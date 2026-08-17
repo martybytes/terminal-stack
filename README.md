@@ -9,25 +9,25 @@ One command per environment. GitHub renders a copy button on each code block (to
 **Windows 11** (PowerShell 7+, from an elevated or normal pwsh window):
 
 ```powershell
-irm https://raw.githubusercontent.com/martsamp77/terminal-stack/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/martybytes/terminal-stack/main/install.ps1 | iex
 ```
 
 **WSL Ubuntu** (run *after* the Windows step above):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/martsamp77/terminal-stack/main/install-wsl.sh | bash
+curl -fsSL https://raw.githubusercontent.com/martybytes/terminal-stack/main/install-wsl.sh | bash
 ```
 
 **Native Debian/Ubuntu**:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/martsamp77/terminal-stack/main/install-linux.sh | bash
+curl -fsSL https://raw.githubusercontent.com/martybytes/terminal-stack/main/install-linux.sh | bash
 ```
 
 **macOS** (Apple Silicon or Intel):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/martsamp77/terminal-stack/main/install-mac.sh | bash
+curl -fsSL https://raw.githubusercontent.com/martybytes/terminal-stack/main/install-mac.sh | bash
 ```
 
 Defaults: the Windows installer clones to `%USERPROFILE%\terminal-stack` (visible from WSL as `/mnt/c/Users/<you>/terminal-stack`); Linux and macOS clone to `~/code/terminal-stack`. Override with `$env:TERMINAL_STACK_DIR` (PowerShell) or `TERMINAL_STACK_DIR=…` (bash). Expects a clean home directory — if you already have a hand-edited `~/.zshrc` or `$PROFILE`, see `INSTALL.md` for the per-step path that preserves user content.

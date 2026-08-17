@@ -2,7 +2,7 @@
 # install-mac.sh — one-liner macOS installer for the terminal-stack.
 # Targets macOS (Apple Silicon or Intel) via Homebrew. Idempotent: re-run safely.
 # Usage (from a fresh Mac):
-#   curl -fsSL https://raw.githubusercontent.com/martsamp77/terminal-stack/main/install-mac.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/martybytes/terminal-stack/main/install-mac.sh | bash
 #
 # Optional: override the clone location before piping.
 #   TERMINAL_STACK_DIR=~/dotfiles/ts curl -fsSL ... | bash
@@ -11,7 +11,7 @@
 #   1. Verifies Darwin.
 #   2. Installs Homebrew if absent.
 #   3. brew install git if absent.
-#   4. Clones github.com/martsamp77/terminal-stack to ~/code/terminal-stack
+#   4. Clones github.com/martybytes/terminal-stack to ~/code/terminal-stack
 #      (or $TERMINAL_STACK_DIR). git pull if already cloned.
 #   5. Runs bootstrap/mac-bootstrap.sh.
 #   6. Runs chezmoi apply -v. The post-apply hook self-no-ops without /mnt/c/Users/.
@@ -51,7 +51,7 @@ if ! command -v git >/dev/null 2>&1; then
 fi
 
 # 3. Choose clone location ($TERMINAL_STACK_DIR skips the prompt), then clone.
-REPO_URL='https://github.com/martsamp77/terminal-stack.git'
+REPO_URL='https://github.com/martybytes/terminal-stack.git'
 DEFAULT_DIR="$HOME/code/terminal-stack"
 if [ -n "${TERMINAL_STACK_DIR:-}" ]; then
     TARGET_DIR="$TERMINAL_STACK_DIR"

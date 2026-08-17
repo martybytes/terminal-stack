@@ -6,11 +6,15 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Added
 
+- **Agent-friendly shells.** Cursor Agent and other capture runners set `TERM=dumb` / `CURSOR_AGENT=1`; the stack now skips Starship, transient prompt, and OSC title sequences in those shells (pwsh `Test-TsAgentShell`; zsh `_ts_agent_shell`) while keeping zoxide, git shortcuts, and workspace nav. **`windows/AppData/Roaming/Cursor/User/terminal-stack.terminal.json`** ships stack-owned Cursor IDE terminal keys; **`bootstrap/_merge_cursor_settings.ps1`** shallow-merges them into `%APPDATA%\Cursor\User\settings.json` on sync (backup before write). See `doc windows/pwsh`, `doc common/tools/starship`, `docs/decisions.md`.
+
 - **TTS config folder + input notifications.** `~/.claude/tts/config.json` (+ untracked `local.json` override) replaces flat `tts.json`. Configurable **Claude/Cursor prefixes**, `{project}` inclusion, **excitement**, and **question/permission** events. Cursor **`postToolUse`** (AskQuestion) and Claude **Notification / PermissionRequest / AskUserQuestion** hooks speak when input is needed. User-level **`/test-voice`** slash commands. See `doc claude-code`.
 
 - **Claude Code local TTS (Kokoro / Chatterbox / edge-tts).** Optional voice on agent lifecycle events through localhost Kokoro (`am_adam`). Off by default; `ts-config tts` / `cctts`. Cursor + Claude hooks share **`cc-tts-notify`**. See `doc claude-code`.
 
 ### Changed
+
+- **Repository moved to `github.com/martybytes/terminal-stack`** (GitHub username renamed from `martsamp77`). Every install URL in `README.md`, `INSTALL.md`, `install.ps1`, `install-wsl.sh`, `install-mac.sh`, and `install-linux.sh` now points at the new owner. GitHub still redirects the old path, but only until someone else claims `martsamp77`.
 
 - **TTS app prefix.** Claude Code hooks speak `Claude. …`; Cursor Agent stop hook speaks `Cursor. …` (prefix configurable via `ts-config tts prefix`).
 
