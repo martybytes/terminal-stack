@@ -1,6 +1,6 @@
 # install.ps1 — one-liner Windows installer for the terminal-stack.
 # Usage (from a fresh box, PowerShell 7+):
-#   irm https://raw.githubusercontent.com/martsamp77/terminal-stack/main/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/martybytes/terminal-stack/main/install.ps1 | iex
 #
 # Optional: override the clone location before invoking.
 #   $env:TERMINAL_STACK_DIR = 'D:\dotfiles\terminal-stack'; irm ... | iex
@@ -8,7 +8,7 @@
 # What it does:
 #   1. Verifies winget is available (App Installer).
 #   2. Ensures Git is installed (winget Git.Git if missing).
-#   3. Clones github.com/martsamp77/terminal-stack to $TERMINAL_STACK_DIR
+#   3. Clones github.com/martybytes/terminal-stack to $TERMINAL_STACK_DIR
 #      (default: $env:USERPROFILE\terminal-stack). git pull if already cloned.
 #   4. Runs bootstrap\windows-bootstrap.ps1 from the clone.
 #   5. Prints the WSL one-liner for the next step (chezmoi apply runs in WSL).
@@ -44,7 +44,7 @@ if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
 }
 
 # 3. Choose clone location ($env:TERMINAL_STACK_DIR skips the prompt), then clone.
-$repoUrl = 'https://github.com/martsamp77/terminal-stack.git'
+$repoUrl = 'https://github.com/martybytes/terminal-stack.git'
 $defaultDir = Join-Path $env:USERPROFILE 'terminal-stack'
 if ($env:TERMINAL_STACK_DIR) {
     $targetDir = $env:TERMINAL_STACK_DIR
@@ -115,8 +115,8 @@ Write-Host "    Clone: $targetDir"
 Write-Host '    Update later from any pwsh window:  ts-update'
 Write-Host ''
 Write-Host '    If you also use WSL Ubuntu, apply the WSL-side dotfiles too:'
-Write-Host '        curl -fsSL https://raw.githubusercontent.com/martsamp77/terminal-stack/main/install-wsl.sh | bash'
+Write-Host '        curl -fsSL https://raw.githubusercontent.com/martybytes/terminal-stack/main/install-wsl.sh | bash'
 Write-Host ''
 Write-Host '    For native Linux / macOS hosts (run on that machine instead):'
-Write-Host '        curl -fsSL https://raw.githubusercontent.com/martsamp77/terminal-stack/main/install-linux.sh | bash'
-Write-Host '        curl -fsSL https://raw.githubusercontent.com/martsamp77/terminal-stack/main/install-mac.sh | bash'
+Write-Host '        curl -fsSL https://raw.githubusercontent.com/martybytes/terminal-stack/main/install-linux.sh | bash'
+Write-Host '        curl -fsSL https://raw.githubusercontent.com/martybytes/terminal-stack/main/install-mac.sh | bash'

@@ -10,18 +10,18 @@ The fastest path: a single command per environment, runnable from a fresh box. I
 
 ```powershell
 # Windows 11 — PowerShell 7+
-irm https://raw.githubusercontent.com/martsamp77/terminal-stack/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/martybytes/terminal-stack/main/install.ps1 | iex
 ```
 
 ```sh
 # WSL Ubuntu — run after the Windows one-liner
-curl -fsSL https://raw.githubusercontent.com/martsamp77/terminal-stack/main/install-wsl.sh | bash
+curl -fsSL https://raw.githubusercontent.com/martybytes/terminal-stack/main/install-wsl.sh | bash
 
 # Native Debian/Ubuntu
-curl -fsSL https://raw.githubusercontent.com/martsamp77/terminal-stack/main/install-linux.sh | bash
+curl -fsSL https://raw.githubusercontent.com/martybytes/terminal-stack/main/install-linux.sh | bash
 
 # macOS
-curl -fsSL https://raw.githubusercontent.com/martsamp77/terminal-stack/main/install-mac.sh | bash
+curl -fsSL https://raw.githubusercontent.com/martybytes/terminal-stack/main/install-mac.sh | bash
 ```
 
 **Clone location.** Each installer **prompts** for where to put the repo, pre-filled with the per-platform default (Windows `%USERPROFILE%\terminal-stack`, which WSL sees as `/mnt/c/Users/<you>/terminal-stack`; Linux/macOS `~/code/terminal-stack`). Press Enter to accept, or set `$env:TERMINAL_STACK_DIR` (PowerShell) / `TERMINAL_STACK_DIR=…` (bash) to skip the prompt. The WSL installer auto-detects your Windows username via `cmd.exe` interop, so it runs without prompts under `curl | bash`.

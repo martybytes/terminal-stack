@@ -2,14 +2,14 @@
 # install-linux.sh — one-liner native-Linux installer for the terminal-stack.
 # Targets Debian/Ubuntu-family hosts. Idempotent: re-run safely.
 # Usage (from a fresh Debian/Ubuntu box):
-#   curl -fsSL https://raw.githubusercontent.com/martsamp77/terminal-stack/main/install-linux.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/martybytes/terminal-stack/main/install-linux.sh | bash
 #
 # Optional: override the clone location before piping.
 #   TERMINAL_STACK_DIR=~/dotfiles/ts curl -fsSL ... | bash
 #
 # What it does:
 #   1. Ensures git + curl are installed (apt).
-#   2. Clones github.com/martsamp77/terminal-stack to ~/code/terminal-stack
+#   2. Clones github.com/martybytes/terminal-stack to ~/code/terminal-stack
 #      (or $TERMINAL_STACK_DIR). git pull if already cloned.
 #   3. Runs bootstrap/linux-bootstrap.sh.
 #   4. Runs chezmoi apply -v. The post-apply hook self-no-ops without /mnt/c/Users/.
@@ -36,7 +36,7 @@ if ! command -v git >/dev/null 2>&1 || ! command -v curl >/dev/null 2>&1; then
 fi
 
 # 2. Choose clone location ($TERMINAL_STACK_DIR skips the prompt), then clone.
-REPO_URL='https://github.com/martsamp77/terminal-stack.git'
+REPO_URL='https://github.com/martybytes/terminal-stack.git'
 DEFAULT_DIR="$HOME/code/terminal-stack"
 if [ -n "${TERMINAL_STACK_DIR:-}" ]; then
     TARGET_DIR="$TERMINAL_STACK_DIR"

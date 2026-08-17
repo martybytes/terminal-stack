@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # install-wsl.sh — one-liner WSL installer for the terminal-stack.
 # Usage (from a fresh WSL Ubuntu, after running install.ps1 on Windows):
-#   curl -fsSL https://raw.githubusercontent.com/martsamp77/terminal-stack/main/install-wsl.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/martybytes/terminal-stack/main/install-wsl.sh | bash
 #
 # Optional: override the clone location before piping.
 #   TERMINAL_STACK_DIR=/mnt/c/dev/terminal-stack curl -fsSL ... | bash
@@ -9,7 +9,7 @@
 # What it does:
 #   1. Ensures git + curl are installed (apt).
 #   2. Auto-detects Windows username via cmd.exe interop.
-#   3. Clones github.com/martsamp77/terminal-stack to /mnt/c/Users/<WIN_USER>/terminal-stack
+#   3. Clones github.com/martybytes/terminal-stack to /mnt/c/Users/<WIN_USER>/terminal-stack
 #      (or $TERMINAL_STACK_DIR). git pull if already cloned.
 #   4. Runs bootstrap/wsl-bootstrap.sh non-interactively (WIN_USER from env).
 #   5. Runs chezmoi apply -v.
@@ -54,7 +54,7 @@ export WIN_USER
 echo "$INFO Windows username: $WIN_USER"
 
 # 3. Choose clone location ($TERMINAL_STACK_DIR skips the prompt), then clone.
-REPO_URL='https://github.com/martsamp77/terminal-stack.git'
+REPO_URL='https://github.com/martybytes/terminal-stack.git'
 DEFAULT_DIR="/mnt/c/Users/$WIN_USER/terminal-stack"
 if [ -n "${TERMINAL_STACK_DIR:-}" ]; then
     TARGET_DIR="$TERMINAL_STACK_DIR"
