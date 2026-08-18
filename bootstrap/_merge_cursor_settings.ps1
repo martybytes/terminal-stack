@@ -36,8 +36,20 @@ function Resolve-TsPwshPath {
 }
 
 function Resolve-TsGitCmdDir {
+    # Prefer <install root>/cmd. Get-Command often finds git.exe in mingw64/bin,
+    # which is the wrong thing to put on PATH: it is full of MSYS DLLs and ships a
+    # curl.exe that shadows Windows' own System32/curl.exe. <root>/cmd holds just
+    # git/gitk/git-lfs/scalar and is the directory Git for Windows means for PATH.
     $cmd = Get-Command git.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($cmd -and $cmd.Source) { return (Split-Path -Parent $cmd.Source) }
+    if ($cmd -and $cmd.Source) {
+        $probe = Split-Path -Parent $cmd.Source
+        for ($i = 0; $i -lt 3 -and $probe; $i++) {
+            $candidate = Join-Path $probe 'cmd'
+            if (Test-Path -LiteralPath (Join-Path $candidate 'git.exe')) { return $candidate }
+            $probe = Split-Path -Parent $probe
+        }
+        return (Split-Path -Parent $cmd.Source)   # non-standard layout: use what we found
+    }
     foreach ($p in @(
         (Join-Path $env:ProgramFiles 'Git\cmd'),
         (Join-Path ${env:ProgramFiles(x86)} 'Git\cmd'),
