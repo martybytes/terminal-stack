@@ -195,6 +195,32 @@ The fix is **not** to force `TERM=xterm-256color` in agent shells (Cursor sets `
 
 The existing `plain` escape hatch (`pwsh -NoProfile` / `zsh -df`) remains for humans who want a completely vanilla shell; agent detection is automatic and lighter-weight.
 
+## Why `lsr` ignores a directory's own mtime, and probes for GNU vs BSD
+
+A directory's mtime changes only when an entry is added, removed, or renamed — not when a file
+inside it is edited. That makes `ls -lt` and `eza -l -s modified` actively misleading for the
+question people actually ask a listing ("which project did I touch last?"): a repo you edited
+all afternoon shows an untouched mtime, while one where a build tool dropped and deleted a temp
+file jumps to the top. `lsr` therefore ranks by the newest mtime among a directory's *immediate*
+children and never falls back to the directory's own timestamp, not even for an empty directory
+— an empty one has no activity to report, so it prints `(empty)` and sorts last. Staying exactly
+one level deep is what keeps it usable: full recursion would be correct too, but on a workspace
+of git checkouts it means walking every object in every `.git`.
+
+The one-level rule has a sharp edge worth remembering: `find <dir> -maxdepth 1` includes `<dir>`
+itself, so the obvious implementation silently reintroduces the directory's own mtime and makes
+"is this empty?" impossible to detect. `-mindepth 1` is load-bearing, not tidiness.
+
+`stat` and `date` are the portability problem. GNU wants `stat -c '%Y %n'` and `date -d @N`;
+BSD/macOS wants `stat -f '%m %N'` and `date -r N`, and each errors on the other's flags. Since
+one `dot_zshrc` serves WSL, native Linux, **and** macOS, the split has to be resolved at runtime
+inside the function. We probe (`stat -c %Y .` succeeds?) rather than branch on
+`uname -s = Darwin`, which is the idiom elsewhere in this repo: a Mac with Homebrew coreutils on
+`PATH` has GNU `stat`, and the probe gets that right where a `uname` test would pick the wrong
+flags. The result is cached in `$_TS_STAT_FLAVOR` so it costs one process per shell, not one per
+call. The implementation stays POSIX (no zsh-only globbing such as `*(om)`, no `print -r --`) so
+the same function body works if it is ever sourced from bash.
+
 ## Why Cursor IDE settings use merge, not whole-file
 
 `%APPDATA%\Cursor\User\settings.json` holds personal choices — theme, fonts, editor prefs — alongside stack infrastructure. Whole-file management (the pattern used for `~/.claude/settings.json` infra keys) would clobber those on every sync.

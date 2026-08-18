@@ -525,6 +525,70 @@ catclip() {
   fi
   cat -- "$1" | clipcopy
 }
+
+# lsr — "list by recent": top-level directories ranked by the newest mtime among
+# their immediate children (one level deep, no recursion). A directory's own mtime
+# only moves when entries are added or removed, so `ls -lt` buries a project whose
+# files you edited all day; lsr answers "what did I actually touch last?".
+# GNU (Linux/WSL) and BSD (macOS) disagree on stat/date flags — probe once, cache.
+_ts_stat_flavor() {
+  if [ -z "${_TS_STAT_FLAVOR:-}" ]; then
+    if stat -c %Y . >/dev/null 2>&1; then
+      _TS_STAT_FLAVOR=gnu
+    else
+      _TS_STAT_FLAVOR=bsd
+    fi
+  fi
+  printf '%s\n' "$_TS_STAT_FLAVOR"
+}
+# "epoch path" for every immediate child of $1, hidden ones included. -mindepth 1
+# matters: without it find also returns $1 itself, so no directory ever looks empty
+# and each one would rank on its own mtime — exactly what lsr exists to avoid.
+_ts_child_times() {
+  if [ "$(_ts_stat_flavor)" = gnu ]; then
+    find "$1" -mindepth 1 -maxdepth 1 -exec stat -c '%Y %n' {} + 2>/dev/null
+  else
+    find "$1" -mindepth 1 -maxdepth 1 -exec stat -f '%m %N' {} + 2>/dev/null
+  fi
+}
+lsr() {
+  local all=0 root='.' d name newest epoch child
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -a|--all) all=1; shift ;;
+      -h|--help)
+        printf '%s\n' 'lsr [-a] [dir]   top-level dirs, most recent activity first'
+        printf '%s\n' '  -a, --all      include dotted directories'
+        return 0 ;;
+      --) shift; break ;;
+      -*) echo "lsr: unknown option: $1" >&2; return 2 ;;
+      *)  root="$1"; shift ;;
+    esac
+  done
+  [ $# -gt 0 ] && root="$1"
+  [ -d "$root" ] || { echo "lsr: not a directory: $root" >&2; return 1; }
+  # Sort raw epochs numerically before formatting — sorting the rendered columns
+  # breaks as soon as a directory name is wider than the pad.
+  find "$root" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | while IFS= read -r d; do
+    name=${d##*/}
+    case "$name" in .*) [ "$all" -eq 1 ] || continue ;; esac
+    newest=$(_ts_child_times "$d" | sort -k1,1rn | head -1)
+    if [ -n "$newest" ]; then
+      epoch=${newest%% *}; child=${newest#* }
+      printf '%s\t%s\t%s\n' "$epoch" "$name" "${child##*/}"
+    else
+      printf '0\t%s\t\n' "$name"   # empty: epoch 0 sorts it last
+    fi
+  done | sort -k1,1rn | while IFS="$(printf '\t')" read -r epoch name child; do
+    if [ "$epoch" = 0 ]; then
+      printf '%-28s  %s\n' "$name" '(empty)'
+    elif [ "$(_ts_stat_flavor)" = gnu ]; then
+      printf '%-28s  %s  %s\n' "$name" "$(date -d "@$epoch" '+%Y-%m-%d %H:%M')" "$child"
+    else
+      printf '%-28s  %s  %s\n' "$name" "$(date -r "$epoch" '+%Y-%m-%d %H:%M')" "$child"
+    fi
+  done
+}
 # ---- cli-tools-end ----
 
 # ---- doc-start ----

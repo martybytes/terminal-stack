@@ -195,6 +195,38 @@ if (Get-Command eza -ErrorAction SilentlyContinue) {
     function lt { eza --tree --icons=always --git --group-directories-first @args }
 }
 
+# lsr — "list by recent": top-level directories ranked by the newest LastWriteTime
+# among their immediate children (one level deep, no recursion). A directory's own
+# timestamp only moves when entries are added or removed, so `ls -lt`/eza bury a
+# project whose files you edited all day. Mirrors the zsh lsr.
+# Emits objects rather than Format-Table output, so `lsr | Where-Object ...` works.
+function lsr {
+    param([string]$Path = '.', [switch]$All)
+    if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
+        Write-Warning "lsr: not a directory: $Path"
+        return
+    }
+    # -Force on the CHILDREN always (hidden files still count as activity); on the
+    # top-level listing only with -All. Note "hidden" is the hidden ATTRIBUTE here,
+    # where the zsh version keys off a leading dot.
+    Get-ChildItem -LiteralPath $Path -Directory -Force:$All -ErrorAction SilentlyContinue |
+        ForEach-Object {
+            $newest = Get-ChildItem -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue |
+                      Sort-Object LastWriteTime -Descending |
+                      Select-Object -First 1
+            [pscustomobject]@{
+                Name   = $_.Name
+                Latest = if ($newest) { $newest.LastWriteTime } else { $null }
+                Item   = if ($newest) { $newest.Name } else { '(empty)' }
+            }
+        } |
+        # Explicit MinValue key so empty dirs pin to the bottom instead of relying
+        # on however Sort-Object happens to order $null.
+        Sort-Object -Property @{
+            Expression = { if ($_.Latest) { $_.Latest } else { [datetime]::MinValue } }
+        } -Descending
+}
+
 # ref — alias into the `doc` knowledge base (replaced the old command-reference file).
 function ref { doc @args }
 # ---- cli-tools-end ----
