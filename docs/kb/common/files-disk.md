@@ -6,7 +6,8 @@
 | `ls -T` / `lt` | eza tree view |
 | `ll` / `la` | long / hidden+long (pwsh) |
 | `lsr` | top-level dirs, most recently *worked in* first (see below) |
-| `lsr -a` | same, including hidden/dotted directories |
+| `lsrr` | the same, capped at the 20 most recent |
+| `lsr -a` / `lsrr -a` | same, including hidden/dotted directories |
 | `lsr <dir>` | run it somewhere other than the current directory |
 | `cat file` / `bat file` | **bat** — syntax highlighting, line numbers |
 | `glow file.md` | render markdown in the terminal (`glow .` for a browser) |
@@ -31,6 +32,10 @@ spaced dir                    2026-07-04 08:30  my report v2.txt
 stale                         2020-01-01 10:00  old.txt
 empty                         (empty)
 ```
+
+`lsrr` is `lsr` truncated to the 20 most recent — the common case on a workspace with
+dozens of checkouts. It takes the same flags and optional directory. For any other count,
+pipe `lsr` yourself: `lsr | head -5`, or `lsr | Select-Object -First 5` in PowerShell.
 
 Both shells agree on ordering. Two platform notes:
 

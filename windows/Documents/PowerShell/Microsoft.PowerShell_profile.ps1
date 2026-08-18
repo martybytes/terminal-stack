@@ -227,6 +227,10 @@ function lsr {
         } -Descending
 }
 
+# lsrr — lsr, capped at the 20 most recent. Same parameters as lsr, and still
+# emits objects, so it composes the same way.
+function lsrr { lsr @args | Select-Object -First 20 }
+
 # ref — alias into the `doc` knowledge base (replaced the old command-reference file).
 function ref { doc @args }
 # ---- cli-tools-end ----

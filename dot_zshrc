@@ -589,6 +589,15 @@ lsr() {
     fi
   done
 }
+# lsrr — lsr, capped at the 20 most recent. Takes the same flags and optional
+# directory as lsr. Captures rather than piping straight into head, because a
+# plain `lsr … | head` reports head's exit status and swallows lsr's errors.
+lsrr() {
+  local out
+  out="$(lsr "$@")" || return $?
+  [ -n "$out" ] && printf '%s\n' "$out" | head -20
+  return 0
+}
 # ---- cli-tools-end ----
 
 # ---- doc-start ----
