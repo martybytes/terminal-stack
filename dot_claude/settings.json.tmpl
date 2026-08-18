@@ -87,5 +87,6 @@
         ]
       }
     ]{{ end }}
-  }
+  },
+  "theme": "{{ if hasKey . "resolvedTheme" }}{{ .resolvedTheme }}{{ else }}dark{{ end }}"
 }
