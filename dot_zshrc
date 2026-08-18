@@ -211,18 +211,30 @@ bindkey "\e[4~" end-of-line
 # alias ohmyzsh="mate ~/.oh-my-zsh"
 
 # ---- starship-stack-start ----
-eval "$(starship init zsh)"
+_ts_agent_shell() {
+  [[ "${CURSOR_AGENT:-}" == 1 ]] && return 0
+  [[ "${TERM:-}" == dumb ]] && return 0
+  [[ "${CI:-}" == true || "${CI:-}" == 1 ]] && return 0
+  return 1
+}
+if ! _ts_agent_shell; then
+  eval "$(starship init zsh)"
+fi
 # ---- starship-stack-end ----
 
 # ---- terminal-stack-helpers-start ----
 autoload -Uz add-zsh-hook
 # Hostname-aware title — useful when ssh'ing between boxes; composes with other precmd hooks.
-_set_title() { print -Pn "\e]0;%m: %~\a" }
-add-zsh-hook precmd _set_title
+if ! _ts_agent_shell; then
+  _set_title() { print -Pn "\e]0;%m: %~\a" }
+  add-zsh-hook precmd _set_title
+fi
 
 # OSC 7: host + cwd for WezTerm's pane-aware status (and other OSC-7 terminals).
 # Prefer WezTerm's own integration script when installed; otherwise emit OSC 7 here.
-if [[ -z "${__WEZTERM_SHELL_INTEGRATION_LOADED:-}" ]]; then
+# Guarded too: the integration script installs precmd/preexec hooks that emit OSC 133/7/1337,
+# which is exactly the noise agent shells must not have in captured stdout.
+if [[ -z "${__WEZTERM_SHELL_INTEGRATION_LOADED:-}" ]] && ! _ts_agent_shell; then
   for _wsi in \
     "${WEZTERM_CONFIG_DIR:-}/wezterm-shell-integration.sh" \
     "$HOME/.config/wezterm/wezterm-shell-integration.sh" \
@@ -233,7 +245,7 @@ if [[ -z "${__WEZTERM_SHELL_INTEGRATION_LOADED:-}" ]]; then
   done
   unset _wsi
 fi
-if [[ -z "${__WEZTERM_SHELL_INTEGRATION_LOADED:-}" ]]; then
+if [[ -z "${__WEZTERM_SHELL_INTEGRATION_LOADED:-}" ]] && ! _ts_agent_shell; then
   _wezterm_osc7() {
     local h="${${$(hostname -s 2>/dev/null):-${HOST:-$(hostname)}}// /}"
     printf '\033]7;file://%s%s\033\\' "${h:l}" "$PWD"

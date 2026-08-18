@@ -220,4 +220,10 @@ if (Get-Command Export-CcTtsJson -ErrorAction SilentlyContinue) {
     Write-Host "updated  $(Join-Path $env:USERPROFILE '.claude\tts\config.json')  (from config ccTts)"
 }
 
+$mergeHelper = Join-Path $SourceDir 'bootstrap\_merge_cursor_settings.ps1'
+if (Test-Path -LiteralPath $mergeHelper) {
+    . $mergeHelper
+    Merge-TsCursorSettings
+}
+
 Write-Host "sync-windows: user=$WinUser, $created created, $updated updated, $unchanged unchanged"

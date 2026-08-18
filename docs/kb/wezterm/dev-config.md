@@ -69,6 +69,7 @@ new tabs as needed.
 | `windows/.claude/hooks/wez-tab-status.ps1` | `%USERPROFILE%\.claude\hooks\…` | Tab tint + `cc_state` user var |
 | `windows/Documents/PowerShell/…profile.ps1` | `$PROFILE` | `cc*` wrappers, `wezterm cli set-tab-title` |
 | `windows/.config/starship.toml.tmpl` | `%USERPROFILE%\.config\starship.toml` | Prompt in pwsh panes |
+| `windows/AppData/Roaming/Cursor/User/terminal-stack.terminal.json` | same path under `%USERPROFILE%` | Fragment merged into `%APPDATA%\Cursor\User\settings.json` (`automationProfile`) |
 | `docs/kb/**` | `%LOCALAPPDATA%\terminal-stack\docs\kb\` | `doc` / `wzr` only — not WezTerm |
 
 WezTerm loads only `.wezterm.lua` and `require 'pane_grid'` — both are under

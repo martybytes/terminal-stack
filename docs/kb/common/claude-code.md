@@ -15,6 +15,11 @@ zsh aliases / pwsh functions. Each `cc*` sets the WezTerm tab title while Claude
 
 `ccnotify on` / `off` toggles the done/error toast (zsh + pwsh).
 
+**Agent shells:** Cursor Agent and hook subprocesses often run with `TERM=dumb`.
+The stack skips Starship and OSC title sequences in those shells while keeping
+git shortcuts, zoxide, and `cc*` wrappers. See `doc windows/pwsh` § "Agent vs
+interactive terminals".
+
 ## Local TTS (Kokoro / Chatterbox / edge)
 
 Optional voice when an agent **finishes**, **errors**, **asks a question**, or **needs permission**. Shared config under `~/.claude/tts/`. **Off by default.**

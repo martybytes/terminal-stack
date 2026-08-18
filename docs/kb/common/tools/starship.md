@@ -2,6 +2,11 @@
 
 Cross-shell prompt; config at `~/.config/starship.toml` (stack-managed, whole-file).
 
+**Agent/capture shells** (`TERM=dumb`, `CURSOR_AGENT=1`, `CI=1`): Starship is not
+initialized — it errors on dumb terminals and adds stderr noise to agent output.
+Interactive WezTerm and Cursor panel terminals are unaffected. See `doc windows/pwsh`
+§ "Agent vs interactive terminals".
+
 | Command | What |
 |---|---|
 | `starship explain` | explain what the current prompt is showing |

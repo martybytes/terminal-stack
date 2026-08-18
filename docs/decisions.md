@@ -187,6 +187,20 @@ An earlier version of this entry argued the opposite — that the template shoul
 
 The companion machine-state notes for the GitKraken integration (the AI-hook log flood, the 0-byte `gk.exe` symlink) remain in `powershell-quirks.md` § "GitKraken `gk ai hook` plugin" for anyone who opts back in.
 
+## Why Starship and prompt chrome are skipped in agent shells
+
+Cursor Agent (and similar capture runners) intentionally set `TERM=dumb` and `CURSOR_AGENT=1`. The shell is not interactive — it exists so the IDE can run commands and parse plain-text stdout. Starship detects `TERM=dumb`, refuses to render, and logs `[ERROR] - (starship::print): Under a 'dumb' terminal` to stderr on every invocation. That noise pollutes agent transcripts without helping the model.
+
+The fix is **not** to force `TERM=xterm-256color` in agent shells (Cursor sets `dumb` by design; fighting it breaks output parsing) and **not** to drop the full profile (agents still benefit from git shortcuts, zoxide, UTF-8 setup, workspace nav). Instead, `Test-TsAgentShell` / `_ts_agent_shell` guard only the prompt layer: Starship init, transient prompt, and OSC 7/0 title sequences. Interactive WezTerm and the Cursor bottom-panel terminal are unchanged.
+
+The existing `plain` escape hatch (`pwsh -NoProfile` / `zsh -df`) remains for humans who want a completely vanilla shell; agent detection is automatic and lighter-weight.
+
+## Why Cursor IDE settings use merge, not whole-file
+
+`%APPDATA%\Cursor\User\settings.json` holds personal choices — theme, fonts, editor prefs — alongside stack infrastructure. Whole-file management (the pattern used for `~/.claude/settings.json` infra keys) would clobber those on every sync.
+
+The stack ships a **fragment** at `windows/AppData/Roaming/Cursor/User/terminal-stack.terminal.json` containing only stack-owned terminal keys (`terminal.integrated.automationProfile.windows`). `bootstrap/_merge_cursor_settings.ps1` shallow-merges those keys into the live settings file, backing up before write. This complements the profile guard: `automationProfile` covers VS Code/Cursor task automation (`pwsh -NoProfile`); agent shells still load `$PROFILE` but skip Starship via `Test-TsAgentShell`.
+
 ## Why a separate `dot_wezterm.lua` for macOS
 
 WezTerm reads `~/.wezterm.lua` from the home directory of whatever machine the GUI runs on. On Windows that's `C:\Users\<you>\.wezterm.lua`, deployed from `windows/.wezterm.lua` by the sync hook. On WSL the GUI is still the *Windows* WezTerm, so WSL's Linux home gets no WezTerm config at all — correct, because nothing there would read it. On macOS, WezTerm runs natively and reads the macOS home directory, so the Mac genuinely needs its own `~/.wezterm.lua`.

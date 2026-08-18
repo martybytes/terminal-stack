@@ -270,4 +270,25 @@ if cz="$(resolve_cz)" && [ -f "$stack_root/dot_claude/tts/config.json.tmpl" ]; t
   fi
 fi
 
+merge_helper="$stack_root/bootstrap/_merge_cursor_settings.ps1"
+if [ -f "$merge_helper" ]; then
+  pwsh_exe=""
+  for p in /mnt/c/Program\ Files/PowerShell/7/pwsh.exe \
+           /mnt/c/Program\ Files/PowerShell/7-preview/pwsh.exe; do
+    if [ -x "$p" ]; then pwsh_exe="$p"; break; fi
+  done
+  if [ -n "$pwsh_exe" ]; then
+    # pwsh.exe is a Windows binary: WSL interop does not translate argument paths, so the
+    # POSIX $merge_helper must be converted. -ExecutionPolicy Bypass matches every other
+    # pwsh call in this file and is required because the script resolves over a
+    # \\wsl.localhost UNC path, which PowerShell treats as remote (RemoteSigned blocks it).
+    merge_helper_win="$(wslpath -w "$merge_helper" 2>/dev/null || printf '%s' "$merge_helper")"
+    if ! "$pwsh_exe" -NoLogo -NonInteractive -ExecutionPolicy Bypass -File "$merge_helper_win"; then
+      echo "sync-windows: Cursor settings merge failed (non-fatal)." >&2
+    fi
+  else
+    echo "sync-windows: pwsh not found; skipping Cursor settings merge." >&2
+  fi
+fi
+
 printf 'sync-windows: user=%s, %d created, %d updated, %d unchanged\n' "$WIN_USER" "$created" "$updated" "$unchanged"

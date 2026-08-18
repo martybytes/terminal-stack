@@ -70,6 +70,14 @@ function plain { Set-WezTabTitle "plain • $(Split-Path -Leaf $PWD)"; try { pws
 
 # ---- starship-stack-start ----
 
+# Cursor/Claude agent shells set TERM=dumb and CURSOR_AGENT=1 — skip prompt chrome there.
+function Test-TsAgentShell {
+    if ($env:CURSOR_AGENT -eq '1') { return $true }
+    if ($env:TERM -eq 'dumb') { return $true }
+    if ($env:CI -eq 'true' -or $env:CI -eq '1') { return $true }
+    return $false
+}
+
 # Native console children (Claude Code, etc.) can SetConsoleOutputCP back to 437 on exit; [Console]::OutputEncoding caches and won't catch it, so probe the OS codepage directly.
 if (-not ('Native.ConsoleCP' -as [type])) {
     Add-Type -Namespace Native -Name ConsoleCP -MemberDefinition @'
@@ -83,23 +91,25 @@ public static extern bool SetConsoleOutputCP(uint wCodePageID);
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 [Console]::InputEncoding  = [System.Text.Encoding]::UTF8
 
-Invoke-Expression (&starship init powershell)
-if (Get-Command Enable-TransientPrompt -ErrorAction SilentlyContinue) { Enable-TransientPrompt }
+if (-not (Test-TsAgentShell)) {
+    Invoke-Expression (&starship init powershell)
+    if (Get-Command Enable-TransientPrompt -ErrorAction SilentlyContinue) { Enable-TransientPrompt }
 
-function Invoke-Starship-PreCommand {
-    if ([Native.ConsoleCP]::GetConsoleOutputCP() -ne 65001) {
-        [Native.ConsoleCP]::SetConsoleOutputCP(65001) | Out-Null
-        [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-        [Console]::InputEncoding  = [System.Text.Encoding]::UTF8
-    }
-    $loc = $executionContext.SessionState.Path.CurrentLocation
-    if ($loc.Provider.Name -eq 'FileSystem') {
-        $hostName = ($env:COMPUTERNAME).ToLower()
-        $providerPath = $loc.ProviderPath -replace '\\', '/'
-        Write-Host -NoNewline "`e]7;file://${hostName}/${providerPath}`a"
-        $leaf = Split-Path -Leaf $loc.Path
-        if ([string]::IsNullOrEmpty($leaf)) { $leaf = $loc.Path }
-        Write-Host -NoNewline "`e]0;pwsh • $leaf`a"
+    function Invoke-Starship-PreCommand {
+        if ([Native.ConsoleCP]::GetConsoleOutputCP() -ne 65001) {
+            [Native.ConsoleCP]::SetConsoleOutputCP(65001) | Out-Null
+            [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+            [Console]::InputEncoding  = [System.Text.Encoding]::UTF8
+        }
+        $loc = $executionContext.SessionState.Path.CurrentLocation
+        if ($loc.Provider.Name -eq 'FileSystem') {
+            $hostName = ($env:COMPUTERNAME).ToLower()
+            $providerPath = $loc.ProviderPath -replace '\\', '/'
+            Write-Host -NoNewline "`e]7;file://${hostName}/${providerPath}`a"
+            $leaf = Split-Path -Leaf $loc.Path
+            if ([string]::IsNullOrEmpty($leaf)) { $leaf = $loc.Path }
+            Write-Host -NoNewline "`e]0;pwsh • $leaf`a"
+        }
     }
 }
 # ---- starship-stack-end ----
