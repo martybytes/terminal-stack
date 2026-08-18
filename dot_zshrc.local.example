@@ -8,6 +8,14 @@
 # GPU/server-role helpers, credentials paths — anything that shouldn't
 # propagate to other machines via the shared repo.
 
+# ── Work workspace override ───────────────────────────────────────────────────
+# wsw looks for a *_Work / *-Work sibling of the main workspace. Set this only
+# when the work tree lives somewhere unrelated. You do not have to edit this by
+# hand: `wsw --set /path/to/work` writes the line below (backing this file up
+# first) and applies it to the running shell.
+#
+# export WORK_WORKSPACE_DIR="$HOME/clients/acme"
+
 # ── Workspace location override ───────────────────────────────────────────────
 # ws/wsp/wspu autodetect the workspace from a candidate list (/mnt/c/DATA/Workspace,
 # ~/Documents/Workspace, ~/workspace, ~/Workspace — see _ts_workspace in ~/.zshrc).

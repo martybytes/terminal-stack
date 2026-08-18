@@ -41,6 +41,68 @@ function wspu {
     $r = Get-TsWorkspaceSibling 'Public'
     if ($r) { Set-Location $r } else { Write-Warning 'wspu: no *_Public sibling' }
 }
+
+# Work workspace. $env:WORK_WORKSPACE_DIR (set in profile.local.ps1) wins;
+# otherwise the *_Work / *-Work sibling of the main workspace — same naming rule
+# as wsp/wspu. `wsw --set` writes that override for you, so a machine whose work
+# tree lives somewhere unrelated to the main workspace needs no hand-editing.
+function Get-TsWorkspaceWork {
+    if ($env:WORK_WORKSPACE_DIR) { return $env:WORK_WORKSPACE_DIR }
+    return (Get-TsWorkspaceSibling 'Work')
+}
+function Set-TsWorkspaceWork([string]$Path) {
+    if (-not $Path) { $Path = (Get-Location).Path }
+    if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
+        Write-Warning "wsw: not a directory: $Path"
+        return
+    }
+    $full = (Resolve-Path -LiteralPath $Path).Path
+    $rc   = Join-Path (Split-Path $PROFILE) 'profile.local.ps1'
+    $line = "`$env:WORK_WORKSPACE_DIR = '" + ($full -replace "'", "''") + "'"
+    if (Test-Path -LiteralPath $rc) {
+        $stamp = Get-Date -Format 'yyyyMMdd'
+        $bak = "$rc.bak.$stamp"; $n = 1
+        while (Test-Path -LiteralPath $bak) { $bak = "$rc.bak.$stamp.$n"; $n++ }
+        Copy-Item -LiteralPath $rc -Destination $bak -Force
+        Write-Host "wsw: backup $bak"
+        $kept = @(Get-Content -LiteralPath $rc | Where-Object { $_ -notmatch '^\s*\$env:WORK_WORKSPACE_DIR\s*=' })
+        Set-Content -LiteralPath $rc -Value ($kept + $line) -Encoding utf8
+        Write-Host "wsw: updated $rc"
+    } else {
+        $dir = Split-Path -Parent $rc
+        if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+        Set-Content -LiteralPath $rc -Encoding utf8 -Value @(
+            '# Per-machine pwsh overrides — not synced by the stack.', $line)
+        Write-Host "wsw: created $rc"
+    }
+    $env:WORK_WORKSPACE_DIR = $full
+    Write-Host "wsw: WORK_WORKSPACE_DIR=$full"
+}
+function wsw {
+    if ($args.Count -gt 0) {
+        switch -Regex ([string]$args[0]) {
+            '^(--set|-s|-set)$' { Set-TsWorkspaceWork ([string]$args[1]); return }
+            '^(--show|-show)$'  {
+                $r = Get-TsWorkspaceWork
+                if ($r) { Write-Output $r } else { Write-Warning 'wsw: no work workspace configured' }
+                return
+            }
+            '^(-h|--help|-help)$' {
+                Write-Output 'wsw              cd to the work workspace'
+                Write-Output 'wsw --set [dir]  define it in profile.local.ps1 (default: current dir)'
+                Write-Output 'wsw --show       print the resolved path'
+                return
+            }
+        }
+    }
+    $r = Get-TsWorkspaceWork
+    if ($r) {
+        Set-Location $r
+    } else {
+        Write-Warning "wsw: no work workspace found — looked for `$env:WORK_WORKSPACE_DIR and *_Work/*-Work siblings of $(Get-TsWorkspace)"
+        Write-Warning "wsw: run 'wsw --set [dir]' to define one in profile.local.ps1"
+    }
+}
 # Project-specific shortcuts (wscalibra, wsnetsuite, …) belong in
 # profile.local.ps1 — see profile.local.ps1.example.
 # ---- workspace-nav-end ----

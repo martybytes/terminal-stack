@@ -431,6 +431,58 @@ _ts_workspace_sibling() {
 ws()   { cd "$(_ts_workspace)" 2>/dev/null || echo "ws: no workspace found — export WORKSPACE_DIR in ~/.zshrc.local" >&2 }
 wsp()  { cd "$(_ts_workspace_sibling Personal)" 2>/dev/null || echo "wsp: no *_Personal sibling of $(_ts_workspace 2>/dev/null)" >&2 }
 wspu() { cd "$(_ts_workspace_sibling Public)" 2>/dev/null || echo "wspu: no *_Public sibling of $(_ts_workspace 2>/dev/null)" >&2 }
+
+# Work workspace. $WORK_WORKSPACE_DIR (set in ~/.zshrc.local) wins; otherwise the
+# *_Work / *-Work sibling of the main workspace — same naming rule as wsp/wspu.
+# `wsw --set` writes that override for you, so a machine whose work tree lives
+# somewhere unrelated to the main workspace needs no hand-editing.
+_ts_workspace_work() {
+  [[ -n "${WORK_WORKSPACE_DIR:-}" ]] && { echo "$WORK_WORKSPACE_DIR"; return 0 }
+  _ts_workspace_sibling Work
+}
+_ts_workspace_work_set() {
+  local dir="${1:-$PWD}" rc="$HOME/.zshrc.local" stamp bak n tmp
+  dir="${dir:A}"
+  [[ -d "$dir" ]] || { echo "wsw: not a directory: $dir" >&2; return 1 }
+  if [[ -f "$rc" ]]; then
+    stamp="$(date +%Y%m%d)"; bak="$rc.bak.$stamp"; n=1
+    while [[ -e "$bak" ]]; do bak="$rc.bak.$stamp.$n"; n=$((n + 1)); done
+    cp "$rc" "$bak" || return 1
+    echo "wsw: backup $bak"
+    tmp="$rc.wsw.$$"
+    grep -v '^[[:space:]]*export[[:space:]][[:space:]]*WORK_WORKSPACE_DIR=' "$rc" > "$tmp" || true
+    printf 'export WORK_WORKSPACE_DIR=%q
+' "$dir" >> "$tmp"
+    mv "$tmp" "$rc" || return 1
+    echo "wsw: updated $rc"
+  else
+    printf '# Per-machine zsh overrides — not tracked by chezmoi.
+' > "$rc"
+    printf 'export WORK_WORKSPACE_DIR=%q
+' "$dir" >> "$rc"
+    echo "wsw: created $rc"
+  fi
+  export WORK_WORKSPACE_DIR="$dir"
+  echo "wsw: WORK_WORKSPACE_DIR=$dir"
+}
+wsw() {
+  case "${1:-}" in
+    --set|-s) shift; _ts_workspace_work_set "$@"; return $? ;;
+    --show)   _ts_workspace_work || { echo "wsw: no work workspace configured" >&2; return 1 }; return 0 ;;
+    -h|--help)
+      print -r -- 'wsw              cd to the work workspace'
+      print -r -- 'wsw --set [dir]  define it in ~/.zshrc.local (default: current dir)'
+      print -r -- 'wsw --show       print the resolved path'
+      return 0 ;;
+  esac
+  local d
+  if ! d="$(_ts_workspace_work)"; then
+    echo "wsw: no work workspace found — looked for \$WORK_WORKSPACE_DIR and *_Work/*-Work siblings of $(_ts_workspace 2>/dev/null)" >&2
+    echo "wsw: run 'wsw --set [dir]' to define one in ~/.zshrc.local" >&2
+    return 1
+  fi
+  cd "$d"
+}
 # Project-specific shortcuts (wscalibra, wsnetsuite, …) belong in
 # ~/.zshrc.local — see dot_zshrc.local.example.
 # ---- terminal-stack-helpers-end ----

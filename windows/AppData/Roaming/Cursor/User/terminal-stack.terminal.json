@@ -1,9 +1,9 @@
 {
   "terminal.integrated.automationProfile.windows": {
-    "path": "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+    "path": "__PWSH_EXE__",
     "args": ["-NoLogo", "-NoProfile"],
     "env": {
-      "Path": "C:\\Program Files\\Git\\cmd;${env:Path}"
+      "Path": "__GIT_CMD_DIR__;${env:Path}"
     }
   }
 }
