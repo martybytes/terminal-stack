@@ -82,6 +82,7 @@ WezTerm loads from your home directory, not the clone. On Windows, run `scripts\
 - **`lsr` — top-level directories by most recent activity.** Ranks each directory by the newest mtime among its *immediate* children, so a project you edited files inside all day sorts first — unlike `ls -lt`/`eza -s modified`, which sort by the directory's own mtime and bury it. One level deep, never recursive. Both shells; `lsr -a` includes hidden dirs, and `lsrr` caps the list at the 20 most recent. See `doc common/files-disk`.
 
 - **`ws`/`wsp`/`wspu`/`wsw` workspace navigation** that autodetects the workspace root per machine (`$WORKSPACE_DIR` in `~/.zshrc.local` / `profile.local.ps1` overrides it). `wsw` finds the `*_Work`/`*-Work` sibling, and `wsw --set` writes the override for you when work lives elsewhere.
+- **`wso` — workspace organizer for many repos across many machines.** Keeps every clone in one derivable tree, `<workspace>/<tier>/github.com/<owner>/<repo>`, where the path is computed from the repo's `origin` remote rather than the folder someone typed once — which is what catches a repo misfiled under the wrong name, the same remote cloned twice under two spellings, or a clone still pointing at a renamed GitHub account. `wso status` is a read-only report of everything dirty, unpushed or detached; `wso plan`/`wso migrate` move an existing mess into the tree as atomic renames that preserve uncommitted work, stashes and untracked files, refusing anything whose destination already exists; `wso sync` is a fast-forward-only bulk update that can never destroy local work; `wso archive`/`wso unarchive` move cold repos to a parallel `archive/` tier behind an interactive checklist and a hard safety gate. `ws37`/`ws42`/`wsmb`/`wsmd`/`wspu`/`wsar` jump to an owner and `wsj` fuzzy-jumps to any repo, which is what makes the deep paths free. Both shells. See `doc common/workspace-org`.
 - **`doc` knowledge base** — a tree of markdown command runbooks under `docs/kb/` in the clone (`common/` + per-OS `linux/`/`macos/`/`windows/` + `wezterm/`), rendered by `glow`. `doc` fuzzy-finds a topic, `doc <topic>` opens it, `doc -g` greps, `doc cmd` drops a command straight onto your prompt, and `doc sync` commits your edits back (with a changelog bullet). Personal/secret runbooks live in an untracked `~/.doc.local/` layer. `ref` and `wzr` are thin aliases into it.
 
 ## Architecture in 30 seconds
@@ -112,19 +113,28 @@ terminal-stack/
 ├── install-wsl.sh        # one-liner WSL installer (curl | bash)
 ├── install-linux.sh      # one-liner native-Linux installer
 ├── install-mac.sh        # one-liner macOS installer
-├── bootstrap/            # deeper bootstraps invoked by the installers
+├── bootstrap/            # deeper bootstraps + command backends, run from the clone
 │   ├── windows-bootstrap.ps1
 │   ├── wsl-bootstrap.sh
 │   ├── linux-bootstrap.sh
+│   ├── mac-bootstrap.sh
 │   ├── _common-debian.sh    # shared Debian install helpers (sourced)
-│   └── mac-bootstrap.sh
+│   ├── _config.sh / _config.ps1   # config store + app catalog, per side
+│   ├── _wizard.sh           # install-wizard prompts (ts_tty_prompt)
+│   ├── _cleanup.sh / _cleanup.ps1 # old-clone checklist; ts_backup_file lives here
+│   ├── ts-config.sh         # backend for the `ts-config` shell command
+│   ├── ts-doctor.sh         # backend for `ts-doctor`
+│   ├── workspace.conf       # tracked layout map for `wso` (org → tier, renames)
+│   ├── _workspace.sh + wso.sh              # `wso` — bash half (WSL/Linux/macOS)
+│   └── _workspace.ps1 + _workspace_cmd.ps1 # `wso` — pwsh half (Windows)
 ├── scripts/
 │   └── sync-windows.ps1  # Windows-native port of run_after sync (no WSL needed)
 ├── docs/                 # design-decision documentation
 │   ├── cross-side-chezmoi.md
 │   ├── developing-wezterm.md
 │   ├── powershell-quirks.md
-│   └── decisions.md
+│   ├── decisions.md
+│   └── kb/               # the `doc` knowledge base (common/, linux/, macos/, windows/, wezterm/)
 ├── dot_zshrc             # ↘ chezmoi-managed (WSL + native Linux + macOS home)
 ├── dot_zshrc.local.example  # template for per-machine overrides (~/.zshrc.local)
 ├── dot_tmux.conf

@@ -32,7 +32,7 @@ curl -fsSL https://raw.githubusercontent.com/martybytes/terminal-stack/main/inst
 
 - **Leader key** (WezTerm) — `Ctrl+Space` (recommended), `Ctrl+A`, `Ctrl+B`, or a custom `mod-key` chord (e.g. `alt-space`). Skip with `TS_LEADER=ctrl-a`.
 - **Theme** — `dark` (Catppuccin Mocha, recommended), `light` (Latte), or `follow` (track the OS light/dark setting; WezTerm switches live, the Starship/tmux palette is baked at apply and refreshed by `ts-update`/`ts-config`). Skip with `TS_THEME=dark|light|follow`.
-- **Apps** — accept the recommended set (`eza fzf bat delta ripgrep zoxide glow micro neovim`, plus `tmux` off-Windows) or customize per-app (also offers `zed`, `tldr`, `nvtop`, `lazydocker`). Required tools (WezTerm, the Nerd Font, Starship, chezmoi, git, zsh) are always installed. Skip with `TS_APPS=recommended|all|none|id,id,…`.
+- **Apps** — accept the recommended set (`eza fzf bat delta ripgrep zoxide glow micro neovim gh ghq lazygit`, plus `tmux` off-Windows) or customize per-app (also offers `zed`, `tldr`, `nvtop`, `lazydocker`). Required tools (WezTerm, the Nerd Font, Starship, chezmoi, git, zsh) are always installed. Skip with `TS_APPS=recommended|all|none|id,id,…`.
 - **Workspace directory** — pre-filled with the autodetected candidate (`C:\DATA\Workspace` / `~/Documents/Workspace` / `~/workspace` / `~/Workspace`). Press Enter to accept. Persisted to `~/.zshrc.local` (zsh) or `Documents\PowerShell\profile.local.ps1` (pwsh) *only* when it differs from the autodetect. Skip with `WORKSPACE_DIR=/path` / `$env:WORKSPACE_DIR`.
 
 **Headless servers.** On a host with no graphical session (a server reached over ssh/PuTTY), the bootstrap auto-detects "headless", tells you so, and lets you confirm or flip it; force it with `TS_HEADLESS=1` (or `=0` for a desktop). Headless mode **skips the Nerd Font download and the WezTerm leader-key prompt** — there's no GUI terminal to use them — while still installing tmux, Starship, zsh, and the CLI tools. (WSL is treated as a desktop: it renders in a Windows GUI terminal.)
@@ -275,12 +275,32 @@ winget install --id dandavison.delta --exact --silent
 winget install --id BurntSushi.ripgrep.MSVC --exact --silent
 # zoxide if not already from Chocolatey:
 # winget install --id ajeetdsouza.zoxide --exact --silent
+# workspace-organizer toolchain (wso):
+winget install --id GitHub.cli --exact --silent
+winget install --id x-motemen.ghq --exact --silent
+winget install --id JesseDuffield.lazygit --exact --silent
 ```
 
 ```sh
 sudo apt-get install -y eza zoxide fzf bat git-delta ripgrep
 mkdir -p ~/.local/bin
 ln -sf /usr/bin/batcat ~/.local/bin/bat
+```
+
+`gh`, `ghq` and `lazygit` back the `wso` workspace organizer. Only `gh` is packaged
+on Debian/Ubuntu, and only from 24.04, so the bootstrap installs all three from their
+upstream GitHub releases into `~/.local/bin` when apt cannot supply them (arch-aware —
+amd64 and arm64 both work). On macOS all three are Homebrew formulae:
+
+```sh
+brew install gh ghq lazygit
+```
+
+Authenticate `gh` once per machine — `wso synceverything` and `wso orphans --push`
+need it, and `wso doctor` checks for it:
+
+```sh
+gh auth login
 ```
 
 ### Phase 8 — Apply chezmoi

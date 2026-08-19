@@ -430,7 +430,17 @@ _ts_workspace_sibling() {
 }
 ws()   { cd "$(_ts_workspace)" 2>/dev/null || echo "ws: no workspace found — export WORKSPACE_DIR in ~/.zshrc.local" >&2 }
 wsp()  { cd "$(_ts_workspace_sibling Personal)" 2>/dev/null || echo "wsp: no *_Personal sibling of $(_ts_workspace 2>/dev/null)" >&2 }
-wspu() { cd "$(_ts_workspace_sibling Public)" 2>/dev/null || echo "wspu: no *_Public sibling of $(_ts_workspace 2>/dev/null)" >&2 }
+# wspu prefers the organised public/ tier and falls back to the old *_Public
+# sibling root, so it keeps working before, during and after `wso migrate`.
+wspu() {
+  local root pub
+  root="$(_ts_workspace)" || { echo "wspu: no workspace found" >&2; return 1 }
+  pub="$root/public/github.com"
+  [[ -d "$pub" ]] || pub="$root/public"
+  [[ -d "$pub" ]] || pub="$(_ts_workspace_sibling Public)" || {
+    echo "wspu: no public/ tier and no *_Public sibling of $root" >&2; return 1 }
+  cd "$pub"
+}
 
 # Work workspace. $WORK_WORKSPACE_DIR (set in ~/.zshrc.local) wins; otherwise the
 # *_Work / *-Work sibling of the main workspace — same naming rule as wsp/wspu.
@@ -485,6 +495,66 @@ wsw() {
 }
 # Project-specific shortcuts (wscalibra, wsnetsuite, …) belong in
 # ~/.zshrc.local — see dot_zshrc.local.example.
+
+# --- organised tree: per-owner jumps -----------------------------------------
+# Repos live at <workspace>/<tier>/<host>/<owner>/<repo>; see `doc workspace-org`.
+# These stay shell functions rather than moving into `wso` because a child
+# process cannot change the parent shell's directory.
+_ts_ws_org_cd() {
+  local owner="$1" name="$2" root d
+  root="$(_ts_workspace)" || { echo "$name: no workspace found" >&2; return 1 }
+  for d in "$root/src/github.com/$owner" "$root/archive/github.com/$owner"; do
+    [[ -d "$d" ]] && { cd "$d"; return 0 }
+  done
+  echo "$name: $root/src/github.com/$owner does not exist yet — run 'wso plan'" >&2
+  return 1
+}
+ws37()  { _ts_ws_org_cd 37metrics        ws37 }
+ws42()  { _ts_ws_org_cd dimension42ai    ws42 }
+wsmb()  { _ts_ws_org_cd martybytes       wsmb }
+wsmd()  { _ts_ws_org_cd moleculardesigns wsmd }
+wsar()  {
+  local root; root="$(_ts_workspace)" || { echo "wsar: no workspace found" >&2; return 1 }
+  [[ -d "$root/archive/github.com" ]] && { cd "$root/archive/github.com"; return 0 }
+  [[ -d "$root/archive" ]] && { cd "$root/archive"; return 0 }
+  echo "wsar: nothing archived on this machine yet" >&2; return 1
+}
+
+# wsj — fuzzy-jump to any repo in the tree. This is what makes the deep paths
+# free: you never type them. Falls back to a numbered menu without fzf.
+wsj() {
+  local root d sel n i
+  root="$(_ts_workspace)" || { echo "wsj: no workspace found" >&2; return 1 }
+  local -a repos
+  repos=("${(@f)$(find "$root"/{src,public,archive,local} -maxdepth 5 -name .git -prune 2>/dev/null \
+                  | sed 's|/\.git$||' | sed "s|^$root/||" | sort)}")
+  (( ${#repos[@]} )) || { echo "wsj: no repos found under $root — run 'wso plan'" >&2; return 1 }
+  if command -v fzf >/dev/null 2>&1; then
+    sel="$(printf '%s\n' "${repos[@]}" | fzf --height 40% --reverse \
+           --query="${1:-}" --prompt 'repo> ')" || return 0
+  elif [[ -n "$1" ]]; then
+    local -a hits
+    hits=("${(@f)$(printf '%s\n' "${repos[@]}" | grep -i -- "$1")}")
+    (( ${#hits[@]} )) || { echo "wsj: no repo matching '$1'" >&2; return 1 }
+    if (( ${#hits[@]} == 1 )); then sel="${hits[1]}"
+    else
+      for i in {1..${#hits[@]}}; do printf '%3d) %s\n' "$i" "${hits[$i]}"; done
+      read -r "n?select [1]: "; sel="${hits[${n:-1}]}"
+    fi
+  else
+    echo "wsj: fzf not installed — pass a search term, e.g. 'wsj ironcl'" >&2; return 1
+  fi
+  [[ -n "$sel" ]] && cd "$root/$sel"
+}
+
+# wso — workspace organizer. Thin wrapper; the work happens in the clone so the
+# logic is shared with a standalone `bash bootstrap/wso.sh` invocation.
+wso() {
+  local cz src
+  cz="$(_ts_chezmoi)" || { echo "wso: chezmoi not found on PATH." >&2; return 1 }
+  src="$(_ts_src "$cz" wso)" || return 1
+  TERMINAL_STACK_DIR="$src" TERMINAL_STACK_CHEZMOI="$cz" bash "$src/bootstrap/wso.sh" "$@"
+}
 # ---- terminal-stack-helpers-end ----
 
 # ---- cli-tools-start ----

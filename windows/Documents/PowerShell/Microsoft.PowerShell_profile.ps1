@@ -37,9 +37,77 @@ function wsp {
     $r = Get-TsWorkspaceSibling 'Personal'
     if ($r) { Set-Location $r } else { Write-Warning 'wsp: no *_Personal sibling' }
 }
+# wspu prefers the organised public\ tier and falls back to the old *_Public
+# sibling root, so it keeps working before, during and after `wso migrate`.
 function wspu {
+    $root = Get-TsWorkspace
+    if ($root) {
+        foreach ($d in @((Join-Path $root 'public\github.com'), (Join-Path $root 'public'))) {
+            if (Test-Path -LiteralPath $d) { Set-Location $d; return }
+        }
+    }
     $r = Get-TsWorkspaceSibling 'Public'
-    if ($r) { Set-Location $r } else { Write-Warning 'wspu: no *_Public sibling' }
+    if ($r) { Set-Location $r } else { Write-Warning 'wspu: no public\ tier and no *_Public sibling' }
+}
+
+# --- organised tree: per-owner jumps -----------------------------------------
+# Repos live at <workspace>\<tier>\<host>\<owner>\<repo>; see `doc workspace-org`.
+# These stay profile functions rather than moving into `wso` because a child
+# process cannot change the parent shell's directory.
+function Set-TsWsOrgLocation([string]$Owner, [string]$Name) {
+    $root = Get-TsWorkspace
+    if (-not $root) { Write-Warning "${Name}: no workspace found"; return }
+    foreach ($d in @((Join-Path $root "src\github.com\$Owner"),
+                     (Join-Path $root "archive\github.com\$Owner"))) {
+        if (Test-Path -LiteralPath $d) { Set-Location $d; return }
+    }
+    Write-Warning "${Name}: $root\src\github.com\$Owner does not exist yet - run 'wso plan'"
+}
+function ws37 { Set-TsWsOrgLocation '37metrics'        'ws37' }
+function ws42 { Set-TsWsOrgLocation 'dimension42ai'    'ws42' }
+function wsmb { Set-TsWsOrgLocation 'martybytes'       'wsmb' }
+function wsmd { Set-TsWsOrgLocation 'moleculardesigns' 'wsmd' }
+function wsar {
+    $root = Get-TsWorkspace
+    if (-not $root) { Write-Warning 'wsar: no workspace found'; return }
+    foreach ($d in @((Join-Path $root 'archive\github.com'), (Join-Path $root 'archive'))) {
+        if (Test-Path -LiteralPath $d) { Set-Location $d; return }
+    }
+    Write-Warning 'wsar: nothing archived on this machine yet'
+}
+
+# wsj — fuzzy-jump to any repo in the tree. This is what makes the deep paths
+# free: you never type them. Falls back to a filtered menu without fzf.
+function wsj {
+    param([string]$Query)
+    $root = Get-TsWorkspace
+    if (-not $root) { Write-Warning 'wsj: no workspace found'; return }
+    $repos = @()
+    foreach ($t in @('src', 'public', 'archive', 'local')) {
+        $p = Join-Path $root $t
+        if (-not (Test-Path -LiteralPath $p)) { continue }
+        $repos += Get-ChildItem -LiteralPath $p -Directory -Recurse -Depth 3 -Force -ErrorAction SilentlyContinue |
+                  Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName '.git') } |
+                  ForEach-Object { $_.FullName.Substring($root.Length).TrimStart('\') }
+    }
+    if (-not $repos.Count) { Write-Warning "wsj: no repos found under $root - run 'wso plan'"; return }
+    $sel = $null
+    if (Get-Command fzf -ErrorAction SilentlyContinue) {
+        $sel = $repos | Sort-Object | fzf --height 40% --reverse --query "$Query" --prompt 'repo> '
+    } elseif ($Query) {
+        $hits = @($repos | Where-Object { $_ -like "*$Query*" } | Sort-Object)
+        if (-not $hits.Count) { Write-Warning "wsj: no repo matching '$Query'"; return }
+        if ($hits.Count -eq 1) { $sel = $hits[0] }
+        else {
+            for ($i = 0; $i -lt $hits.Count; $i++) { "{0,3}) {1}" -f ($i + 1), $hits[$i] }
+            $n = Read-Host 'select [1]'
+            if (-not $n) { $n = 1 }
+            $sel = $hits[[int]$n - 1]
+        }
+    } else {
+        Write-Warning "wsj: fzf not installed - pass a search term, e.g. 'wsj ironcl'"; return
+    }
+    if ($sel) { Set-Location (Join-Path $root $sel) }
 }
 
 # Work workspace. $env:WORK_WORKSPACE_DIR (set in profile.local.ps1) wins;
@@ -798,6 +866,25 @@ function hgrep {
     if (Test-Path -LiteralPath $h) { Select-String -LiteralPath $h -Pattern ($Pattern -join ' ') | ForEach-Object { $_.Line } }
 }
 # ---- clipboard-end ----
+
+# ---- workspace-organizer-start ----
+# wso — workspace organizer. Thin wrapper: the verbs live in the clone
+# (bootstrap\_workspace.ps1 + _workspace_cmd.ps1) so they can be fixed with a
+# `ts-update` rather than a profile re-sync, and so the same code serves a
+# standalone invocation. The bash twin is bootstrap/wso.sh.
+function wso {
+    param([Parameter(ValueFromRemainingArguments)] [string[]]$Arguments)
+    $src = Resolve-TsSourceDir
+    if (-not $src) { return }
+    $lib = Join-Path $src 'bootstrap\_workspace.ps1'
+    if (-not (Test-Path -LiteralPath $lib)) {
+        Write-Warning "$lib not found; cannot run wso. Try 'ts-update'."
+        return
+    }
+    . $lib
+    Invoke-Wso @Arguments
+}
+# ---- workspace-organizer-end ----
 
 # ---- local-overrides-start ----
 # Per-machine overrides (not synced by the stack). The Windows counterpart of

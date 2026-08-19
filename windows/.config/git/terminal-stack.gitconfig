@@ -33,3 +33,13 @@
 # support one.
 [help]
 	autocorrect = prompt
+
+# Fast-forward-only pulls. The single most valuable line here once a machine
+# holds ~100 repos: `git pull` either fast-forwards cleanly or refuses and
+# leaves you exactly where you were. It can never manufacture a surprise merge
+# commit, and it can never half-merge over uncommitted work — so a bulk update
+# pass (`wso sync`) is safe by construction, and the repos it skips are the
+# short list that actually needs a human. Use `git pull --rebase` or an
+# explicit `git merge` when you genuinely want to reconcile a divergence.
+[pull]
+	ff = only

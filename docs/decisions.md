@@ -288,3 +288,105 @@ When the installer finds an old clone at a different path, it clones fresh to th
 ## Why headless is auto-detected (and what it changes)
 
 Native Linux already skips the WezTerm *program* (only macOS/Windows install it), but the bootstrap still downloaded a ~30 MB Nerd Font and ran `fc-cache` on every server, and the wizard still asked for a WezTerm leader key — neither of which means anything on a box with no GUI terminal. We auto-detect headless (no `$DISPLAY`/`$WAYLAND_DISPLAY` and either an SSH session or a non-graphical systemd target; WSL is explicitly *not* headless because it renders in a Windows GUI terminal) rather than adding a flag, because the common case — `curl … | bash` on a fresh server over ssh — has no one around to pass a flag. Detection is **confirmed, not silent**: the bootstrap prints what it concluded and lets the user flip it on `/dev/tty`, and `TS_HEADLESS=1|0` forces it for unattended runs. Headless mode skips only the GUI-only steps (font + leader prompt); tmux, Starship, zsh, and the CLI tools — the things that make a server pleasant over ssh — still install.
+
+## Why `wso` derives repo paths from the remote instead of the folder name
+
+The folder a clone sits in is a guess someone typed once; the `origin` remote is the
+only thing that says what a repo actually is. Deriving `<tier>/<host>/<owner>/<repo>`
+from the remote is what makes the layout machine-generatable — a new machine is one
+command rather than an afternoon — but the reason it earned its place is the failure
+modes it catches for free. On the machine this was built against, the first plan found a
+folder named `flipoff` in the third-party root whose origin was `37metrics/rotari`;
+`sheet-sense` and `sheet_sense` in two different roots turned out to be one repo with
+two local spellings; and a clone still pointing at a GitHub account renamed years ago
+filed itself under the new name because a `rename` line in `workspace.conf` said to.
+None of those are visible by looking at the folder, and all three are structurally
+impossible once the path is computed rather than typed.
+
+The `github.com/` level looks like pointless nesting when everything lives on one host,
+and it is never typed — `wsj` fuzzy-jumps. It buys three things: two owners on different
+hosts can share a repo name without colliding, the tree stays compatible with `ghq`, and
+the day something lands on a self-hosted Gitea or a client's GitLab, nothing about the
+scheme changes.
+
+Trade-off: a repo whose remote is wrong gets filed wrong, and a repo with no remote
+cannot be placed at all. The second case is why the `local/` tier exists rather than
+guessing an owner — a path under `src/github.com/<owner>/` is a claim about where the
+repo lives upstream, and for a repo that has never been pushed that claim would be false.
+
+## Why the archive tier is a parallel tree and not `#archive` inside each org
+
+A folder nested in each org directory was the first instinct and is wrong twice over.
+It breaks the path-equals-remote invariant that everything else depends on, and
+punctuation prefixes do not sort the way people assume: under the default
+`en_US.UTF-8` collation glibc ignores punctuation entirely, so `_archive` interleaves
+with the `a` repos and only sorts first under `LC_COLLATE=C`. A naming scheme whose
+behaviour depends on a locale setting will behave differently on different machines,
+which is disqualifying for a stack that exists to be identical across a fleet.
+
+A parallel `archive/` mirroring the shape of `src/` makes archiving a path-preserving
+move and restoring the same move reversed, keeps derivation working in both tiers, and
+leaves `ls` inside an org directory showing only live work — which was the actual goal.
+
+Archive state is deliberately per-machine and never written back to this repo. A repo
+being cold on the laptop and hot on the desktop is correct; it is local cache state, not
+a fact about the repo. Syncing that decision would archive a repo out from under you on
+the next machine.
+
+## Why `wso` owns its own path derivation when it also requires `ghq`
+
+`ghq` is a hard requirement — it is installed by every bootstrap and `wso doctor`
+verifies it — and `wso identity` writes the per-URL `ghq.root` config so `ghq get` and
+`ghq list` land in the same tree. But the layout logic is ours, not delegated.
+
+Two reasons. `ghq` has no concept of the `archive/`, `local/` or `scratch/` tiers, which
+is most of what the organizer decides; delegating would mean owning the tiering anyway
+and then reconciling it with a second source of truth. And `ghq`'s multi-root
+configuration resolves with last-value-wins precedence, which has silently broken
+people's setups across upgrades — a per-machine debugging cost multiplied by the number
+of machines this deploys to.
+
+Trade-off: more code here, and the two must be kept in agreement. The agreement is
+one-directional and mechanical (`wso identity` generates the `ghq` config from
+`workspace.conf`), so there is one source of truth even though there are two consumers.
+
+## Why the staleness scan excludes `.git`, and re-checks safety twice
+
+`wso archive` ranks by the later of the last commit and the newest mtime among a repo's
+immediate children, reusing the reasoning behind `lsr` — a directory's own mtime only
+moves when entries are added or removed, so a repo edited all afternoon looks untouched.
+
+Excluding `.git` from that child scan matters more for a repo than the `-mindepth 1`
+rule does for a plain directory. `git fetch` writes `FETCH_HEAD`, `git gc` rewrites
+packs, and even `git status` can churn the index lock — all of which add and remove
+entries directly under `.git`. Including it would make every repo that has ever been
+fetched look like it was touched today, and the archiver would correctly conclude that
+nothing is ever cold.
+
+The safety gate runs twice: once when the candidate list is built, and again immediately
+before each move. The checklist is interactive and can sit open for minutes while the
+user reads it, which is more than enough time for a background editor save or a running
+build to dirty a repo that was clean when it was listed. Re-checking is cheap; moving a
+repo with uncommitted work is not.
+
+## Why the migration moves rather than re-clones, and refuses across volumes
+
+Within one filesystem a move is a rename: instant, atomic, and it preserves everything
+inside the directory — uncommitted changes, stashes, the reflog, untracked scratch
+files, `.env` files that were never going to be in git. Any approach based on
+re-cloning silently discards exactly the work that is hardest to recover, and on a
+machine where several repos carry hundreds of uncommitted changes that is a data-loss
+event rather than a tidy-up.
+
+Across filesystems the same call degrades into copy-then-delete, which is slow and can
+half-finish. `wso` detects that and refuses rather than doing it, because a partially
+copied repo with the original already unlinked is the worst possible outcome.
+
+The Windows path needs retry logic that the POSIX path does not: directory handles are
+released asynchronously, so an editor, terminal, language server or indexer that has
+merely *looked* at a repo can make the rename fail for a second or two. The retry loop
+reports the likely culprit by name rather than a raw sharing-violation message.
+
+Nothing is ever deleted. The old roots are left in place after a migration for the user
+to remove by hand once they have verified — the same discipline as the `.bak` convention
+elsewhere in this repo.

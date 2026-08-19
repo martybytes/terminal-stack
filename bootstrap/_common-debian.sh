@@ -62,6 +62,7 @@ common_install_selected_apps() {
             eza)     apt_pkgs="$apt_pkgs eza" ;;        # may be absent pre-23.10; github fallback below
             delta)   apt_pkgs="$apt_pkgs git-delta" ;;
             tldr)    apt_pkgs="$apt_pkgs tldr" ;;
+            gh)      apt_pkgs="$apt_pkgs gh" ;;          # universe on 24.04+; github fallback below
             nvtop)   command -v nvidia-smi >/dev/null 2>&1 && apt_pkgs="$apt_pkgs nvtop" ;;
         esac
     done
@@ -74,7 +75,7 @@ common_install_selected_apps() {
                     # eza/git-delta aren't in older Debian/Ubuntu repos by design —
                     # the GitHub-release fallback below installs them and reports
                     # the real outcome. Don't cry wolf here.
-                    eza|git-delta) : ;;
+                    eza|git-delta|gh) : ;;
                     *) echo "$WARN apt install $id failed" ;;
                 esac
             done
@@ -91,6 +92,25 @@ common_install_selected_apps() {
         command -v delta >/dev/null 2>&1 \
             || common_install_github_binary "dandavison/delta" "delta" "delta-.*-x86_64-unknown-linux-gnu\\.tar\\.gz$" \
             || echo "$WARN delta unavailable (not in apt and GitHub fallback failed)" ;;
+    esac
+    # gh / ghq / lazygit — the workspace-organizer toolchain. ghq and lazygit are
+    # in no Debian/Ubuntu archive, and gh only from 24.04, so the upstream release
+    # is the reliable path on all three. Arch-aware: unlike eza/delta above, these
+    # are commonly wanted on arm64 boxes too.
+    case " $apps " in *" gh "*)
+        command -v gh >/dev/null 2>&1 \
+            || common_install_github_binary "cli/cli" "gh" "gh_.*_linux_$(common_arch_tag deb)\\.tar\\.gz$" \
+            || echo "$WARN gh unavailable (not in apt and GitHub fallback failed)" ;;
+    esac
+    case " $apps " in *" ghq "*)
+        command -v ghq >/dev/null 2>&1 \
+            || common_install_github_binary "x-motemen/ghq" "ghq" "ghq_linux_$(common_arch_tag deb)\\.zip$" \
+            || echo "$WARN ghq unavailable (GitHub fallback failed)" ;;
+    esac
+    case " $apps " in *" lazygit "*)
+        command -v lazygit >/dev/null 2>&1 \
+            || common_install_github_binary "jesseduffield/lazygit" "lazygit" "lazygit_.*_Linux_$(common_arch_tag gnu)\\.tar\\.gz$" \
+            || echo "$WARN lazygit unavailable (GitHub fallback failed)" ;;
     esac
     case " $apps " in *" glow "*)   common_install_glow ;; esac
     case " $apps " in *" neovim "*) common_install_neovim ;; esac
@@ -149,6 +169,21 @@ common_install_neovim() {
         || echo "$WARN add-apt-repository ppa:neovim-ppa/unstable failed (non-Ubuntu?); using distro neovim"
     sudo apt-get update -qq
     sudo apt-get install -y neovim >/dev/null 2>&1 || echo "$WARN apt install neovim failed"
+}
+
+# uname -m -> the token upstream release assets actually use. Two spellings are
+# common and projects disagree, so callers say which they need:
+#   deb  -> amd64 / arm64   (gh, ghq, and most Go projects)
+#   gnu  -> x86_64 / arm64  (lazygit, eza, delta)
+# Unknown machines fall back to the 64-bit Intel asset, which is what the older
+# call sites hardcoded anyway.
+common_arch_tag() {
+    local style="${1:-deb}" m
+    m="$(uname -m 2>/dev/null || echo x86_64)"
+    case "$m" in
+        aarch64|arm64) echo arm64 ;;
+        *) if [ "$style" = deb ]; then echo amd64; else echo x86_64; fi ;;
+    esac
 }
 
 # Fetch the latest release tarball from a GitHub repo for the current arch and

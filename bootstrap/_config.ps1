@@ -21,9 +21,12 @@ $script:TsWingetIds = @{
     micro   = 'zyedidia.micro'
     neovim  = 'Neovim.Neovim'
     zed     = 'Zed.Zed'
+    gh      = 'GitHub.cli'
+    ghq     = 'x-motemen.ghq'
+    lazygit = 'JesseDuffield.lazygit'
     ffmpeg  = 'Gyan.FFmpeg'
 }
-$script:TsAppsRecommended = @('eza','fzf','bat','delta','ripgrep','zoxide','glow','micro','neovim')
+$script:TsAppsRecommended = @('eza','fzf','bat','delta','ripgrep','zoxide','glow','micro','neovim','gh','ghq','lazygit')
 $script:TsAppsOptional    = @('zed','ffmpeg')
 $script:TsAppsAll         = $script:TsAppsRecommended + $script:TsAppsOptional
 
@@ -39,6 +42,9 @@ function Get-TsAppDesc([string]$id) {
         'micro'   { 'nano-like terminal editor' }
         'neovim'  { 'neovim editor (nvim)' }
         'zed'     { 'Zed GUI editor' }
+        'gh'      { 'GitHub CLI (org enumeration for wso)' }
+        'ghq'     { 'clone into the derived workspace path' }
+        'lazygit' { 'git TUI (the wso status hand-off)' }
         'ffmpeg'  { 'ffplay for Claude TTS on Windows (Gyan.FFmpeg)' }
         default   { '' }
     }

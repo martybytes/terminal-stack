@@ -24,7 +24,7 @@
 # by the common_* steps and are NOT listed here.
 #   TS_APPS_RECOMMENDED — pre-checked in the picker / installed by "recommended".
 #   TS_APPS_OPTIONAL    — unchecked by default (GUI editor, GPU/docker tools).
-TS_APPS_RECOMMENDED="tmux eza fzf bat delta ripgrep zoxide glow micro neovim"
+TS_APPS_RECOMMENDED="tmux eza fzf bat delta ripgrep zoxide glow micro neovim gh ghq lazygit"
 TS_APPS_OPTIONAL="zed tldr nvtop lazydocker"
 TS_APPS_ALL="$TS_APPS_RECOMMENDED $TS_APPS_OPTIONAL"
 
@@ -41,6 +41,9 @@ ts_app_desc() {
         glow)       echo "terminal markdown renderer";;
         micro)      echo "nano-like terminal editor";;
         neovim)     echo "neovim editor (nvim)";;
+        gh)         echo "GitHub CLI (org enumeration for wso)";;
+        ghq)        echo "clone into the derived workspace path";;
+        lazygit)    echo "git TUI (the wso status hand-off)";;
         zed)        echo "Zed GUI editor";;
         tldr)       echo "concise command examples";;
         nvtop)      echo "GPU process monitor (NVIDIA hosts)";;
@@ -82,6 +85,9 @@ ts_brew_install_apps() {
             micro)      formulae="$formulae micro" ;;
             glow)       formulae="$formulae glow" ;;
             neovim)     formulae="$formulae neovim" ;;
+            gh)         formulae="$formulae gh" ;;
+            ghq)        formulae="$formulae ghq" ;;
+            lazygit)    formulae="$formulae lazygit" ;;
             tldr)       formulae="$formulae tldr" ;;
             lazydocker) formulae="$formulae lazydocker" ;;
             nvtop)      echo "==> nvtop is Linux-only; skipping on macOS" ;;
