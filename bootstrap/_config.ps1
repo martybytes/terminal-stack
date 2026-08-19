@@ -30,6 +30,37 @@ $script:TsAppsRecommended = @('eza','fzf','bat','delta','ripgrep','zoxide','glow
 $script:TsAppsOptional    = @('zed','ffmpeg')
 $script:TsAppsAll         = $script:TsAppsRecommended + $script:TsAppsOptional
 
+# The binary an app id actually puts on PATH. Mostly identity; a few differ.
+function Get-TsAppBin([string]$id) {
+    switch ($id) {
+        'ripgrep' { 'rg' }
+        'neovim'  { 'nvim' }
+        default   { $id }
+    }
+}
+
+# Apps this machine is expected to have but doesn't. Two sources, deliberately:
+# the saved selection (an install that failed or a tool later removed), AND
+# anything since added to the recommended set. The second half is the point — a
+# machine configured before a tool joined the catalog would otherwise never get
+# it however many times ts-update ran, which is exactly how gh/ghq/lazygit would
+# have missed every existing install.
+function Get-TsAppsPending {
+    $saved = @()
+    try { $saved = @((Get-TsConfig).apps) } catch {}
+    $seen = @{}; $out = @()
+    foreach ($id in ($saved + $script:TsAppsRecommended)) {
+        if (-not $id) { continue }
+        if ($seen[$id]) { continue }
+        $seen[$id] = $true
+        if (Get-Command (Get-TsAppBin $id) -ErrorAction SilentlyContinue) { continue }
+        # Only offer what this platform can actually install.
+        if (-not $script:TsWingetIds.ContainsKey($id)) { continue }
+        $out += $id
+    }
+    return $out
+}
+
 function Get-TsAppDesc([string]$id) {
     switch ($id) {
         'eza'     { 'modern ls (icons, git status)' }

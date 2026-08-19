@@ -458,6 +458,36 @@ function Update-TerminalStack {
         try { . $cfgHelper; Update-TsResolvedTheme } catch { Write-Warning "resolvedTheme refresh skipped: $_" }
     }
     Invoke-TsSync $SourceDir
+
+    # Config files are only half an update: a release that adds a CLI tool is
+    # inert until the tool exists. Offer the gap rather than installing behind
+    # your back, and skip the question entirely when there is nothing to do or
+    # nobody to ask.
+    if (Test-Path $cfgHelper) {
+        try {
+            . $cfgHelper
+            $pending = @(Get-TsAppsPending)
+            if ($pending.Count) {
+                Write-Host "==> $($pending.Count) app(s) from the catalog are not installed:"
+                foreach ($p in $pending) { Write-Host ("    {0,-10} {1}" -f $p, (Get-TsAppDesc $p)) }
+                if ([Console]::IsInputRedirected) {
+                    Write-Host "    Install them with: ts-config apps"
+                } else {
+                    $a = Read-Host 'Install them now? [y/N]'
+                    if ($a -match '^(y|Y|yes|YES)$') {
+                        Install-TsApps $pending
+                        # Record them, so the selection reflects what is actually here.
+                        $cfg = Get-TsConfig
+                        $merged = @(@($cfg.apps) + $pending | Where-Object { $_ } | Select-Object -Unique)
+                        Save-TsConfig -LeaderChord $cfg.leaderChord -ThemeMode $cfg.themeMode `
+                                      -TmuxPrefix $cfg.tmuxPrefix -Apps $merged | Out-Null
+                    } else {
+                        Write-Host '    Skipped. Run ts-config apps when you want them.'
+                    }
+                }
+            }
+        } catch { Write-Warning "app check skipped: $_" }
+    }
 }
 Set-Alias -Name ts-update -Value Update-TerminalStack
 

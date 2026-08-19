@@ -52,6 +52,33 @@ ts_app_desc() {
     esac
 }
 
+# The binary an app id actually puts on PATH. Mostly identity; a few differ.
+ts_app_bin() {
+    case "$1" in
+        ripgrep) echo rg ;;
+        neovim)  echo nvim ;;
+        *)       echo "$1" ;;
+    esac
+}
+
+# Apps this machine is expected to have but doesn't. Two sources, deliberately:
+# the user's saved selection (an install that failed or a tool later removed),
+# AND anything since added to TS_APPS_RECOMMENDED. The second half is the point —
+# a machine configured before a tool joined the catalog would otherwise never
+# get it however many times ts-update ran, which is exactly how gh/ghq/lazygit
+# would have missed every existing install.
+ts_apps_pending() {
+    local saved id seen="" out=""
+    saved="$(ts_data_get_apps 2>/dev/null || true)"
+    for id in $saved $TS_APPS_RECOMMENDED; do
+        case " $seen " in *" $id "*) continue ;; esac
+        seen="$seen $id"
+        command -v "$(ts_app_bin "$id")" >/dev/null 2>&1 && continue
+        out="$out $id"
+    done
+    echo "${out# }"
+}
+
 # Shown in the apps wizard when optional installs may need elevation.
 ts_apps_install_note() {
     if command -v apt-get >/dev/null 2>&1; then

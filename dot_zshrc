@@ -375,6 +375,31 @@ ts-update() {
   # which looks like a pager opening on long-output. Use `chezmoi diff` if
   # you want to preview.
   "$cz" apply
+  # Config files are only half an update: a release that adds a CLI tool is
+  # inert until the tool exists. Offer the gap rather than installing behind
+  # your back, and stay silent when there is nothing to do.
+  local pending
+  pending="$(TERMINAL_STACK_CHEZMOI="$cz" bash -c \
+    'source "$1/bootstrap/_config.sh" >/dev/null 2>&1 && ts_apps_pending' _ "$src" 2>/dev/null)"
+  if [[ -n "$pending" ]]; then
+    echo "==> ${#${(z)pending}} app(s) from the catalog are not installed:"
+    local a
+    for a in ${=pending}; do
+      printf '    %-10s %s\n' "$a" "$(bash -c 'source "$1/bootstrap/_config.sh" >/dev/null 2>&1 && ts_app_desc "$2"' _ "$src" "$a" 2>/dev/null)"
+    done
+    if [[ -t 0 ]]; then
+      local ans
+      read -r "ans?Install them now? [y/N]: "
+      case "$ans" in
+        y|Y|yes|YES)
+          TERMINAL_STACK_DIR="$src" TERMINAL_STACK_CHEZMOI="$cz" \
+            bash "$src/bootstrap/ts-config.sh" apps "$pending" ;;
+        *) echo "    Skipped. Run 'ts-config apps' when you want them." ;;
+      esac
+    else
+      echo "    Install them with: ts-config apps"
+    fi
+  fi
 }
 
 # Undo the last ts-update: reset the clone to the recorded pre-update SHA and
