@@ -31,6 +31,16 @@ for _, dom in ipairs(config.ssh_domains) do
   dom.assume_shell = 'Posix'
 end
 
+-- Host panes in a multiplexer process outside the GUI, so losing the GUI does
+-- not kill the shells. Motivation: the WebGpu panic documented at config.front_end
+-- below took out three live Claude Code sessions on 2026-08-18. With a mux domain,
+-- a GUI crash leaves every pane (and everything running in it) alive; relaunching
+-- WezTerm reattaches. Note the mux server loads its OWN copy of this file -- after
+-- changing config that affects pane spawning, restart wezterm-mux-server, not just
+-- the GUI. To back this out: delete these two lines and re-sync.
+config.unix_domains = { { name = 'main' } }
+config.default_domain = 'main'
+
 -- ── Theme palette (light / dark, optional follow-OS) ──────────────────────────
 -- THEME_MODE is injected from the saved terminal-stack config:
 --   'dark'  → Catppuccin Mocha · 'light' → VS Code Light Modern (official tokens) ·
@@ -132,9 +142,23 @@ config.window_frame = {
   inactive_titlebar_bg = P.crust,   -- unfocused
 }
 
--- WebGpu is WezTerm's modern, fastest backend (set explicitly). If a render
--- stall on child-process startup reappears, fall back to 'OpenGL'.
-config.front_end = 'WebGpu'
+-- Renderer: OpenGL, deliberately NOT WebGpu.
+-- WebGpu (wgpu 25.0.2 / DX12) panics at wgpu_core.rs:3626:38 ("!?") when it
+-- reconfigures the swapchain surface after a display/session state change --
+-- monitor sleep, RDP/session disconnect. Four identical crashes 2026-08-15..18,
+-- each one killing every pane in the window (and every Claude Code session in
+-- them). OpenGL does not use wgpu at all, so it cannot reach that code path.
+-- Full diagnosis: claude-local docs/windows/wezterm-webgpu-crash-runbook.md
+config.front_end = 'OpenGL'
+
+-- To re-test WebGpu once upstream wgpu is fixed: uncomment, and pin the adapter
+-- so wgpu stops choosing between the AMD iGPU and the RTX 5070. Get the exact
+-- table from the debug overlay (CTRL+SHIFT+L) via wezterm.gui.enumerate_gpus().
+-- NOTE: macOS (dot_wezterm.lua.tmpl) intentionally stays on WebGpu -- it is
+-- Metal-backed there and does not have this defect.
+-- config.front_end = 'WebGpu'
+-- config.webgpu_power_preference = 'HighPerformance'
+-- config.webgpu_preferred_adapter = { backend = 'Dx12', device_type = 'DiscreteGpu' }
 config.scrollback_lines = 10000
 config.audible_bell = 'Disabled'
 config.adjust_window_size_when_changing_font_size = false
