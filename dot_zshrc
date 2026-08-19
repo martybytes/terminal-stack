@@ -282,6 +282,25 @@ _ts_chezmoi() {
 # caller name for error prefixes. Each failure mode gets its own message —
 # a chezmoi error (e.g. state lock held by another running instance) is not
 # a missing clone, so chezmoi's stderr passes through unredirected.
+# Every terminal-stack clone on this machine, one path per line. A directory
+# counts only when it is a git repo whose origin names the project — the name
+# test alone is not enough to *choose* one (a stale install from an old account
+# still matches), which is why callers report rather than silently switch.
+_ts_clones() {
+  local d u seen=""
+  for d in "${TERMINAL_STACK_DIR:-}" "$HOME/code/terminal-stack" "$HOME/terminal-stack" \
+           "$HOME/Workspace/terminal-stack" "$HOME/Documents/Workspace/terminal-stack" \
+           "$HOME/workspace/terminal-stack" "$HOME/.local/share/chezmoi" \
+           /mnt/c/DATA/Workspace/terminal-stack /mnt/c/Users/*/terminal-stack; do
+    [[ -n "$d" && -d "$d/.git" ]] || continue
+    case " $seen " in *" $d "*) continue ;; esac
+    u="$(git -C "$d" config --get remote.origin.url 2>/dev/null)"
+    [[ "$u" == *terminal-stack* ]] || continue
+    seen="$seen $d"
+    echo "$d"
+  done
+}
+
 _ts_src() {
   local cz="$1" name="${2:-ts}" src="${TERMINAL_STACK_DIR:-}"
   if [[ -z "$src" ]]; then
@@ -313,6 +332,23 @@ ts-update() {
   # install. Nudge toward ts-doctor rather than pulling the wrong repo.
   git -C "$src" config --get remote.origin.url 2>/dev/null | grep -qi terminal-stack \
     || echo "ts-update: note — '$src' doesn't look like a terminal-stack clone. Run 'ts-doctor' to check." >&2
+  echo "==> clone: $src"
+  # A leftover second clone is not just untidy: whichever one ts-update picks is
+  # the one that re-deploys your config, so an unnoticed old clone silently
+  # reinstates an old profile. Report the others rather than choosing quietly;
+  # `ts-doctor --repair` repoints chezmoi's sourceDir for good.
+  local other others=""
+  for other in $(_ts_clones); do
+    [[ "$other" == "$src" ]] && continue
+    others="$others $other"
+  done
+  if [[ -n "$others" ]]; then
+    echo "ts-update: note — other terminal-stack clones on this machine:" >&2
+    for other in ${=others}; do
+      echo "    $other  ($(git -C "$other" log -1 --format='%h %s' 2>/dev/null | cut -c1-50))" >&2
+    done
+    echo "    Only '$src' is being updated. Run 'ts-doctor --repair' if that's the wrong one." >&2
+  fi
   git -C "$src" fetch --quiet || return $?
   local incoming
   incoming="$(git -C "$src" log --oneline 'HEAD..@{u}' 2>/dev/null)"

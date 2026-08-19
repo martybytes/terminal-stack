@@ -322,14 +322,74 @@ function gb  { git branch @args }
 # `chezmoi source-path` here: on Windows that returns chezmoi's default
 # sourceDir (~/.local/share/chezmoi) regardless of where the actual clone
 # lives, because Windows users don't configure chezmoi.toml (the WSL side does).
+# Every place a terminal-stack clone could plausibly live on Windows.
+function Get-TsCloneCandidates {
+    $seen = @{}
+    @(
+        $env:TERMINAL_STACK_DIR,
+        (Join-Path $env:USERPROFILE 'terminal-stack'),
+        'C:\DATA\Workspace\terminal-stack',
+        (Join-Path $env:USERPROFILE 'code\terminal-stack'),
+        (Join-Path $env:USERPROFILE 'Documents\Workspace\terminal-stack'),
+        (Join-Path $env:USERPROFILE 'workspace\terminal-stack'),
+        (Join-Path $env:USERPROFILE 'Workspace\terminal-stack')
+    ) | Where-Object {
+        if (-not $_) { return $false }
+        $k = $_.ToLower(); if ($seen[$k]) { $false } else { $seen[$k] = $true; $true }
+    }
+}
+
+# A path is a terminal-stack clone when it is a git repo whose origin names the
+# project. The name test is necessary but NOT sufficient to pick one: a stale
+# install under ~\terminal-stack from an old account still matches, which is
+# exactly how a machine ends up re-syncing an ancient profile over a current one.
+function Get-TsClones {
+    $out = foreach ($d in (Get-TsCloneCandidates)) {
+        if (-not (Test-Path (Join-Path $d '.git'))) { continue }
+        $origin = & git -C $d config --get remote.origin.url 2>$null
+        if ($origin -notmatch 'terminal-stack') { continue }
+        $ct = & git -C $d log -1 --format=%ct 2>$null
+        [pscustomobject]@{
+            Path   = $d
+            Origin = ([string]$origin).Trim()
+            Commit = if ($ct) { [int64]$ct } else { 0 }
+            Short  = (& git -C $d log -1 --format='%h %s' 2>$null)
+        }
+    }
+    # Newest commit first: after a `ts-update` pull the active clone is by
+    # definition the most recent one, so this self-heals rather than needing
+    # a pin. Ties keep candidate order, which puts an explicit override first.
+    return @($out | Sort-Object -Property Commit -Descending)
+}
+
+# Resolve the clone to operate on. An explicit -SourceDir or $env:TERMINAL_STACK_DIR
+# always wins. Otherwise pick the newest real clone and, when more than one
+# exists, say so — silently choosing between two clones is how the wrong profile
+# gets deployed.
 function Resolve-TsSourceDir([string]$SourceDir) {
     if (-not $SourceDir) { $SourceDir = $env:TERMINAL_STACK_DIR }
-    if (-not $SourceDir) { $SourceDir = Join-Path $env:USERPROFILE 'terminal-stack' }
-    if (-not (Test-Path (Join-Path $SourceDir '.git'))) {
-        Write-Warning "terminal-stack clone not found at $SourceDir. Pass -SourceDir <path> or re-run install.ps1."
+    if ($SourceDir) {
+        if (-not (Test-Path (Join-Path $SourceDir '.git'))) {
+            Write-Warning "terminal-stack clone not found at $SourceDir. Pass -SourceDir <path> or re-run install.ps1."
+            return $null
+        }
+        return $SourceDir
+    }
+    $clones = Get-TsClones
+    if (-not $clones.Count) {
+        Write-Warning 'No terminal-stack clone found. Pass -SourceDir <path> or re-run install.ps1.'
         return $null
     }
-    return $SourceDir
+    if ($clones.Count -gt 1) {
+        Write-Warning "$($clones.Count) terminal-stack clones found; using the most recently committed one:"
+        foreach ($c in $clones) {
+            $mark = if ($c.Path -eq $clones[0].Path) { '->' } else { '  ' }
+            Write-Host ("  {0} {1}" -f $mark, $c.Path)
+            Write-Host ("       {0}  |  {1}" -f $c.Origin, $c.Short)
+        }
+        Write-Host "  Pin one with: Set-TsSourceDirPersisted '<path>'   (or run ts-doctor --repair)"
+    }
+    return $clones[0].Path
 }
 
 function Invoke-TsSync([string]$SourceDir) {
@@ -357,6 +417,18 @@ function Update-TerminalStack {
     $remote = & git -C $SourceDir config --get remote.origin.url 2>$null
     if ($remote -notmatch 'terminal-stack') {
         Write-Warning "ts-update: '$SourceDir' doesn't look like a terminal-stack clone. Run 'ts-doctor' to check."
+    }
+    Write-Host "==> clone: $SourceDir"
+    # A second clone is not just untidy: whichever one ts-update picks is the one
+    # that overwrites $PROFILE, so an unnoticed leftover silently reinstates an
+    # old profile. Offer to pin the choice once rather than re-deciding it on
+    # every run. Skipped when the user pinned already or is non-interactive.
+    if (-not $env:TERMINAL_STACK_DIR) {
+        $all = Get-TsClones
+        if ($all.Count -gt 1 -and -not [Console]::IsInputRedirected) {
+            $a = Read-Host "Pin '$SourceDir' as this machine's clone and stop asking? [y/N]"
+            if ($a -match '^(y|Y|yes|YES)$') { Set-TsSourceDirPersisted $SourceDir }
+        }
     }
 
     & git -C $SourceDir fetch --quiet
