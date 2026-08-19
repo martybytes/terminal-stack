@@ -629,6 +629,8 @@ command -v fzf    >/dev/null && source <(fzf --zsh 2>/dev/null)
 export EZA_COLORS='di=1;34:da=1;34:ln=1;36'
 command -v eza    >/dev/null && alias ls='eza --icons=always --git --group-directories-first'
 command -v bat    >/dev/null && alias ccat='bat --paging=never'   # ccat, not cat — don't shadow real cat
+alias rmf='rm -rf'   # force-delete file/folder recursively, no confirmation
+command -v cursor >/dev/null 2>&1 && c() { cursor "${1:-.}" --classic "${@:2}" }
 
 # ref — alias into the `doc` knowledge base (replaced the old command-reference file).
 ref() { doc "$@"; }

@@ -301,6 +301,12 @@ function lsrr { lsr @args | Select-Object -First 20 }
 
 # ref — alias into the `doc` knowledge base (replaced the old command-reference file).
 function ref { doc @args }
+
+# rmf <path...> — delete file(s)/folder(s) recursively with no confirmation prompts.
+function rmf {
+    param([Parameter(Mandatory, ValueFromRemainingArguments = $true)][string[]]$Paths)
+    Remove-Item -Path $Paths -Recurse -Force -Confirm:$false
+}
 # ---- cli-tools-end ----
 
 # ---- git-shortcuts-start ----
@@ -741,6 +747,18 @@ function npp {
         else                                           { Join-Path (Get-Location).Path $p }
     }
     & $exe @resolved
+}
+
+# c [folder] — open folder in Cursor with the classic UI (like `npp`, but for Cursor).
+function c {
+    param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Paths)
+    $exe = (Get-Command cursor -ErrorAction SilentlyContinue).Source
+    if (-not $exe) {
+        Write-Warning 'c: cursor CLI not found on PATH — install Cursor and enable its shell command'
+        return
+    }
+    if (-not $Paths) { $Paths = @('.') }
+    & $exe @Paths --classic
 }
 # ---- editor-launch-end ----
 
