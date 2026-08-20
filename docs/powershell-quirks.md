@@ -257,3 +257,44 @@ Defensive practices used in this stack:
 - For multi-line scripts, write to a tempfile in WSL native filesystem and execute that.
 - Strip `\r` from any file edited via Windows-side tools that will be parsed by bash: `sed -i 's/\r$//' <file>`.
 - For paths in JSON consumed by shell layers, use forward slashes.
+
+## `| Set-Content` silently no-ops when the pipeline is empty
+
+`Clear-TsSourceDirPin` (`bootstrap/_cleanup.ps1`) strips the `$env:TERMINAL_STACK_DIR`
+line from `profile.local.ps1`. It was written the obvious way:
+
+```powershell
+(Get-Content $f) | Where-Object { $_ -notmatch '^\s*\$env:TERMINAL_STACK_DIR\s*=' } |
+    Set-Content $f
+```
+
+That works whenever *something* survives the filter, and does **nothing at all** when
+nothing does — which is the common case here, because a machine whose only per-machine
+override is the pin has a `profile.local.ps1` containing exactly that one line. The
+function printed "removed the pin", the backup was written, and the file was untouched.
+It was found on a real repair run, by checking the file instead of trusting the message.
+
+The cause is that `Set-Content` takes its content from the **pipeline**, and a pipeline
+that yields zero objects never gives it a value to write — the cmdlet's process block
+never runs, so the existing file is left alone. It is not an error and there is no
+warning. Contrast `-Value`, which is a parameter and therefore always supplied:
+
+```powershell
+$kept = @((Get-Content $f) | Where-Object { $_ -notmatch '…' })
+Set-Content -LiteralPath $f -Value $kept -Encoding utf8   # @() truncates, as intended
+```
+
+Demonstration:
+
+```powershell
+'only-line' | Set-Content t.txt
+'only-line' | Where-Object { $_ -notmatch 'only' } | Set-Content t.txt
+Get-Content t.txt          # -> only-line     (unchanged!)
+Set-Content t.txt -Value @()
+Get-Content t.txt          # -> (empty)
+```
+
+**Rule for this repo:** when rewriting a file by filtering its lines, collect into an
+array and pass `-Value`. Never pipe a `Where-Object` straight into `Set-Content`. A
+`-replace` pipeline is safe (it emits one line per input line and cannot go empty), and
+`Set-TsSourceDirPersisted` in the profile already uses the `-Value ($kept + $line)` form.

@@ -110,6 +110,18 @@ a copy. It never deletes anything: the old roots are left in place for you to re
 hand once you have verified. And moves are renames, so uncommitted work, stashes,
 reflog and untracked scratch files all survive intact.
 
+It also refuses to move **terminal-stack's own runtime clone**, listing it as
+`runtime — not migrated`. That gate is deliberately blunt: it blocks *any* un-tiered
+terminal-stack clone found at the workspace root, not merely the one that currently
+resolves as active. The narrower version — compare each candidate against the resolved
+runtime clone — switched itself off whenever resolution came back empty, which is
+precisely the broken state (a pin pointing at nothing, a clone at a legacy path) where
+the guard is needed. It cost a real install: a clone at `<workspace>/terminal-stack`
+was migrated to `src/github.com/martybytes/terminal-stack`, a path no resolver knows,
+and the machinery went with it. A genuine dev clone already lives at a tier path and is
+therefore never a scan candidate, so nothing legitimate is caught. Relocating the
+runtime clone is `ts-doctor --repair`'s job — see `doc common/stack`.
+
 Every run that moves anything writes a TSV log, which is what `wso unarchive --undo-last`
 reads. Those logs live in `<workspace>/.terminal-stack/workspace-runs/` — inside the
 workspace rather than in per-OS state, because they describe the workspace and not the
@@ -165,4 +177,6 @@ under a personal one. Those files are per-machine and never enter the source tre
 
 Read every line of `wso plan` before running `wso migrate`. Anything it lists as blocked
 needs a human — usually two diverged clones of the same repo, which is a `git diff`
-session, not something a tool should guess at.
+session, not something a tool should guess at. The exception is
+`runtime — not migrated`, which needs nothing from you: it is the stack protecting its
+own install, and `ts-doctor --repair` is what moves that clone.

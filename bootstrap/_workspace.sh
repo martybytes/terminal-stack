@@ -127,6 +127,13 @@ ts_ws_runtime_clone() {
         src="$(grep -E '^[[:space:]]*sourceDir[[:space:]]*=' "$toml" | head -n1 \
             | sed -E 's/^[[:space:]]*sourceDir[[:space:]]*=[[:space:]]*"?([^"]*)"?.*/\1/')"
     fi
+    # Third step so a standalone `bash bootstrap/wso.sh` (Git Bash, no
+    # chezmoi.toml) isn't left guard-less — an empty result switches the
+    # "never migrate the runtime clone" check off entirely.
+    if [ -z "$src" ] && command -v ts_canonical_clone_dir >/dev/null 2>&1; then
+        src="$(ts_canonical_clone_dir 2>/dev/null || true)"
+        [ -d "$src/.git" ] || src=""
+    fi
     [ -n "$src" ] || return 1
     ( cd "$src" 2>/dev/null && pwd -P ) || printf '%s\n' "$src"
 }

@@ -4,6 +4,10 @@
 #
 # Optional: override the clone location before invoking.
 #   $env:TERMINAL_STACK_DIR = 'D:\dotfiles\terminal-stack'; irm ... | iex
+# Two caveats on that override: a target inside a workspace root is refused by
+# default (wso migrate would relocate it), and a pin already persisted in
+# profile.local.ps1 with no clone behind it is treated as a leftover and ignored
+# -- $PROFILE sets that variable in every session, so it is not evidence of intent.
 #
 # What it does:
 #   1. Verifies winget is available (App Installer).
@@ -45,17 +49,88 @@ if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
     Write-Host "==> git already present ($((Get-Command git).Source))"
 }
 
-# 3. Choose clone location ($env:TERMINAL_STACK_DIR skips the prompt), then clone.
+# 3. Choose clone location (a live $env:TERMINAL_STACK_DIR skips the prompt), then clone.
 # Canonical default: inside the app-data dir the stack already owns (see
 # docs/decisions.md § "Runtime clone location"). Canonical needs no pin.
 $repoUrl = 'https://github.com/martybytes/terminal-stack.git'
 $defaultDir = Join-Path $env:LOCALAPPDATA 'terminal-stack\stack'
-if ($env:TERMINAL_STACK_DIR) {
-    $targetDir = $env:TERMINAL_STACK_DIR
+
+# Workspace roots, in probe order. Keep in sync with bootstrap\_workspace.ps1
+# Get-TsWsRoot and the profile's Get-TsWorkspace — this copy exists because
+# install.ps1 runs before any clone is on disk.
+function Test-TsInWorkspaceRoot([string]$Path) {
+    if (-not $Path) { return $false }
+    $p = $Path.TrimEnd('\')
+    foreach ($r in @(
+        $env:WORKSPACE_DIR,
+        'C:\DATA\Workspace',
+        (Join-Path $env:USERPROFILE 'workspace'),
+        (Join-Path $env:USERPROFILE 'Documents\Workspace')
+    )) {
+        if (-not $r) { continue }
+        if (($p + '\') -like ($r.TrimEnd('\') + '\*')) { return $true }
+    }
+    return $false
+}
+# A dev clone at a wso tier path is a deliberate choice, not an accident.
+# Twin of bootstrap\_cleanup.ps1 Test-TsDevClone.
+function Test-TsDevClonePath([string]$Path) {
+    ($Path -replace '\\', '/') -match '/(src|public|archive|local|scratch)/[^/]+\.[^/]+/[^/]+/[^/]+/?$'
+}
+
+$pin = $env:TERMINAL_STACK_DIR
+if ($pin) {
+    # profile.local.ps1 is dot-sourced by $PROFILE, so a pin written by an earlier
+    # install is present in EVERY pwsh session — `irm ... | iex` never sees a clean
+    # environment. A value that matches that persisted line is therefore not a
+    # deliberate override, and is only worth honouring while a clone still lives
+    # there. A pin exported for this run alone is untouched.
+    $plps = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'PowerShell\profile.local.ps1'
+    $pinPattern = "^\s*\`$env:TERMINAL_STACK_DIR\s*=\s*['`"]?" + [regex]::Escape($pin.TrimEnd('\'))
+    $persisted = (Test-Path $plps) -and
+                 [bool]((Get-Content $plps) | Where-Object { $_ -match $pinPattern })
+    if ($persisted -and -not (Test-Path (Join-Path $pin '.git'))) {
+        Write-Host "==> ignoring a stale `$env:TERMINAL_STACK_DIR pin ($pin — no clone there)"
+        Write-Host "    the line in $plps is removed once the clone lands at the canonical path."
+        $env:TERMINAL_STACK_DIR = $null
+        $pin = $null
+    }
+}
+
+if ($pin) {
+    $targetDir = $pin
     Write-Host "==> Clone location: $targetDir (from `$env:TERMINAL_STACK_DIR)"
+} elseif ([Console]::IsInputRedirected) {
+    # No one to answer (CI, a piped host). Read-Host would block on a pipe that
+    # never closes rather than returning the default.
+    $targetDir = $defaultDir
+    Write-Host "==> Clone location: $targetDir (non-interactive)"
 } else {
     $answer = Read-Host "Where should the terminal-stack repo live? [$defaultDir]"
-    $targetDir = if ($answer) { $answer } else { $defaultDir }
+    $targetDir = if ($answer) { $answer.Trim() } else { $defaultDir }
+}
+
+# The runtime clone must not live inside a workspace root: `wso migrate` derives
+# a repo's destination from its origin and will happily relocate it to a tier
+# path, orphaning the install. That has happened. Dev-clone tier paths are
+# exempt — pinning one is deliberate (docs/decisions.md § "Runtime clone location").
+if ((Test-TsInWorkspaceRoot $targetDir) -and -not (Test-TsDevClonePath $targetDir)) {
+    Write-Host ''
+    Write-Warning "$targetDir is inside a workspace root."
+    Write-Host "    'wso migrate' can relocate it out from under the install."
+    if ([Console]::IsInputRedirected) {
+        Write-Host "==> non-interactive: using the canonical location $defaultDir instead."
+        $targetDir = $defaultDir
+    } else {
+        $a = Read-Host "  Use $defaultDir instead? [Y/n]"
+        if ($a -notmatch '^(n|no)$') {
+            $targetDir = $defaultDir
+            Write-Host "==> Clone location: $targetDir"
+        } else {
+            Write-Host "==> keeping $targetDir — re-run 'wso plan' after any workspace migration."
+        }
+    }
+    Write-Host ''
 }
 
 # 3a. An existing clone at a legacy location: pull it first (that lands the
@@ -65,17 +140,26 @@ if ($env:TERMINAL_STACK_DIR) {
 if (-not (Test-Path (Join-Path $targetDir '.git'))) {
     $legacy = $null
     foreach ($d in @(
-        (Join-Path $env:USERPROFILE 'terminal-stack'),
-        'C:\DATA\Workspace\terminal-stack',
         (Join-Path $env:USERPROFILE 'code\terminal-stack'),
+        (Join-Path $env:USERPROFILE 'terminal-stack'),
+        (Join-Path $env:USERPROFILE 'Workspace\terminal-stack'),
+        (Join-Path $env:USERPROFILE 'workspace\terminal-stack'),
         (Join-Path $env:USERPROFILE 'Documents\Workspace\terminal-stack'),
-        (Join-Path $env:USERPROFILE 'workspace\terminal-stack')
+        (Join-Path $env:USERPROFILE '.local\share\chezmoi'),
+        'C:\DATA\Workspace\terminal-stack'
     )) {
-        if (Test-Path (Join-Path $d '.git')) { $legacy = $d; break }
+        if (-not (Test-Path (Join-Path $d '.git'))) { continue }
+        # Name alone isn't enough — check the origin, like the bash twin does.
+        if ((& git -C $d config --get remote.origin.url 2>$null) -notmatch 'terminal-stack') { continue }
+        $legacy = $d; break
     }
     if ($legacy) {
         Write-Host "==> Existing clone found at $legacy"
-        $choice = Read-Host "  [M]ove it to $targetDir / [K]eep it there / [F]resh clone at the new location? [M]"
+        # Default [M]ove without asking when there is no one to ask — Read-Host
+        # blocks on a pipe rather than returning empty.
+        $choice = if ([Console]::IsInputRedirected) { '' } else {
+            Read-Host "  [M]ove it to $targetDir / [K]eep it there / [F]resh clone at the new location? [M]"
+        }
         switch -Regex ($choice) {
             '^(k|keep)$'  { $targetDir = $legacy; Write-Host "==> Keeping $legacy" }
             '^(f|fresh)$' { }

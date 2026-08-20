@@ -344,8 +344,18 @@ _ts_clones() {
   done
 }
 
+# A dangling $TERMINAL_STACK_DIR degrades rather than dead-ending: the pin is
+# inherited by every shell, so a stale one would otherwise brick ts-update / wso
+# / doc with no way out. Fall back to chezmoi's sourceDir, then the candidate
+# list. Twin of the profile's Resolve-TsSourceDir.
 _ts_src() {
-  local cz="$1" name="${2:-ts}" src="${TERMINAL_STACK_DIR:-}"
+  local cz="$1" name="${2:-ts}" src="${TERMINAL_STACK_DIR:-}" stale=""
+  if [[ -n "$src" && ! -d "$src/.git" ]]; then
+    echo "$name: stale \$TERMINAL_STACK_DIR — no clone at '$src'; searching the usual locations." >&2
+    echo "$name: clear it with 'ts-doctor --repair', or unset it in ~/.zshrc.local." >&2
+    stale=1
+    src=""
+  fi
   if [[ -z "$src" ]]; then
     src="$("$cz" source-path)" || {
       echo "$name: 'chezmoi source-path' failed (error above) — can't locate the clone." >&2
@@ -353,13 +363,13 @@ _ts_src() {
     }
   fi
   if [[ ! -d "$src/.git" ]]; then
-    if [[ -n "${TERMINAL_STACK_DIR:-}" ]]; then
-      echo "$name: \$TERMINAL_STACK_DIR='$TERMINAL_STACK_DIR' is not a git clone." >&2
-    else
-      echo "$name: no terminal-stack clone at '$src'. Re-run the install one-liner." >&2
-    fi
+    src="$(TERMINAL_STACK_DIR= _ts_clones | head -n1)"
+  fi
+  if [[ ! -d "$src/.git" ]]; then
+    echo "$name: no terminal-stack clone found. Re-run the install one-liner." >&2
     return 1
   fi
+  [[ -n "$stale" ]] && echo "$name: using $src" >&2
   echo "$src"
 }
 _TS_STATE="${XDG_STATE_HOME:-$HOME/.local/state}/terminal-stack"

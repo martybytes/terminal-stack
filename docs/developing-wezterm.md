@@ -31,7 +31,7 @@ Run WezTerm normally (no special launch flags). After saving WezTerm files in yo
 A dev clone at a workspace tier path is **invisible** to `ts-update` and the clone resolvers — pinning `$env:TERMINAL_STACK_DIR` at it is exactly how you develop against it (the canonical install at `%LOCALAPPDATA%\terminal-stack\stack` needs no pin). Point the stack at the dev clone once in `Documents\PowerShell\profile.local.ps1`:
 
 ```powershell
-$env:TERMINAL_STACK_DIR = 'C:\DATA\Workspace\src\github.com\martybytes\terminal-stack'
+$env:TERMINAL_STACK_DIR = 'C:\DATA\Workspace\src\github.com\martybytes\terminal-stack'   # stale pins are warned-through, not fatal
 ```
 
 Then sync with:

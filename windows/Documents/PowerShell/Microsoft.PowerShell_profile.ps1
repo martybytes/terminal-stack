@@ -351,12 +351,13 @@ function Get-TsCloneCandidates {
     @(
         $env:TERMINAL_STACK_DIR,
         (Get-TsCanonicalCloneDir),
-        (Join-Path $env:USERPROFILE 'terminal-stack'),
-        'C:\DATA\Workspace\terminal-stack',
         (Join-Path $env:USERPROFILE 'code\terminal-stack'),
-        (Join-Path $env:USERPROFILE 'Documents\Workspace\terminal-stack'),
+        (Join-Path $env:USERPROFILE 'terminal-stack'),
+        (Join-Path $env:USERPROFILE 'Workspace\terminal-stack'),
         (Join-Path $env:USERPROFILE 'workspace\terminal-stack'),
-        (Join-Path $env:USERPROFILE 'Workspace\terminal-stack')
+        (Join-Path $env:USERPROFILE 'Documents\Workspace\terminal-stack'),
+        (Join-Path $env:USERPROFILE '.local\share\chezmoi'),
+        'C:\DATA\Workspace\terminal-stack'
     ) | Where-Object {
         if (-not $_) { return $false }
         $k = $_.ToLower(); if ($seen[$k]) { $false } else { $seen[$k] = $true; $true }
@@ -392,8 +393,13 @@ function Get-TsClones {
 # always wins. Otherwise take the highest-priority real clone and, when more than
 # one exists, say so — silently choosing between two clones is how the wrong
 # profile gets deployed.
+#
+# The two pin sources are NOT equivalent when the pin is dangling. -SourceDir is
+# typed per call, so a bad one is a mistake worth failing on. $env:TERMINAL_STACK_DIR
+# arrives from profile.local.ps1 in every session, so a stale line there would
+# otherwise brick ts-update / wso / doc machine-wide with no way out — it degrades
+# to the normal candidate search instead.
 function Resolve-TsSourceDir([string]$SourceDir) {
-    if (-not $SourceDir) { $SourceDir = $env:TERMINAL_STACK_DIR }
     if ($SourceDir) {
         if (-not (Test-Path (Join-Path $SourceDir '.git'))) {
             Write-Warning "terminal-stack clone not found at $SourceDir. Pass -SourceDir <path> or re-run install.ps1."
@@ -401,11 +407,20 @@ function Resolve-TsSourceDir([string]$SourceDir) {
         }
         return $SourceDir
     }
+    if ($env:TERMINAL_STACK_DIR) {
+        if (Test-Path (Join-Path $env:TERMINAL_STACK_DIR '.git')) {
+            return $env:TERMINAL_STACK_DIR
+        }
+        Write-Warning "stale `$env:TERMINAL_STACK_DIR pin: no clone at $($env:TERMINAL_STACK_DIR) — searching the usual locations."
+        Write-Host   "  Clear it with 'ts-doctor -Repair', or delete the line from $(Join-Path (Split-Path $PROFILE) 'profile.local.ps1')."
+        $stalePin = $true
+    }
     $clones = Get-TsClones
     if (-not $clones.Count) {
         Write-Warning 'No terminal-stack clone found. Pass -SourceDir <path> or re-run install.ps1.'
         return $null
     }
+    if ($stalePin) { Write-Host "  using $($clones[0].Path)" }
     if ($clones.Count -gt 1) {
         Write-Warning "$($clones.Count) terminal-stack clones found; using the highest-priority location:"
         foreach ($c in $clones) {
@@ -903,7 +918,17 @@ function Invoke-TsDoctor {
         if ($src.TrimEnd('\') -ne $canon.TrimEnd('\') -and -not (Test-TsDevClone $src) `
             -and (Get-Command Move-TsClone -ErrorAction SilentlyContinue)) {
             if (Test-Path $canon) {
-                Write-Warning "canonical location $canon already exists — not moving '$src'; resolve via the cleanup menu."
+                # Move-TsClone refuses an existing destination, and the cleanup
+                # menu never offers the canonical path — so "resolve it there"
+                # used to be a dead end. Decide it here instead.
+                if (Test-TsStackClone $canon) {
+                    Write-Warning "two clones: '$src' and the canonical '$canon'."
+                    Write-Host   "  switching to $canon; the cleanup menu below can remove '$src'."
+                    $src = $canon
+                } else {
+                    Write-Warning "'$canon' exists but is not a terminal-stack clone."
+                    Write-Host   "  Move it aside or delete it, then re-run 'ts-doctor -Repair' to relocate '$src'."
+                }
             } elseif (-not [Console]::IsInputRedirected) {
                 $a = Read-Host "Move '$src' to the canonical location '$canon'? [Y/n]"
                 if ($a -notmatch '^(n|no)$') {
@@ -1355,7 +1380,18 @@ function wso {
         return
     }
     . $lib
-    Invoke-Wso @Arguments
+    # Hand the resolved clone to the library so Get-TsWsRuntimeClone can never
+    # disagree with Resolve-TsSourceDir — a disagreement switches off the
+    # "never migrate the runtime clone" guard, and `wso migrate` then relocates
+    # the install. The zsh twin does the same (dot_zshrc wso).
+    $prevPin = $env:TERMINAL_STACK_DIR
+    try {
+        $env:TERMINAL_STACK_DIR = $src
+        Invoke-Wso @Arguments
+    } finally {
+        if ($null -eq $prevPin) { Remove-Item Env:TERMINAL_STACK_DIR -ErrorAction SilentlyContinue }
+        else { $env:TERMINAL_STACK_DIR = $prevPin }
+    }
 }
 # ---- workspace-organizer-end ----
 

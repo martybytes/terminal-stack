@@ -25,12 +25,13 @@ function Test-TsDevClone([string]$Path) {
 function Get-TsCleanupCloneCandidates {
     @(
         (Get-TsCanonicalCloneDir),
-        (Join-Path $env:USERPROFILE 'terminal-stack'),
-        'C:\DATA\Workspace\terminal-stack',
         (Join-Path $env:USERPROFILE 'code\terminal-stack'),
-        (Join-Path $env:USERPROFILE 'Documents\Workspace\terminal-stack'),
+        (Join-Path $env:USERPROFILE 'terminal-stack'),
+        (Join-Path $env:USERPROFILE 'Workspace\terminal-stack'),
         (Join-Path $env:USERPROFILE 'workspace\terminal-stack'),
-        (Join-Path $env:USERPROFILE '.local\share\chezmoi')
+        (Join-Path $env:USERPROFILE 'Documents\Workspace\terminal-stack'),
+        (Join-Path $env:USERPROFILE '.local\share\chezmoi'),
+        'C:\DATA\Workspace\terminal-stack'
     )
 }
 
@@ -69,8 +70,13 @@ function Clear-TsSourceDirPin {
     if ((Test-Path $localProfile) -and
         (Get-Content $localProfile | Where-Object { $_ -match '^\s*\$env:TERMINAL_STACK_DIR\s*=' })) {
         Backup-TsFile $localProfile
-        (Get-Content $localProfile) | Where-Object { $_ -notmatch '^\s*\$env:TERMINAL_STACK_DIR\s*=' } |
-            Set-Content $localProfile
+        # -Value, not a pipeline: when the pin is the ONLY line in the file the
+        # filter yields nothing, and `… | Set-Content` with no pipeline input
+        # leaves the file untouched — so the pin survived exactly the case this
+        # is for (a machine whose only override is the pin). `-Value @()` truncates.
+        $kept = @((Get-Content $localProfile) |
+                  Where-Object { $_ -notmatch '^\s*\$env:TERMINAL_STACK_DIR\s*=' })
+        Set-Content -LiteralPath $localProfile -Value $kept -Encoding utf8
         Write-Host "==> removed the `$env:TERMINAL_STACK_DIR pin from $localProfile (canonical location needs none)"
     }
     if (Test-Path Env:TERMINAL_STACK_DIR) { Remove-Item Env:TERMINAL_STACK_DIR }

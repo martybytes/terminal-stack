@@ -34,7 +34,11 @@ Same script `install.ps1` runs at install time; `ts-update` runs it after a pull
 A dev clone at a workspace tier path is **invisible** to `ts-update` and the
 resolvers — pinning `$env:TERMINAL_STACK_DIR` at it is exactly how you develop
 against it (the canonical install at `%LOCALAPPDATA%\terminal-stack\stack` needs
-no pin). Set once in `Documents\PowerShell\profile.local.ps1`:
+no pin), and a tier path is exempt from the installers' refusal to put the runtime
+clone inside a workspace root. If you later move or delete the dev clone, the pin
+goes stale: the resolvers warn and fall back to the canonical install rather than
+breaking, and `ts-doctor -Repair` removes the dead line. Set once in
+`Documents\PowerShell\profile.local.ps1`:
 
 ```powershell
 $env:TERMINAL_STACK_DIR = 'C:\DATA\Workspace\src\github.com\martybytes\terminal-stack'

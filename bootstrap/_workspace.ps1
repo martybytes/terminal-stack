@@ -104,9 +104,25 @@ function Get-TsWsStateDir { Join-Path $env:LOCALAPPDATA 'terminal-stack' }
 
 # The ACTIVE terminal-stack runtime clone (the one ts-update updates), resolved.
 # wso must never migrate it: relocating the runtime clone breaks the install
-# (that's ts-doctor's job). $env:TERMINAL_STACK_DIR → the canonical location.
+# (that's ts-doctor's job).
+#
+# Reuses the profile's Resolve-TsSourceDir when it is loaded — the same
+# delegation Get-TsWsRoot does for Get-TsWorkspace. A narrower resolver here is
+# not a harmless simplification: this guard returning $null is what let
+# `wso migrate` relocate a runtime clone that lived at a legacy path, because
+# pin → canonical alone doesn't know about the legacy candidates.
+# Standalone fallback: $env:TERMINAL_STACK_DIR → the canonical location.
 function Get-TsWsRuntimeClone {
-    $src = $env:TERMINAL_STACK_DIR
+    $src = $null
+    if (Get-Command Resolve-TsSourceDir -ErrorAction SilentlyContinue) {
+        # Quietly — an unresolvable clone is not this function's error to report,
+        # and the caller has already said its piece. Resolve-TsSourceDir is a
+        # simple function, so -WarningAction would bind as a positional argument
+        # instead of suppressing anything; set the preference in scope instead.
+        $WarningPreference = 'SilentlyContinue'
+        $src = Resolve-TsSourceDir 6>$null
+    }
+    if (-not $src) { $src = $env:TERMINAL_STACK_DIR }
     if (-not $src) {
         $canon = Join-Path $env:LOCALAPPDATA 'terminal-stack\stack'
         if (Test-Path (Join-Path $canon '.git')) { $src = $canon }
