@@ -65,3 +65,16 @@ if [ "$state" = "waiting" ] || [ "$state" = "error" ]; then
         fi
     fi
 fi
+
+# ── Barge-in signal for the ttsd daemon (backgrounded, best-effort) ──────────
+# A new prompt in this session cancels its queued "done"/"error" announcements
+# — the user is already looking at this pane. No fallback action: this event
+# is advisory, so a dead daemon just means no cancellation.
+if [ "$state" = "thinking" ] && [ -f "$HOME/.claude/hooks/cc-tts-lib.sh" ]; then
+    _input="$(cat 2>/dev/null || true)"
+    (
+        . "$HOME/.claude/hooks/cc-tts-lib.sh"
+        cc_tts_daemon_ready || exit 0
+        cc_tts_daemon_send claude prompt_submit "" "$_input" || true
+    ) >/dev/null 2>&1 &
+fi

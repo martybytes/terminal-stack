@@ -65,3 +65,18 @@ if ($State -in 'waiting', 'error') {
         } catch {}
     }
 }
+
+# Barge-in signal for the ttsd daemon: a new prompt in this session cancels its
+# queued "done"/"error" announcements. Advisory only — no fallback action.
+if ($State -eq 'thinking') {
+    $inputJson = ''
+    try {
+        if ([Console]::IsInputRedirected) { $inputJson = [Console]::In.ReadToEnd() }
+    } catch {}
+    try {
+        . (Join-Path $PSScriptRoot 'cc-tts-lib.ps1')
+        if (Test-CcTtsDaemonReady) {
+            Send-CcTtsDaemonEvent -Source claude -Event prompt_submit -InputJson $inputJson | Out-Null
+        }
+    } catch {}
+}

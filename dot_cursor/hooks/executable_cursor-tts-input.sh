@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # cursor-tts-input.sh — Cursor postToolUse hook when agent asks a question (AskQuestion).
+# Daemon-first with direct-path fallback — never silence.
 set -euo pipefail
 
 input="$(cat 2>/dev/null || true)"
@@ -18,7 +19,7 @@ if [ ! -f "$LIB" ] || [ ! -f "$notify" ]; then
     printf '{}\n'
     exit 0
 fi
-# shellcheck source=cc-tts-lib.sh
+# shellcheck source=/dev/null
 . "$LIB"
 
 cc_tts_parse_input_state "$input" cursor_question
@@ -27,6 +28,13 @@ override="${CC_TTS_PARSED_OVERRIDE:-}"
 
 export CC_TTS_HOOK_JSON="$input"
 export CC_TTS_SOURCE=cursor
-"$notify" "$state" "$override" &
+if cc_tts_daemon_ready; then
+    (
+        cc_tts_daemon_send cursor cursor_question "$state" "$input" "$override" \
+            || "$notify" "$state" "$override"
+    ) >/dev/null 2>&1 &
+else
+    "$notify" "$state" "$override" &
+fi
 printf '{}\n'
 exit 0

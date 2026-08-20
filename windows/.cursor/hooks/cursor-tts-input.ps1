@@ -27,11 +27,19 @@ if ($inputJson) {
 }
 
 . (Join-Path (Join-Path $env:USERPROFILE '.claude\hooks') 'cc-tts-lib.ps1')
+$parsed = Parse-CcTtsInputHook -InputJson $inputJson -Event 'cursor_question'
+
+# Daemon first; direct path below is the fallback — never silence.
+if (Test-CcTtsDaemonReady) {
+    if (Send-CcTtsDaemonEvent -Source cursor -Event cursor_question -State $parsed.State -InputJson $inputJson -Override $parsed.Override) {
+        Write-Output '{}'
+        return
+    }
+}
+
 $cfg = Initialize-CcTtsConfig
 if (-not $cfg -or -not $cfg.enabled) { Write-Output '{}'; return }
 if (-not (Test-CcTtsEventEnabled 'question')) { Write-Output '{}'; return }
-
-$parsed = Parse-CcTtsInputHook -InputJson $inputJson -Event 'cursor_question'
 $notify = Join-Path $env:USERPROFILE '.claude\hooks\cc-tts-notify.ps1'
 if (-not (Test-Path -LiteralPath $notify)) {
     Write-Output '{}'

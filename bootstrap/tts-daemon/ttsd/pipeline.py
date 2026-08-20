@@ -131,6 +131,11 @@ class Dispatcher(threading.Thread):
         log.info("spoke [%s]: %s", result.engine, line)
 
     def _suppress(self, ev: Event) -> bool:
+        # Same .events gate the direct cc-tts-notify path applies.
+        events = self.cfg.get("events") or []
+        if ev.state and isinstance(events, list) and ev.state not in events:
+            self.suppressed += 1
+            return True
         interactive = ev.priority in (P0_INTERACTIVE, P1_ERROR)
         if self.dnd_active() or self._quiet_hours():
             if not (interactive and self.cfg.get("quietHours.allowInteractive", True)):
