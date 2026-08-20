@@ -133,6 +133,17 @@ ts_ws_build_plan() {
             printf 'runtime\t%s\t\t%s\n' "$d" "active terminal-stack runtime clone — not migrated (relocate with ts-doctor --repair)"
             continue
         fi
+        # Belt and braces: skip ANY un-tiered terminal-stack clone, not only the
+        # one that resolved as active. ts_ws_runtime_clone comes back empty in
+        # exactly the broken states where this matters most (dangling pin, clone
+        # at a legacy path), and an empty value used to switch the guard off —
+        # that is how a runtime clone got migrated to a tier path and orphaned
+        # the install. A real dev clone already lives at a tier path and is
+        # therefore never a scan candidate, so nothing legitimate is blocked.
+        if git -C "$d" config --get remote.origin.url 2>/dev/null | grep -qi terminal-stack; then
+            printf 'runtime\t%s\t\t%s\n' "$d" "terminal-stack clone at the workspace root — not migrated (relocate with ts-doctor --repair)"
+            continue
+        fi
         out="$(ts_ws_dest_for "$d")"
         tier="$(printf '%s' "$out" | cut -f1)"
         rel="$(printf '%s' "$out" | cut -f2)"
@@ -196,7 +207,13 @@ cmd_plan() {
     if [ -n "$conflicts" ]; then
         echo
         echo "-- BLOCKED ------------------------------------------------------------"
-        printf '%s\n' "$conflicts" | while IFS=$'\t' read -r _ s dd nn; do
+        # cut, not `read -r _ s dd nn`: tab is IFS whitespace, so bash collapses
+        # the empty dest field's adjacent tabs and the note lands in $dd —
+        # which silently blanked the one line that says what to do about a
+        # blocked repo. cut -f keeps empty fields.
+        printf '%s\n' "$conflicts" | while IFS= read -r line; do
+            s="$(printf '%s' "$line" | cut -f2)"
+            nn="$(printf '%s' "$line" | cut -f4)"
             printf '   %-46s %s\n' "$(basename -- "$s")" "$nn"
             printf '      at: %s\n' "$s"
         done

@@ -25,12 +25,13 @@ function Test-TsDevClone([string]$Path) {
 function Get-TsCleanupCloneCandidates {
     @(
         (Get-TsCanonicalCloneDir),
-        (Join-Path $env:USERPROFILE 'terminal-stack'),
-        'C:\DATA\Workspace\terminal-stack',
         (Join-Path $env:USERPROFILE 'code\terminal-stack'),
-        (Join-Path $env:USERPROFILE 'Documents\Workspace\terminal-stack'),
+        (Join-Path $env:USERPROFILE 'terminal-stack'),
+        (Join-Path $env:USERPROFILE 'Workspace\terminal-stack'),
         (Join-Path $env:USERPROFILE 'workspace\terminal-stack'),
-        (Join-Path $env:USERPROFILE '.local\share\chezmoi')
+        (Join-Path $env:USERPROFILE 'Documents\Workspace\terminal-stack'),
+        (Join-Path $env:USERPROFILE '.local\share\chezmoi'),
+        'C:\DATA\Workspace\terminal-stack'
     )
 }
 

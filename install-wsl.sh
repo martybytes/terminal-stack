@@ -58,6 +58,31 @@ echo "$INFO Windows username: $WIN_USER"
 # WSL and Windows (see docs/decisions.md § "Runtime clone location").
 REPO_URL='https://github.com/martybytes/terminal-stack.git'
 DEFAULT_DIR="/mnt/c/Users/$WIN_USER/AppData/Local/terminal-stack/stack"
+# Workspace roots, in probe order. Keep in sync with bootstrap/_workspace.sh
+# ts_ws_root — this copy exists because the installer runs before any clone is
+# on disk.
+ts_in_workspace_root() {
+    p="${1%/}"
+    for r in "${WORKSPACE_DIR:-}" /mnt/c/DATA/Workspace "$HOME/Documents/Workspace" "$HOME/workspace" "$HOME/Workspace"; do
+        [ -n "$r" ] || continue
+        case "$p/" in "${r%/}"/*) return 0 ;; esac
+    done
+    return 1
+}
+# A dev clone at a wso tier path is a deliberate choice, not an accident.
+# Twin of bootstrap/_cleanup.sh ts_is_dev_clone.
+ts_is_dev_clone_path() {
+    printf '%s' "$1" | grep -Eq '/(src|public|archive|local|scratch)/[^/]+\.[^/]+/[^/]+/[^/]+/?$'
+}
+
+# A pin at a path with no clone, while the canonical location HAS one, is a
+# leftover from a relocated install. POSIX persists its pin as chezmoi's
+# sourceDir rather than an env var, so an exported TERMINAL_STACK_DIR is
+# honoured whenever it could plausibly be deliberate — i.e. every other case.
+if [ -n "${TERMINAL_STACK_DIR:-}" ] && [ ! -d "$TERMINAL_STACK_DIR/.git" ] && [ -d "$DEFAULT_DIR/.git" ]; then
+    echo "$INFO ignoring \$TERMINAL_STACK_DIR=$TERMINAL_STACK_DIR (no clone there); using $DEFAULT_DIR"
+    TERMINAL_STACK_DIR=""
+fi
 if [ -n "${TERMINAL_STACK_DIR:-}" ]; then
     TARGET_DIR="$TERMINAL_STACK_DIR"
     echo "$INFO Clone location: $TARGET_DIR (from \$TERMINAL_STACK_DIR)"
@@ -71,6 +96,25 @@ else
         "~")   TARGET_DIR="$HOME" ;;
         "~/"*) TARGET_DIR="$HOME/${TARGET_DIR#\~/}" ;;
     esac
+fi
+
+# The runtime clone must not live inside a workspace root: `wso migrate` derives
+# a repo's destination from its origin and will relocate it to a tier path,
+# orphaning the install. That has happened. Dev-clone tier paths are exempt —
+# pinning one is deliberate (docs/decisions.md § "Runtime clone location").
+if ts_in_workspace_root "$TARGET_DIR" && ! ts_is_dev_clone_path "$TARGET_DIR"; then
+    echo ""
+    echo "$WARN $TARGET_DIR is inside a workspace root."
+    echo "    'wso migrate' can relocate it out from under the install."
+    ws_ans=""
+    if { true > /dev/tty; } 2>/dev/null; then
+        IFS= read -r -p "  Use $DEFAULT_DIR instead? [Y/n]: " ws_ans < /dev/tty || ws_ans=""
+    fi
+    case "$ws_ans" in
+        n|N|no|NO) echo "$INFO keeping $TARGET_DIR — re-run 'wso plan' after any workspace migration." ;;
+        *)         TARGET_DIR="$DEFAULT_DIR"; echo "$INFO Clone location: $TARGET_DIR" ;;
+    esac
+    echo ""
 fi
 
 # 3a. Existing clone at a legacy location: pull it first (that lands the move
