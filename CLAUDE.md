@@ -97,6 +97,7 @@ These are written up at length in `docs/powershell-quirks.md`; the short version
 - **Tab title for `cc` wrappers uses `wezterm cli set-tab-title`, not OSC 0.** Claude Code's TUI overwrites `pane.title` (OSC) with its conversation slug; `tab.tab_title` is sticky and survives. The `format-tab-title` hook in both WezTerm configs checks `tab.tab_title` first, falling back to the active pane's cwd leaf.
 - **Never auto-restart `wezterm-mux-server`.** Windows panes live in a mux domain (`default_domain = 'main'`), and the mux server loads its own copy of `.wezterm.lua` — but restarting it kills every live pane. The sync scripts print a reminder instead; keep it that way.
 - **`Enable-TransientPrompt` is guarded with `Get-Command`** because PSReadLine 2.4.5 doesn't export it. Don't remove the guard.
+- **Never pipe `Where-Object` straight into `Set-Content`.** An empty pipeline gives `Set-Content` no value to write, so it leaves the file untouched — silently, with no error. Filtering a file down to nothing therefore *keeps* the line you meant to remove. Collect into an array and pass `-Value` (`@()` truncates as intended). A `-replace` pipeline is safe; it can't go empty.
 
 ## Backup convention
 
