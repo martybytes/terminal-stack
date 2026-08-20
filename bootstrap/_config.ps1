@@ -633,6 +633,108 @@ function Set-CcTtsWizardChoice {
     return $tts
 }
 
+function Read-TsCcTtsDaemon {
+    if ($env:TS_CC_TTS_DAEMON) { return $(if ($env:TS_CC_TTS_DAEMON -eq 'on') { 'on' } else { 'off' }) }
+    Read-TsChoice -Title 'Route voice notifications through the tray daemon?' `
+        -Default 'off' -Intro @(
+            '  Queues/coalesces announcements, per-session voices, ducks music while speaking.',
+            '  Installs a small Python venv under %LOCALAPPDATA%\terminal-stack. Needs Python 3.10+.'
+        ) -Options @(
+            @{ Key = 'off'; Label = 'Classic direct playback' },
+            @{ Key = 'on';  Label = 'Tray daemon'; Note = 'installs now, autostarts at login' }
+        )
+}
+
+function Invoke-TsCcTtsDaemonInstaller {
+    param([string[]]$Arguments = @())
+    $script = Join-Path $PSScriptRoot 'install-tts-daemon.ps1'
+    if (-not (Test-Path -LiteralPath $script)) {
+        Write-Warning "tts daemon: install-tts-daemon.ps1 not found at $script"
+        return $false
+    }
+    & pwsh -NoLogo -NonInteractive -ExecutionPolicy Bypass -File $script @Arguments
+    return ($LASTEXITCODE -eq 0)
+}
+
+function Show-CcTtsDaemonStatus {
+    $tts = Get-CcTtsConfig
+    $port = if ($tts.daemon -and $tts.daemon.port) { [int]$tts.daemon.port } else { 8890 }
+    try {
+        $r = Invoke-WebRequest -Uri "http://127.0.0.1:$port/healthz" -TimeoutSec 2 -UseBasicParsing
+        Write-Host "tts daemon: $($r.Content)"
+        $sha = & git -C (Split-Path -Parent $PSScriptRoot) rev-parse HEAD 2>$null
+        if ($sha -and ($r.Content -notmatch [regex]::Escape($sha))) {
+            Write-Host 'tts daemon: running an older build than this clone — ts-config tts daemon restart'
+        }
+    } catch {
+        Write-Host "tts daemon: not reachable on port $port (hooks fall back to direct playback)"
+        $enabled = if ($tts.daemon) { [bool]$tts.daemon.enabled } else { $false }
+        Write-Host "  saved setting daemon.enabled=$enabled  —  start: ts-config tts daemon on"
+    }
+}
+
+# ── `summarizer self` marker block in %USERPROFILE%\.claude\CLAUDE.md ──────────
+# Same discipline as the $PROFILE marker regions; the asset carries its own
+# start/end markers. Backups follow the repo's .bak.YYYYMMDD[.N] convention.
+# Lines are collected into an array and written with -Value — never
+# `Where-Object | Set-Content` (an empty pipeline silently writes nothing).
+
+$script:CcTtsSelfStart = '<!-- terminal-stack-tts-start -->'
+$script:CcTtsSelfEnd = '<!-- terminal-stack-tts-end -->'
+
+function Backup-CcTtsUserFile {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) { return }
+    $stamp = Get-Date -Format 'yyyyMMdd'
+    $bak = "$Path.bak.$stamp"; $n = 1
+    while (Test-Path -LiteralPath $bak) { $bak = "$Path.bak.$stamp.$n"; $n++ }
+    Copy-Item -LiteralPath $Path -Destination $bak
+}
+
+function Get-CcTtsSelfStripped {
+    param([string]$Path)
+    $out = [System.Collections.Generic.List[string]]::new()
+    $skip = $false
+    foreach ($line in @(Get-Content -LiteralPath $Path)) {
+        if ($skip) {
+            if ($line.Contains($script:CcTtsSelfEnd)) { $skip = $false }
+            continue
+        }
+        if ($line.Contains($script:CcTtsSelfStart)) { $skip = $true; continue }
+        $out.Add($line)
+    }
+    return $out
+}
+
+function Install-CcTtsSelfBlock {
+    $target = Join-Path $env:USERPROFILE '.claude\CLAUDE.md'
+    $asset = Join-Path $PSScriptRoot 'tts-daemon\assets\speak-summary.md'
+    if (-not (Test-Path -LiteralPath $asset)) {
+        Write-Warning 'tts: speak-summary.md asset not found (run ts-update?)'
+        return
+    }
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $target) | Out-Null
+    $lines = @()
+    if (Test-Path -LiteralPath $target) {
+        Backup-CcTtsUserFile $target
+        $lines = @(Get-CcTtsSelfStripped $target) + @('')
+    }
+    $lines += @(Get-Content -LiteralPath $asset)
+    Set-Content -LiteralPath $target -Value $lines -Encoding UTF8
+    Write-Host "tts: spoken-summary instruction installed in $target"
+}
+
+function Remove-CcTtsSelfBlock {
+    $target = Join-Path $env:USERPROFILE '.claude\CLAUDE.md'
+    if (-not (Test-Path -LiteralPath $target)) { return }
+    $raw = Get-Content -LiteralPath $target -Raw
+    if (-not $raw.Contains($script:CcTtsSelfStart)) { return }
+    Backup-CcTtsUserFile $target
+    $lines = @(Get-CcTtsSelfStripped $target)
+    Set-Content -LiteralPath $target -Value $lines -Encoding UTF8
+    Write-Host "tts: spoken-summary instruction removed from $target"
+}
+
 function Invoke-TsConfigTts {
     param(
         [string]$Sub,
@@ -718,6 +820,64 @@ function Invoke-TsConfigTts {
             if (-not $Arg) { Write-Warning 'usage: ts-config tts events waiting,error,question,permission'; return }
             $tts.events = @($Arg -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
         }
+        'daemon' {
+            switch ($Arg) {
+                'on' {
+                    if (-not (Invoke-TsCcTtsDaemonInstaller)) { return }
+                    $tts.daemon.enabled = $true
+                }
+                'off' {
+                    Invoke-TsCcTtsDaemonInstaller @('-Uninstall') | Out-Null
+                    $tts.daemon.enabled = $false
+                }
+                'install' { Invoke-TsCcTtsDaemonInstaller @('-NoStart') | Out-Null; return }
+                'restart' {
+                    Invoke-TsCcTtsDaemonInstaller @('-Uninstall') | Out-Null
+                    Invoke-TsCcTtsDaemonInstaller | Out-Null
+                    return
+                }
+                default { Show-CcTtsDaemonStatus; return }
+            }
+        }
+        'summarizer' {
+            if ($Arg -notin 'template', 'self', 'haiku', 'ollama') {
+                Write-Warning 'usage: ts-config tts summarizer template|self|haiku|ollama'; return
+            }
+            $tts.summarize.mode = $Arg
+            if ($Arg -eq 'self') { Install-CcTtsSelfBlock } else { Remove-CcTtsSelfBlock }
+        }
+        'haiku-model' {
+            if (-not $Arg) { Write-Warning 'usage: ts-config tts haiku-model <model>'; return }
+            $tts.summarize.haikuModel = $Arg
+        }
+        'ollama' {
+            if (-not $Arg) { Write-Warning 'usage: ts-config tts ollama <url> [<model>]'; return }
+            $tts.summarize.ollamaUrl = $Arg
+            if ($Arg2) { $tts.summarize.ollamaModel = $Arg2 }
+        }
+        'music' {
+            if ($Arg -notin 'duck', 'smart', 'pause', 'off') {
+                Write-Warning 'usage: ts-config tts music duck|smart|pause|off'; return
+            }
+            $tts.music.mode = $Arg
+        }
+        'duck-level' {
+            if ($Arg -notmatch '^\d+$' -or [int]$Arg -gt 100) {
+                Write-Warning 'usage: ts-config tts duck-level <0-100>'; return
+            }
+            $tts.music.duckPercent = [int]$Arg
+        }
+        'voices' {
+            if (-not $Arg -or $Arg -eq 'show') {
+                Write-Host "voice pool: $(@($tts.voicePool) -join ',')"
+                return
+            }
+            $tts.voicePool = @($Arg -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+        }
+        'port' {
+            if ($Arg -notmatch '^\d+$') { Write-Warning 'usage: ts-config tts port <n>'; return }
+            $tts.daemon.port = [int]$Arg
+        }
         'test' {
             $test = Join-Path $env:USERPROFILE '.claude\hooks\cc-tts-test.ps1'
             if (Test-Path -LiteralPath $test) {
@@ -734,7 +894,7 @@ function Invoke-TsConfigTts {
             return
         }
     }
-    if ($Sub -in 'on','off','engine','message','voice','voice-chatter','energy','excitement','url','events','prefix','project','template','reset') {
+    if ($Sub -in 'on','off','engine','message','voice','voice-chatter','energy','excitement','url','events','prefix','project','template','reset','daemon','summarizer','haiku-model','ollama','music','duck-level','voices','port') {
         & $Apply $tts
     }
 }

@@ -629,10 +629,11 @@ function Set-TerminalStackConfig {
                     '5' { & $save }
                     '6' {
                         Show-CcTtsConfig
-                        switch (Read-Host 'TTS: a) on  b) off  c) test  d) back') {
+                        switch (Read-Host 'TTS: a) on  b) off  c) test  d) daemon status  e) back') {
                             'a' { $ccTts.enabled = $true; & $save $ccTts }
                             'b' { $ccTts.enabled = $false; & $save $ccTts }
                             'c' { Invoke-TsConfigTts -Sub test -Apply $save }
+                            'd' { Show-CcTtsDaemonStatus }
                         }
                     }
                     '7' { Invoke-TsMux status }

@@ -243,6 +243,116 @@ ts_cc_tts_json_for_mirror() {
 EOF
 }
 
+# ── ttsd daemon plumbing (Windows-only; WSL reaches it via interop) ────────────
+
+ts_cc_tts_bootstrap_dir() {
+    # Directory of this file — the clone's bootstrap/ (works because ts-config
+    # and the bootstraps source _cc_tts.sh from the clone).
+    printf '%s' "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+}
+
+ts_cc_tts_daemon_supported() { [ -d /mnt/c/Users ]; }
+
+ts_cc_tts_pwsh_exe() {
+    local p
+    for p in "/mnt/c/Program Files/PowerShell/7/pwsh.exe" \
+             "/mnt/c/Program Files/PowerShell/7-preview/pwsh.exe"; do
+        [ -x "$p" ] && { printf '%s' "$p"; return 0; }
+    done
+    return 1
+}
+
+ts_cc_tts_daemon_installer() {
+    # Run bootstrap/install-tts-daemon.ps1 (Windows side) with the given args.
+    local script pwsh_exe win
+    script="$(ts_cc_tts_bootstrap_dir)/install-tts-daemon.ps1"
+    [ -f "$script" ] || { echo "tts daemon: install-tts-daemon.ps1 not found beside _cc_tts.sh" >&2; return 1; }
+    pwsh_exe="$(ts_cc_tts_pwsh_exe)" || { echo "tts daemon: pwsh.exe not found under /mnt/c" >&2; return 1; }
+    win="$(wslpath -w "$script" 2>/dev/null || printf '%s' "$script")"
+    "$pwsh_exe" -NoLogo -NonInteractive -ExecutionPolicy Bypass -File "$win" "$@"
+}
+
+ts_cc_tts_daemon_status() {
+    local port health sha
+    port="$(ts_cc_tts_get ccTtsDaemonPort)"
+    health="$(curl -sf --max-time 2 "http://127.0.0.1:${port}/healthz" 2>/dev/null || true)"
+    if [ -z "$health" ] && [ -f "${HOME}/.claude/hooks/cc-tts-lib.sh" ]; then
+        # NAT-mode WSL: reuse the hooks' host ladder + token.
+        health="$(
+            # shellcheck source=/dev/null
+            . "${HOME}/.claude/hooks/cc-tts-lib.sh"
+            hostline="$(cc_tts_daemon_host "$port" 2>/dev/null)" || exit 0
+            host="${hostline%% *}"; token="${hostline#* }"
+            [ "$token" = "$hostline" ] && token=""
+            if [ -n "$token" ]; then
+                curl -sf --max-time 2 -H "X-TS-Token: $token" "http://${host}:${port}/healthz" 2>/dev/null
+            else
+                curl -sf --max-time 2 "http://${host}:${port}/healthz" 2>/dev/null
+            fi
+        )"
+    fi
+    if [ -z "$health" ]; then
+        echo "tts daemon: not reachable on port $port (hooks fall back to direct playback)"
+        echo "  saved setting ccTtsDaemon=$(ts_cc_tts_get ccTtsDaemon)  —  start: ts-config tts daemon on"
+        return 1
+    fi
+    echo "tts daemon: $health"
+    sha="$(git -C "$(ts_cc_tts_bootstrap_dir)/.." rev-parse HEAD 2>/dev/null || true)"
+    if [ -n "$sha" ] && ! printf '%s' "$health" | grep -q "$sha"; then
+        echo "tts daemon: running an older build than this clone — ts-config tts daemon restart"
+    fi
+}
+
+# ── `summarizer self` marker block in the user's ~/.claude/CLAUDE.md ───────────
+# Marker-block edit, same discipline as \$PROFILE regions: install appends the
+# block from bootstrap/tts-daemon/assets/speak-summary.md (which carries its own
+# start/end markers); switching modes removes exactly that block. Backups follow
+# the repo's .bak.YYYYMMDD[.N] convention.
+
+TS_CC_TTS_SELF_START='<!-- terminal-stack-tts-start -->'
+TS_CC_TTS_SELF_END='<!-- terminal-stack-tts-end -->'
+
+ts_cc_tts_backup_file() {
+    local f="$1" b n=1
+    [ -f "$f" ] || return 0
+    b="$f.bak.$(date +%Y%m%d)"
+    while [ -e "$b" ]; do b="$f.bak.$(date +%Y%m%d).$n"; n=$((n + 1)); done
+    cp -p "$f" "$b" 2>/dev/null || cp "$f" "$b"
+}
+
+ts_cc_tts_self_strip() {
+    # Print $1 minus the marker block (no-op passthrough when absent).
+    awk -v s="$TS_CC_TTS_SELF_START" -v e="$TS_CC_TTS_SELF_END" '
+        index($0, s) { skip = 1 }
+        !skip { print }
+        skip && index($0, e) { skip = 0 }' "$1"
+}
+
+ts_cc_tts_self_install() {
+    local target="${HOME}/.claude/CLAUDE.md"
+    local asset
+    asset="$(ts_cc_tts_bootstrap_dir)/tts-daemon/assets/speak-summary.md"
+    [ -f "$asset" ] || { echo "tts: speak-summary.md asset not found (run ts-update?)" >&2; return 1; }
+    mkdir -p "${HOME}/.claude" 2>/dev/null || true
+    if [ -f "$target" ]; then
+        ts_cc_tts_backup_file "$target"
+        { ts_cc_tts_self_strip "$target"; echo; cat "$asset"; } > "$target.tmp" \
+            && mv "$target.tmp" "$target"
+    else
+        cat "$asset" > "$target"
+    fi
+    echo "tts: spoken-summary instruction installed in $target"
+}
+
+ts_cc_tts_self_remove() {
+    local target="${HOME}/.claude/CLAUDE.md"
+    [ -f "$target" ] || return 0
+    grep -qF "$TS_CC_TTS_SELF_START" "$target" || return 0
+    ts_cc_tts_backup_file "$target"
+    ts_cc_tts_self_strip "$target" > "$target.tmp" && mv "$target.tmp" "$target"
+    echo "tts: spoken-summary instruction removed from $target"
+}
+
 # Wizard: probe Kokoro; echo on|off|skip recommendation.
 ts_cc_tts_wizard_probe() {
     if [ -n "${TS_CC_TTS:-}" ]; then echo "$TS_CC_TTS"; return 0; fi
@@ -285,8 +395,22 @@ ts_prompt_cc_tts() {
     esac
 }
 
+# Rendered via ts_prompt_choice — must stay byte-identical to Read-TsCcTtsDaemon
+# (pwsh, Read-TsChoice) per the repo's menu-parity rule. Only the wizard calls
+# this, so ts_prompt_choice (from _wizard.sh) is always in scope.
+ts_prompt_cc_tts_daemon() {
+    if [ -n "${TS_CC_TTS_DAEMON:-}" ]; then
+        case "$TS_CC_TTS_DAEMON" in on) echo on; return ;; *) echo off; return ;; esac
+    fi
+    ts_prompt_choice off 'Route voice notifications through the tray daemon?' \
+'  Queues/coalesces announcements, per-session voices, ducks music while speaking.
+  Installs a small Python venv under %LOCALAPPDATA%\terminal-stack. Needs Python 3.10+.' \
+        'off|Classic direct playback' \
+        'on|Tray daemon|installs now, autostarts at login'
+}
+
 ts_cc_tts_apply_wizard_choice() {
-    local choice="$1"
+    local choice="$1" daemon="${2:-off}"
     case "$choice" in
         on)
             ts_cc_tts_reset_defaults
@@ -295,8 +419,19 @@ ts_cc_tts_apply_wizard_choice() {
         off|skip)
             ts_cc_tts_reset_defaults
             ts_cc_tts_set ccTtsEnabled false
+            daemon=off
             ;;
     esac
+    if [ "$daemon" = on ] && ts_cc_tts_daemon_supported; then
+        if ts_cc_tts_daemon_installer; then
+            ts_cc_tts_set ccTtsDaemon on
+        else
+            echo "tts daemon: install failed — keeping direct playback (retry: ts-config tts daemon on)" >&2
+            ts_cc_tts_set ccTtsDaemon off
+        fi
+    else
+        ts_cc_tts_set ccTtsDaemon off
+    fi
 }
 
 # ts-config tts subcommands (requires $CZ and finish() from ts-config.sh caller).
@@ -415,6 +550,90 @@ ts_config_tts() {
             ts_cc_tts_finish
             finish
             ;;
+        daemon)
+            case "$arg" in
+                on)
+                    ts_cc_tts_daemon_supported || { echo "tts daemon: Windows-only; this host uses direct playback." >&2; return 1; }
+                    ts_cc_tts_daemon_installer || return 1
+                    ts_cc_tts_set ccTtsDaemon on
+                    ts_cc_tts_finish
+                    finish
+                    ;;
+                off)
+                    ts_cc_tts_daemon_supported || { echo "tts daemon: Windows-only; this host uses direct playback." >&2; return 1; }
+                    ts_cc_tts_daemon_installer -Uninstall || true
+                    ts_cc_tts_set ccTtsDaemon off
+                    ts_cc_tts_finish
+                    finish
+                    ;;
+                install)
+                    ts_cc_tts_daemon_supported || { echo "tts daemon: Windows-only; this host uses direct playback." >&2; return 1; }
+                    ts_cc_tts_daemon_installer -NoStart
+                    ;;
+                restart)
+                    ts_cc_tts_daemon_supported || { echo "tts daemon: Windows-only; this host uses direct playback." >&2; return 1; }
+                    ts_cc_tts_daemon_installer -Uninstall || true
+                    ts_cc_tts_daemon_installer
+                    ;;
+                ''|status)
+                    ts_cc_tts_daemon_status
+                    ;;
+                *)
+                    echo "usage: ts-config tts daemon on|off|status|restart|install" >&2; return 2 ;;
+            esac
+            ;;
+        summarizer)
+            [ -n "$arg" ] || { echo "usage: ts-config tts summarizer template|self|haiku|ollama" >&2; return 2; }
+            case "$arg" in template|self|haiku|ollama) ;; *)
+                echo "ts-config tts summarizer: expected template, self, haiku, or ollama" >&2; return 2 ;; esac
+            ts_cc_tts_set ccTtsSummarizer "$arg"
+            if [ "$arg" = self ]; then ts_cc_tts_self_install || true; else ts_cc_tts_self_remove || true; fi
+            ts_cc_tts_finish
+            finish
+            ;;
+        haiku-model)
+            [ -n "$arg" ] || { echo "usage: ts-config tts haiku-model <model>" >&2; return 2; }
+            ts_cc_tts_set ccTtsHaikuModel "$arg"
+            ts_cc_tts_finish
+            finish
+            ;;
+        ollama)
+            [ -n "$arg" ] || { echo "usage: ts-config tts ollama <url> [<model>]" >&2; return 2; }
+            ts_cc_tts_set ccTtsOllamaUrl "$arg"
+            [ -n "$arg2" ] && ts_cc_tts_set ccTtsOllamaModel "$arg2"
+            ts_cc_tts_finish
+            finish
+            ;;
+        music)
+            [ -n "$arg" ] || { echo "usage: ts-config tts music duck|smart|pause|off" >&2; return 2; }
+            case "$arg" in duck|smart|pause|off) ;; *)
+                echo "ts-config tts music: expected duck, smart, pause, or off" >&2; return 2 ;; esac
+            ts_cc_tts_set ccTtsMusicMode "$arg"
+            ts_cc_tts_finish
+            finish
+            ;;
+        duck-level)
+            case "$arg" in ''|*[!0-9]*) echo "usage: ts-config tts duck-level <0-100>" >&2; return 2 ;; esac
+            [ "$arg" -le 100 ] || { echo "ts-config tts duck-level: expected 0-100" >&2; return 2; }
+            ts_cc_tts_set ccTtsDuckPercent "$arg"
+            ts_cc_tts_finish
+            finish
+            ;;
+        voices)
+            if [ -z "$arg" ] || [ "$arg" = show ]; then
+                echo "voice pool: $(ts_cc_tts_get ccTtsVoicePool)"
+            else
+                ts_cc_tts_set ccTtsVoicePool "$arg"
+                ts_cc_tts_finish
+                finish
+            fi
+            ;;
+        port)
+            case "$arg" in ''|*[!0-9]*) echo "usage: ts-config tts port <n>" >&2; return 2 ;; esac
+            ts_cc_tts_set ccTtsDaemonPort "$arg"
+            ts_cc_tts_finish
+            finish
+            ;;
         test)
             if [ -f "${HOME}/.claude/hooks/cc-tts-test.sh" ]; then
                 if [ "$arg" = --source ] && [ -n "$arg2" ]; then
@@ -445,6 +664,11 @@ ts-config tts — Claude Code local TTS (Kokoro / Chatterbox / edge-tts)
   prefix claude|cursor on|off|<label>
   project on|off
   template waiting|error|question|permission "…"
+  daemon on|off|status|restart|install    (Windows tray daemon: queue/coalesce/duck)
+  summarizer template|self|haiku|ollama   (self also installs the CLAUDE.md block)
+  haiku-model <model> | ollama <url> [<model>]
+  music duck|smart|pause|off | duck-level <0-100>
+  voices show|<v1,v2,...> | port <n>
 EOF
             ;;
         *)
@@ -455,12 +679,13 @@ EOF
 }
 
 ts_config_tts_menu() {
-    echo "  a) enable (on)   b) disable (off)   c) test   d) back"
+    echo "  a) enable (on)   b) disable (off)   c) test   d) daemon status   e) back"
     local c; c="$(ts_tty_prompt 'Choose: ')"
     case "$c" in
         a|A) ts_config_tts on ;;
         b|B) ts_config_tts off ;;
         c|C) ts_config_tts test ;;
+        d|D) ts_config_tts daemon status ;;
         *) ;;
     esac
 }

@@ -107,7 +107,7 @@ Write-Host "PowerShell $($PSVersionTable.PSVersion); user $env:USERNAME"
 # TS_WEZ_RESTORE / TS_APPS / TS_CC_TTS / WORKSPACE_DIR) still skip their prompt
 # individually.
 function Read-TsWizard {
-    [ordered]@{
+    $w = [ordered]@{
         Leader    = (Read-TsLeader)
         Theme     = (Read-TsTheme)
         Wezterm   = (Read-TsWezterm)
@@ -117,6 +117,9 @@ function Read-TsWizard {
         CcTts     = (Read-TsCcTts)
         Workspace = (Read-TsWorkspaceDir)
     }
+    # Tray daemon follow-up only makes sense when TTS itself was enabled.
+    $w.CcTtsDaemon = if ($w.CcTts -eq 'on') { Read-TsCcTtsDaemon } else { 'off' }
+    return $w
 }
 
 function Show-TsWizardReview($w) {
@@ -135,6 +138,7 @@ function Show-TsWizardReview($w) {
     Write-Host ("    Session restore  {0}" -f $w.WezRestore)
     Write-Host ("    Apps             {0}" -f $(if ($w.Apps.Count) { $w.Apps -join ', ' } else { '<none>' }))
     Write-Host ("    Claude TTS       {0}" -f $w.CcTts)
+    if ($w.CcTts -eq 'on') { Write-Host ("    TTS daemon       {0}" -f $w.CcTtsDaemon) }
     Write-Host ("    Workspace        {0}" -f $(if ($w.Workspace) { $w.Workspace } else { '<none detected>' }))
 }
 
@@ -184,6 +188,15 @@ if ($PSCmdlet.ShouldProcess('terminal-stack config.json', 'save config')) {
     Save-TsConfig -LeaderChord $leaderChord -ThemeMode $themeMode -Apps $selectedApps -WeztermMux $wizard.WezMux -WeztermRestore $wizard.WezRestore -CcTts $ccTts | Out-Null
     Export-CcTtsJson
     Write-Host "==> Saved config to $(Get-TsConfigPath)"
+    if ($wizard.CcTtsDaemon -eq 'on') {
+        if (Invoke-TsCcTtsDaemonInstaller) {
+            $ccTts.daemon.enabled = $true
+            Save-TsConfig -LeaderChord $leaderChord -ThemeMode $themeMode -Apps $selectedApps -WeztermMux $wizard.WezMux -WeztermRestore $wizard.WezRestore -CcTts $ccTts | Out-Null
+            Export-CcTtsJson
+        } else {
+            Write-Warning 'tts daemon: install failed — keeping direct playback (retry: ts-config tts daemon on)'
+        }
+    }
 }
 
 # Git include — stack aliases + delta config. The included file lands at
