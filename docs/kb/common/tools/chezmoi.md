@@ -11,6 +11,11 @@ Keeps dotfiles in a git "source tree" and renders them into `$HOME`. This repo
   `windows/**` (chezmoi-ignored) and are mirrored by the run_after hook, so the
   diff never shows them — compare manually, or apply and read the
   `created`/`updated` lines.
+- `sourceDir` points at the **canonical runtime clone**:
+  `%LOCALAPPDATA%\terminal-stack\stack` on Windows + WSL (WSL path
+  `/mnt/c/Users/<you>/AppData/Local/terminal-stack/stack`),
+  `~/.local/share/terminal-stack` on native Linux/macOS. Dev clones at workspace
+  tier paths are invisible unless pinned — see `doc common/stack`.
 - Wizard choices (leader, theme, tmux prefix, Windows username) live under
   `[data]` in `~/.config/chezmoi/chezmoi.toml`, mirrored to
   `%LOCALAPPDATA%\terminal-stack\config.json` for Windows-standalone.

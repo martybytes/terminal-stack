@@ -399,3 +399,58 @@ reports the likely culprit by name rather than a raw sharing-violation message.
 Nothing is ever deleted. The old roots are left in place after a migration for the user
 to remove by hand once they have verified — the same discipline as the `.bak` convention
 elsewhere in this repo.
+
+## Runtime clone location: canonical app-data paths, invisible dev clones
+
+The runtime clone — the one `ts-update` pulls and chezmoi applies from — lives at a
+**canonical location** per platform:
+
+- Windows + WSL (shared, ONE clone for both worlds): `%LOCALAPPDATA%\terminal-stack\stack`,
+  which WSL reaches as `/mnt/c/Users/<you>/AppData/Local/terminal-stack/stack`.
+- Native Linux / macOS: `${XDG_DATA_HOME:-~/.local/share}/terminal-stack`.
+
+Why there: the stack already owns `%LOCALAPPDATA%\terminal-stack` (config.json,
+rollback-sha, the docs/kb mirror, workspace state), chezmoi itself uses the same
+convention (`%LOCALAPPDATA%\chezmoi` / `~/.local/share/chezmoi`), and — decisively —
+app-data is **outside every workspace root**, so `wso migrate` can never relocate the
+runtime clone out from under the install. That happened in practice: a clone at
+`<workspace>/terminal-stack` planned cleanly into `src/github.com/<owner>/terminal-stack`,
+a path no resolver knew, orphaning the machinery. Note the state-dir nesting: the mirror
+at `…\terminal-stack\docs\kb` and the clone's kb at `…\terminal-stack\stack\docs\kb`
+are distinct trees; the mirror stays last in every doc-root probe.
+
+**The candidate list** (master copy: `bootstrap/_cleanup.sh ts_clone_candidates`;
+replicas with sync headers: `dot_zshrc _ts_clone_candidates`, profile
+`Get-TsCloneCandidates`, `bootstrap/_cleanup.ps1 Get-TsCleanupCloneCandidates` —
+parse-time isolation forces the copies). Priority order IS resolution order:
+
+1. the pin (`TERMINAL_STACK_DIR` / `-SourceDir`; POSIX also honours chezmoi `sourceDir`)
+2. the canonical location
+3. legacy defaults (`~/terminal-stack`, `C:\DATA\Workspace\terminal-stack`,
+   `~/code/terminal-stack`, Workspace variants, `~/.local/share/chezmoi`,
+   WSL `/mnt/c` probes)
+
+The old pwsh newest-commit ranking is gone: it would prefer a **dev clone** the moment
+you commit to it, making `ts-update` mutate the tree you are developing in.
+
+**Dev clones are invisible unless pinned.** A clone at a wso tier path
+(`<tier>/<host-with-dot>/<owner>/<repo>` — `ts_is_dev_clone` / `Test-TsDevClone`) is
+skipped by every resolver, doctor probe, doc root, and cleanup menu. Setting
+`TERMINAL_STACK_DIR` at it still works — pins are deliberate. This is what lets the
+same repo be simultaneously the runtime install (canonical path) and a working
+checkout (`wsmb` → `src/github.com/martybytes/terminal-stack`) without `ts-update`
+ever touching the latter. `wso` plan/migrate additionally mark the *active* runtime
+clone as `runtime … not migrated` if it is ever scanned.
+
+**Pins are only for non-canonical locations.** The canonical path resolves on its own;
+a pin there would shadow future relocations, so the installer and `Move-TsClone`/
+`ts_relocate_clone` strip a stale pin (backed up) instead of rewriting it.
+
+**Migration is ts-doctor's job.** `ts-doctor --repair` (pwsh `-Repair`) offers to move
+a legacy-path clone to the canonical location: a plain directory move (same-volume
+rename; cross-volume copy + HEAD-verify), then repoints chezmoi `sourceDir` (POSIX) or
+clears the stale pin (Windows), offers to normalize a renamed-account origin URL, and
+re-applies. `ts-update` only prints a one-line notice — an update must never move
+directories as a side effect. Installers default to the canonical paths and offer the
+same move when they find an existing legacy clone (pulling it first so the move
+routine is present inside it).

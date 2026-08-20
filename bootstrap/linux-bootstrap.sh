@@ -23,7 +23,9 @@ common_install_all
 # chezmoi.toml — point sourceDir at this repo. No windowsUsername on native Linux.
 # ts_ensure_source_dir (from _config.sh, sourced via _common-debian.sh) creates
 # the toml or repoints a stale sourceDir, preserving any [data] block.
-SOURCE_DIR="${SOURCE_DIR:-$HOME/code/terminal-stack}"
+# Default: the clone this script lives in (self-relative, like mac-bootstrap).
+_TS_BOOTSTRAP_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+SOURCE_DIR="${SOURCE_DIR:-$(cd -- "$_TS_BOOTSTRAP_DIR/.." && pwd)}"
 TOML="$HOME/.config/chezmoi/chezmoi.toml"
 if [ -d "$SOURCE_DIR" ]; then
     ts_ensure_source_dir "$SOURCE_DIR"

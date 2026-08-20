@@ -48,6 +48,8 @@ Two invariants worth not breaking. A repo's destination is derived from its `ori
 
 The jump shortcuts (`ws37`/`ws42`/`wsmb`/`wsmd`/`wsar`/`wsj`, and the repointed `wspu`) must stay shell functions in `dot_zshrc` and `$PROFILE` — a child process cannot change the parent shell's directory.
 
+**Runtime clone location.** The runtime clone — the one `ts-update` pulls and chezmoi applies from — lives at a canonical path: `%LOCALAPPDATA%\terminal-stack\stack` shared by Windows + WSL (WSL sees `/mnt/c/Users/<you>/AppData/Local/terminal-stack/stack`), `~/.local/share/terminal-stack` on native Linux/macOS; pins (`TERMINAL_STACK_DIR`) are only for non-canonical locations. Dev clones at workspace tier paths (e.g. the `wsmb` checkout at `src/github.com/martybytes/terminal-stack`) are **invisible** to resolution, doctor, and doc probes unless pinned — `ts-update` never touches the dev tree. Relocating a legacy-path clone is `ts-doctor --repair`'s job (`ts-update` only prints a notice); rationale in `docs/decisions.md` § "Runtime clone location: canonical app-data paths, invisible dev clones".
+
 **Update/rollback.** `ts-update` records the pre-pull HEAD to a state file (`~/.local/state/terminal-stack/rollback-sha` / `%LOCALAPPDATA%\terminal-stack\rollback-sha`) before pulling; `ts-rollback` resets the clone to it and re-applies. Both refuse on a dirty clone. The state file is only written when commits are actually incoming.
 
 Source → destination mapping for the `windows/` subtree is **relative-path-preserving**: `windows/.wezterm.lua` → `/mnt/c/Users/<you>/.wezterm.lua`. To add a new Windows-side file, drop it at the mirror path under `windows/` — no script changes needed. Full mechanism in `docs/cross-side-chezmoi.md`.

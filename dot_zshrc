@@ -280,6 +280,48 @@ _ts_chezmoi() {
   else return 1
   fi
 }
+# The canonical runtime clone location. WSL shares one clone with Windows in
+# %LOCALAPPDATA%\terminal-stack\stack; native Linux/macOS use the XDG data home.
+# Pins (TERMINAL_STACK_DIR) are only for NON-canonical locations. Twin of
+# bootstrap/_config.sh ts_canonical_clone_dir (see docs/decisions.md).
+_ts_canonical_clone() {
+  if [[ -r /proc/version ]] && grep -qi microsoft /proc/version 2>/dev/null; then
+    local m
+    for m in /mnt/c/Users/*/AppData/Local/terminal-stack/stack(N); do
+      echo "$m"; return 0
+    done
+    # No clone there yet: derive the path from the interop username.
+    local wu
+    wu="$(/mnt/c/Windows/System32/cmd.exe /c 'echo %USERNAME%' 2>/dev/null | tr -d '\r\n')"
+    [[ -n "$wu" ]] && { echo "/mnt/c/Users/$wu/AppData/Local/terminal-stack/stack"; return 0; }
+    return 1
+  fi
+  echo "${XDG_DATA_HOME:-$HOME/.local/share}/terminal-stack"
+}
+
+# True when a path is a DEV clone at a wso workspace tier path
+# (<tier>/<host-with-dot>/<owner>/<repo>). Dev clones are invisible to
+# auto-resolution unless pinned. Twin of bootstrap/_cleanup.sh ts_is_dev_clone.
+_ts_is_dev_clone() {
+  [[ "$1" =~ /(src|public|archive|local|scratch)/[^/]+\.[^/]+/[^/]+/[^/]+/?$ ]]
+}
+
+# CANONICAL CLONE CANDIDATE LIST (zsh replica) — canonical location first, then
+# legacy defaults. Keep in sync with docs/decisions.md § "Runtime clone location"
+# and the siblings: bootstrap/_cleanup.sh ts_clone_candidates (master), profile
+# Get-TsCloneCandidates, bootstrap/_cleanup.ps1 Get-TsCleanupCloneCandidates.
+_ts_clone_candidates() {
+  echo "$(_ts_canonical_clone 2>/dev/null)"
+  printf '%s\n' \
+    "$HOME/code/terminal-stack" "$HOME/terminal-stack" \
+    "$HOME/Workspace/terminal-stack" "$HOME/workspace/terminal-stack" \
+    "$HOME/Documents/Workspace/terminal-stack" "$HOME/.local/share/chezmoi"
+  local d
+  for d in /mnt/c/Users/*/terminal-stack(N) /mnt/c/DATA/Workspace/terminal-stack(N); do
+    echo "$d"
+  done
+}
+
 # Clone resolution: $TERMINAL_STACK_DIR → `chezmoi source-path`. $2 is the
 # caller name for error prefixes. Each failure mode gets its own message —
 # a chezmoi error (e.g. state lock held by another running instance) is not
@@ -288,13 +330,12 @@ _ts_chezmoi() {
 # counts only when it is a git repo whose origin names the project — the name
 # test alone is not enough to *choose* one (a stale install from an old account
 # still matches), which is why callers report rather than silently switch.
+# Dev clones (workspace tier paths) are skipped — only an explicit pin sees them.
 _ts_clones() {
   local d u seen=""
-  for d in "${TERMINAL_STACK_DIR:-}" "$HOME/code/terminal-stack" "$HOME/terminal-stack" \
-           "$HOME/Workspace/terminal-stack" "$HOME/Documents/Workspace/terminal-stack" \
-           "$HOME/workspace/terminal-stack" "$HOME/.local/share/chezmoi" \
-           /mnt/c/DATA/Workspace/terminal-stack /mnt/c/Users/*/terminal-stack; do
+  { echo "${TERMINAL_STACK_DIR:-}"; _ts_clone_candidates; } | while IFS= read -r d; do
     [[ -n "$d" && -d "$d/.git" ]] || continue
+    if _ts_is_dev_clone "$d" && [[ "$d" != "${TERMINAL_STACK_DIR:-}" ]]; then continue; fi
     case " $seen " in *" $d "*) continue ;; esac
     u="$(git -C "$d" config --get remote.origin.url 2>/dev/null)"
     [[ "${u:l}" == *terminal-stack* ]] || continue   # :l — match case-insensitively like the pwsh side
@@ -335,6 +376,11 @@ ts-update() {
   git -C "$src" config --get remote.origin.url 2>/dev/null | grep -qi terminal-stack \
     || echo "ts-update: note — '$src' doesn't look like a terminal-stack clone. Run 'ts-doctor' to check." >&2
   echo "==> clone: $src"
+  # Location notice only — moving is ts-doctor's job, never a side effect of updating.
+  local _canon; _canon="$(_ts_canonical_clone 2>/dev/null)"
+  if [[ -n "$_canon" && "$src" != "$_canon" ]] && ! _ts_is_dev_clone "$src"; then
+    echo "ts-update: note — clone is at a legacy location; run 'ts-doctor --repair' to move it to $_canon." >&2
+  fi
   # A leftover second clone is not just untidy: whichever one ts-update picks is
   # the one that re-deploys your config, so an unnoticed old clone silently
   # reinstates an old profile. Report the others rather than choosing quietly;
@@ -455,11 +501,13 @@ ts-doctor() {
   cz="$(_ts_chezmoi)" || { echo "ts-doctor: chezmoi not found on PATH." >&2; return 1 }
   src="${TERMINAL_STACK_DIR:-$("$cz" source-path 2>/dev/null)}"
   if [[ ! -f "$src/bootstrap/ts-doctor.sh" ]]; then
-    for c in "$HOME/code/terminal-stack" "$HOME/terminal-stack" \
-             "$HOME/Workspace/terminal-stack" "$HOME/Documents/Workspace/terminal-stack" \
-             /mnt/c/Users/*/terminal-stack /mnt/c/DATA/Workspace/terminal-stack; do
-      [[ -f "$c/bootstrap/ts-doctor.sh" ]] && { src="$c"; break }
-    done
+    # Probe the shared candidate list (canonical first, dev clones excluded) so
+    # the doctor still runs when `chezmoi source-path` is the very thing broken.
+    while IFS= read -r c; do
+      [[ -n "$c" && -f "$c/bootstrap/ts-doctor.sh" ]] || continue
+      _ts_is_dev_clone "$c" && continue
+      src="$c"; break
+    done < <(_ts_clone_candidates)
   fi
   if [[ ! -f "$src/bootstrap/ts-doctor.sh" ]]; then
     echo "ts-doctor: can't locate a terminal-stack clone. Re-run the install one-liner." >&2
@@ -747,13 +795,18 @@ _doc_root() {
   if [[ -x "$HOME/.local/bin/chezmoi" ]]; then cz="$HOME/.local/bin/chezmoi"
   elif command -v chezmoi >/dev/null 2>&1; then cz="chezmoi"; fi
   [[ -n "$cz" ]] && cm_src="$("$cz" source-path 2>/dev/null)"
+  # Canonical clone locations first (glob avoids a chezmoi call per doc run),
+  # legacy paths after, the read-only %LOCALAPPDATA% mirror LAST.
   for c in "$DOC_ROOT" \
            "${TERMINAL_STACK_DIR:+$TERMINAL_STACK_DIR/docs/kb}" \
            "${cm_src:+$cm_src/docs/kb}" \
-           /mnt/c/DATA/Workspace/terminal-stack/docs/kb \
+           "${XDG_DATA_HOME:-$HOME/.local/share}/terminal-stack/docs/kb" \
+           /mnt/c/Users/*/AppData/Local/terminal-stack/stack/docs/kb(N) \
+           "$HOME/code/terminal-stack/docs/kb" \
            "$HOME/terminal-stack/docs/kb" \
            "$HOME/Workspace/terminal-stack/docs/kb" \
            "$HOME/Documents/Workspace/terminal-stack/docs/kb" \
+           /mnt/c/DATA/Workspace/terminal-stack/docs/kb \
            /mnt/c/Users/*/AppData/Local/terminal-stack/docs/kb(N); do
     [[ -n "$c" && -d "$c" ]] && { echo "$c"; return 0; }
   done
@@ -764,13 +817,16 @@ _doc_repo() {
   if cz="$(_ts_chezmoi 2>/dev/null)"; then
     src="$(_ts_src "$cz" doc 2>/dev/null)" && { echo "$src"; return 0; }
   fi
-  for src in "${TERMINAL_STACK_DIR:-}" \
-             /mnt/c/DATA/Workspace/terminal-stack \
-             "$HOME/terminal-stack" \
-             "$HOME/Workspace/terminal-stack" \
-             "$HOME/Documents/Workspace/terminal-stack"; do
-    [[ -n "$src" && -d "$src/.git" ]] && { echo "$src"; return 0; }
-  done
+  # Pin first (exempt from the dev-clone filter — pins are deliberate), then
+  # the shared candidate list (canonical first, dev clones excluded).
+  if [[ -n "${TERMINAL_STACK_DIR:-}" && -d "$TERMINAL_STACK_DIR/.git" ]]; then
+    echo "$TERMINAL_STACK_DIR"; return 0
+  fi
+  while IFS= read -r src; do
+    [[ -n "$src" && -d "$src/.git" ]] || continue
+    _ts_is_dev_clone "$src" && continue
+    echo "$src"; return 0
+  done < <(_ts_clone_candidates)
   return 1
 }
 _doc_local() { echo "${DOC_LOCAL:-$HOME/.doc.local}"; }

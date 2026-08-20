@@ -46,7 +46,10 @@ fi
 # chezmoi.toml — point sourceDir at this repo and persist windowsUsername under
 # [data]. ts_ensure_source_dir creates the toml or repoints a stale sourceDir
 # (preserving [data]); ts_data_set adds/updates windowsUsername idempotently.
-SOURCE_DIR="${SOURCE_DIR:-/mnt/c/DATA/Workspace/terminal-stack}"
+# Default: the clone this script lives in (self-relative, like mac-bootstrap) —
+# the bootstrap is always run from inside the clone it should point at.
+_TS_BOOTSTRAP_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+SOURCE_DIR="${SOURCE_DIR:-$(cd -- "$_TS_BOOTSTRAP_DIR/.." && pwd)}"
 TOML="$HOME/.config/chezmoi/chezmoi.toml"
 if [ -d "$SOURCE_DIR" ]; then
     ts_ensure_source_dir "$SOURCE_DIR"

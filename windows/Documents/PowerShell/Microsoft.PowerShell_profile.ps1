@@ -323,16 +323,34 @@ function gb  { git branch @args }
 # ---- git-shortcuts-end ----
 
 # ---- terminal-stack-update-start ----
-# Resolution order: -SourceDir → $env:TERMINAL_STACK_DIR → install.ps1 default
-# ($env:USERPROFILE\terminal-stack). We deliberately do NOT consult
+# Resolution order: -SourceDir → $env:TERMINAL_STACK_DIR → canonical location →
+# legacy candidates in list order. We deliberately do NOT consult
 # `chezmoi source-path` here: on Windows that returns chezmoi's default
 # sourceDir (~/.local/share/chezmoi) regardless of where the actual clone
 # lives, because Windows users don't configure chezmoi.toml (the WSL side does).
-# Every place a terminal-stack clone could plausibly live on Windows.
+
+# The canonical runtime clone location — inside the app-data dir the stack
+# already owns (config.json, rollback-sha, docs mirror). Pins are only for
+# NON-canonical locations. Twin copies: bootstrap/_cleanup.ps1 (parse-time
+# isolation), bootstrap/_config.sh ts_canonical_clone_dir (bash).
+function Get-TsCanonicalCloneDir { Join-Path $env:LOCALAPPDATA 'terminal-stack\stack' }
+
+# True when a path is a DEV clone at a wso workspace tier path
+# (<tier>/<host-with-dot>/<owner>/<repo>). Dev clones are invisible to
+# auto-resolution unless pinned. Twin of bootstrap/_cleanup.sh ts_is_dev_clone.
+function Test-TsDevClone([string]$Path) {
+    ($Path -replace '\\', '/') -match '/(src|public|archive|local|scratch)/[^/]+\.[^/]+/[^/]+/[^/]+/?$'
+}
+
+# CANONICAL CLONE CANDIDATE LIST (pwsh replica) — pin, then canonical, then
+# legacy defaults. Keep in sync with docs/decisions.md § "Runtime clone location"
+# and the siblings: bootstrap/_cleanup.sh ts_clone_candidates (master),
+# dot_zshrc _ts_clone_candidates, bootstrap/_cleanup.ps1 Get-TsCleanupCloneCandidates.
 function Get-TsCloneCandidates {
     $seen = @{}
     @(
         $env:TERMINAL_STACK_DIR,
+        (Get-TsCanonicalCloneDir),
         (Join-Path $env:USERPROFILE 'terminal-stack'),
         'C:\DATA\Workspace\terminal-stack',
         (Join-Path $env:USERPROFILE 'code\terminal-stack'),
@@ -349,9 +367,11 @@ function Get-TsCloneCandidates {
 # project. The name test is necessary but NOT sufficient to pick one: a stale
 # install under ~\terminal-stack from an old account still matches, which is
 # exactly how a machine ends up re-syncing an ancient profile over a current one.
+# Dev clones (workspace tier paths) are skipped unless they ARE the pin.
 function Get-TsClones {
     $out = foreach ($d in (Get-TsCloneCandidates)) {
         if (-not (Test-Path (Join-Path $d '.git'))) { continue }
+        if ((Test-TsDevClone $d) -and $d -ne $env:TERMINAL_STACK_DIR) { continue }
         $origin = & git -C $d config --get remote.origin.url 2>$null
         if ($origin -notmatch 'terminal-stack') { continue }
         $ct = & git -C $d log -1 --format=%ct 2>$null
@@ -362,16 +382,16 @@ function Get-TsClones {
             Short  = (& git -C $d log -1 --format='%h %s' 2>$null)
         }
     }
-    # Newest commit first: after a `ts-update` pull the active clone is by
-    # definition the most recent one, so this self-heals rather than needing
-    # a pin. Ties keep candidate order, which puts an explicit override first.
-    return @($out | Sort-Object -Property Commit -Descending)
+    # Candidate order IS the priority: pin > canonical > legacy. (Ranking by
+    # newest commit was removed — it would prefer a dev clone the moment you
+    # commit to it, updating the tree you're developing in.)
+    return @($out)
 }
 
 # Resolve the clone to operate on. An explicit -SourceDir or $env:TERMINAL_STACK_DIR
-# always wins. Otherwise pick the newest real clone and, when more than one
-# exists, say so — silently choosing between two clones is how the wrong profile
-# gets deployed.
+# always wins. Otherwise take the highest-priority real clone and, when more than
+# one exists, say so — silently choosing between two clones is how the wrong
+# profile gets deployed.
 function Resolve-TsSourceDir([string]$SourceDir) {
     if (-not $SourceDir) { $SourceDir = $env:TERMINAL_STACK_DIR }
     if ($SourceDir) {
@@ -387,13 +407,13 @@ function Resolve-TsSourceDir([string]$SourceDir) {
         return $null
     }
     if ($clones.Count -gt 1) {
-        Write-Warning "$($clones.Count) terminal-stack clones found; using the most recently committed one:"
+        Write-Warning "$($clones.Count) terminal-stack clones found; using the highest-priority location:"
         foreach ($c in $clones) {
             $mark = if ($c.Path -eq $clones[0].Path) { '->' } else { '  ' }
             Write-Host ("  {0} {1}" -f $mark, $c.Path)
             Write-Host ("       {0}  |  {1}" -f $c.Origin, $c.Short)
         }
-        Write-Host "  Pin one with: Set-TsSourceDirPersisted '<path>'   (or run ts-doctor --repair)"
+        Write-Host "  Consolidate with 'ts-doctor -Repair' (or pin one: Set-TsSourceDirPersisted '<path>')"
     }
     return $clones[0].Path
 }
@@ -425,11 +445,17 @@ function Update-TerminalStack {
         Write-Warning "ts-update: '$SourceDir' doesn't look like a terminal-stack clone. Run 'ts-doctor' to check."
     }
     Write-Host "==> clone: $SourceDir"
+    # Location notice only — moving is ts-doctor's job, never a side effect of updating.
+    $canon = Get-TsCanonicalCloneDir
+    if ($SourceDir.TrimEnd('\') -ne $canon.TrimEnd('\') -and -not (Test-TsDevClone $SourceDir)) {
+        Write-Host "ts-update: note — clone is at a legacy location; run 'ts-doctor -Repair' to move it to $canon."
+    }
     # A second clone is not just untidy: whichever one ts-update picks is the one
     # that overwrites $PROFILE, so an unnoticed leftover silently reinstates an
     # old profile. Offer to pin the choice once rather than re-deciding it on
-    # every run. Skipped when the user pinned already or is non-interactive.
-    if (-not $env:TERMINAL_STACK_DIR) {
+    # every run. Skipped when pinned, non-interactive, or already canonical
+    # (canonical needs no pin — consolidate via ts-doctor instead).
+    if (-not $env:TERMINAL_STACK_DIR -and $SourceDir.TrimEnd('\') -ne $canon.TrimEnd('\')) {
         $all = Get-TsClones
         if ($all.Count -gt 1 -and -not [Console]::IsInputRedirected) {
             $a = Read-Host "Pin '$SourceDir' as this machine's clone and stop asking? [y/N]"
@@ -627,15 +653,12 @@ Set-Alias -Name ts-config -Value Set-TerminalStackConfig
 
 # Probe known clone locations for one that actually contains the repo — used so
 # the doctor still runs when $env:TERMINAL_STACK_DIR / the default path is wrong.
+# Same priority as Get-TsCloneCandidates; dev clones skipped unless pinned.
 function Find-TsAnyClone {
-    foreach ($d in @(
-        $env:TERMINAL_STACK_DIR,
-        (Join-Path $env:USERPROFILE 'terminal-stack'),
-        'C:\DATA\Workspace\terminal-stack',
-        (Join-Path $env:USERPROFILE 'code\terminal-stack'),
-        (Join-Path $env:USERPROFILE 'Documents\Workspace\terminal-stack')
-    )) {
-        if ($d -and (Test-Path (Join-Path $d 'bootstrap\_cleanup.ps1'))) { return $d }
+    foreach ($d in (Get-TsCloneCandidates)) {
+        if (-not $d) { continue }
+        if ((Test-TsDevClone $d) -and $d -ne $env:TERMINAL_STACK_DIR) { continue }
+        if (Test-Path (Join-Path $d 'bootstrap\_cleanup.ps1')) { return $d }
     }
     return $null
 }
@@ -656,8 +679,9 @@ function Set-TsSourceDirPersisted([string]$SourceDir) {
 }
 
 # Diagnose / repair the Windows install: missing/moved clone, stale config, leftover
-# old clones. `ts-doctor` checks (read-only); `ts-doctor -Repair` fixes (persist the
-# real clone path, re-sync, offer cleanup). Counterpart of the POSIX `ts-doctor`.
+# old clones. `ts-doctor` checks (read-only); `ts-doctor -Repair` fixes (move the
+# clone to the canonical location, re-sync, offer cleanup). POSIX counterpart:
+# bootstrap/ts-doctor.sh.
 function Invoke-TsDoctor {
     [CmdletBinding()] param([switch]$Repair, [switch]$Quiet)
     $clone = Find-TsAnyClone
@@ -665,12 +689,34 @@ function Invoke-TsDoctor {
     . (Join-Path $clone 'bootstrap\_cleanup.ps1')
     $src = Resolve-TsSourceDir
     if (-not $src) { $src = $clone }
+    $canon = Get-TsCanonicalCloneDir
     if ($Repair) {
-        if ((Resolve-Path $clone).Path -ne (Resolve-Path $src).Path) { Set-TsSourceDirPersisted $clone; $src = $clone }
+        # Offer the canonical-location move first (Move-TsClone clears a stale pin).
+        if ($src.TrimEnd('\') -ne $canon.TrimEnd('\') -and -not (Test-TsDevClone $src) `
+            -and (Get-Command Move-TsClone -ErrorAction SilentlyContinue)) {
+            if (Test-Path $canon) {
+                Write-Warning "canonical location $canon already exists — not moving '$src'; resolve via the cleanup menu."
+            } elseif (-not [Console]::IsInputRedirected) {
+                $a = Read-Host "Move '$src' to the canonical location '$canon'? [Y/n]"
+                if ($a -notmatch '^(n|no)$') {
+                    if (Move-TsClone -Source $src -Dest $canon) { $src = $canon }
+                }
+            }
+        }
+        # Fallback pin only when the clone stays at a non-canonical path.
+        if ($src.TrimEnd('\') -ne $canon.TrimEnd('\') -and `
+            (Resolve-Path $clone -ErrorAction SilentlyContinue).Path -ne (Resolve-Path $src -ErrorAction SilentlyContinue).Path) {
+            Set-TsSourceDirPersisted $src
+        }
         Invoke-TsSync $src
         Invoke-TsCleanupMenu $src
         Test-TsInstall -SourceDir $src | Out-Null
     } else {
+        if ($src.TrimEnd('\') -ne $canon.TrimEnd('\') -and -not (Test-TsDevClone $src)) {
+            Write-Host "note: clone is at a legacy location; 'ts-doctor -Repair' can move it to $canon"
+        } elseif (Test-TsDevClone $src) {
+            Write-Host 'note: pinned at a dev clone (workspace tier path) — deliberate, leaving it alone.'
+        }
         Test-TsInstall -SourceDir $src -Quiet:$Quiet | Out-Null
     }
 }
@@ -769,12 +815,15 @@ function c {
 # %LOCALAPPDATA%\terminal-stack\docs\kb (read fallback; edit/sync use the clone).
 # See docs/kb/_index.md. (`ref`/`wzr` are separate for now.)
 function Get-DocRoot {
+    # Overrides, then the clone candidates (canonical first, dev clones skipped
+    # unless pinned), then the read-only %LOCALAPPDATA% mirror LAST — note the
+    # mirror (…\terminal-stack\docs\kb) is distinct from the canonical clone's kb
+    # (…\terminal-stack\stack\docs\kb).
     $cands = @()
     if ($env:DOC_ROOT) { $cands += $env:DOC_ROOT }
-    if ($env:TERMINAL_STACK_DIR) { $cands += (Join-Path $env:TERMINAL_STACK_DIR 'docs\kb') }
-    foreach ($base in @('C:\DATA\Workspace', (Join-Path $env:USERPROFILE 'workspace'),
-                        (Join-Path $env:USERPROFILE 'Documents\Workspace'), $env:USERPROFILE)) {
-        $cands += (Join-Path $base 'terminal-stack\docs\kb')
+    foreach ($d in (Get-TsCloneCandidates)) {
+        if ((Test-TsDevClone $d) -and $d -ne $env:TERMINAL_STACK_DIR) { continue }
+        $cands += (Join-Path $d 'docs\kb')
     }
     if ($env:LOCALAPPDATA) { $cands += (Join-Path $env:LOCALAPPDATA 'terminal-stack\docs\kb') }
     foreach ($c in $cands) { if ($c -and (Test-Path -LiteralPath $c -PathType Container)) { return (Resolve-Path -LiteralPath $c).Path } }

@@ -28,10 +28,10 @@ Run WezTerm normally (no special launch flags). After saving WezTerm files in yo
 
 `sync-windows.ps1` renders `.tmpl` files (leader key, theme tokens, `__WIN_USER__`, etc.) and copies only targets whose bytes differ. Same script `install.ps1` runs at the end of a Windows install, and `ts-update` runs it after a pull.
 
-If your dev clone is not the install default (`%USERPROFILE%\terminal-stack`), point the stack at it once in `Documents\PowerShell\profile.local.ps1`:
+A dev clone at a workspace tier path is **invisible** to `ts-update` and the clone resolvers — pinning `$env:TERMINAL_STACK_DIR` at it is exactly how you develop against it (the canonical install at `%LOCALAPPDATA%\terminal-stack\stack` needs no pin). Point the stack at the dev clone once in `Documents\PowerShell\profile.local.ps1`:
 
 ```powershell
-$env:TERMINAL_STACK_DIR = 'C:\DATA\Workspace\terminal-stack'
+$env:TERMINAL_STACK_DIR = 'C:\DATA\Workspace\src\github.com\martybytes\terminal-stack'
 ```
 
 Then sync with:
@@ -66,7 +66,7 @@ Full tables: **`doc wezterm/dev-config`**. Summary:
 Run in a side pwsh window while editing; re-syncs whenever anything under `windows/` changes:
 
 ```powershell
-$clone = 'C:\DATA\Workspace\terminal-stack'   # your dev clone
+$clone = 'C:\DATA\Workspace\src\github.com\martybytes\terminal-stack'   # your dev clone
 $src   = Join-Path $clone 'windows'
 $sync  = Join-Path $clone 'scripts\sync-windows.ps1'
 $w = New-Object IO.FileSystemWatcher $src -PropertyName LastWrite,FileName,DirectoryName -IncludeSubdirectories
@@ -82,7 +82,7 @@ Still use **`Ctrl+Space` `r`** after `pane_nav.lua` edits.
 If you are iterating mostly on the grid module, link the repo file into place once (symlinks may require an elevated or Developer Mode shell on Windows):
 
 ```powershell
-$clone = 'C:\DATA\Workspace\terminal-stack'
+$clone = 'C:\DATA\Workspace\src\github.com\martybytes\terminal-stack'
 New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.wezterm" | Out-Null
 Remove-Item "$env:USERPROFILE\.wezterm\pane_nav.lua" -ErrorAction SilentlyContinue
 New-Item -ItemType SymbolicLink `
@@ -97,7 +97,7 @@ Edits in the clone are visible at WezTerm's module path immediately; **`Ctrl+Spa
 From WSL, with chezmoi's `sourceDir` pointing at your dev clone:
 
 ```sh
-cd /mnt/c/DATA/Workspace/terminal-stack   # adjust path
+cd /mnt/c/DATA/Workspace/src/github.com/martybytes/terminal-stack   # adjust path
 ~/.local/bin/chezmoi apply -v
 ```
 

@@ -117,6 +117,20 @@ ts_ws_state_dir() {
     printf '%s\n' "${XDG_STATE_HOME:-$HOME/.local/state}/terminal-stack"
 }
 
+# The ACTIVE terminal-stack runtime clone (the one ts-update updates), realpathed.
+# wso must never migrate it: relocating the runtime clone breaks the install
+# (that's ts-doctor's job). Resolution: $TERMINAL_STACK_DIR → chezmoi.toml
+# sourceDir (inline read — this library stays standalone). Empty when unknown.
+ts_ws_runtime_clone() {
+    local src="${TERMINAL_STACK_DIR:-}" toml="$HOME/.config/chezmoi/chezmoi.toml"
+    if [ -z "$src" ] && [ -f "$toml" ]; then
+        src="$(grep -E '^[[:space:]]*sourceDir[[:space:]]*=' "$toml" | head -n1 \
+            | sed -E 's/^[[:space:]]*sourceDir[[:space:]]*=[[:space:]]*"?([^"]*)"?.*/\1/')"
+    fi
+    [ -n "$src" ] || return 1
+    ( cd "$src" 2>/dev/null && pwd -P ) || printf '%s\n' "$src"
+}
+
 # --------------------------------------------------------- remote parsing ----
 
 # ts_ws_parse_remote <url> -> "host<TAB>owner<TAB>repo", or return 1.

@@ -139,6 +139,34 @@ ts_chezmoi_bin() {
 
 ts_toml() { echo "${HOME}/.config/chezmoi/chezmoi.toml"; }
 
+# The canonical runtime clone location (see docs/decisions.md § "Runtime clone
+# location"). WSL shares ONE clone with Windows inside the app-data dir the
+# stack already owns; native Linux/macOS use the XDG data home. Pins
+# (TERMINAL_STACK_DIR) are only for NON-canonical locations. Twins:
+# dot_zshrc _ts_canonical_clone, profile/_cleanup.ps1 Get-TsCanonicalCloneDir.
+ts_canonical_clone_dir() {
+    if [ -r /proc/version ] && grep -qi microsoft /proc/version 2>/dev/null; then
+        local wu=""
+        wu="$(ts_data_get windowsUsername 2>/dev/null || true)"
+        if [ -z "$wu" ] && [ -x /mnt/c/Windows/System32/cmd.exe ]; then
+            wu="$(/mnt/c/Windows/System32/cmd.exe /c 'echo %USERNAME%' 2>/dev/null | tr -d '\r\n' || true)"
+        fi
+        if [ -n "$wu" ]; then
+            echo "/mnt/c/Users/$wu/AppData/Local/terminal-stack/stack"
+            return 0
+        fi
+        # Last resort: a single existing match wins.
+        local m matches=0 hit=""
+        for m in /mnt/c/Users/*/AppData/Local/terminal-stack/stack; do
+            [ -d "$m" ] || continue
+            matches=$((matches + 1)); hit="$m"
+        done
+        [ "$matches" -eq 1 ] && { echo "$hit"; return 0; }
+        return 1
+    fi
+    echo "${XDG_DATA_HOME:-$HOME/.local/share}/terminal-stack"
+}
+
 # Read the sourceDir currently recorded in chezmoi.toml (empty if unset/absent).
 ts_source_dir_recorded() {
     local toml; toml="$(ts_toml)"

@@ -24,7 +24,7 @@ curl -fsSL https://raw.githubusercontent.com/martybytes/terminal-stack/main/inst
 curl -fsSL https://raw.githubusercontent.com/martybytes/terminal-stack/main/install-mac.sh | bash
 ```
 
-**Clone location.** Each installer **prompts** for where to put the repo, pre-filled with the per-platform default (Windows `%USERPROFILE%\terminal-stack`, which WSL sees as `/mnt/c/Users/<you>/terminal-stack`; Linux/macOS `~/code/terminal-stack`). Press Enter to accept, or set `$env:TERMINAL_STACK_DIR` (PowerShell) / `TERMINAL_STACK_DIR=…` (bash) to skip the prompt. The WSL installer auto-detects your Windows username via `cmd.exe` interop, so it runs without prompts under `curl | bash`.
+**Clone location.** Each installer **prompts** for where to put the repo, pre-filled with the per-platform canonical default (Windows and WSL share **one** clone at `%LOCALAPPDATA%\terminal-stack\stack`, which WSL sees as `/mnt/c/Users/<you>/AppData/Local/terminal-stack/stack`; Linux/macOS `~/.local/share/terminal-stack`). Press Enter to accept, or set `$env:TERMINAL_STACK_DIR` (PowerShell) / `TERMINAL_STACK_DIR=…` (bash) to skip the prompt. If an existing clone sits at an old location, the installer offers to move it to the canonical path (git state intact). The WSL installer auto-detects your Windows username via `cmd.exe` interop, so it runs without prompts under `curl | bash`.
 
 **Cleaning up old installs.** After cloning, the installer scans for **old terminal-stack clones at other paths** and **retired leftover files** (`command-reference.{md,txt,html}`, `~/.local/bin/wzr`, `~/.wezterm-ref`) and offers a checklist — safe items pre-ticked, one confirmation before anything is removed, your per-machine files (`~/.zshrc.local`/`profile.local.ps1`, `~/.doc.local`, `*.local.md`) never touched. Preview without deleting via `TS_DRY_RUN=1`. This is also what prevents the "I re-installed but `doc` still isn't found" trap: a stale `chezmoi sourceDir` pointing at an old clone is repointed automatically.
 
@@ -49,10 +49,10 @@ For a fresh Windows 11 + WSL2 machine, follow sections 1 → 4 below. For a nati
 
 ### 1. Windows side
 
-Open PowerShell 7 (`pwsh`) and run (adjust the path if you cloned elsewhere — the default for the one-liner installer is `$env:USERPROFILE\terminal-stack`):
+Open PowerShell 7 (`pwsh`) and run (adjust the path if you cloned elsewhere — the default for the one-liner installer is `$env:LOCALAPPDATA\terminal-stack\stack`):
 
 ```powershell
-cd $env:USERPROFILE\terminal-stack
+cd $env:LOCALAPPDATA\terminal-stack\stack
 .\bootstrap\windows-bootstrap.ps1
 ```
 
@@ -68,7 +68,7 @@ Open WSL Ubuntu (substitute your Windows username for `<you>`):
 
 ```sh
 wsl -d Ubuntu
-cd /mnt/c/Users/<you>/terminal-stack
+cd /mnt/c/Users/<you>/AppData/Local/terminal-stack/stack
 bash ./bootstrap/wsl-bootstrap.sh
 ```
 
@@ -89,8 +89,8 @@ Re-run as needed; the script is idempotent.
 For any native Debian/Ubuntu host:
 
 ```sh
-git clone <repo-url> ~/code/terminal-stack    # or your chosen path
-cd ~/code/terminal-stack
+git clone <repo-url> ~/.local/share/terminal-stack    # or your chosen path
+cd ~/.local/share/terminal-stack
 bash ./bootstrap/linux-bootstrap.sh
 ```
 
@@ -109,8 +109,8 @@ Re-run as needed; the script is idempotent.
 For a MacBook or any macOS host:
 
 ```sh
-git clone <repo-url> ~/code/terminal-stack    # or your chosen path
-cd ~/code/terminal-stack
+git clone <repo-url> ~/.local/share/terminal-stack    # or your chosen path
+cd ~/.local/share/terminal-stack
 bash ./bootstrap/mac-bootstrap.sh
 ```
 
@@ -152,7 +152,7 @@ tilde or an absolute path:
 
 ```sh
 mkdir -p ~/.config/chezmoi
-echo 'sourceDir = "~/code/terminal-stack"' > ~/.config/chezmoi/chezmoi.toml  # adjust path
+echo 'sourceDir = "~/.local/share/terminal-stack"' > ~/.config/chezmoi/chezmoi.toml  # adjust path
 chezmoi apply -v
 ```
 
@@ -181,7 +181,7 @@ WezTerm reads `%USERPROFILE%\.wezterm.lua` and `%USERPROFILE%\.wezterm\pane_nav.
 & C:\path\to\terminal-stack\scripts\sync-windows.ps1 -SourceDir C:\path\to\terminal-stack
 ```
 
-Set `$env:TERMINAL_STACK_DIR` in `profile.local.ps1` when the dev clone is not `%USERPROFILE%\terminal-stack`. Changes to `.wezterm.lua` usually auto-reload; press **`Ctrl+Space` `r`** after `pane_nav.lua` edits. Full loop, optional file-watcher, macOS path, and symlink trick: `docs/developing-wezterm.md`.
+The canonical install (`%LOCALAPPDATA%\terminal-stack\stack`) resolves without any pin — set `$env:TERMINAL_STACK_DIR` in `profile.local.ps1` only when working against a **non-canonical** location, e.g. a dev clone at a workspace tier path (which is otherwise invisible to `ts-update` and the resolvers). Changes to `.wezterm.lua` usually auto-reload; press **`Ctrl+Space` `r`** after `pane_nav.lua` edits. Full loop, optional file-watcher, macOS path, and symlink trick: `docs/developing-wezterm.md`.
 
 ## Manual
 

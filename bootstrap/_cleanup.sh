@@ -18,13 +18,20 @@ fi
 : "${INFO:=$'\033[1;34m==>\033[0m'}"
 : "${WARN:=$'\033[1;33m!!\033[0m'}"
 
-# Echo the platform-aware list of candidate clone locations (one per line).
+# CANONICAL CLONE CANDIDATE LIST (bash master) — canonical location first, then
+# legacy defaults. Keep in sync with docs/decisions.md § "Runtime clone location"
+# and the sibling replicas: dot_zshrc _ts_clone_candidates, profile
+# Get-TsCloneCandidates, bootstrap/_cleanup.ps1 Get-TsCleanupCloneCandidates.
 # Globs expand later in ts_find_old_clones; non-existent paths are filtered there.
 ts_clone_candidates() {
+    local canon=""
+    command -v ts_canonical_clone_dir >/dev/null 2>&1 && canon="$(ts_canonical_clone_dir 2>/dev/null || true)"
+    [ -n "$canon" ] && printf '%s\n' "$canon"
     printf '%s\n' \
         "$HOME/code/terminal-stack" \
         "$HOME/terminal-stack" \
         "$HOME/Workspace/terminal-stack" \
+        "$HOME/workspace/terminal-stack" \
         "$HOME/Documents/Workspace/terminal-stack" \
         "$HOME/.local/share/chezmoi"
     if [ -r /proc/version ] && grep -qi microsoft /proc/version 2>/dev/null; then
@@ -41,6 +48,17 @@ ts_is_stack_clone() {
     git -C "$d" config --get remote.origin.url 2>/dev/null | grep -qi 'terminal-stack'
 }
 
+# True when <path> is a DEV clone: it sits at a wso workspace tier path
+# (<tier>/<host>/<owner>/<repo>, host must contain a dot). Dev clones are
+# invisible to auto-resolution, move offers and cleanup — the user works there;
+# only an explicit TERMINAL_STACK_DIR pin selects one. Master copy — twins:
+# dot_zshrc _ts_is_dev_clone, profile/_cleanup.ps1 Test-TsDevClone.
+# Safe by construction: ~/.local/share/... ('.local' breaks the /local/ bound)
+# and .../AppData/Local/terminal-stack/stack (host segment has no dot) never match.
+ts_is_dev_clone() {
+    [[ "$1" =~ /(src|public|archive|local|scratch)/[^/]+\.[^/]+/[^/]+/[^/]+/?$ ]]
+}
+
 # Canonicalize a path (resolve symlinks/.. when it exists; echo as-is otherwise).
 _ts_realpath() { ( cd "$1" 2>/dev/null && pwd -P ) || echo "$1"; }
 
@@ -54,6 +72,7 @@ ts_find_old_clones() {
     for d in "$@"; do
         [ -e "$d" ] || continue
         ts_is_stack_clone "$d" || continue
+        ts_is_dev_clone "$d" && continue   # dev checkouts are never "old clones"
         rp="$(_ts_realpath "$d")"
         [ "$rp" = "$current" ] && continue
         case "$seen" in *" $rp "*) continue ;; esac
@@ -102,8 +121,12 @@ ts_cleanup_menu() {
     local -a paths=() labels=() ticks=() kinds=()
     local d tk pth lbl
 
+    local canon=""
+    command -v ts_canonical_clone_dir >/dev/null 2>&1 && canon="$(ts_canonical_clone_dir 2>/dev/null || true)"
     while IFS= read -r d; do
         [ -n "$d" ] || continue
+        # The canonical runtime location is never offered for deletion.
+        [ -n "$canon" ] && [ "$(_ts_realpath "$d")" = "$(_ts_realpath "$canon")" ] && continue
         paths+=("$d")
         case "$d" in
             /mnt/c/*)

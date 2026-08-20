@@ -82,10 +82,21 @@ function Invoke-TsWsStatus([string[]]$Arguments) {
 
 # -------------------------------------------------------------------- plan ----
 
-# Build the migration plan. Status is move | inplace | conflict | blocked.
+# Build the migration plan. Status is move | inplace | conflict | blocked | runtime.
 function Get-TsWsPlan {
     $root = Get-TsWsRoot
+    $runtime = Get-TsWsRuntimeClone
     $rows = foreach ($d in (Get-TsWsScanCandidates)) {
+        # Never plan the active runtime clone into the tree — relocating it
+        # breaks the install; ts-doctor -Repair owns that move.
+        if ($runtime) {
+            $dResolved = try { (Resolve-Path -LiteralPath $d).Path } catch { $d }
+            if ($dResolved.TrimEnd('\') -ieq $runtime.TrimEnd('\')) {
+                [pscustomobject]@{ Status = 'runtime'; Source = $d; Dest = ''
+                    Note = 'active terminal-stack runtime clone - not migrated (relocate with ts-doctor -Repair)' }
+                continue
+            }
+        }
         $dest = Get-TsWsDestFor $d
         if (-not $dest.Rel) {
             [pscustomobject]@{ Status = 'blocked'; Source = $d; Dest = ''; Note = $dest.Note }
@@ -135,7 +146,7 @@ function Show-TsWsPlan($Rows, [string]$Mode) {
             if ($r.Note) { "      note: $($r.Note)" }
         }
     }
-    $blocked = @($Rows | Where-Object { $_.Status -in @('conflict', 'blocked') })
+    $blocked = @($Rows | Where-Object { $_.Status -in @('conflict', 'blocked', 'runtime') })
     if ($blocked.Count) {
         ""
         "-- BLOCKED ------------------------------------------------------------"
@@ -150,7 +161,7 @@ function Show-TsWsPlan($Rows, [string]$Mode) {
     "{0} ready, {1} conflicted, {2} blocked, {3} already correct" -f `
         @($Rows | Where-Object { $_.Status -eq 'move' }).Count,
         @($Rows | Where-Object { $_.Status -eq 'conflict' }).Count,
-        @($Rows | Where-Object { $_.Status -eq 'blocked' }).Count,
+        @($Rows | Where-Object { $_.Status -in @('blocked', 'runtime') }).Count,
         @($Rows | Where-Object { $_.Status -eq 'inplace' }).Count
     ""
 }

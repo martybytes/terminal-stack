@@ -31,11 +31,13 @@ Also mirrors `docs/kb/**` to `%LOCALAPPDATA%\terminal-stack\docs\kb\` so `doc`
 picks up kb updates after sync (clone paths still win for `doc edit` / `doc sync`).
 Same script `install.ps1` runs at install time; `ts-update` runs it after a pull.
 
-When the dev clone is not `%USERPROFILE%\terminal-stack`, set once in
-`Documents\PowerShell\profile.local.ps1`:
+A dev clone at a workspace tier path is **invisible** to `ts-update` and the
+resolvers — pinning `$env:TERMINAL_STACK_DIR` at it is exactly how you develop
+against it (the canonical install at `%LOCALAPPDATA%\terminal-stack\stack` needs
+no pin). Set once in `Documents\PowerShell\profile.local.ps1`:
 
 ```powershell
-$env:TERMINAL_STACK_DIR = 'C:\DATA\Workspace\terminal-stack'
+$env:TERMINAL_STACK_DIR = 'C:\DATA\Workspace\src\github.com\martybytes\terminal-stack'
 ```
 
 Then:
@@ -157,7 +159,7 @@ Reload: auto for `~/.wezterm.lua`; **`Ctrl+Space` `r`** for `pane_nav.lua`.
 anything under `windows/` changes:
 
 ```powershell
-$clone = 'C:\DATA\Workspace\terminal-stack'
+$clone = 'C:\DATA\Workspace\src\github.com\martybytes\terminal-stack'
 $src   = Join-Path $clone 'windows'
 $sync  = Join-Path $clone 'scripts\sync-windows.ps1'
 $w = New-Object IO.FileSystemWatcher $src -PropertyName LastWrite,FileName,DirectoryName -IncludeSubdirectories
@@ -172,7 +174,7 @@ Still **`Ctrl+Space` `r`** after `pane_nav.lua` edits.
 save (symlinks may need Developer Mode / elevated shell on Windows):
 
 ```powershell
-$clone = 'C:\DATA\Workspace\terminal-stack'
+$clone = 'C:\DATA\Workspace\src\github.com\martybytes\terminal-stack'
 New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.wezterm" | Out-Null
 Remove-Item "$env:USERPROFILE\.wezterm\pane_nav.lua" -ErrorAction SilentlyContinue
 New-Item -ItemType SymbolicLink `
