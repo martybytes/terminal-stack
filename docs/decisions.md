@@ -141,7 +141,7 @@ if MUX_ENABLED then
 end
 ```
 
-Defaulting to *off* rather than preserving the shipped-on behaviour is deliberate: crash resilience is worth having, but it is worth **choosing**, and a machine that silently gained a mux is better served by landing back where it started and opting back in with one command.
+Defaulting to *off* rather than preserving the shipped-on behaviour is deliberate: crash resilience is worth having, but it is worth **choosing**, and a machine that silently gained a mux is better served by landing back where it started and opting back in with one command. For the same reason the **install wizard asks** — `ts_prompt_wezterm_mux` / `Read-TsWeztermMux`, defaulting to off, `TS_WEZ_MUX=on|off` for scripted installs, and skipped on headless hosts where there is no GUI to host anything. A question at install is how a default becomes a decision; leaving it to a command nobody knows exists is how it stays a surprise.
 
 `ts-mux` is that command, and it also owns the live server, because the manual path (`taskkill /IM wezterm-mux-server.exe /F`) is both easy to get wrong and impossible from WSL without knowing the interop trick:
 
@@ -156,6 +156,16 @@ Defaulting to *off* rather than preserving the shipped-on behaviour is deliberat
 Two implementations, as everywhere else in this repo: `bootstrap/ts-mux.sh` (zsh wrapper in `dot_zshrc`) and `Invoke-TsMux` in `$PROFILE`. On WSL the GUI, the mux server and the rendered config are all Windows-side, so the bash script drives them over interop (`tasklist.exe` / `taskkill.exe` / `wezterm.exe`) rather than the Linux process table.
 
 `status` deliberately reports the **rendered** value separately from the saved one. A config written before this toggle existed has no `MUX_ENABLED` line at all, so it reads the unconditional `config.default_domain = 'main'` and reports `on (pre-toggle)` — which is exactly the state a machine is in between pulling this change and applying it.
+
+## Why the status bar starts quiet
+
+The tabline status bar shipped showing the mode badge, the workspace name, and `user@host │ path` for the active pane. Two of those three are permanent noise: on a single-user laptop `user@host` never changes, the workspace is `default` until you deliberately make another one, and the path is already in the Starship prompt two lines below and in the tab title above. That left a status bar whose steady state was three facts you already knew, and whose one genuinely useful element — the mode badge that tells you a repeatable key table is armed — was competing with them.
+
+So `wezterm.GLOBAL.show_identity` now starts `false`. The badge still renders (it is transient and load-bearing); **Leader+s** reveals the rest when you actually want it — "which host is this pane on again?" — and hides it again. `wezterm.GLOBAL` survives a config reload but not a GUI restart, which is the right lifetime: a deliberate reveal lasts the session, and every launch starts clean.
+
+The toggle covers the workspace name too, which it previously did not. Both the tabline sections and the hand-rolled fallback status now route through `status_workspace` / `status_identity`, so there is exactly one place the toggle is honoured and no way for the two renderers to disagree — the fallback had its own `ws ~= 'default'` test, which would have kept showing a named workspace after Leader+s hid everything else.
+
+This is a runtime toggle with a default, not a saved config key. It costs one keystroke to change, needs no re-apply, and adding it to chezmoi `[data]` would mean the seven-file blast radius described above for something you flip while looking at it.
 
 ## Why not just use a single GUI tool like Microsoft Terminal?
 

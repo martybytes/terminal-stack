@@ -136,9 +136,11 @@ Panes already hosted by the mux stay there until you close them or `ts-mux kill`
 but never applied — or a `.wezterm.lua` older than the toggle, reported as
 `on (pre-toggle)` — shows up as stale instead of silently disagreeing.
 
-The setting is saved with the rest of the config (`ts-config show` prints it as
-`wezmux`; `ts-config mux …` is the same command). On WSL the mux server is a
-**Windows** process — `ts-mux` reaches it over interop, so it works from either side.
+The install wizard asks (defaulting to off); `TS_WEZ_MUX=on|off` skips the prompt
+for a scripted install. The setting is saved with the rest of the config
+(`ts-config show` prints it as `wezmux`; `ts-config mux …` is the same command).
+On WSL the mux server is a **Windows** process — `ts-mux` reaches it over interop,
+so it works from either side.
 
 ## SSH (stack shortcut)
 `ssht host [session]` — SSH and attach-or-create a remote tmux session in one shot

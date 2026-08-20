@@ -69,8 +69,9 @@ grows the pane right 9 cells.
 | `Ctrl+Space` `Ctrl+Space` | send a real `Ctrl+Space` to the app — the escape hatch, since the leader eats the first press (leader, then `Ctrl+Space`, whatever your leader is) |
 
 ## Do panes survive a GUI crash?
-Only if the **multiplexer domain** is on, and it is **off by default** — panes are
-spawned by the GUI, so a GUI crash takes them with it. `ts-mux on` moves them into
+Only if the **multiplexer domain** is on. The installer asks and defaults to off,
+so unless you said yes, panes are spawned by the GUI and a GUI crash takes them
+with it. `ts-mux on` moves them into
 `wezterm-mux-server`, where they (and everything running in them) survive; `ts-mux`
 alone reports which mode you're in. Trade-offs and the kill/restart/reset verbs:
 `ts-mux -h`, `doc common/stack`.

@@ -103,13 +103,14 @@ Write-Host "PowerShell $($PSVersionTable.PSVersion); user $env:USERNAME"
 # ── Wizard ──────────────────────────────────────────────────────────────────────
 # Every answer is collected first and shown for review before anything is
 # installed or written, so a mis-typed choice costs a keystroke instead of a
-# re-run. Env vars (TS_LEADER / TS_THEME / TS_WEZTERM / TS_APPS / TS_CC_TTS /
-# WORKSPACE_DIR) still skip their prompt individually.
+# re-run. Env vars (TS_LEADER / TS_THEME / TS_WEZTERM / TS_WEZ_MUX / TS_APPS /
+# TS_CC_TTS / WORKSPACE_DIR) still skip their prompt individually.
 function Read-TsWizard {
     [ordered]@{
         Leader    = (Read-TsLeader)
         Theme     = (Read-TsTheme)
         Wezterm   = (Read-TsWezterm)
+        WezMux    = (Read-TsWeztermMux)
         Apps      = @(Read-TsApps)
         CcTts     = (Read-TsCcTts)
         Workspace = (Read-TsWorkspaceDir)
@@ -128,6 +129,7 @@ function Show-TsWizardReview($w) {
     Write-Host ("    Leader       {0}" -f $w.Leader)
     Write-Host ("    Theme        {0}" -f $themeLabel)
     Write-Host ("    WezTerm      {0}" -f $w.Wezterm)
+    Write-Host ("    WezTerm mux  {0}" -f $w.WezMux)
     Write-Host ("    Apps         {0}" -f $(if ($w.Apps.Count) { $w.Apps -join ', ' } else { '<none>' }))
     Write-Host ("    Claude TTS   {0}" -f $w.CcTts)
     Write-Host ("    Workspace    {0}" -f $(if ($w.Workspace) { $w.Workspace } else { '<none detected>' }))
@@ -153,7 +155,7 @@ $selectedApps = @($wizard.Apps)
 $ccTtsChoice  = $wizard.CcTts
 $ccTts        = Set-CcTtsWizardChoice $ccTtsChoice
 Write-Host ''
-Write-Host "==> Config: leader=$leaderChord theme=$themeMode wezterm=$($wizard.Wezterm) cc-tts=$ccTtsChoice"
+Write-Host "==> Config: leader=$leaderChord theme=$themeMode wezterm=$($wizard.Wezterm) wez-mux=$($wizard.WezMux) cc-tts=$ccTtsChoice"
 
 # Required packages (always installed; not part of the picker). WezTerm is NOT
 # here — it is a wizard choice, see Read-TsWezterm.
@@ -176,7 +178,7 @@ foreach ($id in $selectedApps) {
 # Save the chosen config to %LOCALAPPDATA%\terminal-stack\config.json — read by
 # sync-windows.ps1 (and the WSL hook's mirror) to render the Windows .tmpl files.
 if ($PSCmdlet.ShouldProcess('terminal-stack config.json', 'save config')) {
-    Save-TsConfig -LeaderChord $leaderChord -ThemeMode $themeMode -Apps $selectedApps -CcTts $ccTts | Out-Null
+    Save-TsConfig -LeaderChord $leaderChord -ThemeMode $themeMode -Apps $selectedApps -WeztermMux $wizard.WezMux -CcTts $ccTts | Out-Null
     Export-CcTtsJson
     Write-Host "==> Saved config to $(Get-TsConfigPath)"
 }
