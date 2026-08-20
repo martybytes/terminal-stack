@@ -29,13 +29,26 @@ The canonical path resolves without a pin — set `TERMINAL_STACK_DIR`
 you deliberately work against; that pin is how `ts-update` can update it, since dev
 clones are otherwise skipped. At a legacy path `ts-update` prints a one-line notice
 and `ts-doctor --repair` offers to move the clone to the canonical location (git
-state intact). `%LOCALAPPDATA%\terminal-stack` also holds `config.json`,
+state intact).
+
+**A pin that points at nothing does not break anything.** If the clone moved or was
+deleted, the resolvers warn once and fall through to the usual candidate search
+rather than failing — a stale line in `profile.local.ps1` would otherwise take
+`ts-update`, `wso` and `doc` down together. An explicit `sync-windows.ps1 -SourceDir`
+still fails loudly: that one is typed per call, so a bad value is a mistake worth
+stopping for. `install.ps1` goes further and ignores a *persisted* pin with no clone
+behind it, removing the dead line once the clone lands at the canonical path.
+
+**The runtime clone never goes inside a workspace root.** The installers warn and
+offer the canonical path instead, and `wso` refuses to migrate any un-tiered
+terminal-stack clone it finds there — see `doc common/workspace-org`. `%LOCALAPPDATA%\terminal-stack` also holds `config.json`,
 `rollback-sha`, and the `docs\kb` mirror alongside `stack\`. Rationale:
 `docs/decisions.md` § "Runtime clone location".
 
 ## `ts-update`
 Resolves the **runtime** clone — the pin (`$TERMINAL_STACK_DIR`) first, else the
-canonical location, else legacy defaults; dev clones at workspace tier paths are
+canonical location, else legacy defaults; a pin with no clone behind it is warned
+about and skipped rather than obeyed. Dev clones at workspace tier paths are
 never picked up unless pinned, so `ts-update` can't mutate the tree you develop
 in. Then: prints a one-line notice if the clone sits at a legacy path (`ts-doctor
 --repair` moves it); warns about any **other** clones on
@@ -65,7 +78,10 @@ the `doc` command, and that `zsh`/`starship` are on PATH. Leftover clones are no
 but don't fail the check. `--quiet` hides the per-check ok lines.
 
 `ts-doctor --repair` fixes what it finds, confirming each step: offers to **move**
-a legacy-path clone to the canonical location (git state intact), repoints chezmoi's
+a legacy-path clone to the canonical location (git state intact) — or, when that
+location is **already occupied**, switches to the clone living there and offers the
+other one for removal, since the move itself refuses an existing destination and the
+cleanup checklist never lists the canonical path. It also repoints chezmoi's
 sourceDir at the real clone, fixes stale pins, can normalize an old-account origin
 URL, re-applies, then offers an interactive checklist to
 remove old clones and leftover files (per-machine files — `profile.local.ps1`,
@@ -79,6 +95,7 @@ repair offers the same canonical move and re-syncs (a pin is written to
 | Command | What it does |
 |---|---|
 | `ts-config` | interactive menu (leader / theme / tmux / apps / re-apply / TTS) |
+| — | WezTerm itself is an **install-time** choice, not a `ts-config` entry; change it with `winget install wez.wezterm` / `brew install --cask wezterm@nightly` |
 | `ts-config show` | print the saved config + the derived bindings |
 | `ts-config leader <chord>` | WezTerm leader, e.g. `ctrl-space`, `ctrl-a`, `alt-x` |
 | `ts-config theme <dark\|light\|follow>` | palette; `follow` tracks the OS theme |

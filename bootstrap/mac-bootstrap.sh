@@ -45,7 +45,10 @@ fi
 # 2. Wizard — collect leader/theme/app choices (env vars skip prompts), then
 # install the required formulae plus the selected toggleable apps.
 ts_confirm_headless
-ts_wizard_collect
+# macOS is the only POSIX target that installs WezTerm (WSL/Linux use the
+# host's GUI), so it is the only one that asks.
+ts_is_headless || TS_WIZ_ASK_WEZTERM=1
+ts_wizard_collect || exit 0
 echo "$INFO Installing required brew formulae (zsh, git, starship, chezmoi)"
 brew install zsh git starship chezmoi
 ts_brew_install_apps "$TS_WIZ_APPS"
@@ -55,14 +58,34 @@ ts_brew_install_apps "$TS_WIZ_APPS"
 if ts_is_headless; then
     echo "$INFO Headless Mac — skipping WezTerm + Nerd Font casks (no GUI here)."
 else
-    # WezTerm nightly, matching the Windows side. The plain `wezterm` cask is
-    # pinned to the stale 20240203 stable; this stack expects a current build.
-    if ! brew list --cask wezterm@nightly >/dev/null 2>&1; then
-        echo "$INFO Installing WezTerm nightly cask"
-        brew install --cask wezterm@nightly
-    else
-        echo "$INFO WezTerm nightly cask already installed"
-    fi
+    # WezTerm, matching the Windows side. The plain `wezterm` cask is pinned to
+    # the stale 20240203 stable; this stack expects a current build, so nightly
+    # is the default — but it is a choice (see ts_prompt_wezterm), and a nightly
+    # that won't install falls back to stable rather than failing the bootstrap.
+    case "${TS_WIZ_WEZTERM:-nightly}" in
+        skip)
+            echo "$INFO WezTerm: skipped"
+            ;;
+        stable)
+            if ! brew list --cask wezterm >/dev/null 2>&1; then
+                echo "$INFO Installing WezTerm stable cask"
+                brew install --cask wezterm || echo "$WARN WezTerm cask install failed; install it by hand later."
+            else
+                echo "$INFO WezTerm cask already installed"
+            fi
+            ;;
+        *)
+            if ! brew list --cask wezterm@nightly >/dev/null 2>&1; then
+                echo "$INFO Installing WezTerm nightly cask"
+                if ! brew install --cask wezterm@nightly; then
+                    echo "$WARN nightly unavailable; falling back to WezTerm stable"
+                    brew install --cask wezterm || echo "$WARN WezTerm cask install failed; install it by hand later."
+                fi
+            else
+                echo "$INFO WezTerm nightly cask already installed"
+            fi
+            ;;
+    esac
     # JetBrainsMono Nerd Font cask (font casks moved into homebrew/cask in 2024).
     if ! brew list --cask font-jetbrains-mono-nerd-font >/dev/null 2>&1; then
         echo "$INFO Installing JetBrainsMono Nerd Font cask"

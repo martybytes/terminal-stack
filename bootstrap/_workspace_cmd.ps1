@@ -97,6 +97,18 @@ function Get-TsWsPlan {
                 continue
             }
         }
+        # Belt and braces: skip ANY un-tiered terminal-stack clone, not only the
+        # one that resolved as active. Get-TsWsRuntimeClone returns $null in
+        # exactly the broken states where this matters most (dangling pin, clone
+        # at a legacy path), and a $null there used to switch the guard off — that
+        # is how a runtime clone got migrated to a tier path and orphaned the
+        # install. A real dev clone already lives at a tier path and is therefore
+        # never a scan candidate, so nothing legitimate is blocked here.
+        if ((& git -C $d config --get remote.origin.url 2>$null) -match 'terminal-stack') {
+            [pscustomobject]@{ Status = 'runtime'; Source = $d; Dest = ''
+                Note = 'terminal-stack clone at the workspace root - not migrated (relocate with ts-doctor -Repair)' }
+            continue
+        }
         $dest = Get-TsWsDestFor $d
         if (-not $dest.Rel) {
             [pscustomobject]@{ Status = 'blocked'; Source = $d; Dest = ''; Note = $dest.Note }
