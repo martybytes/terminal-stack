@@ -789,6 +789,41 @@ function Get-DocRepo {
 }
 function Get-DocLocal { if ($env:DOC_LOCAL) { $env:DOC_LOCAL } else { Join-Path $env:USERPROFILE '.doc.local' } }
 
+# Rendering style: the repo ships glamour style JSONs in docs/kb/_style (they
+# ride the same mirror sync as the topics), so glow renders identically on
+# every platform/build. Theme follows the saved resolvedTheme; override with
+# $env:DOC_STYLE (dark | light | path\to\style.json).
+function Get-DocStyle {
+    $theme = $env:DOC_STYLE
+    if ($theme -and (Test-Path -LiteralPath $theme)) { return $theme }
+    if ($theme -notin @('dark', 'light')) {
+        $theme = 'dark'
+        $cfg = Join-Path $env:LOCALAPPDATA 'terminal-stack\config.json'
+        if (Test-Path -LiteralPath $cfg) {
+            try {
+                $j = Get-Content -LiteralPath $cfg -Raw | ConvertFrom-Json
+                if ($j.resolvedTheme -in @('dark', 'light')) { $theme = $j.resolvedTheme }
+            } catch {}
+        }
+    }
+    $root = Get-DocRoot
+    if ($root) {
+        $f = Join-Path $root "_style\$theme.json"
+        if (Test-Path -LiteralPath $f) { return $f }
+    }
+    return $theme
+}
+# Reading width: terminal width minus a hair, capped for readability.
+function Get-DocWidth {
+    $w = 100
+    try { $w = $Host.UI.RawUI.WindowSize.Width } catch {}
+    if (-not $w -or $w -lt 1) { $w = 100 }
+    $w -= 2
+    if ($w -gt 100) { $w = 100 }
+    if ($w -lt 40)  { $w = 40 }
+    return $w
+}
+
 function Get-DocIndex([string]$Os = 'windows') {
     $roots = [ordered]@{}
     $r = Get-DocRoot; if ($r) { $roots[$r] = '' }
@@ -809,9 +844,18 @@ function Get-DocIndex([string]$Os = 'windows') {
 
 function Invoke-DocView([string]$path) {
     if (-not (Test-Path -LiteralPath $path)) { Write-Warning "doc: not found: $path"; return }
-    if     (Get-Command glow -EA SilentlyContinue) { & glow -p $path }
-    elseif (Get-Command bat  -EA SilentlyContinue) { & bat --language=markdown --paging=always $path }
-    else   { Get-Content -LiteralPath $path }
+    # Render at an explicit width + shipped style, page with less when available
+    # (Git for Windows ships less; search with /, q quits, short topics print
+    # straight through thanks to -F).
+    $glow = Get-Command glow -EA SilentlyContinue
+    $less = Get-Command less -EA SilentlyContinue
+    if ($glow -and $less) { & glow -s (Get-DocStyle) -w (Get-DocWidth) $path | & $less -RF }
+    elseif ($glow)        { & glow -p $path }
+    elseif (Get-Command bat -EA SilentlyContinue) { & bat --language=markdown --paging=always $path }
+    else {
+        try { Get-Content -LiteralPath $path | Out-Host -Paging }
+        catch { Get-Content -LiteralPath $path }
+    }
 }
 
 function Invoke-DocOpen([string]$query, [string]$os) {
@@ -836,9 +880,18 @@ function Invoke-DocFinder([string]$os, [string]$query) {
     if (-not (Get-Command fzf -EA SilentlyContinue)) { Write-Warning 'doc: fzf not installed'; return }
     $idx = Get-DocIndex $os | Sort-Object Label
     if (-not $idx) { Write-Warning 'doc: no topics found'; return }
-    $prev = if (Get-Command glow -EA SilentlyContinue) { 'glow -s dark {2}' } else { 'bat --color=always --style=plain {2}' }
+    # Preview runs through cmd.exe on Windows, so the width var is %…% syntax;
+    # fzf exports FZF_PREVIEW_COLUMNS to the preview process.
+    $prev = if (Get-Command glow -EA SilentlyContinue) {
+        "glow -s `"$(Get-DocStyle)`" -w %FZF_PREVIEW_COLUMNS% {2}"
+    } else { 'bat --color=always --style=plain {2}' }
+    $ed = if ($env:EDITOR) { $env:EDITOR } elseif (Get-Command micro -EA SilentlyContinue) { 'micro' } else { 'notepad' }
     $sel = ($idx | ForEach-Object { "$($_.Label)`t$($_.Path)" }) |
-        fzf --delimiter="`t" --with-nth=1 --query=$query --preview=$prev --preview-window='right,60%,wrap' --header='enter=open'
+        fzf --delimiter="`t" --with-nth=1 --query=$query --border --prompt='doc> ' `
+            --preview=$prev --preview-window='right,60%,wrap,border-left' `
+            --bind='ctrl-u:preview-half-page-up,ctrl-d:preview-half-page-down,ctrl-/:toggle-preview' `
+            --bind="alt-e:execute($ed {2})" `
+            --header='enter=open · ctrl-u/d=scroll preview · ctrl-/=toggle · alt-e=edit'
     if ($sel) { Invoke-DocView (($sel -split "`t")[-1]) }
 }
 
@@ -854,9 +907,13 @@ function Invoke-DocCmd([string]$query) {
         }
     }
     if (-not $rows) { Write-Warning 'doc: no commands found'; return }
-    $sel = $rows | fzf --delimiter="`t" --with-nth=1 --query=$query `
-        --preview='bat --color=always --highlight-line {3} {2}' --preview-window='right,60%,wrap' `
-        --header='enter = put command on your prompt'
+    $cprev = if (Get-Command bat -EA SilentlyContinue) {
+        'bat --color=always --highlight-line {3} {2}'
+    } else { 'type {2}' }   # cmd builtin — no highlight, but never breaks without bat
+    $sel = $rows | fzf --delimiter="`t" --with-nth=1 --query=$query --border --prompt='cmd> ' `
+        --preview=$cprev --preview-window='right,60%,wrap,border-left' `
+        --bind='ctrl-u:preview-half-page-up,ctrl-d:preview-half-page-down,ctrl-/:toggle-preview' `
+        --header='enter = put command on your prompt · ctrl-u/d=scroll preview'
     if ($sel) { [Microsoft.PowerShell.PSConsoleReadLine]::Insert((($sel -split "`t")[0])) }
 }
 
@@ -864,22 +921,43 @@ function Invoke-DocGrep([string]$pat) {
     if (-not $pat) { Write-Host 'usage: doc -g <pattern>'; return }
     $files = @((Get-DocIndex 'all').Path)
     if (-not $files) { Write-Warning 'doc: no docs'; return }
-    if (Get-Command rg -EA SilentlyContinue) { & rg --line-number --heading --color=always $pat @files }
-    else { Select-String -Path $files -Pattern $pat | ForEach-Object { "$($_.Filename):$($_.LineNumber): $($_.Line.Trim())" } }
+    $out = if (Get-Command rg -EA SilentlyContinue) { & rg --line-number --heading --color=always $pat @files }
+           else { Select-String -Path $files -Pattern $pat | ForEach-Object { "$($_.Filename):$($_.LineNumber): $($_.Line.Trim())" } }
+    if (-not $out) { return }
+    # Page long results (less ships with Git for Windows); plain output otherwise.
+    $less = Get-Command less -EA SilentlyContinue
+    if ($less) { $out | & $less -RF } else { $out }
 }
 
 function Invoke-DocEdit([string]$mode, [string]$arg, [string]$os) {
     $editor = if ($env:EDITOR) { $env:EDITOR } elseif (Get-Command micro -EA SilentlyContinue) { 'micro' } else { 'notepad' }
+    # Edits belong in the clone (or ~/.doc.local) — never the %LOCALAPPDATA%
+    # mirror, which the next sync overwrites.
+    $repo = Get-DocRepo
+    $root = if ($repo) { Join-Path $repo 'docs\kb' } else { Get-DocRoot }
+    $mirror = Join-Path $env:LOCALAPPDATA 'terminal-stack\docs\kb'
     if ($mode -eq 'new') {
         if (-not $arg) { Write-Host 'usage: doc new <os>/<name>   e.g. doc new linux/foo'; return }
-        $p = Join-Path (Get-DocRoot) ($arg -replace '/', '\')
+        if ($root -like "$mirror*") {
+            Write-Warning 'doc new: only the read-only mirror is available — clone terminal-stack (or set $env:TERMINAL_STACK_DIR) first.'
+            return
+        }
+        $p = Join-Path $root ($arg -replace '/', '\')
         if (-not $p.EndsWith('.md')) { $p += '.md' }
         New-Item -ItemType Directory -Force -Path (Split-Path $p) | Out-Null
         if (-not (Test-Path -LiteralPath $p)) { "# $((Split-Path $p -Leaf) -replace '\.md$','')`n" | Set-Content -LiteralPath $p -Encoding utf8 }
         & $editor $p
     } else {
         $m = @(Get-DocIndex 'all' | Where-Object { $_.Label -like "*$arg*" })
-        if ($m.Count -ge 1) { & $editor $m[0].Path } else { Write-Warning "doc edit: no topic matching '$arg'" }
+        if ($m.Count -lt 1) { Write-Warning "doc edit: no topic matching '$arg'"; return }
+        $target = $m[0].Path
+        if ($target -like "$mirror*") {
+            $rel = $target.Substring($mirror.Length).TrimStart('\')
+            $cand = if ($repo) { Join-Path $repo "docs\kb\$rel" } else { $null }
+            if ($cand -and (Test-Path -LiteralPath $cand)) { $target = $cand }
+            else { Write-Warning "doc edit: '$arg' resolves to the read-only mirror — clone terminal-stack to edit it."; return }
+        }
+        & $editor $target
     }
 }
 
@@ -928,15 +1006,19 @@ function Invoke-DocSync([string]$msg) {
 
 function Write-DocHelp {
     @'
-doc                     fuzzy-find a topic (glow preview) -> open in pager
+doc                     fuzzy-find a topic (live preview) -> open in less
 doc <topic>             open a topic directly (e.g. doc veracrypt, doc ssh-keys)
-doc -g <pattern>        grep across every topic
+doc -g <pattern>        grep across every topic (paged)
 doc cmd [pattern]       find a command and drop it on your prompt
-doc tui                 glow's tree browser
+doc tui [local]         glow's tree browser (tracked kb; 'local' = ~/.doc.local)
 doc edit <topic>        edit a topic   |   doc new <os>/<name>   scaffold one
 doc ls                  list topics (this OS + common + local)
 doc --os <linux|macos|windows> ...    browse another OS
 doc sync [msg]          commit doc edits back to the repo (+ changelog, confirm push)
+
+picker keys: ctrl-u/ctrl-d scroll preview · ctrl-/ toggle preview · alt-e edit
+reader keys: j/k or arrows scroll · /pattern searches · q quits
+style: docs/kb/_style/<dark|light>.json follows your theme ($env:DOC_STYLE overrides)
 '@
 }
 
@@ -957,7 +1039,15 @@ function doc {
         '^(find)$'      { Invoke-DocFinder $os $tail; break }
         '^(-g|grep)$'   { Invoke-DocGrep $tail; break }
         '^(cmd|c)$'     { Invoke-DocCmd $tail; break }
-        '^(tui)$'       { $r = Get-DocRoot; if (Get-Command glow -EA SilentlyContinue) { & glow $r } else { Write-Warning 'doc tui needs glow (winget install charmbracelet.glow)' }; break }
+        '^(tui)$'       {
+            if (-not (Get-Command glow -EA SilentlyContinue)) { Write-Warning 'doc tui needs glow (winget install charmbracelet.glow)' }
+            elseif ($tail -eq 'local') {
+                $l = Get-DocLocal
+                if (Test-Path -LiteralPath $l) { & glow $l } else { Write-Warning "doc tui local: $l does not exist" }
+            }
+            else { & glow (Get-DocRoot) }
+            break
+        }
         '^(ls|list)$'   { Get-DocIndex $os | Sort-Object Label | ForEach-Object { $_.Label }; break }
         '^(edit|new)$'  { Invoke-DocEdit $cmd $tail $os; break }
         '^(sync)$'      { Invoke-DocSync $tail; break }

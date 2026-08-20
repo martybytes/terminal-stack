@@ -776,6 +776,29 @@ _doc_repo() {
 _doc_local() { echo "${DOC_LOCAL:-$HOME/.doc.local}"; }
 _doc_os() { [[ "$(uname -s)" == Darwin ]] && echo macos || echo linux; }
 
+# Rendering style: the repo ships glamour style JSONs in docs/kb/_style (they
+# ride the same mirror sync as the topics), so glow renders identically on
+# every platform/build. Theme follows the saved resolvedTheme; override with
+# $DOC_STYLE (dark | light | /path/to/style.json).
+_doc_style() {
+  local theme="${DOC_STYLE:-}" root
+  [[ -f "$theme" ]] && { echo "$theme"; return; }
+  if [[ "$theme" != dark && "$theme" != light ]]; then
+    theme="$(grep -Eo 'resolvedTheme *= *"(dark|light)"' "$HOME/.config/chezmoi/chezmoi.toml" 2>/dev/null | grep -Eo 'dark|light' | head -1)"
+    [[ -n "$theme" ]] || theme=dark
+  fi
+  root="$(_doc_root)"
+  if [[ -f "$root/_style/$theme.json" ]]; then echo "$root/_style/$theme.json"; else echo "$theme"; fi
+}
+# Reading width: terminal width minus a hair, capped for readability.
+_doc_width() {
+  local w="${COLUMNS:-100}"
+  (( w = w - 2 ))
+  (( w > 100 )) && w=100
+  (( w < 40 )) && w=40
+  echo "$w"
+}
+
 # Emit "label<TAB>path" for visible topics. $1 = os (default current; 'all' = every OS).
 _doc_index() {
   local os="${1:-$(_doc_os)}" root local_root r tag sub f rel i
@@ -805,24 +828,43 @@ _doc_index() {
 _doc_view() {
   local f="$1"
   [[ -f "$f" ]] || { echo "doc: not found: $f" >&2; return 1; }
-  if command -v glow >/dev/null; then glow -p "$f"
+  # Render at an explicit width + shipped style, page with less (search with /,
+  # q quits, short topics print straight through thanks to -F).
+  if command -v glow >/dev/null; then
+    glow -s "$(_doc_style)" -w "$(_doc_width)" "$f" | less -RF
   elif command -v bat >/dev/null; then bat --language=markdown --paging=always "$f"
   else less "$f"; fi
 }
 
 _doc_finder() {
-  local os="$1" query="$2" prev sel
+  local os="$1" query="$2" prev sel style
   command -v fzf >/dev/null || { echo "doc: fzf not installed" >&2; return 1; }
-  if command -v glow >/dev/null; then prev='glow -s dark {2}'; else prev='bat --color=always --style=plain {2}'; fi
+  if command -v glow >/dev/null; then
+    style="$(_doc_style)"
+    # FZF_PREVIEW_COLUMNS is exported by fzf into the preview command's shell,
+    # so glow renders at the preview pane's real width (escaped: expand there).
+    prev="glow -s ${(q)style} -w \${FZF_PREVIEW_COLUMNS:-76} {2}"
+  else
+    prev='bat --color=always --style=plain {2}'
+  fi
   sel=$(_doc_index "$os" | sort | fzf --delimiter=$'\t' --with-nth=1 --query="$query" \
-        --preview="$prev" --preview-window='right,60%,wrap' --header='enter=open') || return 0
+        --border --prompt='doc> ' \
+        --preview="$prev" --preview-window='right,60%,wrap,border-left' \
+        --bind='ctrl-u:preview-half-page-up,ctrl-d:preview-half-page-down,ctrl-/:toggle-preview' \
+        --bind="alt-e:become(${EDITOR:-micro} {2})" \
+        --header='enter=open · ctrl-u/d=scroll preview · ctrl-/=toggle · alt-e=edit') || return 0
   [[ -n "$sel" ]] && _doc_view "${sel#*$'\t'}"
 }
 
 # Find a single command across all docs and drop it on the prompt to run.
 _doc_cmd() {
-  local query="$1" sel cmd
+  local query="$1" sel cmd prev
   command -v fzf >/dev/null || { echo "doc: fzf not installed" >&2; return 1; }
+  if command -v bat >/dev/null; then
+    prev='bat --color=always --highlight-line {3} {2}'
+  else
+    prev='awk -v n={3} "NR>=n-5 && NR<=n+15" {2}'
+  fi
   sel=$(_doc_index all | cut -f2 | while IFS= read -r f; do
           awk -v file="$f" '
             /^[[:space:]]*```/ { infence = !infence; next }
@@ -830,8 +872,10 @@ _doc_cmd() {
                       if (line=="" || line ~ /^#/) next; printf "%s\t%s\t%d\n", line, file, NR }
           ' "$f"
         done | fzf --delimiter=$'\t' --with-nth=1 --query="$query" \
-                   --preview='bat --color=always --highlight-line {3} {2}' \
-                   --preview-window='right,60%,wrap' --header='enter = put command on your prompt') || return 0
+                   --border --prompt='cmd> ' \
+                   --preview="$prev" --preview-window='right,60%,wrap,border-left' \
+                   --bind='ctrl-u:preview-half-page-up,ctrl-d:preview-half-page-down,ctrl-/:toggle-preview' \
+                   --header='enter = put command on your prompt · ctrl-u/d=scroll preview') || return 0
   [[ -n "$sel" ]] || return 0
   cmd="${sel%%$'\t'*}"
   print -z -- "$cmd"
@@ -843,8 +887,11 @@ _doc_grep() {
   local -a files
   files=("${(@f)$(_doc_index all | cut -f2)}")
   (( ${#files} )) || { echo "doc: no docs" >&2; return 1; }
-  if command -v rg >/dev/null; then rg --line-number --heading --color=always -- "$pat" $files
-  else grep -rn -- "$pat" $files; fi
+  # Page long results when on a terminal; plain passthrough when piped.
+  {
+    if command -v rg >/dev/null; then rg --line-number --heading --color=always -- "$pat" $files
+    else grep -rn -- "$pat" $files; fi
+  } | { [[ -t 1 ]] && less -RF || cat }
 }
 
 _doc_open() {
@@ -866,18 +913,36 @@ _doc_open() {
 }
 
 _doc_edit() {
-  local mode="$1" arg="$2" os="$3" editor="${EDITOR:-}" root p first
+  local mode="$1" arg="$2" os="$3" editor="${EDITOR:-}" root repo p target rel
   [[ -z "$editor" ]] && { command -v micro >/dev/null && editor=micro || editor=vi; }
-  root="$(_doc_root)"
+  # Edits belong in the clone (or ~/.doc.local) — never the %LOCALAPPDATA%
+  # mirror, which the next sync overwrites. Prefer the repo's docs/kb; the
+  # generic _doc_root only as a non-mirror fallback.
+  repo=""; repo="$(_doc_repo 2>/dev/null)" || repo=""
+  if [[ -n "$repo" && -d "$repo/docs/kb" ]]; then root="$repo/docs/kb"; else root="$(_doc_root)"; fi
   if [[ "$mode" == new ]]; then
     [[ -n "$arg" ]] || { echo "usage: doc new <os>/<name>   e.g. doc new linux/foo"; return 2; }
+    if [[ "$root" == */AppData/Local/terminal-stack/* ]]; then
+      echo "doc new: only the read-only mirror is available — clone terminal-stack (or set \$TERMINAL_STACK_DIR) first." >&2
+      return 1
+    fi
     p="$root/$arg"; [[ "$p" == *.md ]] || p="$p.md"
     mkdir -p "${p:h}"
     [[ -f "$p" ]] || printf '# %s\n' "${${p:t}:r}" > "$p"
     "$editor" "$p"
   else
-    first="$(_doc_index all | awk -F'\t' -v q="${(L)arg}" 'tolower($1) ~ q {print $2; exit}')"
-    [[ -n "$first" ]] && "$editor" "$first" || echo "doc edit: no topic matching '$arg'" >&2
+    target="$(_doc_index all | awk -F'\t' -v q="${(L)arg}" 'tolower($1) ~ q {print $2; exit}')"
+    [[ -n "$target" ]] || { echo "doc edit: no topic matching '$arg'" >&2; return 1; }
+    if [[ "$target" == */AppData/Local/terminal-stack/* ]]; then
+      rel="${target#*/AppData/Local/terminal-stack/docs/kb/}"
+      if [[ -n "$repo" && -f "$repo/docs/kb/$rel" ]]; then
+        target="$repo/docs/kb/$rel"
+      else
+        echo "doc edit: '$arg' resolves to the read-only mirror — clone terminal-stack to edit it." >&2
+        return 1
+      fi
+    fi
+    "$editor" "$target"
   fi
 }
 
@@ -919,15 +984,19 @@ _doc_sync() {
 
 _doc_help() {
   cat <<'EOF'
-doc                     fuzzy-find a topic (glow preview) -> open in pager
+doc                     fuzzy-find a topic (live preview) -> open in less
 doc <topic>             open a topic directly (e.g. doc veracrypt, doc ssh-keys)
-doc -g <pattern>        grep across every topic
+doc -g <pattern>        grep across every topic (paged)
 doc cmd [pattern]       find a command and drop it on your prompt
-doc tui                 glow's tree browser
+doc tui [local]         glow's tree browser (tracked kb; 'local' = ~/.doc.local)
 doc edit <topic>        edit a topic   |   doc new <os>/<name>   scaffold one
 doc ls                  list topics (this OS + common + local)
 doc --os <linux|macos|windows> ...    browse another OS
 doc sync [msg]          commit doc edits back to the repo (+ changelog, confirm push)
+
+picker keys: ctrl-u/ctrl-d scroll preview · ctrl-/ toggle preview · alt-e edit
+reader keys: j/k or arrows scroll · /pattern searches · q quits
+style: docs/kb/_style/<dark|light>.json follows your theme ($DOC_STYLE overrides)
 EOF
 }
 
@@ -946,7 +1015,10 @@ doc() {
     find)           _doc_finder "$os" "${(j: :)rest[2,-1]}" ;;
     -g|grep)        _doc_grep "${(j: :)rest[2,-1]}" ;;
     cmd|c)          _doc_cmd "${(j: :)rest[2,-1]}" ;;
-    tui)            command -v glow >/dev/null && glow "$(_doc_root)" || echo "doc tui needs glow" >&2 ;;
+    tui)            if ! command -v glow >/dev/null; then echo "doc tui needs glow" >&2
+                    elif [[ "${rest[2]:-}" == local ]]; then
+                      [[ -d "$(_doc_local)" ]] && glow "$(_doc_local)" || echo "doc tui local: $(_doc_local) does not exist" >&2
+                    else glow "$(_doc_root)"; fi ;;
     ls|list)        _doc_index "$os" | sort | cut -f1 ;;
     edit|new)       _doc_edit "$cmd" "${(j: :)rest[2,-1]}" "$os" ;;
     sync)           _doc_sync "${(j: :)rest[2,-1]}" ;;

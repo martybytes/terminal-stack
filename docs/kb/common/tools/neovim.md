@@ -1,6 +1,10 @@
 # Neovim (nvim)
 
-Modal editor. Installed on every target; `$EDITOR` stays `micro`, so run `nvim` explicitly.
+Modal editor. In the app catalog as a **recommended** install — `ts-config apps`
+(zsh) / `Set-TerminalStackConfig` (pwsh); winget id `Neovim.Neovim`. The stack's
+`$EDITOR` stays `micro`, so run `nvim` explicitly — to make git, `doc edit` and
+friends use it instead, set `EDITOR` in `~/.zshrc.local` / `profile.local.ps1`.
+WezTerm tabs show a vim glyph while nvim is the pane's foreground process.
 
 ## Launch
 | Command | What |
@@ -10,7 +14,6 @@ Modal editor. Installed on every target; `$EDITOR` stays `micro`, so run `nvim` 
 | `nvim +42 file` | open at line 42 |
 | `nvim +/term file` | open and search for `term` |
 | `nvim -u NONE file` | clean — no config |
-| `nvim --help` | all options |
 
 ## Everyday (Normal mode unless noted)
 | Key | What |
@@ -28,7 +31,7 @@ Modal editor. Installed on every target; `$EDITOR` stays `micro`, so run `nvim` 
 | `gg` / `G` | top / bottom of file |
 | `Ctrl-u` / `Ctrl-d` | half-page up / down |
 | `/text` `?text` `n` `N` | search forward / back / next / prev |
-| `:%s/old/new/g` | replace all in the file |
+| `:%s/old/new/g` | replace all in the file (`/gc` to confirm each) |
 
 ## Windows & buffers
 | Key | What |

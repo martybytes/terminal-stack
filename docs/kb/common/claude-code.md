@@ -20,6 +20,33 @@ The stack skips Starship and OSC title sequences in those shells while keeping
 git shortcuts, zoxide, and `cc*` wrappers. See `doc windows/pwsh` § "Agent vs
 interactive terminals".
 
+## Statusline
+
+The three-line footer under the prompt is `~/.claude/statusline-command.sh`
+(chezmoi-managed; needs `python3` — any segment whose data is missing simply
+drops out):
+
+| Line | Segments |
+|---|---|
+| 1 | cwd \| branch + status \| `owner/repo` |
+| 2 | model \| `ctx` % + bar \| `5h` budget % + bar + reset \| `7d` budget % + bar + reset |
+| 3 | `user@host` \| tokens (`205k/1M tok`) \| `cost: $X.XX` \| `+N/-M lines` |
+
+Branch status is `✓` when clean, else the non-zero counts as
+`+staged ~modified -deleted ?untracked !conflicts`, plus `↑ahead ↓behind` of
+upstream. The 10-segment bars are green below 70%, yellow at 70-89%, red at 90%+.
+`5h`/`7d` are the rate-limit budgets; the grey suffix is the reset as one coarse
+unit (`14m`, `2h`, `2d`).
+
+## Enter vs Shift+Enter
+
+`~/.claude/keybindings.json` binds `Enter` = submit, `Shift+Enter` = newline. Most
+terminals never deliver a distinct Shift+Enter to the app, so that binding alone
+can't fire — WezTerm closes the gap by sending a literal LF (`Ctrl+J`, the default
+newline binding) for `Shift+Enter`; see `doc wezterm/panes` § "Literal keys".
+Inside tmux it survives thanks to `extended-keys`/`allow-passthrough` — see
+`doc common/tmux`.
+
 ## Local TTS (Kokoro / Chatterbox / edge)
 
 Optional voice when an agent **finishes**, **errors**, **asks a question**, or **needs permission**. Shared config under `~/.claude/tts/`. **Off by default.**

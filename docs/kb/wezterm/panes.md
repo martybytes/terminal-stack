@@ -62,4 +62,10 @@ grows the pane right 9 cells.
 | `Ctrl+Shift+Space` | QuickSelect — hint-label URLs/paths plus **git SHAs** and **`file:line`** refs in the viewport, press the label to copy |
 | Ctrl-click | URLs open in the browser; a bare `owner/repo` opens on GitHub; `path/file.ext:123` opens in **Cursor** at that line |
 
+## Literal keys
+| Key | Action |
+|---|---|
+| `Shift+Enter` | send a literal newline (LF) — newline-without-submit in CLI REPLs like Claude Code, whose keybinding alone can't fire because terminals don't deliver a distinct Shift+Enter (`doc common/claude-code`) |
+| `Ctrl+Space` `Ctrl+Space` | send a real `Ctrl+Space` to the app — the escape hatch, since the leader eats the first press (leader, then `Ctrl+Space`, whatever your leader is) |
+
 > macOS: free `Ctrl+Space` and the F-row from the OS first — see `doc macos/wezterm`.
