@@ -1,0 +1,10 @@
+{
+  "v": 1,
+  "source": "claude",
+  "host": "wsl",
+  "event": "stop_failure",
+  "state": "error",
+  "session_key": "claude:fixture-error-1",
+  "project": { "name": "netsuite-customizations" },
+  "message": { "error_type": "rate_limit" }
+}

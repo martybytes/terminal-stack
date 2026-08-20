@@ -1,0 +1,14 @@
+{
+  "v": 1,
+  "source": "claude",
+  "host": "windows",
+  "event": "stop",
+  "state": "waiting",
+  "session_key": "claude:fixture-stop-1",
+  "project": { "dir": "C:/DATA/Workspace/src/github.com/martybytes/terminal-stack", "name": "terminal-stack" },
+  "cwd": "C:/DATA/Workspace/src/github.com/martybytes/terminal-stack",
+  "message": {
+    "text": "Refactored the sync hook and verified the render.\n\n<!-- speak: Refactored the sync hook and everything renders cleanly. -->"
+  },
+  "wezterm": { "pane": "7" }
+}
