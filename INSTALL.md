@@ -31,7 +31,7 @@ curl -fsSL https://raw.githubusercontent.com/martybytes/terminal-stack/main/inst
 **Install wizard.** The bootstraps run a short wizard, each prompt skippable via an env var (so scripted installs stay non-interactive — the bash prompts read `/dev/tty` directly and degrade to their defaults when no terminal is attached). Your answers are **saved** (chezmoi `[data]` on WSL/Linux/macOS; `%LOCALAPPDATA%\terminal-stack\config.json` on Windows) so `ts-update` keeps honoring them and `ts-config` can change them later.
 
 - **Leader key** (WezTerm) — `Ctrl+Space` (recommended), `Ctrl+A`, `Ctrl+B`, or a custom `mod-key` chord (e.g. `alt-space`). Skip with `TS_LEADER=ctrl-a`.
-- **Theme** — `dark` (Catppuccin Mocha, recommended), `light` (Latte), or `follow` (track the OS light/dark setting; WezTerm switches live, the Starship/tmux palette is baked at apply and refreshed by `ts-update`/`ts-config`). Skip with `TS_THEME=dark|light|follow`.
+- **Theme** — `dark` (Catppuccin Mocha, recommended), `light` (VS Code Light Modern), or `follow` (track the OS light/dark setting; WezTerm switches live, the Starship/tmux palette is baked at apply and refreshed by `ts-update`/`ts-config`). Skip with `TS_THEME=dark|light|follow`.
 - **Apps** — accept the recommended set (`eza fzf bat delta ripgrep zoxide glow micro neovim gh ghq lazygit`, plus `tmux` off-Windows) or customize per-app (also offers `zed`, `tldr`, `nvtop`, `lazydocker`). Required tools (WezTerm, the Nerd Font, Starship, chezmoi, git, zsh) are always installed. Skip with `TS_APPS=recommended|all|none|id,id,…`.
 - **Workspace directory** — pre-filled with the autodetected candidate (`C:\DATA\Workspace` / `~/Documents/Workspace` / `~/workspace` / `~/Workspace`). Press Enter to accept. Persisted to `~/.zshrc.local` (zsh) or `Documents\PowerShell\profile.local.ps1` (pwsh) *only* when it differs from the autodetect. Skip with `WORKSPACE_DIR=/path` / `$env:WORKSPACE_DIR`.
 
@@ -166,7 +166,7 @@ Open a new WezTerm tab — auto-reload picks up the new `.wezterm.lua`. Open a p
 
 On macOS, quit and relaunch WezTerm so it sets JetBrainsMono Nerd Font from the freshly-applied `~/.wezterm.lua`, then open a new tab and confirm the Starship two-line prompt renders with glyphs. WezTerm itself must be set to a Nerd Font for the launch-window prompt; the config does that automatically.
 
-**macOS — free the keybinding keys.** macOS intercepts the WezTerm leader and the pane-grid F-keys before they reach the terminal, so out of the box `Ctrl+Space …` and `F1`–`F6` look dead. Two System Settings toggles fix it:
+**macOS — free the keybinding keys.** macOS intercepts the WezTerm leader and the directional pane F-keys before they reach the terminal, so out of the box `Ctrl+Space …` and `F1`–`F6` look dead. Two System Settings toggles fix it:
 
 - **F-keys** → System Settings → Keyboard → enable **"Use F1, F2, etc. keys as standard function keys"** (or hold **Fn** + F1…F6). The bare F-row is otherwise hardware media keys (brightness, Mission Control, …).
 - **`Ctrl+Space`** → System Settings → Keyboard → Keyboard Shortcuts → **Input Sources** → uncheck **"Select the previous input source"**. That system shortcut swallows `Ctrl+Space` system-wide, which also disables the `Ctrl+Space 1`–`6` F-key fallback.
@@ -175,13 +175,13 @@ Then `Ctrl+Space r` in WezTerm to reload, and the bindings in the command refere
 
 ### Developing WezTerm config
 
-WezTerm reads `%USERPROFILE%\.wezterm.lua` and `%USERPROFILE%\.wezterm\pane_grid.lua`, **not** the git clone. After editing `windows/.wezterm.lua.tmpl` or `windows/.wezterm/pane_grid.lua` in your dev checkout, deploy and reload:
+WezTerm reads `%USERPROFILE%\.wezterm.lua` and `%USERPROFILE%\.wezterm\pane_nav.lua`, **not** the git clone. After editing `windows/.wezterm.lua.tmpl` or `windows/.wezterm/pane_nav.lua` in your dev checkout, deploy and reload:
 
 ```powershell
 & C:\path\to\terminal-stack\scripts\sync-windows.ps1 -SourceDir C:\path\to\terminal-stack
 ```
 
-Set `$env:TERMINAL_STACK_DIR` in `profile.local.ps1` when the dev clone is not `%USERPROFILE%\terminal-stack`. Changes to `.wezterm.lua` usually auto-reload; press **`Ctrl+Space` `r`** after `pane_grid.lua` edits. Full loop, optional file-watcher, macOS path, and symlink trick: `docs/developing-wezterm.md`.
+Set `$env:TERMINAL_STACK_DIR` in `profile.local.ps1` when the dev clone is not `%USERPROFILE%\terminal-stack`. Changes to `.wezterm.lua` usually auto-reload; press **`Ctrl+Space` `r`** after `pane_nav.lua` edits. Full loop, optional file-watcher, macOS path, and symlink trick: `docs/developing-wezterm.md`.
 
 ## Manual
 

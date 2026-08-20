@@ -39,5 +39,5 @@
 # sources flattens into the destination dir (.ssh/config would land at ~/config).
 #
 # _DOTPEER=$( [[ $(hostname -s) == "lambda-dual" ]] && echo "internal" || echo "lambda-dual" )
-# dot-push() { rsync -av ~/.zshrc "msampson@${_DOTPEER}:~/" && rsync -av ~/.ssh/config "msampson@${_DOTPEER}:~/.ssh/"; }
-# dot-pull() { rsync -av "msampson@${_DOTPEER}:~/.zshrc" ~/ && rsync -av "msampson@${_DOTPEER}:~/.ssh/config" ~/.ssh/; }
+# dot-push() { rsync -av ~/.zshrc "<your-user>@${_DOTPEER}:~/" && rsync -av ~/.ssh/config "<your-user>@${_DOTPEER}:~/.ssh/"; }
+# dot-pull() { rsync -av "<your-user>@${_DOTPEER}:~/.zshrc" ~/ && rsync -av "<your-user>@${_DOTPEER}:~/.ssh/config" ~/.ssh/; }

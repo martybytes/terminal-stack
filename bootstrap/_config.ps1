@@ -156,9 +156,14 @@ function Save-TsConfig {
         $CcTts                = $null
     )
     $l = ConvertTo-TsLeader $LeaderChord
+    $existing = Get-TsConfig
     if (-not $CcTts) {
-        $existing = Get-TsConfig
         if ($existing.ccTts) { $CcTts = $existing.ccTts } else { $CcTts = Get-CcTtsDefaults }
+    }
+    # Callers that don't pass -TmuxPrefix (e.g. the Windows bootstrap re-run)
+    # must not silently reset a prefix the WSL side already configured.
+    if (-not $PSBoundParameters.ContainsKey('TmuxPrefix') -and $existing.tmuxPrefix) {
+        $TmuxPrefix = $existing.tmuxPrefix
     }
     $obj = [ordered]@{
         leaderChord        = $LeaderChord
@@ -198,7 +203,7 @@ function Read-TsTheme {
     Write-Host ''
     Write-Host 'Theme:'
     Write-Host '  1) dark   (Catppuccin Mocha, recommended)'
-    Write-Host '  2) light  (Catppuccin Latte)'
+    Write-Host '  2) light  (VS Code Light Modern)'
     Write-Host '  3) follow OS appearance'
     switch (Read-Host 'Choose [1]') {
         '2'     { 'light' }

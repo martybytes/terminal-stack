@@ -22,7 +22,8 @@ terminal-stack/
 ├── dot_claude/settings.json.tmpl   → ~/.claude/settings.json (chezmoi template)
 ├── dot_claude/hooks/...            → ~/.claude/hooks/... (WSL)
 └── windows/                        ← NOT applied by chezmoi
-    ├── .wezterm.lua                → /mnt/c/Users/<you>/.wezterm.lua
+    ├── .wezterm.lua.tmpl           → /mnt/c/Users/<you>/.wezterm.lua (sync-hook template)
+    ├── .wezterm/pane_nav.lua       → /mnt/c/Users/<you>/.wezterm/pane_nav.lua
     ├── .config/...                 → /mnt/c/Users/<you>/.config/...
     ├── Documents/...               → /mnt/c/Users/<you>/Documents/...
     └── .claude/settings.json.tmpl  → /mnt/c/Users/<you>/.claude/settings.json (sync-hook template)
@@ -41,9 +42,11 @@ No file in this repo hard-codes a username. The username is resolved at apply ti
 
 The WSL bootstrap (`bootstrap/wsl-bootstrap.sh`) prompts for the Windows username at install time (pre-filling the interop-detected value) and persists it under `[data]`.
 
+`__WIN_USER__` is one of several tokens the sync substitutes: the saved wizard config supplies `__LEADER_KEY__` / `__LEADER_MODS__` (WezTerm leader), `__THEME_MODE__` / `__THEME_RESOLVED__` (theme), `__TMUX_PREFIX__`, and the optional `__CC_TTS_*__` hook blocks. See `CLAUDE.md` § "User config tokens" and the header of `run_after_90-sync-windows.sh` for the full list.
+
 ### The run_after hook
 
-`run_after_90-sync-windows.sh` runs after every successful `chezmoi apply`. It walks `$CHEZMOI_SOURCE_DIR/windows/`, mirrors every file to `/mnt/c/Users/<you>/<same relative path>` (substituting `__WIN_USER__` in `.tmpl` files and stripping the `.tmpl` suffix), and:
+`run_after_90-sync-windows.sh` runs after every successful `chezmoi apply`. It walks `$CHEZMOI_SOURCE_DIR/windows/`, mirrors every file to `/mnt/c/Users/<you>/<same relative path>` (substituting `__WIN_USER__` and the config tokens in `.tmpl` files — via python3, which the hook requires — and stripping the `.tmpl` suffix), and:
 
 - **Idempotent**: only touches files whose content differs from what's already at the destination. If the rendered source is byte-identical to the destination, it's skipped.
 - **Backup-first**: any pre-existing file that gets overwritten is first copied to `<path>.bak.YYYYMMDD`. If that backup name is already taken (you applied twice in one day), the new backup gets a `.N` suffix (`.bak.YYYYMMDD.1`, `.2`, …). The original-day backup is never clobbered.
@@ -70,7 +73,7 @@ The WSL bootstrap (`bootstrap/wsl-bootstrap.sh`) prompts for the Windows usernam
 - **`wso` is the one command implemented twice rather than shimmed.** Everything else in the stack is either a shell function mirrored per shell or a script one side calls; the workspace organizer is a full parallel pair — `bootstrap/_workspace.sh` + `bootstrap/wso.sh` (bash: WSL, native Linux, macOS) and `bootstrap/_workspace.ps1` + `bootstrap/_workspace_cmd.ps1` (pwsh: Windows). Calling into WSL from Windows would break a Windows-standalone install, and driving ~100 repos' worth of `git` calls across the 9p boundary is slow enough to matter. Both live under `bootstrap/**` (chezmoi-ignored) and run from the clone, so `ts-update` ships a fix without a profile re-sync. They must agree: same subcommands, same flags, same plan output, byte-identical `--help`.
 - **`wso` writes outside the clone, and says so.** It moves repositories inside `$WORKSPACE_DIR` (atomic same-volume renames only — it refuses a cross-volume move rather than silently degrading to copy+delete), appends a TSV to `<workspace>/.terminal-stack/workspace-runs/`, and `wso identity` generates `~/.config/git/terminal-stack-workspace.gitconfig` plus per-owner `identity-<owner>` files, registering them with a single `git config --global --add include.path`. Those identity files hold real names and emails, so they are per-machine and generated rather than tracked — the source tree stays free of personal data. Anything it overwrites gets the standard `.bak.YYYYMMDD[.N]` treatment first, and it never deletes a repository.
 - **Run logs live with the workspace, not in per-OS state.** Unlike `rollback-sha`, which describes the clone and is genuinely per-side, an archive run describes the *workspace* — and on a combined Windows+WSL machine both sides drive the same tree. Logs therefore sit in `<workspace>/.terminal-stack/workspace-runs/` with paths stored relative to the workspace root and forward-slashed, so `wso unarchive --undo-last` from zsh can reverse a run made from PowerShell.
-- **PowerShell `$PROFILE` is marker-block-edited, not whole-file-managed.** It contains user-personal content (workspace navigation funcs, `cc` aliases, zoxide env vars) that predates the terminal stack. We use `# ---- name-start ----` / `# ---- name-end ----` blocks to encapsulate our additions and leave everything else untouched. Re-running the deployment replaces *only* the block content if markers exist; otherwise appends.
+- **PowerShell `$PROFILE` is whole-file-synced, marker-block *edited*.** Both sync scripts copy the repo source (`windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1`) over `$PROFILE` whole, with a `.bak.YYYYMMDD[.N]` backup on every overwrite — anything hand-added to the live `$PROFILE` outside the repo is replaced on the next sync (recoverable from the `.bak`, but gone from the live file). Per-machine content belongs in `profile.local.ps1`, which `$PROFILE` dot-sources at the end and is never synced. The `# ---- name-start ----` / `# ---- name-end ----` marker blocks survive as *editing discipline* in the repo source — they delimit the stack's functional regions, not a merge mechanism. See `docs/decisions.md` § "Why a whole-file `~/.zshrc` and a marker-block `$PROFILE`?".
 - **`~/.zshrc` is whole-file-managed.** It was created from scratch by oh-my-zsh during our deployment, so we own the entire file. If you ever hand-edit `~/.zshrc` to enable a plugin, run `chezmoi re-add ~/.zshrc` to capture the change in source.
 - **Claude Code `settings.json` is whole-file-managed too** on both sides. If you change a CC preference via `/config` (UI), run `chezmoi re-add ~/.claude/settings.json`.
 

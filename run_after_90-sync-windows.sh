@@ -15,7 +15,8 @@
 #   __THEME_MODE__      dark|light|follow    (from themeMode)
 #   __THEME_RESOLVED__  baked palette light|dark (from resolvedTheme)
 #   __TMUX_PREFIX__     tmux prefix spec     (from tmuxPrefixResolved)
-#   __CC_TTS_STOP_HOOK__ / __CC_TTS_STOPFAILURE_HOOK__  optional cc-speak hooks (when ccTtsEnabled)
+#   __CC_TTS_STOP_HOOK__ / __CC_TTS_STOPFAILURE_HOOK__ / __CC_TTS_CURSOR_HOOKS__ /
+#   __CC_TTS_PRETOOLUSE_TTS__ / __CC_TTS_INPUT_HOOKS__  optional cc-speak hooks (when ccTtsEnabled)
 #
 # Idempotent: only writes targets whose content differs.
 # Backs up any pre-existing target to <path>.bak.YYYYMMDD[.N] before overwrite.
@@ -173,6 +174,7 @@ today="$(date +%Y%m%d)"
 created=0
 updated=0
 unchanged=0
+wezterm_cfg_changed=0
 
 rendered="$(mktemp)"
 trap 'rm -f "$rendered"' EXIT
@@ -216,15 +218,11 @@ for k, v in repl.items():
 sys.stdout.write(text)
 PY
       else
-        sed -e "s|__WIN_USER__|$WIN_USER|g" \
-            -e "s|__LEADER_KEY__|$LEADER_KEY|g" \
-            -e "s|__LEADER_MODS__|$LEADER_MODS|g" \
-            -e "s|__THEME_MODE__|$THEME_MODE|g" \
-            -e "s|__THEME_RESOLVED__|$THEME_RESOLVED|g" \
-            -e "s|__TMUX_PREFIX__|$TMUX_PREFIX|g" \
-            -e "s|__CC_TTS_STOP_HOOK__||g" \
-            -e "s|__CC_TTS_STOPFAILURE_HOOK__||g" \
-            "$src" > "$rendered"
+        # No sed fallback: it cannot substitute the multi-line __CC_TTS_*__
+        # tokens (renders broken JSON) and | as delimiter breaks on two-modifier
+        # leaders like CTRL|SHIFT. python3 ships with WSL Ubuntu — require it.
+        echo "sync-windows: python3 is required to render $rel — install python3 and re-run." >&2
+        exit 1
       fi
       effective_src="$rendered"
     else
@@ -249,11 +247,13 @@ PY
       cp -- "$effective_src" "$dst"
       updated=$((updated + 1))
       printf 'updated  %s  (backup: %s)\n' "$dst" "$bak"
+      case "$dst" in "$dst_home/.wezterm"*) wezterm_cfg_changed=1 ;; esac
     else
       mkdir -p -- "$(dirname -- "$dst")"
       cp -- "$effective_src" "$dst"
       created=$((created + 1))
       printf 'created  %s\n' "$dst"
+      case "$dst" in "$dst_home/.wezterm"*) wezterm_cfg_changed=1 ;; esac
     fi
   done < <(find "$src_root" -type f -print0)
 }
@@ -262,11 +262,27 @@ sync_tree "$windows_src" "$dst_home" 1
 sync_tree "$kb_src" "$dst_home/AppData/Local/terminal-stack/docs/kb" 0
 
 # Render ~/.claude/tts/config.json on the Windows side from chezmoi [data] (same as WSL apply).
+# Idempotent + backed up, matching sync_tree's discipline: render to a temp file,
+# skip when identical, back up as .bak.YYYYMMDD[.N] before overwriting.
 if cz="$(resolve_cz)" && [ -f "$stack_root/dot_claude/tts/config.json.tmpl" ]; then
   tts_dst="$dst_home/.claude/tts/config.json"
   mkdir -p "$(dirname "$tts_dst")"
-  if "$cz" execute-template "$(cat "$stack_root/dot_claude/tts/config.json.tmpl")" > "$tts_dst" 2>/dev/null; then
-    printf 'updated  %s  (chezmoi tts config)\n' "$tts_dst"
+  if "$cz" execute-template "$(cat "$stack_root/dot_claude/tts/config.json.tmpl")" > "$rendered" 2>/dev/null; then
+    if [ -e "$tts_dst" ] && cmp -s "$rendered" "$tts_dst"; then
+      : # unchanged
+    else
+      if [ -e "$tts_dst" ]; then
+        bak="$tts_dst.bak.$today"
+        if [ -e "$bak" ]; then
+          n=1
+          while [ -e "$tts_dst.bak.$today.$n" ]; do n=$((n + 1)); done
+          bak="$tts_dst.bak.$today.$n"
+        fi
+        cp -p -- "$tts_dst" "$bak"
+      fi
+      cp -- "$rendered" "$tts_dst"
+      printf 'updated  %s  (chezmoi tts config)\n' "$tts_dst"
+    fi
   fi
 fi
 
@@ -292,3 +308,10 @@ if [ -f "$merge_helper" ]; then
 fi
 
 printf 'sync-windows: user=%s, %d created, %d updated, %d unchanged\n' "$WIN_USER" "$created" "$updated" "$unchanged"
+
+# The mux server (unix domain 'main') loads its own copy of .wezterm.lua and is
+# never restarted automatically — that would kill every live pane. Remind instead.
+if [ "$wezterm_cfg_changed" = 1 ]; then
+  echo "sync-windows: WezTerm config changed. The GUI reloads live, but wezterm-mux-server keeps the old config for spawning panes." >&2
+  echo "  When convenient (closes all panes!): close WezTerm, then 'taskkill /IM wezterm-mux-server.exe /F' and relaunch." >&2
+fi

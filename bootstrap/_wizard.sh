@@ -47,7 +47,7 @@ ts_prompt_theme() {
     {
         printf '\nTheme:\n'
         printf '  1) dark   (Catppuccin Mocha, recommended)\n'
-        printf '  2) light  (Catppuccin Latte)\n'
+        printf '  2) light  (VS Code Light Modern)\n'
         printf '  3) follow OS appearance\n'
     } > /dev/tty 2>/dev/null
     local ans; ans="$(ts_tty_prompt 'Choose [1]: ')"

@@ -14,14 +14,15 @@
 	co = checkout
 	cm = commit
 
-# delta: side-by-side syntax-highlighted diffs. Installed by every bootstrap;
-# on a machine without delta, remove the include or install delta, or git's
-# pager errors on `git diff`.
+# delta: side-by-side syntax-highlighted diffs. Guarded: on a machine without
+# delta (app picker skipped, TS_APPS=none) the pager falls back to less/cat
+# instead of erroring on every `git diff`. Git runs pager values through sh on
+# all platforms (Git for Windows ships sh + less), so the guard is portable.
 [core]
-	pager = delta
+	pager = "sh -c 'if command -v delta >/dev/null 2>&1; then delta; else less -R; fi'"
 
 [interactive]
-	diffFilter = delta --color-only
+	diffFilter = "sh -c 'if command -v delta >/dev/null 2>&1; then delta --color-only; else cat; fi'"
 
 [delta]
 	navigate = true

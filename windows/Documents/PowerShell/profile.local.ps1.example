@@ -10,10 +10,10 @@
 # ── Work workspace override ───────────────────────────────────────────────────
 # wsw looks for a *_Work / *-Work sibling of the main workspace. Set this only
 # when the work tree lives somewhere unrelated. You do not have to edit this by
-# hand: `wsw --set C:\path	o\work` writes the line below (backing this file up
+# hand: `wsw --set C:\path\to\work` writes the line below (backing this file up
 # first) and applies it to the running shell.
 #
-# $env:WORK_WORKSPACE_DIR = 'D:\clientscme'
+# $env:WORK_WORKSPACE_DIR = 'D:\clients\acme'
 
 # ── Workspace location override ───────────────────────────────────────────────
 # ws/wsp/wspu autodetect the workspace (C:\DATA\Workspace, ~\workspace,

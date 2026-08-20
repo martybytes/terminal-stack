@@ -105,7 +105,10 @@ make_bar() {
 }
 
 ctx_str="?"
-[ -n "$ctx_used_pct" ] && [ "$ctx_used_pct" -ge 0 ] 2>/dev/null && ctx_str=$(make_bar "$ctx_used_pct")
+# The percentage can arrive as a float ("41.5"); strip the fraction first —
+# POSIX [ -ge ] and $(( )) are integer-only and would silently fail to a "?".
+ctx_int="${ctx_used_pct%%.*}"
+[ -n "$ctx_int" ] && [ "$ctx_int" -ge 0 ] 2>/dev/null && ctx_str=$(make_bar "$ctx_int")
 
 # ── Token display (e.g. 205k/1M tok) ─────────────────────────────────────────
 token_str=""

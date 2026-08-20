@@ -10,6 +10,14 @@ set -g prefix {{ $tp }}
 unbind C-b
 bind {{ $tp }} send-prefix
 
+# Truecolor: without these the Catppuccin hexes below get quantized to 256
+# colors; RGB advertises 24-bit support for terminals matching the patterns.
+set -g default-terminal "tmux-256color"
+set -as terminal-features 'xterm*:RGB'
+set -as terminal-features 'wezterm*:RGB'
+# OSC 52: let programs inside tmux write the system clipboard (works over ssh).
+set -g set-clipboard on
+
 set -g mouse on
 set -g base-index 1
 setw -g pane-base-index 1

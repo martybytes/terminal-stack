@@ -6,7 +6,9 @@
 # Honors $env:TS_DRY_RUN = '1' (preview only).
 
 # Candidate clone locations on Windows (current + historical).
-function Get-TsCloneCandidates {
+# Named Get-TsCleanupCloneCandidates (not Get-TsCloneCandidates) so dot-sourcing
+# this file never shadows the richer profile function of the old shared name.
+function Get-TsCleanupCloneCandidates {
     @(
         (Join-Path $env:USERPROFILE 'terminal-stack'),
         'C:\DATA\Workspace\terminal-stack',
@@ -28,7 +30,7 @@ function Test-TsStackClone([string]$dir) {
 function Find-TsClones([string]$current) {
     $cur = if ($current -and (Test-Path $current)) { (Resolve-Path $current).Path } else { $current }
     $seen = New-Object System.Collections.Generic.HashSet[string]
-    foreach ($d in Get-TsCloneCandidates) {
+    foreach ($d in Get-TsCleanupCloneCandidates) {
         if (-not (Test-Path $d)) { continue }
         if (-not (Test-TsStackClone $d)) { continue }
         $rp = (Resolve-Path $d).Path
