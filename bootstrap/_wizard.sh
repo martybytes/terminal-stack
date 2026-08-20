@@ -11,6 +11,7 @@
 #   TS_APPS=recommended|all|none|id,id,...   (none or "skip all" = no optional apps)
 #   TS_WEZTERM=nightly|stable|skip           (macOS only; WSL/Linux never install it)
 #   TS_WEZ_MUX=on|off                        WezTerm multiplexer domain (ts-mux)
+#   TS_WEZ_RESTORE=on|off                    reopen the last session at startup
 #   TS_CC_TTS=on|off|skip   Claude Code Kokoro TTS at install
 #   TS_ASSUME_YES=1         skip the review prompt (answers still come from the above)
 #
@@ -155,6 +156,24 @@ ts_prompt_wezterm_mux() {
         'on|on|panes survive a GUI crash'
 }
 
+# Reopen the last session at WezTerm start (resurrect's gui-startup restore).
+# Asked wherever a WezTerm GUI runs and skipped headless, same rule as the mux.
+# Default off: a terminal that silently reopens yesterday's shells is a surprise,
+# and the autosave runs either way so Leader+L can restore on demand.
+# Twin of bootstrap/_config.ps1 Read-TsWeztermRestore — keep the rendering identical.
+ts_prompt_wezterm_restore() {
+    if [ -n "${TS_WEZ_RESTORE:-}" ]; then
+        case "$TS_WEZ_RESTORE" in on) printf 'on\n' ;; *) printf 'off\n' ;; esac
+        return 0
+    fi
+    ts_prompt_choice off 'WezTerm session restore (reopen the last session at startup):' \
+'  On: WezTerm reopens the tabs, panes and scrollback you had when you last
+  closed it. Off: it starts clean, and Leader+L still restores a session on
+  demand from the same autosaved state.' \
+        'off|off|start clean every time' \
+        'on|on|reopen the last session'
+}
+
 # Expand a TS_APPS env value (recommended|all|none|csv) to a space list.
 ts_expand_apps() {
     case "$1" in
@@ -226,13 +245,14 @@ ts_wizard_review() {
         *)      theme_label="$TS_WIZ_THEME" ;;
     esac
     printf '\n%s Review\n' "$INFO"
-    printf '    Leader       %s\n' "$TS_WIZ_LEADER"
-    printf '    Theme        %s\n' "$theme_label"
-    [ -n "${TS_WIZ_WEZTERM:-}" ] && printf '    WezTerm      %s\n' "$TS_WIZ_WEZTERM"
-    printf '    WezTerm mux  %s\n' "${TS_WIZ_WEZ_MUX:-off}"
-    printf '    tmux prefix  %s\n' "$TS_WIZ_TMUX"
-    printf '    Apps         %s\n' "${TS_WIZ_APPS:-<none>}"
-    printf '    Claude TTS   %s\n' "${TS_WIZ_CC_TTS:-off}"
+    printf '    Leader           %s\n' "$TS_WIZ_LEADER"
+    printf '    Theme            %s\n' "$theme_label"
+    [ -n "${TS_WIZ_WEZTERM:-}" ] && printf '    WezTerm          %s\n' "$TS_WIZ_WEZTERM"
+    printf '    WezTerm mux      %s\n' "${TS_WIZ_WEZ_MUX:-off}"
+    printf '    Session restore  %s\n' "${TS_WIZ_WEZ_RESTORE:-off}"
+    printf '    tmux prefix      %s\n' "$TS_WIZ_TMUX"
+    printf '    Apps             %s\n' "${TS_WIZ_APPS:-<none>}"
+    printf '    Claude TTS       %s\n' "${TS_WIZ_CC_TTS:-off}"
 }
 
 # Ask each question once. Env vars skip their prompt individually.
@@ -269,6 +289,12 @@ ts_wizard_ask() {
     elif command -v ts_is_headless >/dev/null 2>&1 && ts_is_headless; then TS_WIZ_WEZ_MUX=off
     else TS_WIZ_WEZ_MUX="$(ts_prompt_wezterm_mux)"; TS_WIZ_ASKED=$((TS_WIZ_ASKED + 1)); fi
 
+    # Same GUI-only rule as the mux above: a headless server has no WezTerm.
+    if [ -n "${TS_WEZ_RESTORE:-}" ]; then
+        case "$TS_WEZ_RESTORE" in on) TS_WIZ_WEZ_RESTORE=on ;; *) TS_WIZ_WEZ_RESTORE=off ;; esac
+    elif command -v ts_is_headless >/dev/null 2>&1 && ts_is_headless; then TS_WIZ_WEZ_RESTORE=off
+    else TS_WIZ_WEZ_RESTORE="$(ts_prompt_wezterm_restore)"; TS_WIZ_ASKED=$((TS_WIZ_ASKED + 1)); fi
+
     if [ -n "${TS_APPS:-}" ]; then TS_WIZ_APPS="$(ts_expand_apps "$TS_APPS")"
     else TS_WIZ_APPS="$(ts_prompt_apps)"; TS_WIZ_ASKED=$((TS_WIZ_ASKED + 1)); fi
 
@@ -302,7 +328,7 @@ ts_wizard_collect() {
         esac
     done
 
-    export TS_WIZ_LEADER TS_WIZ_THEME TS_WIZ_APPS TS_WIZ_TMUX TS_WIZ_CC_TTS TS_WIZ_WEZTERM TS_WIZ_WEZ_MUX
-    echo "$INFO Config: leader=$TS_WIZ_LEADER theme=$TS_WIZ_THEME tmux-prefix=$TS_WIZ_TMUX wez-mux=${TS_WIZ_WEZ_MUX:-off} cc-tts=${TS_WIZ_CC_TTS:-off}"
+    export TS_WIZ_LEADER TS_WIZ_THEME TS_WIZ_APPS TS_WIZ_TMUX TS_WIZ_CC_TTS TS_WIZ_WEZTERM TS_WIZ_WEZ_MUX TS_WIZ_WEZ_RESTORE
+    echo "$INFO Config: leader=$TS_WIZ_LEADER theme=$TS_WIZ_THEME tmux-prefix=$TS_WIZ_TMUX wez-mux=${TS_WIZ_WEZ_MUX:-off} wez-restore=${TS_WIZ_WEZ_RESTORE:-off} cc-tts=${TS_WIZ_CC_TTS:-off}"
     echo "$INFO Apps: ${TS_WIZ_APPS:-<none>}"
 }

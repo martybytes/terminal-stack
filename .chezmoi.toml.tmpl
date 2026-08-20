@@ -9,7 +9,8 @@
   makes apply warn "run chezmoi init to regenerate".
 
   sourceDir, windowsUsername and the terminal-stack config (leaderChord,
-  themeMode, tmuxPrefix, resolvedTheme, weztermMux, apps) are re-emitted here so
+  themeMode, tmuxPrefix, resolvedTheme, weztermMux, weztermRestore, apps) are
+  re-emitted here so
   a bare `chezmoi init` (no repo arg) keeps pointing at the existing clone and keeps
   the user's saved answers. Without that, regenerating would silently drop
   sourceDir (chezmoi falls back to ~/.local/share/chezmoi), windowsUsername
@@ -88,6 +89,9 @@ resolvedTheme = {{ $resolvedTheme | quote }}
 {{- /* WezTerm multiplexer domain: "on" hosts panes in wezterm-mux-server, "off"
        (default) spawns them locally. Toggled by `ts-mux on|off`. */}}
 weztermMux = {{ index . "weztermMux" | default "off" | quote }}
+{{- /* Reopen the last session at WezTerm start: "on" registers resurrect's
+       gui-startup restore, "off" (default) starts clean. `ts-config restore`. */}}
+weztermRestore = {{ index . "weztermRestore" | default "off" | quote }}
 {{- if hasKey . "apps" }}
 apps = [{{ range $i, $a := .apps }}{{ if $i }}, {{ end }}{{ $a | quote }}{{ end }}]
 {{- end }}

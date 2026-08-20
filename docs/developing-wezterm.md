@@ -49,6 +49,13 @@ You do not need to quit and relaunch WezTerm — with one caveat, and only if yo
 
 ### Plugins (tabline / sessionizer / resurrect)
 
+Note before you tidy it: the resurrect block deliberately does **not** call
+`resurrect.setup()`. That helper registers a `gui-startup` handler
+unconditionally and offers no opt-out, which is what made WezTerm replay the
+previous session at every launch. We drive its two save engines directly and
+register the handler ourselves only when `ts-config restore` is on — see
+`docs/decisions.md` § "Why the startup session restore is opt-in".
+
 The status bar (`tabline.wez`), the `Ctrl+Space` `p` project picker (`sessionizer.wezterm`), and session save/restore (`resurrect.wezterm`) are WezTerm plugins loaded from **pinned forks under `github.com/martybytes`**, so an upstream archival or breaking change can't take the stack down. `wezterm.plugin.require` clones each fork at the **first GUI start** — that one start needs network access; afterwards the clone is cached in WezTerm's plugin directory. Each load is pcall-guarded: if tabline fails, the hand-rolled status handler takes over; if sessionizer or resurrect fail, only their keybindings are lost.
 
 To update a plugin, pull upstream into the fork deliberately, then either run `wezterm.plugin.update_all()` from the debug overlay (**`Ctrl+Shift+L`**) or delete the plugin cache directory and restart WezTerm.

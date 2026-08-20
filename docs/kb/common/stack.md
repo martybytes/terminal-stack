@@ -105,6 +105,7 @@ repair offers the same canonical move and re-syncs (a pin is written to
 | `ts-config apps [recommended\|all\|none\|id,…]` | app catalog; no arg → picker; installs, never uninstalls |
 | `ts-config tts <show\|on\|off\|test\|…>` | Claude/Cursor voice — see `doc common/claude-code` |
 | `ts-config mux [on\|off\|…]` | hand-off to `ts-mux` (WezTerm multiplexer domain) |
+| `ts-config restore <on\|off>` | reopen the last WezTerm session at startup (default off) |
 
 Every change persists (chezmoi `[data]` on WSL/Linux, `config.json` on Windows) and
 re-applies. In a combined WSL+Windows setup run it from **WSL** — its apply is
