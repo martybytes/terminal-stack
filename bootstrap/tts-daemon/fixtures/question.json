@@ -1,0 +1,11 @@
+{
+  "v": 1,
+  "source": "claude",
+  "host": "windows",
+  "event": "notification",
+  "state": "question",
+  "session_key": "claude:fixture-question-1",
+  "project": { "name": "helix" },
+  "override": "Which database should the migration target?",
+  "message": { "notification_type": "agent_needs_input" }
+}

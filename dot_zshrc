@@ -175,6 +175,9 @@ ccr()   { _wez_tab_title "${PWD:t}"; { claude --resume "$@" }                   
 ccdr()  { _wez_tab_title "${PWD:t}"; { claude --dangerously-skip-permissions --resume "$@" }   always { _wez_tab_title "" } }
 cca()   { _wez_tab_title "agents";   { claude agents }                                         always { _wez_tab_title "" } }
 
+# Codex: resume a saved session with approvals and sandboxing bypassed.
+cyr()   { codex --yolo resume "$@" }
+
 # Escape hatch: vanilla zsh, no rc files (no oh-my-zsh/starship/aliases).
 # Nested — `exit` drops back to the customized shell.
 plain() { _wez_tab_title "plain • ${PWD:t}"; { zsh -df "$@" } always { _wez_tab_title "" } }
@@ -458,6 +461,16 @@ ts-update() {
     else
       echo "    Install them with: ts-config apps"
     fi
+  fi
+  # The tts daemon keeps running its pre-pull code. Like the mux server it is
+  # never auto-restarted (it may be mid-announcement or holding a duck) —
+  # nudge instead, same philosophy as ts-mux restart.
+  local _tts_note
+  _tts_note="$(bash -c 'source "$1/bootstrap/_config.sh" >/dev/null 2>&1 \
+    && [ "$(ts_cc_tts_get ccTtsDaemon)" = on ] && ts_cc_tts_daemon_status' _ "$src" 2>/dev/null \
+    | grep 'older build' || true)"
+  if [[ -n "$_tts_note" ]]; then
+    echo "ts-update: note — the tts daemon is running the previous build; 'ts-config tts daemon restart' when convenient." >&2
   fi
 }
 

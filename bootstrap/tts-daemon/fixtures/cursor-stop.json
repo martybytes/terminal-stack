@@ -1,0 +1,10 @@
+{
+  "v": 1,
+  "source": "cursor",
+  "host": "windows",
+  "event": "cursor_stop",
+  "state": "waiting",
+  "session_key": "cursor:fixture-conv-1",
+  "project": { "dir": "C:/DATA/Workspace/src/github.com/martybytes/helix", "name": "helix" },
+  "message": { "stop_status": "completed" }
+}

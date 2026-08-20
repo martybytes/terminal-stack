@@ -22,6 +22,16 @@ if ($inputJson) {
 }
 
 . (Join-Path (Join-Path $env:USERPROFILE '.claude\hooks') 'cc-tts-lib.ps1')
+
+# Daemon first (it holds/cools Cursor's per-turn stop storms); direct path
+# below is the fallback — never silence.
+if (Test-CcTtsDaemonReady) {
+    if (Send-CcTtsDaemonEvent -Source cursor -Event cursor_stop -State $state -InputJson $inputJson) {
+        Write-Output '{}'
+        return
+    }
+}
+
 $cfg = Initialize-CcTtsConfig
 if (-not $cfg -or -not $cfg.enabled) { Write-Output '{}'; return }
 if (-not (Test-CcTtsEventEnabled $state)) { Write-Output '{}'; return }

@@ -246,3 +246,70 @@ function Parse-CcTtsInputHook {
     } catch {}
     return @{ State = $state; Override = $override }
 }
+
+# ── ttsd daemon sender ─────────────────────────────────────────────────────────
+# On native Windows the daemon listens on loopback, so no token/host ladder is
+# needed: a dead daemon refuses the connection instantly and the caller falls
+# back to the direct cc-tts-notify path — never silence.
+
+function Test-CcTtsDaemonReady {
+    return [bool](Get-CcTtsConfigValue 'daemon.enabled' $false)
+}
+
+function Send-CcTtsDaemonEvent {
+    param(
+        [Parameter(Mandatory)][string]$Source,
+        [Parameter(Mandatory)][string]$Event,
+        [string]$State = '',
+        [string]$InputJson = '',
+        [string]$Override = ''
+    )
+    try {
+        # CC_TTS_DAEMON_PORT_OVERRIDE: test hook (cc-tts-test -DaemonFallback)
+        # forces an unreachable port to prove the direct-speak fallback fires.
+        $port = if ($env:CC_TTS_DAEMON_PORT_OVERRIDE) { [int]$env:CC_TTS_DAEMON_PORT_OVERRIDE }
+                else { [int](Get-CcTtsConfigValue 'daemon.port' 8890) }
+        $hook = $null
+        if ($InputJson) { try { $hook = $InputJson | ConvertFrom-Json } catch {} }
+        $pdir = if ($env:CLAUDE_PROJECT_DIR) { $env:CLAUDE_PROJECT_DIR }
+                elseif ($env:CURSOR_PROJECT_DIR) { $env:CURSOR_PROJECT_DIR }
+                else { "$PWD" }
+        $sid = if ($hook -and $hook.session_id) { [string]$hook.session_id }
+               elseif ($hook -and $hook.conversation_id) { [string]$hook.conversation_id }
+               else { 'dir:' + $pdir }  # stable per directory; hook pwsh PIDs are per-invocation
+        $payload = [ordered]@{
+            v = 1
+            source = $Source
+            host = 'windows'
+            event = $Event
+            state = $State
+            session_key = "${Source}:${sid}"
+            project = [ordered]@{ dir = "$pdir"; name = (Split-Path -Leaf $pdir) }
+            cwd = "$PWD"
+            transcript_path = if ($hook -and $hook.transcript_path) { [string]$hook.transcript_path } else { '' }
+            override = $Override
+            message = [ordered]@{
+                text = if ($hook -and $hook.last_assistant_message) { [string]$hook.last_assistant_message }
+                       elseif ($hook -and $hook.text) { [string]$hook.text } else { '' }
+                error_type = if ($hook -and $hook.error_type) { [string]$hook.error_type } else { '' }
+                notification_type = if ($hook -and $hook.notification_type) { [string]$hook.notification_type } else { '' }
+                tool_name = if ($hook -and $hook.tool_name) { [string]$hook.tool_name } else { '' }
+                stop_status = if ($hook -and $hook.status) { [string]$hook.status } else { '' }
+            }
+            wezterm = [ordered]@{ pane = if ($env:WEZTERM_PANE) { "$env:WEZTERM_PANE" } else { '' } }
+            ts = [double][DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() / 1000
+        }
+        $json = $payload | ConvertTo-Json -Depth 6 -Compress
+        $client = [System.Net.Http.HttpClient]::new()
+        try {
+            $client.Timeout = [TimeSpan]::FromMilliseconds(1500)
+            $content = [System.Net.Http.StringContent]::new($json, [System.Text.Encoding]::UTF8, 'application/json')
+            $resp = $client.PostAsync("http://127.0.0.1:$port/v1/event", $content).GetAwaiter().GetResult()
+            return $resp.IsSuccessStatusCode
+        } finally {
+            $client.Dispose()
+        }
+    } catch {
+        return $false
+    }
+}

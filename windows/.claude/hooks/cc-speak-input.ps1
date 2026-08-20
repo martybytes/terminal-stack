@@ -12,6 +12,13 @@ try {
 . (Join-Path $PSScriptRoot 'cc-tts-lib.ps1')
 $parsed = Parse-CcTtsInputHook -InputJson $inputJson -Event $Event
 
+# Daemon first; direct path below is the fallback — never silence.
+if (Test-CcTtsDaemonReady) {
+    if (Send-CcTtsDaemonEvent -Source claude -Event $Event -State $parsed.State -InputJson $inputJson -Override $parsed.Override) {
+        return
+    }
+}
+
 $notify = Join-Path $PSScriptRoot 'cc-tts-notify.ps1'
 $args = @(
     '-NoLogo', '-NonInteractive', '-ExecutionPolicy', 'Bypass',

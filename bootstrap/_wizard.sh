@@ -13,6 +13,7 @@
 #   TS_WEZ_MUX=on|off                        WezTerm multiplexer domain (ts-mux)
 #   TS_WEZ_RESTORE=on|off                    reopen the last session at startup
 #   TS_CC_TTS=on|off|skip   Claude Code Kokoro TTS at install
+#   TS_CC_TTS_DAEMON=on|off route TTS through the Windows tray daemon (WSL only)
 #   TS_ASSUME_YES=1         skip the review prompt (answers still come from the above)
 #
 # This file is sourced, not executed. Do not `exit`; return non-zero instead.
@@ -253,6 +254,7 @@ ts_wizard_review() {
     printf '    tmux prefix      %s\n' "$TS_WIZ_TMUX"
     printf '    Apps             %s\n' "${TS_WIZ_APPS:-<none>}"
     printf '    Claude TTS       %s\n' "${TS_WIZ_CC_TTS:-off}"
+    [ "${TS_WIZ_CC_TTS:-off}" = on ] && printf '    TTS daemon       %s\n' "${TS_WIZ_CC_TTS_DAEMON:-off}"
 }
 
 # Ask each question once. Env vars skip their prompt individually.
@@ -307,6 +309,20 @@ ts_wizard_ask() {
     else
         TS_WIZ_CC_TTS="$(ts_prompt_cc_tts)"; TS_WIZ_ASKED=$((TS_WIZ_ASKED + 1))
     fi
+
+    # Tray daemon follow-up (TS_CC_TTS_DAEMON=on|off skips): only when TTS was
+    # enabled and this host can reach a Windows side (WSL); native Linux and
+    # headless hosts keep classic direct playback.
+    if [ "$TS_WIZ_CC_TTS" = on ] && [ -d /mnt/c/Users ] \
+        && ! { command -v ts_is_headless >/dev/null 2>&1 && ts_is_headless; }; then
+        if [ -n "${TS_CC_TTS_DAEMON:-}" ]; then
+            case "$TS_CC_TTS_DAEMON" in on) TS_WIZ_CC_TTS_DAEMON=on ;; *) TS_WIZ_CC_TTS_DAEMON=off ;; esac
+        else
+            TS_WIZ_CC_TTS_DAEMON="$(ts_prompt_cc_tts_daemon)"; TS_WIZ_ASKED=$((TS_WIZ_ASKED + 1))
+        fi
+    else
+        TS_WIZ_CC_TTS_DAEMON=off
+    fi
 }
 
 # Gather choices into TS_WIZ_* (no chezmoi writes here), then show them for
@@ -328,7 +344,7 @@ ts_wizard_collect() {
         esac
     done
 
-    export TS_WIZ_LEADER TS_WIZ_THEME TS_WIZ_APPS TS_WIZ_TMUX TS_WIZ_CC_TTS TS_WIZ_WEZTERM TS_WIZ_WEZ_MUX TS_WIZ_WEZ_RESTORE
-    echo "$INFO Config: leader=$TS_WIZ_LEADER theme=$TS_WIZ_THEME tmux-prefix=$TS_WIZ_TMUX wez-mux=${TS_WIZ_WEZ_MUX:-off} wez-restore=${TS_WIZ_WEZ_RESTORE:-off} cc-tts=${TS_WIZ_CC_TTS:-off}"
+    export TS_WIZ_LEADER TS_WIZ_THEME TS_WIZ_APPS TS_WIZ_TMUX TS_WIZ_CC_TTS TS_WIZ_CC_TTS_DAEMON TS_WIZ_WEZTERM TS_WIZ_WEZ_MUX TS_WIZ_WEZ_RESTORE
+    echo "$INFO Config: leader=$TS_WIZ_LEADER theme=$TS_WIZ_THEME tmux-prefix=$TS_WIZ_TMUX wez-mux=${TS_WIZ_WEZ_MUX:-off} wez-restore=${TS_WIZ_WEZ_RESTORE:-off} cc-tts=${TS_WIZ_CC_TTS:-off} tts-daemon=${TS_WIZ_CC_TTS_DAEMON:-off}"
     echo "$INFO Apps: ${TS_WIZ_APPS:-<none>}"
 }

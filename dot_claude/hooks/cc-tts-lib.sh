@@ -424,3 +424,149 @@ cc_tts_play() {
     fi
     return 1
 }
+
+# ── ttsd daemon senders ─────────────────────────────────────────────────────────
+# The daemon is a native Windows tray process (bootstrap/tts-daemon), so only
+# WSL (with /mnt/c) can reach it from the POSIX side; native Linux/macOS always
+# keep the direct cc-tts-notify path. Callers must fall back to that path when
+# cc_tts_daemon_send fails — daemon dead means "speak the old way", never silence.
+
+CC_TTS_DAEMON_CACHE="${HOME}/.cache/terminal-stack/cc-tts.daemonhost"
+
+cc_tts_daemon_ready() {
+    [ -d /mnt/c/Users ] || return 1
+    [ "$(cc_tts_json .daemon.enabled false)" = true ] || return 1
+    command -v curl >/dev/null 2>&1 || return 1
+    command -v jq >/dev/null 2>&1 || command -v python3 >/dev/null 2>&1 || return 1
+}
+
+cc_tts_daemon_token() {
+    # Shared secret required by the daemon's non-loopback (WSL-facing) listener.
+    local winuser
+    winuser="$(cmd.exe /c 'echo %USERNAME%' 2>/dev/null | tr -d '\r\n')"
+    [ -n "$winuser" ] || return 1
+    cat "/mnt/c/Users/${winuser}/AppData/Local/terminal-stack/tts-daemon/state/token" 2>/dev/null
+}
+
+cc_tts_daemon_probe() {
+    local host="$1" port="$2" token="$3"
+    if [ -n "$token" ]; then
+        curl -sf --connect-timeout 0.25 --max-time 1 -H "X-TS-Token: $token" \
+            "http://${host}:${port}/healthz" >/dev/null 2>&1
+    else
+        curl -sf --connect-timeout 0.25 --max-time 1 \
+            "http://${host}:${port}/healthz" >/dev/null 2>&1
+    fi
+}
+
+cc_tts_daemon_host() {
+    # Prints "host token" (token empty on loopback). Ladder: hostOverride →
+    # 127.0.0.1 (mirrored networking) → default gateway (NAT) → resolv.conf
+    # nameserver. The winner is cached 60s; send failures clear the cache.
+    local port="$1" host token="" cached age
+    mkdir -p "$(dirname "$CC_TTS_DAEMON_CACHE")" 2>/dev/null || true
+    if [ -f "$CC_TTS_DAEMON_CACHE" ]; then
+        age=$(( $(date +%s) - $(stat -c %Y "$CC_TTS_DAEMON_CACHE" 2>/dev/null || echo 0) ))
+        if [ "$age" -ge 0 ] && [ "$age" -lt 60 ]; then
+            cat "$CC_TTS_DAEMON_CACHE"
+            return 0
+        fi
+    fi
+    local candidates="" override gw ns
+    override="$(cc_tts_json .daemon.hostOverride '')"
+    [ -n "$override" ] && candidates="$override"
+    candidates="$candidates 127.0.0.1"
+    gw="$(ip route show default 2>/dev/null | awk '{print $3; exit}')"
+    [ -n "$gw" ] && candidates="$candidates $gw"
+    ns="$(awk '/^nameserver/ {print $2; exit}' /etc/resolv.conf 2>/dev/null)"
+    [ -n "$ns" ] && [ "$ns" != "$gw" ] && candidates="$candidates $ns"
+    for host in $candidates; do
+        token=""
+        [ "$host" != 127.0.0.1 ] && token="$(cc_tts_daemon_token || true)"
+        if cc_tts_daemon_probe "$host" "$port" "$token"; then
+            printf '%s %s' "$host" "$token" > "$CC_TTS_DAEMON_CACHE" 2>/dev/null || true
+            printf '%s %s' "$host" "$token"
+            return 0
+        fi
+    done
+    return 1
+}
+
+cc_tts_daemon_send() {
+    # cc_tts_daemon_send <source> <event> <state> <hook-json> [override]
+    # Returns 0 only when the daemon accepted the event.
+    local source="$1" event="$2" state="$3" input="$4" override="${5:-}"
+    local port hostline host token payload
+    # CC_TTS_DAEMON_PORT_OVERRIDE: test hook (cc-tts-test --daemon-fallback)
+    # forces an unreachable port to prove the direct-speak fallback fires.
+    port="${CC_TTS_DAEMON_PORT_OVERRIDE:-$(cc_tts_json .daemon.port 8890)}"
+    hostline="$(cc_tts_daemon_host "$port")" || return 1
+    host="${hostline%% *}"
+    token="${hostline#* }"
+    [ "$token" = "$hostline" ] && token=""
+    local pdir="${CLAUDE_PROJECT_DIR:-${CURSOR_PROJECT_DIR:-$PWD}}"
+    local fid="pid$PPID"
+    if command -v jq >/dev/null 2>&1; then
+        payload="$(jq -cn \
+            --arg source "$source" --arg event "$event" --arg state "$state" \
+            --arg pdir "$pdir" --arg cwd "$PWD" --arg pane "${WEZTERM_PANE:-}" \
+            --arg override "$override" --arg fid "$fid" --arg input "$input" '
+            ($input | (try fromjson catch {})) as $h |
+            {v: 1, source: $source, host: "wsl", event: $event, state: $state,
+             session_key: ($source + ":" + (($h.session_id // $h.conversation_id // $fid) | tostring)),
+             project: {dir: $pdir, name: ($pdir | split("/") | last)},
+             cwd: $cwd,
+             transcript_path: ($h.transcript_path // ""),
+             override: $override,
+             message: {
+               text: ($h.last_assistant_message // $h.text // ""),
+               error_type: ($h.error_type // ""),
+               notification_type: ($h.notification_type // ""),
+               tool_name: ($h.tool_name // ""),
+               stop_status: ($h.status // "")},
+             wezterm: {pane: $pane},
+             ts: now}' 2>/dev/null)"
+    else
+        payload="$(CC_TTS_DAEMON_INPUT="$input" python3 - "$source" "$event" "$state" \
+            "$pdir" "$PWD" "${WEZTERM_PANE:-}" "$override" "$fid" <<'PY' 2>/dev/null
+import json, os, sys, time
+source, event, state, pdir, cwd, pane, override, fid = sys.argv[1:9]
+try:
+    h = json.loads(os.environ.get("CC_TTS_DAEMON_INPUT") or "{}")
+    if not isinstance(h, dict):
+        h = {}
+except ValueError:
+    h = {}
+sid = h.get("session_id") or h.get("conversation_id") or fid
+print(json.dumps({
+    "v": 1, "source": source, "host": "wsl", "event": event, "state": state,
+    "session_key": f"{source}:{sid}",
+    "project": {"dir": pdir, "name": pdir.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]},
+    "cwd": cwd,
+    "transcript_path": h.get("transcript_path") or "",
+    "override": override,
+    "message": {
+        "text": h.get("last_assistant_message") or h.get("text") or "",
+        "error_type": h.get("error_type") or "",
+        "notification_type": h.get("notification_type") or "",
+        "tool_name": h.get("tool_name") or "",
+        "stop_status": h.get("status") or ""},
+    "wezterm": {"pane": pane},
+    "ts": time.time()}))
+PY
+)"
+    fi
+    [ -n "$payload" ] || return 1
+    local rc=0
+    if [ -n "$token" ]; then
+        curl -sf --connect-timeout 0.25 --max-time 2 -H "X-TS-Token: $token" \
+            -H 'Content-Type: application/json' -d "$payload" \
+            "http://${host}:${port}/v1/event" >/dev/null 2>&1 || rc=1
+    else
+        curl -sf --connect-timeout 0.25 --max-time 2 \
+            -H 'Content-Type: application/json' -d "$payload" \
+            "http://${host}:${port}/v1/event" >/dev/null 2>&1 || rc=1
+    fi
+    [ "$rc" -ne 0 ] && rm -f "$CC_TTS_DAEMON_CACHE" 2>/dev/null
+    return "$rc"
+}

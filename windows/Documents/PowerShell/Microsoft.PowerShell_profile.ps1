@@ -196,6 +196,9 @@ function ccr   { Set-WezTabTitle "$(Split-Path -Leaf $PWD)"; try { claude --resu
 function ccdr  { Set-WezTabTitle "$(Split-Path -Leaf $PWD)"; try { claude --dangerously-skip-permissions --resume @args } finally { Set-WezTabTitle "" } }
 function cca   { Set-WezTabTitle "agents"; try { claude agents } finally { Set-WezTabTitle "" } }
 
+# Codex: resume a saved session with approvals and sandboxing bypassed.
+function cyr   { codex --yolo resume @args }
+
 # Escape hatch: vanilla pwsh, no profile (no starship/zoxide/aliases).
 # Nested — `exit` drops back to the customized shell.
 function plain { Set-WezTabTitle "plain • $(Split-Path -Leaf $PWD)"; try { pwsh -NoLogo -NoProfile @args } finally { Set-WezTabTitle "" } }
@@ -537,6 +540,24 @@ function Update-TerminalStack {
             }
         } catch { Write-Warning "app check skipped: $_" }
     }
+
+    # The tts daemon keeps running its pre-pull code. Like the mux server it is
+    # never auto-restarted (it may be mid-announcement or holding a duck) —
+    # nudge instead, same philosophy as ts-mux restart.
+    if (Test-Path $cfgHelper) {
+        try {
+            . $cfgHelper
+            $ttsCfg = Get-CcTtsConfig
+            if ($ttsCfg -and $ttsCfg.daemon -and $ttsCfg.daemon.enabled) {
+                $port = if ($ttsCfg.daemon.port) { [int]$ttsCfg.daemon.port } else { 8890 }
+                $r = Invoke-WebRequest -Uri "http://127.0.0.1:$port/healthz" -TimeoutSec 2 -UseBasicParsing
+                $sha = & git -C $SourceDir rev-parse HEAD 2>$null
+                if ($sha -and ($r.Content -notmatch [regex]::Escape($sha))) {
+                    Write-Host "ts-update: note — the tts daemon is running the previous build; 'ts-config tts daemon restart' when convenient."
+                }
+            }
+        } catch {}
+    }
 }
 Set-Alias -Name ts-update -Value Update-TerminalStack
 
@@ -629,10 +650,11 @@ function Set-TerminalStackConfig {
                     '5' { & $save }
                     '6' {
                         Show-CcTtsConfig
-                        switch (Read-Host 'TTS: a) on  b) off  c) test  d) back') {
+                        switch (Read-Host 'TTS: a) on  b) off  c) test  d) daemon status  e) back') {
                             'a' { $ccTts.enabled = $true; & $save $ccTts }
                             'b' { $ccTts.enabled = $false; & $save $ccTts }
                             'c' { Invoke-TsConfigTts -Sub test -Apply $save }
+                            'd' { Show-CcTtsDaemonStatus }
                         }
                     }
                     '7' { Invoke-TsMux status }
@@ -955,6 +977,8 @@ function Invoke-TsDoctor {
             (Resolve-Path $clone -ErrorAction SilentlyContinue).Path -ne (Resolve-Path $src -ErrorAction SilentlyContinue).Path) {
             Set-TsSourceDirPersisted $src
         }
+        . (Join-Path $src 'bootstrap\_config.ps1')
+        Repair-CcTtsDuckSnapshot
         Invoke-TsSync $src
         Invoke-TsCleanupMenu $src
         Test-TsInstall -SourceDir $src | Out-Null
@@ -963,6 +987,23 @@ function Invoke-TsDoctor {
             Write-Host "note: clone is at a legacy location; 'ts-doctor -Repair' can move it to $canon"
         } elseif (Test-TsDevClone $src) {
             Write-Host 'note: pinned at a dev clone (workspace tier path) — deliberate, leaving it alone.'
+        }
+        # Claude TTS daemon (only when the feature is on): enabled-but-dead means
+        # hooks silently degraded to direct playback; a stale duck snapshot means
+        # music may be stuck quiet (Windows persists per-app volume).
+        . (Join-Path $src 'bootstrap\_config.ps1')
+        $ttsCfg = Get-CcTtsConfig
+        if ($ttsCfg -and $ttsCfg.enabled) {
+            if ($ttsCfg.daemon -and $ttsCfg.daemon.enabled) {
+                if (Test-CcTtsDaemonHealthy) {
+                    if (-not $Quiet) { Write-Host '  ok  tts daemon healthy' }
+                } else {
+                    Write-Warning 'tts daemon enabled but not reachable — hooks fall back to direct playback; start: ts-config tts daemon on'
+                }
+            }
+            if ((Test-Path (Get-CcTtsDuckSnapshotPath)) -and -not (Test-CcTtsDaemonHealthy)) {
+                Write-Host "note: stale duck snapshot — music may be stuck quiet; 'ts-doctor -Repair' restores volumes"
+            }
         }
         Test-TsInstall -SourceDir $src -Quiet:$Quiet | Out-Null
     }

@@ -4,6 +4,13 @@ param(
     [switch]$Foreground
 )
 
+$inputJson = ''
+try {
+    if ([Console]::IsInputRedirected) {
+        $inputJson = [Console]::In.ReadToEnd()
+    }
+} catch {}
+
 $notify = Join-Path $PSScriptRoot 'cc-tts-notify.ps1'
 if ($Foreground) {
     $args = @('-File', $notify, '-State', $State, '-Source', 'claude', '-Foreground')
@@ -13,6 +20,16 @@ if ($Foreground) {
 }
 
 . (Join-Path $PSScriptRoot 'cc-tts-lib.ps1')
+
+# Daemon first: session-aware queueing/coalescing/ducking. Any failure falls
+# back to the classic direct path below — never silence.
+if (Test-CcTtsDaemonReady) {
+    $event = if ($State -eq 'error') { 'stop_failure' } else { 'stop' }
+    if (Send-CcTtsDaemonEvent -Source claude -Event $event -State $State -InputJson $inputJson -Override $OverrideText) {
+        return
+    }
+}
+
 $cfg = Initialize-CcTtsConfig
 if (-not $cfg -or -not $cfg.enabled) { return }
 if (-not (Test-CcTtsEventEnabled $State)) { return }

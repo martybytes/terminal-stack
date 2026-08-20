@@ -133,6 +133,30 @@ ts_doctor() {
         if command -v "$t" >/dev/null 2>&1; then _ok "$t on PATH"; else _bad "$t not on PATH"; fi
     done
 
+    # Claude TTS (only when the feature is on). Kokoro down is a note (edge-tts
+    # covers it); an enabled-but-dead daemon is a failure — the hooks are
+    # silently degraded to direct playback and the user chose otherwise.
+    if command -v ts_cc_tts_get >/dev/null 2>&1 && [ "$(ts_cc_tts_get ccTtsEnabled 2>/dev/null)" = true ]; then
+        if ts_cc_tts_probe 2>/dev/null | grep -q '^kokoro: up'; then
+            _ok "kokoro TTS engine reachable"
+        else
+            echo "  note: kokoro TTS engine not reachable (edge-tts fallback will be used)"
+        fi
+        if [ "$(ts_cc_tts_get ccTtsDaemon 2>/dev/null)" = on ]; then
+            local _dout _snap
+            if _dout="$(ts_cc_tts_daemon_status 2>/dev/null)"; then
+                _ok "tts daemon healthy"
+                printf '%s\n' "$_dout" | grep 'older build' | sed 's/^/  note: /' || true
+            else
+                _bad "tts daemon enabled (ccTtsDaemon=on) but not reachable — hooks fall back to direct playback; start: ts-config tts daemon on"
+                _snap="$(ts_cc_tts_daemon_snapshot_path 2>/dev/null || true)"
+                if [ -n "$_snap" ] && [ -f "$_snap" ]; then
+                    echo "  note: stale duck snapshot present — music may be stuck quiet; the daemon's next start restores it (ts-config tts daemon on)"
+                fi
+            fi
+        fi
+    fi
+
     # Location advisories (not health failures): a legacy-path runtime clone can
     # be moved to the canonical location; a dev-clone pin is deliberate.
     local canon=""
