@@ -497,7 +497,9 @@ cc_tts_daemon_send() {
     # Returns 0 only when the daemon accepted the event.
     local source="$1" event="$2" state="$3" input="$4" override="${5:-}"
     local port hostline host token payload
-    port="$(cc_tts_json .daemon.port 8890)"
+    # CC_TTS_DAEMON_PORT_OVERRIDE: test hook (cc-tts-test --daemon-fallback)
+    # forces an unreachable port to prove the direct-speak fallback fires.
+    port="${CC_TTS_DAEMON_PORT_OVERRIDE:-$(cc_tts_json .daemon.port 8890)}"
     hostline="$(cc_tts_daemon_host "$port")" || return 1
     host="${hostline%% *}"
     token="${hostline#* }"

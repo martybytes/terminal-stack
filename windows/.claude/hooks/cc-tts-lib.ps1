@@ -265,7 +265,10 @@ function Send-CcTtsDaemonEvent {
         [string]$Override = ''
     )
     try {
-        $port = [int](Get-CcTtsConfigValue 'daemon.port' 8890)
+        # CC_TTS_DAEMON_PORT_OVERRIDE: test hook (cc-tts-test -DaemonFallback)
+        # forces an unreachable port to prove the direct-speak fallback fires.
+        $port = if ($env:CC_TTS_DAEMON_PORT_OVERRIDE) { [int]$env:CC_TTS_DAEMON_PORT_OVERRIDE }
+                else { [int](Get-CcTtsConfigValue 'daemon.port' 8890) }
         $hook = $null
         if ($InputJson) { try { $hook = $InputJson | ConvertFrom-Json } catch {} }
         $pdir = if ($env:CLAUDE_PROJECT_DIR) { $env:CLAUDE_PROJECT_DIR }
