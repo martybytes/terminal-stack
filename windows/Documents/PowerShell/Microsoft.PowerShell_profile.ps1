@@ -1033,12 +1033,17 @@ function npp {
     if (-not $Paths) { & $exe; return }
     # Resolve each arg against the current dir so relative paths open correctly;
     # a not-yet-existing path is passed through (Notepad++ opens a new buffer).
-    $resolved = foreach ($p in $Paths) {
+    # @(...) forces an array even for one path — foreach with a single output
+    # collapses $resolved to a bare string, and `& $exe @resolved` on a string
+    # splats its individual CHARACTERS as separate arguments (PowerShell splat
+    # gotcha), which silently truncated every single-file open to its first
+    # character before this was caught.
+    $resolved = @(foreach ($p in $Paths) {
         $full = Resolve-Path -LiteralPath $p -ErrorAction SilentlyContinue
         if     ($full)                                 { $full.Path }
         elseif ([System.IO.Path]::IsPathRooted($p))    { $p }
         else                                           { Join-Path (Get-Location).Path $p }
-    }
+    })
     & $exe @resolved
 }
 
@@ -1055,12 +1060,13 @@ function pm {
         return
     }
     if (-not $Paths) { & $exe; return }
-    $resolved = foreach ($p in $Paths) {
+    # @(...) forces an array even for one path — see the comment on npp above.
+    $resolved = @(foreach ($p in $Paths) {
         $full = Resolve-Path -LiteralPath $p -ErrorAction SilentlyContinue
         if     ($full)                               { $full.Path }
         elseif ([System.IO.Path]::IsPathRooted($p))  { $p }
         else                                          { Join-Path (Get-Location).Path $p }
-    }
+    })
     & $exe @resolved
 }
 
