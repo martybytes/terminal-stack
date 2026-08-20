@@ -100,9 +100,14 @@ if ($pin) {
 if ($pin) {
     $targetDir = $pin
     Write-Host "==> Clone location: $targetDir (from `$env:TERMINAL_STACK_DIR)"
+} elseif ([Console]::IsInputRedirected) {
+    # No one to answer (CI, a piped host). Read-Host would block on a pipe that
+    # never closes rather than returning the default.
+    $targetDir = $defaultDir
+    Write-Host "==> Clone location: $targetDir (non-interactive)"
 } else {
     $answer = Read-Host "Where should the terminal-stack repo live? [$defaultDir]"
-    $targetDir = if ($answer) { $answer } else { $defaultDir }
+    $targetDir = if ($answer) { $answer.Trim() } else { $defaultDir }
 }
 
 # The runtime clone must not live inside a workspace root: `wso migrate` derives
@@ -150,7 +155,11 @@ if (-not (Test-Path (Join-Path $targetDir '.git'))) {
     }
     if ($legacy) {
         Write-Host "==> Existing clone found at $legacy"
-        $choice = Read-Host "  [M]ove it to $targetDir / [K]eep it there / [F]resh clone at the new location? [M]"
+        # Default [M]ove without asking when there is no one to ask — Read-Host
+        # blocks on a pipe rather than returning empty.
+        $choice = if ([Console]::IsInputRedirected) { '' } else {
+            Read-Host "  [M]ove it to $targetDir / [K]eep it there / [F]resh clone at the new location? [M]"
+        }
         switch -Regex ($choice) {
             '^(k|keep)$'  { $targetDir = $legacy; Write-Host "==> Keeping $legacy" }
             '^(f|fresh)$' { }
