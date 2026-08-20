@@ -11,18 +11,45 @@ param(
 $ErrorActionPreference = 'Stop'
 
 # Config store + app catalog + wizard prompts (Save-TsConfig, $TsWingetIds,
-# Read-TsLeader/Theme/Apps, etc.).
+# Read-TsChoice, Read-TsLeader/Theme/Wezterm/Apps, etc.).
 . (Join-Path $PSScriptRoot '_config.ps1')
 
+# Packages that didn't install, reported together at the end. A Write-Warning
+# mid-run scrolls past and gets missed — a WezTerm nightly failure did exactly
+# that in the field, and the install looked clean.
+$script:TsFailedPackages = @()
+
 function Install-WingetPackage {
-    param([Parameter(Mandatory)][string]$Id)
-    if ($PSCmdlet.ShouldProcess($Id, 'winget install')) {
-        Write-Host "==> winget install $Id"
-        & winget install --id $Id --exact --silent --accept-source-agreements --accept-package-agreements 2>&1 |
-            Select-Object -Last 3
-        if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne -1978335189) {
-            # -1978335189 = APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE (already at latest)
-            Write-Warning "winget install $Id returned exit code $LASTEXITCODE"
+    param([Parameter(Mandatory)][string]$Id, [string]$Because)
+    if (-not $PSCmdlet.ShouldProcess($Id, 'winget install')) { return $true }
+    Write-Host "==> winget install $Id"
+    $out = & winget install --id $Id --exact --silent --accept-source-agreements --accept-package-agreements 2>&1
+    $out | Select-Object -Last 3
+    if ($LASTEXITCODE -eq 0 -or $LASTEXITCODE -eq -1978335189) {
+        # -1978335189 = APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE (already at latest)
+        return $true
+    }
+    $reason = if ($out -match 'hash does not match') { 'installer hash mismatch (stale manifest)' }
+              else { "winget exit code $LASTEXITCODE" }
+    Write-Warning "winget install $Id failed: $reason"
+    $script:TsFailedPackages += [pscustomobject]@{ Id = $Id; Reason = $reason; Because = $Because }
+    return $false
+}
+
+# WezTerm nightly's winget manifest is republished more often than its hash is
+# refreshed, so a nightly install fails outright on a bad day. Stable is a fine
+# fallback — the config targets nightly features but degrades rather than breaks.
+function Install-TsWezterm {
+    param([Parameter(Mandatory)][string]$Choice)
+    switch ($Choice) {
+        'skip'   { Write-Host '==> WezTerm: skipped'; return }
+        'stable' { Install-WingetPackage -Id 'wez.wezterm' -Because 'terminal emulator' | Out-Null; return }
+        default  {
+            if (Install-WingetPackage -Id 'wez.wezterm.nightly' -Because 'terminal emulator') { return }
+            Write-Host '==> nightly unavailable; falling back to WezTerm stable'
+            # The nightly failure is now handled, not outstanding.
+            $script:TsFailedPackages = @($script:TsFailedPackages | Where-Object { $_.Id -ne 'wez.wezterm.nightly' })
+            Install-WingetPackage -Id 'wez.wezterm' -Because 'terminal emulator (nightly fallback)' | Out-Null
         }
     }
 }
@@ -34,6 +61,30 @@ function Test-WingetAvailable {
     } catch {
         return $false
     }
+}
+
+# Workspace root for the ws/wsp/wspu profile functions. Same contract as the
+# WSL/Linux/Mac bootstraps: $env:WORKSPACE_DIR skips the prompt.
+function Get-TsDetectedWorkspace {
+    foreach ($d in @(
+        'C:\DATA\Workspace',
+        (Join-Path $env:USERPROFILE 'workspace'),
+        (Join-Path $env:USERPROFILE 'Documents\Workspace')
+    )) { if (Test-Path $d) { return $d } }
+    return $null
+}
+
+function Read-TsWorkspaceDir {
+    if ($env:WORKSPACE_DIR) {
+        Write-Host "==> WORKSPACE_DIR=$($env:WORKSPACE_DIR) (from env; skipping prompt)"
+        return $env:WORKSPACE_DIR
+    }
+    $detected = Get-TsDetectedWorkspace
+    $promptDefault = if ($detected) { $detected } else { 'none' }
+    if (-not (Test-TsInteractive)) { return $detected }
+    Write-Host ''
+    $answer = Read-Host "Workspace directory [$promptDefault]"
+    if ($answer) { $answer.Trim() } else { $detected }
 }
 
 # Preflight
@@ -49,29 +100,76 @@ Write-Host '==> Terminal stack Windows bootstrap'
 Write-Host '    Detected: ' -NoNewline
 Write-Host "PowerShell $($PSVersionTable.PSVersion); user $env:USERNAME"
 
-# Wizard — collect leader / theme / app choices (env vars skip prompts).
-$leaderChord  = Read-TsLeader
-$themeMode    = Read-TsTheme
-$selectedApps = @(Read-TsApps)
-$ccTtsChoice  = Read-TsCcTts
-$ccTts        = Set-CcTtsWizardChoice $ccTtsChoice
-Write-Host "==> Config: leader=$leaderChord theme=$themeMode cc-tts=$ccTtsChoice"
-$appsLabel = if ($selectedApps.Count) { $selectedApps -join ', ' } else { '<none>' }
-Write-Host "==> Apps: $appsLabel"
+# ── Wizard ──────────────────────────────────────────────────────────────────────
+# Every answer is collected first and shown for review before anything is
+# installed or written, so a mis-typed choice costs a keystroke instead of a
+# re-run. Env vars (TS_LEADER / TS_THEME / TS_WEZTERM / TS_APPS / TS_CC_TTS /
+# WORKSPACE_DIR) still skip their prompt individually.
+function Read-TsWizard {
+    [ordered]@{
+        Leader    = (Read-TsLeader)
+        Theme     = (Read-TsTheme)
+        Wezterm   = (Read-TsWezterm)
+        Apps      = @(Read-TsApps)
+        CcTts     = (Read-TsCcTts)
+        Workspace = (Read-TsWorkspaceDir)
+    }
+}
 
-# Required packages (always installed; not part of the picker).
+function Show-TsWizardReview($w) {
+    $themeLabel = switch ($w.Theme) {
+        'dark'   { 'dark (Catppuccin Mocha)' }
+        'light'  { 'light (VS Code Light Modern)' }
+        'follow' { 'follow OS appearance' }
+        default  { $w.Theme }
+    }
+    Write-Host ''
+    Write-Host '==> Review'
+    Write-Host ("    Leader       {0}" -f $w.Leader)
+    Write-Host ("    Theme        {0}" -f $themeLabel)
+    Write-Host ("    WezTerm      {0}" -f $w.Wezterm)
+    Write-Host ("    Apps         {0}" -f $(if ($w.Apps.Count) { $w.Apps -join ', ' } else { '<none>' }))
+    Write-Host ("    Claude TTS   {0}" -f $w.CcTts)
+    Write-Host ("    Workspace    {0}" -f $(if ($w.Workspace) { $w.Workspace } else { '<none detected>' }))
+}
+
+# Plain if/else, not switch: `break`/`continue` inside a PowerShell switch bind
+# to the switch, not the enclosing loop, which would make "edit" fall straight
+# through to the install.
+$wizard = Read-TsWizard
+while ($true) {
+    Show-TsWizardReview $wizard
+    if (-not (Test-TsInteractive)) { Write-Host '  (non-interactive — proceeding)'; break }
+    $a = (Read-Host '  [P]roceed / [e]dit / [q]uit').Trim()
+    if ($a -match '^(e|edit)$') { $wizard = Read-TsWizard; continue }
+    if ($a -match '^(q|quit)$') { Write-Host '==> quit — nothing was installed or changed.'; return }
+    if (-not $a -or $a -match '^(p|proceed|y|yes)$') { break }
+    Write-Host "  '$a' is not one of the choices — Enter to proceed, 'e' to edit, 'q' to quit."
+}
+
+$leaderChord  = $wizard.Leader
+$themeMode    = $wizard.Theme
+$selectedApps = @($wizard.Apps)
+$ccTtsChoice  = $wizard.CcTts
+$ccTts        = Set-CcTtsWizardChoice $ccTtsChoice
+Write-Host ''
+Write-Host "==> Config: leader=$leaderChord theme=$themeMode wezterm=$($wizard.Wezterm) cc-tts=$ccTtsChoice"
+
+# Required packages (always installed; not part of the picker). WezTerm is NOT
+# here — it is a wizard choice, see Read-TsWezterm.
 $requiredPackages = @(
-    'wez.wezterm.nightly',              # WezTerm nightly (preferred over stale stable)
     'DEVCOM.JetBrainsMonoNerdFont',     # Nerd Font for glyph rendering
     'Starship.Starship',                # Shell prompt
     'twpayne.chezmoi'                   # Dotfile manager (used to apply this repo)
 )
-foreach ($pkg in $requiredPackages) { Install-WingetPackage -Id $pkg }
+foreach ($pkg in $requiredPackages) { Install-WingetPackage -Id $pkg -Because 'required' | Out-Null }
+
+Install-TsWezterm -Choice $wizard.Wezterm
 
 # Selected toggleable apps (catalog id -> winget id).
 foreach ($id in $selectedApps) {
     if ($script:TsWingetIds.ContainsKey($id)) {
-        Install-WingetPackage -Id $script:TsWingetIds[$id]
+        Install-WingetPackage -Id $script:TsWingetIds[$id] -Because $id | Out-Null
     }
 }
 
@@ -97,26 +195,10 @@ if ($existingIncludes -match 'terminal-stack\.gitconfig') {
     & git config --global --add include.path $gitInclude
 }
 
-# Workspace directory for the ws/wsp/wspu profile functions. Same contract as
-# the WSL/Linux/Mac bootstraps: $env:WORKSPACE_DIR skips the prompt; the
-# answer persists to profile.local.ps1 ONLY when it differs from the
-# autodetect (Get-TsWorkspace in $PROFILE covers the detected case).
-$wsDetected = $null
-foreach ($d in @(
-    'C:\DATA\Workspace',
-    (Join-Path $env:USERPROFILE 'workspace'),
-    (Join-Path $env:USERPROFILE 'Documents\Workspace')
-)) {
-    if (Test-Path $d) { $wsDetected = $d; break }
-}
-$wsChoice = $env:WORKSPACE_DIR
-if ($wsChoice) {
-    Write-Host "==> WORKSPACE_DIR=$wsChoice (from env; skipping prompt)"
-} else {
-    $promptDefault = if ($wsDetected) { $wsDetected } else { 'none' }
-    $answer = Read-Host "Workspace directory [$promptDefault]"
-    $wsChoice = if ($answer) { $answer } else { $wsDetected }
-}
+# Persist the workspace answer ONLY when it differs from the autodetect
+# (Get-TsWorkspace in $PROFILE covers the detected case).
+$wsDetected = Get-TsDetectedWorkspace
+$wsChoice = $wizard.Workspace
 if (-not $wsChoice) {
     Write-Warning 'No workspace directory found or chosen. Set one later: $env:WORKSPACE_DIR in profile.local.ps1'
 } elseif ($wsChoice -eq $wsDetected) {
@@ -140,6 +222,15 @@ if (-not $wsChoice) {
 }
 
 Write-Host ''
+if ($script:TsFailedPackages.Count) {
+    Write-Host "==> $($script:TsFailedPackages.Count) package(s) did not install:"
+    foreach ($f in $script:TsFailedPackages) {
+        Write-Host ("    {0}  ({1}) — {2}" -f $f.Id, $f.Because, $f.Reason)
+        Write-Host ("      retry: winget install --id {0} --exact" -f $f.Id)
+    }
+    Write-Host '    Everything else was configured; re-run this bootstrap once they install.'
+    Write-Host ''
+}
 Write-Host '==> Windows bootstrap done.'
 Write-Host '    Next: run bootstrap\wsl-bootstrap.sh inside WSL Ubuntu, then chezmoi apply.'
 Write-Host '    See INSTALL.md § Scripted for the full sequence.'

@@ -392,7 +392,7 @@ common_git_include() {
 common_install_all() {
     common_apt_prereqs
     ts_confirm_headless
-    ts_wizard_collect
+    ts_wizard_collect || return 1
     common_install_selected_apps "$TS_WIZ_APPS"
     common_oh_my_zsh
     common_login_shell_zsh

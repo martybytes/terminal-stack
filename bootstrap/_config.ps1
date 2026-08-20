@@ -183,32 +183,112 @@ function Save-TsConfig {
 }
 
 # ── Wizard prompts (env vars TS_LEADER / TS_THEME / TS_APPS skip each) ──────────
+
+# The menu prompt every wizard question uses. Marks the default and says how to
+# take it, accepts the option's name as well as its number, and RE-PROMPTS on
+# anything else — the old `switch (Read-Host 'Choose [1]') { default {...} }`
+# silently selected option 1 for a typo, a stray 'y', or a fat-fingered '9',
+# which is the opposite of what a default is for.
+#
+# One definition of "is there a human here" for every prompt in the wizard, so
+# headless behaviour can't drift between questions. POSIX twin: the `> /dev/tty`
+# probe in _wizard.sh ts_tty_prompt.
+function Test-TsInteractive { -not [Console]::IsInputRedirected }
+
+# Map one typed answer onto an option Key; $null when it matches nothing.
+# Split out from the prompt loop so the matching rules are testable without a
+# terminal.
+function Resolve-TsChoiceAnswer {
+    param([Parameter(Mandatory)][object[]]$Options, [string]$Answer)
+    $a = "$Answer".Trim()
+    if (-not $a) { return $null }
+    if ($a -match '^\d+$' -and [int]$a -ge 1 -and [int]$a -le $Options.Count) {
+        return $Options[[int]$a - 1].Key
+    }
+    $named = @($Options | Where-Object { $_.Key -ieq $a })
+    if ($named.Count) { return $named[0].Key }
+    return $null
+}
+
+# $Options is an ordered list of @{ Key; Label; Note }. Returns the chosen Key.
+# Twin of bootstrap/_wizard.sh ts_prompt_choice — keep the rendered output
+# identical (parse-time isolation forces the copy).
+function Read-TsChoice {
+    param(
+        [Parameter(Mandatory)][string]$Title,
+        [Parameter(Mandatory)][object[]]$Options,
+        [Parameter(Mandatory)][string]$Default,
+        [string[]]$Intro = @()
+    )
+    Write-Host ''
+    Write-Host $Title
+    foreach ($line in $Intro) { Write-Host $line }
+    for ($i = 0; $i -lt $Options.Count; $i++) {
+        $o = $Options[$i]
+        $suffix = if ($o.Note) { "  ($($o.Note))" } else { '' }
+        $mark = ' '
+        if ($o.Key -eq $Default) { $mark = '>'; $suffix += '  [default — press Enter]' }
+        Write-Host (" {0}  {1}) {2}{3}" -f $mark, ($i + 1), $o.Label, $suffix)
+    }
+    $range = "1-$($Options.Count)"
+    if (-not (Test-TsInteractive)) {
+        Write-Host "Choose [$range, Enter=default]: (non-interactive — taking the default)"
+        return $Default
+    }
+    for ($try = 0; $try -lt 3; $try++) {
+        $ans = "$(Read-Host "Choose [$range, Enter=default]")".Trim()
+        if (-not $ans) { return $Default }
+        $key = Resolve-TsChoiceAnswer -Options $Options -Answer $ans
+        if ($key) { return $key }
+        Write-Host "  '$ans' is not one of the choices — enter $range, a name, or press Enter for the default."
+    }
+    Write-Host '  three invalid answers — taking the default.'
+    return $Default
+}
+
 function Read-TsLeader {
     if ($env:TS_LEADER) { return $env:TS_LEADER }
-    Write-Host ''
-    Write-Host 'Leader key (WezTerm) — prefix for pane / tab / workspace commands:'
-    Write-Host '  1) Ctrl+Space  (recommended)'
-    Write-Host '  2) Ctrl+A'
-    Write-Host '  3) Ctrl+B'
-    Write-Host '  4) custom (type a chord like ctrl-x or alt-space)'
-    switch (Read-Host 'Choose [1]') {
-        '2'     { 'ctrl-a' }
-        '3'     { 'ctrl-b' }
-        '4'     { $c = Read-Host 'Enter chord (mod-key, e.g. ctrl-x)'; if ($c) { $c } else { 'ctrl-space' } }
-        default { 'ctrl-space' }
-    }
+    $c = Read-TsChoice -Title 'Leader key (WezTerm) — prefix for pane / tab / workspace commands:' -Default 'ctrl-space' -Options @(
+        @{ Key = 'ctrl-space'; Label = 'Ctrl+Space' },
+        @{ Key = 'ctrl-a';     Label = 'Ctrl+A';     Note = 'tmux muscle memory' },
+        @{ Key = 'ctrl-b';     Label = 'Ctrl+B';     Note = 'tmux default' },
+        @{ Key = 'alt-space';  Label = 'Alt+Space' },
+        @{ Key = 'custom';     Label = 'custom chord' }
+    )
+    if ($c -ne 'custom') { return $c }
+    $chord = Read-Host 'Enter chord (mod-key, e.g. ctrl-x or alt-space)'
+    if ($chord) { $chord.Trim() } else { 'ctrl-space' }
 }
+
 function Read-TsTheme {
     if ($env:TS_THEME) { return $env:TS_THEME }
-    Write-Host ''
-    Write-Host 'Theme:'
-    Write-Host '  1) dark   (Catppuccin Mocha, recommended)'
-    Write-Host '  2) light  (VS Code Light Modern)'
-    Write-Host '  3) follow OS appearance'
-    switch (Read-Host 'Choose [1]') {
-        '2'     { 'light' }
-        '3'     { 'follow' }
-        default { 'dark' }
+    Read-TsChoice -Title 'Theme:' -Default 'dark' -Options @(
+        @{ Key = 'dark';   Label = 'dark';   Note = 'Catppuccin Mocha' },
+        @{ Key = 'light';  Label = 'light';  Note = 'VS Code Light Modern' },
+        @{ Key = 'follow'; Label = 'follow OS appearance'; Note = 'WezTerm switches live' }
+    )
+}
+
+# WezTerm used to be an unconditional install. It isn't universal (Windows
+# Terminal users, machines that already have it), and the nightly winget
+# manifest goes stale often enough that the install failed outright in the
+# field — so it is a choice now, and a stale nightly falls back to stable.
+function Read-TsWezterm {
+    if ($env:TS_WEZTERM) { return $env:TS_WEZTERM }
+    if (Get-Command wezterm -ErrorAction SilentlyContinue) {
+        Read-TsChoice -Title 'Terminal emulator (WezTerm):' -Default 'skip' -Intro @(
+            "  Found: $((Get-Command wezterm).Source)"
+        ) -Options @(
+            @{ Key = 'skip';    Label = 'keep the installed WezTerm' },
+            @{ Key = 'nightly'; Label = 'reinstall/upgrade to nightly'; Note = 'what this config targets' },
+            @{ Key = 'stable';  Label = 'reinstall/upgrade to stable' }
+        )
+    } else {
+        Read-TsChoice -Title 'Terminal emulator (WezTerm):' -Default 'nightly' -Options @(
+            @{ Key = 'nightly'; Label = 'WezTerm nightly'; Note = 'what this config targets' },
+            @{ Key = 'stable';  Label = 'WezTerm stable';  Note = 'winget wez.wezterm' },
+            @{ Key = 'skip';    Label = "skip — I'll use Windows Terminal or install it myself" }
+        )
     }
 }
 function Read-TsApps {
@@ -220,26 +300,47 @@ function Read-TsApps {
             default       { return ($env:TS_APPS -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
         }
     }
-    Write-Host ''
-    Write-Host 'Optional CLI tools (WezTerm, font, Starship, chezmoi — always installed):'
-    Write-Host '  Note: winget may prompt for administrator elevation.'
-    Write-Host ('  1) Install recommended set: ' + ($script:TsAppsRecommended -join ', '))
-    Write-Host '  2) Customize (choose each)'
-    Write-Host '  3) Skip all optional apps'
-    switch (Read-Host 'Choose [1]') {
-        '2' {
-            $sel = @()
-            foreach ($id in $script:TsAppsAll) {
-                $def = if ($script:TsAppsRecommended -contains $id) { 'Y' } else { 'n' }
-                $a = Read-Host ('  install {0} — {1}? [{2}]' -f $id, (Get-TsAppDesc $id), $def)
-                if (-not $a) { $a = $def }
-                if ($a -match '^(y|yes)$') { $sel += $id }
-            }
-            return $sel
-        }
-        '3' { return @() }
+    $choice = Read-TsChoice -Title 'Optional CLI tools (font, Starship, chezmoi — always installed):' -Default 'recommended' -Intro @(
+        '  winget may prompt for administrator elevation.',
+        ('  recommended: ' + ($script:TsAppsRecommended -join ', ')),
+        ('  also available: ' + ($script:TsAppsOptional -join ', '))
+    ) -Options @(
+        @{ Key = 'recommended'; Label = 'install the recommended set' },
+        @{ Key = 'all';         Label = 'install everything'; Note = 'recommended + ' + ($script:TsAppsOptional -join ', ') },
+        @{ Key = 'customize';   Label = 'choose which ones' },
+        @{ Key = 'none';        Label = 'skip all optional apps' }
+    )
+    switch ($choice) {
+        'all'  { return $script:TsAppsAll }
+        'none' { return @() }
+        'customize' { return (Read-TsAppsCustom) }
         default { return $script:TsAppsRecommended }
     }
+}
+
+# Customize: a single comma-separated line, or Enter to walk the list one by
+# one. Fourteen consecutive Y/n prompts is a lot to sit through when you already
+# know you want three of them.
+function Read-TsAppsCustom {
+    Write-Host ''
+    Write-Host ('  Available: ' + ($script:TsAppsAll -join ', '))
+    $csv = Read-Host '  Type a comma-separated list, or Enter to be asked one at a time'
+    if ($csv) {
+        $want = @($csv -split ',' | ForEach-Object { $_.Trim().ToLower() } | Where-Object { $_ })
+        $sel = @($script:TsAppsAll | Where-Object { $want -contains $_.ToLower() })
+        $unknown = @($want | Where-Object { $script:TsAppsAll -notcontains $_ })
+        if ($unknown.Count) { Write-Warning ('not in the catalog, ignored: ' + ($unknown -join ', ')) }
+        Write-Host ('  Selected: ' + $(if ($sel.Count) { $sel -join ', ' } else { '<none>' }))
+        return $sel
+    }
+    $sel = @()
+    foreach ($id in $script:TsAppsAll) {
+        $def = if ($script:TsAppsRecommended -contains $id) { 'Y' } else { 'n' }
+        $a = Read-Host ('  install {0} — {1}? [{2}]' -f $id, (Get-TsAppDesc $id), $def)
+        if (-not $a) { $a = $def }
+        if ($a -match '^(y|yes)$') { $sel += $id }
+    }
+    return $sel
 }
 
 # Install the selected toggleable apps via winget (catalog id -> winget id).
@@ -374,23 +475,18 @@ function Show-CcTtsConfig {
 
 function Read-TsCcTts {
     if ($env:TS_CC_TTS) { return $env:TS_CC_TTS }
-    Write-Host ''
-    Write-Host 'Claude Code voice notifications (local Kokoro TTS, am_adam)?'
-    Write-Host '  Requires Kokoro on http://127.0.0.1:8880 (Docker). Does not install containers.'
-    if (Test-CcTtsKokoroProbe) {
-        Write-Host '  Kokoro probe: OK'
-        Write-Host '  1) Enable (am_adam, waiting+error)  [recommended]'
-    } else {
-        Write-Host '  Kokoro probe: not reachable'
-        Write-Host '  1) Enable (am_adam, waiting+error)'
-    }
-    Write-Host '  2) Enable anyway (start Kokoro later)'
-    Write-Host '  3) Skip'
-    switch (Read-Host 'Choose [3]') {
-        '1' { 'on' }
-        '2' { 'on' }
-        default { 'off' }
-    }
+    # Reachable Kokoro means enabling it actually does something now, so that
+    # becomes the default; otherwise enabling is opt-in.
+    $reachable = Test-CcTtsKokoroProbe
+    $probe = if ($reachable) { '  Kokoro probe: OK' } else { '  Kokoro probe: not reachable' }
+    Read-TsChoice -Title 'Claude Code voice notifications (local Kokoro TTS, am_adam)?' `
+        -Default $(if ($reachable) { 'on' } else { 'off' }) -Intro @(
+            '  Requires Kokoro on http://127.0.0.1:8880 (Docker). Does not install containers.',
+            $probe
+        ) -Options @(
+            @{ Key = 'on';  Label = 'Enable'; Note = 'am_adam, waiting+error' },
+            @{ Key = 'off'; Label = 'Skip' }
+        )
 }
 
 function Set-CcTtsWizardChoice {
