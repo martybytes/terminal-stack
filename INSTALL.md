@@ -363,7 +363,7 @@ rg --version | head -1
 chezmoi doctor | head -5
 ```
 
-Open WezTerm, confirm tab status bar shows workspace · cwd. Open a zsh pane, confirm Starship prompt with the branch glyph renders. Open a pwsh pane, run `cc` from a project dir, confirm tab title flips to `cc • <project>`.
+Open WezTerm, confirm the active tab renders as a solid accent block and the clock shows on the right of the bar (`Ctrl+Space` `s` adds `user@host │ path`). Open a zsh pane, confirm Starship prompt with the branch glyph renders. Open a pwsh pane, run `cc` from a project dir, confirm the tab shows the Claude icon and the bare project name (a coloured state dot appears once Claude starts working).
 
 ### Phase 10 — Done
 

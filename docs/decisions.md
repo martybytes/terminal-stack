@@ -38,9 +38,11 @@ If a fresh machine has a pre-existing `$PROFILE`, the first sync backs it up and
 
 Initial implementation set the tab title to the conversation slug (whatever Claude Code emits via OSC 2). Found this in practice: all CC tabs end up with conversation-slug titles that are hard to map back to "which project is this".
 
-Project-leaf-based titles win for human navigation. When you have five CC sessions across five projects, `cc • netsuite-customizations` / `cc • frontend-app` / `cc • slide-decks` is instantly scannable. Conversation titles like `distinguish-claude-code-tabs-pwsh` look meaningful in isolation but are visually similar across tabs.
+Project-leaf-based titles win for human navigation. When you have five CC sessions across five projects, `netsuite-customizations` / `frontend-app` / `slide-decks` is instantly scannable. Conversation titles like `distinguish-claude-code-tabs-pwsh` look meaningful in isolation but are visually similar across tabs.
 
 The thinking/waiting indicator (`⏳` / `✓`) layered on top via CC hooks gives you state without losing the project signal.
+
+**Amended with the 2026-08 tab-bar redesign:** the `cc • ` prefix (and the state glyph in the title) turned out to waste tab width for zero information — the tab bar's Claude icon and per-pane state dots already say "Claude" and its state. The wrappers and hooks now set the **bare project leaf** as the title; the project-leaf-over-conversation-slug reasoning above is unchanged. `strip_cc_prefix` in both configs keeps titles from not-yet-updated machines rendering clean.
 
 ## Why forward slashes in JSON paths?
 
@@ -66,7 +68,9 @@ If you want to clean up the doubled backup name in `$PROFILE`'s directory, delet
 
 Tested at 80 (too tight for tilde-paths in subprojects), 120 (current — fits most paths comfortably), and "infinite via 999" (rejected because it makes WezTerm shrink all tabs proportionally when many are open, defeating readability).
 
-120 cells gives ~14ch margin over the longest expected title (`cc ⏳ ap-bill-automation-standalone`) and leaves room for project name to be the dominant visual signal.
+120 cells gives ~14ch margin over the longest expected title (`ap-bill-automation-standalone`) and leaves room for project name to be the dominant visual signal.
+
+**Retro-bar only since the 2026-08 fancy-bar redesign:** the fancy bar ignores `tab_max_width` and sizes tabs to content (labels are hard-truncated to 28 chars in `format-tab-title` instead). The value stays for the retro fallback.
 
 ## Why `window_background_opacity = 1.0` (no transparency)?
 
@@ -76,7 +80,7 @@ If you want transparency back, change to `0.95` or so. Don't go below `0.85` —
 
 ## Why `INTEGRATED_BUTTONS|RESIZE` for `window_decorations`?
 
-The original value was `'RESIZE'`, which draws only a resizable border — no OS title bar, and therefore *no* minimize/maximize/close buttons anywhere. That's a clean look but leaves no obvious way to close the window with the mouse. `'INTEGRATED_BUTTONS|RESIZE'` keeps the title-bar-less look but folds the standard window controls into the right edge of the tab bar. (This originally rode on the fancy tab bar; since the tabline.wez switch both configs run the retro bar — `use_fancy_tab_bar = false` — and the integrated buttons render there too.) The buttons (`integrated_title_buttons` defaults to `{ 'Hide', 'Maximize', 'Close' }`, right-aligned) render natively per platform — Windows-style on Windows, the native traffic-lights on macOS — so we set no `integrated_title_button_*` overrides. Applied to both `windows/.wezterm.lua` and `dot_wezterm.lua`.
+The original value was `'RESIZE'`, which draws only a resizable border — no OS title bar, and therefore *no* minimize/maximize/close buttons anywhere. That's a clean look but leaves no obvious way to close the window with the mouse. `'INTEGRATED_BUTTONS|RESIZE'` keeps the title-bar-less look but folds the standard window controls into the right edge of the tab bar. (This originally rode on the fancy tab bar; the tabline.wez era ran the retro bar, and the 2026-08 hand-rolled redesign returned both configs to the fancy bar — the integrated buttons render in either.) The buttons (`integrated_title_buttons` defaults to `{ 'Hide', 'Maximize', 'Close' }`, right-aligned) render natively per platform — Windows-style on Windows, the native traffic-lights on macOS — so we set no `integrated_title_button_*` overrides. Applied to both `windows/.wezterm.lua` and `dot_wezterm.lua`.
 
 ## Why `LEADER o` to detach a tab instead of dragging it out?
 
@@ -231,6 +235,20 @@ The toggle covers the workspace name too, which it previously did not. Both the 
 
 This is a runtime toggle with a default, not a saved config key. It costs one keystroke to change, needs no re-apply, and adding it to chezmoi `[data]` would mean the seven-file blast radius described above for something you flip while looking at it.
 
+**Amended with the 2026-08 hand-rolled redesign:** "quiet" got quieter and the split moved. tabline's mode component printed a permanent `NORMAL` badge in the corner — a fact with zero information, and exactly the kind of steady-state noise this entry argues against — so with tabline gone the left side now renders *nothing* in the normal state; a coloured badge appears only while the leader is pending or a repeat mode is live. The workspace name moved **out** from behind the toggle: unlike `user@host`, a non-default workspace only exists because you deliberately created one, so it's signal, not noise (and it's `''` for `default`, i.e. invisible most of the time). Leader+s now gates only `user@host │ path`. The right side gained two always-on segments that earn their slots: the Claude fleet counts and a clock. There is one renderer now, so the two-renderers-disagreeing hazard above is gone by construction.
+
+## Why the tab bar is fancy and fully hand-rolled (tabline.wez dropped)
+
+The 2026-08-20 redesign came from concrete daily frustrations: the active tab (surface-grey on mantle-grey) was nearly indistinguishable from its neighbours; a permanent `NORMAL` badge occupied the corner saying nothing; Claude tabs burned width on a `cc • ` prefix that duplicated what the icon and dots already showed; non-Claude tabs could carry a full remote path; and the one-cell retro bar was cramped with no way to grow it.
+
+Three decisions fell out:
+
+1. **Fancy bar, not retro.** The retro bar's height is hard-locked to one terminal cell, and WezTerm has no multi-line tab bar at all (open feature request, wezterm/wezterm#3789). The fancy bar's height follows `window_frame.font_size` — the *only* sanctioned way to make the bar taller. The fancy bar still honours `colors.tab_bar` and `format-tab-title`, so nothing about the hand-drawn content is style-specific: flipping `use_fancy_tab_bar` back to `false` renders the same tabs and status in the retro bar (the escape hatch if the fancy bar misbehaves).
+2. **tabline.wez dropped, not themed harder.** tabline requires the retro bar, so it blocked (1) outright. And its remaining value had already shrunk to nothing: `tabs_enabled = false` since day one (its components can't express per-pane cc dots), the identity segments moved behind Leader+s, and its mode component is what printed the permanent `NORMAL`. Meanwhile the config carried a complete hand-rolled fallback status for when the plugin failed to clone — two renderers for one bar. The fallback was promoted to the only renderer and extended; one fewer plugin fork to maintain, and the badge/segment behaviour is now plain code in the config.
+3. **Contrast by role.** The active tab is a solid accent block (`#89b4fa` dark / `#005fb8` light) with dark bold text — findable in peripheral vision, which is the active tab's entire job. The cc-state wash now applies to *inactive* tabs only, where "a background Claude run finished" is the thing worth shouting; on the active tab the dots carry the state and the accent block is never diluted.
+
+The status right side also gained the **Claude fleet** segment — `cc_state` counts across every pane in the mux (`N●` per state, coloured) — because "is anything done or broken somewhere?" was otherwise answered by scanning tab dots one by one. The `wezterm.mux` walk runs on the status cadence (100 ms) but is pure in-process table iteration, the same cost class as the pane-tint resync that already rode that cadence.
+
 ## Why not just use a single GUI tool like Microsoft Terminal?
 
 Microsoft Terminal is fine, but:
@@ -272,9 +290,9 @@ The installer only persists `WORKSPACE_DIR` to `~/.zshrc.local` when the user's 
 
 ## Why convert zsh `cc*` from aliases to functions just for the tab title?
 
-Aliases can't run code around the wrapped command. Setting and clearing the WezTerm tab title requires a pre-step and a post-step around the `claude` invocation. Either we (a) leave zsh as plain aliases and accept that only the PowerShell side gets the `cc • <leaf>` tab title, or (b) promote zsh to functions matching the PowerShell try/finally pattern. We chose (b) for the same reason the PowerShell side does it: when you have four or five Claude panes open in WezTerm under WSL, the tab title is what tells you which project each pane is for. Without it the tabs are all just `pwsh` / `zsh` and you have to click each one to remember. The cost is a one-line helper (`_wez_tab_title`) and a small amount of bookkeeping (`local rc=$?; ... return $rc`) since zsh has no `try/finally` — that bookkeeping matters because without it the function would always exit 0 and mask Claude's exit code from scripts that wrap it.
+Aliases can't run code around the wrapped command. Setting and clearing the WezTerm tab title requires a pre-step and a post-step around the `claude` invocation. Either we (a) leave zsh as plain aliases and accept that only the PowerShell side gets the per-project tab title, or (b) promote zsh to functions matching the PowerShell try/finally pattern. We chose (b) for the same reason the PowerShell side does it: when you have four or five Claude panes open in WezTerm under WSL, the tab title is what tells you which project each pane is for. Without it the tabs are all just `pwsh` / `zsh` and you have to click each one to remember. The cost is a one-line helper (`_wez_tab_title`) and a small amount of bookkeeping (`local rc=$?; ... return $rc`) since zsh has no `try/finally` — that bookkeeping matters because without it the function would always exit 0 and mask Claude's exit code from scripts that wrap it.
 
-The `cc • <leaf>` text and the per-prompt clearing behavior are covered separately under "Why per-tab `cc • <project>` instead of one big tab name?" and "Why `wezterm cli set-tab-title` and not OSC 0?" — this entry is just about *why functions, not aliases*.
+The title text and the per-prompt clearing behavior are covered separately under "Why per-tab `cc • <project>` instead of one big tab name?" (amended: bare project leaf now) and "Why `wezterm cli set-tab-title` and not OSC 0?" — this entry is just about *why functions, not aliases*.
 
 ## Why Claude Code TTS is opt-in chezmoi data (not a sentinel file)
 

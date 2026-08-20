@@ -40,11 +40,15 @@ not a stale one from whenever you flipped it off.
 | `Ctrl+Space` `L` | restore a saved state — fuzzy picker |
 
 ## Status bar
-**Quiet by default.** All you get is the active mode badge (or `⌨ LEADER`) on the
-left — `user@host`, the path, and the workspace name are the kind of thing you
-already know, and the tab titles carry the per-pane context.
+**Quiet by default.** The left side is empty until something is pending — then a
+coloured badge names it (`⌨ LEADER`, or the active move/resize/rotate/tab/font
+mode). There is no permanent badge in the normal state.
 
-**`Ctrl+Space` `s`** reveals them: the workspace on the left (hidden anyway while
-you're in the implicit `default` one) and `user@host │ path` for the **active
-pane** on the right. Press it again to go quiet. The state survives config
-reloads but not a WezTerm restart, so every launch starts clean.
+**Always on the right:** the **Claude fleet** — working/done/error counts across
+every pane in every tab — the workspace name whenever it isn't the implicit
+`default`, and a date + clock.
+
+**`Ctrl+Space` `s`** adds `user@host │ path` for the **active pane** (the kind of
+thing you usually already know; the tab titles carry the per-pane context). Press
+it again to go quiet. The state survives config reloads but not a WezTerm
+restart, so every launch starts clean.

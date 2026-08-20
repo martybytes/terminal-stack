@@ -111,7 +111,7 @@ Commit: [`a63044a`](../CHANGELOG.md).
 
 ## Claude Code overwrites the tab title
 
-**Symptom.** Our `cc` PowerShell wrapper sets the tab title to `cc • <project>` via OSC 0 (`Write-Host -NoNewline "ESC ]0;cc • myproject BEL"`). Claude Code launches, and the tab title changes to the conversation slug (e.g., `distinguish-claude-code-tabs-pwsh`).
+**Symptom.** Our `cc` PowerShell wrapper set the per-project tab title (then `cc • <project>`; today the bare project leaf) via OSC 0 (`Write-Host -NoNewline "ESC ]0;cc • myproject BEL"`). Claude Code launches, and the tab title changes to the conversation slug (e.g., `distinguish-claude-code-tabs-pwsh`).
 
 **Cause.** Claude Code's TUI emits its own OSC 0 / OSC 2 with a conversation-derived title. OSC writes to `pane.title`, which is mutable. Last writer wins. Claude Code writes after our wrapper does.
 

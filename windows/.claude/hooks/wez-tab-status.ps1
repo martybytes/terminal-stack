@@ -1,12 +1,14 @@
 param([Parameter(Mandatory)][ValidateSet('thinking','working','waiting','error')][string]$State)
 if (-not $env:WEZTERM_PANE) { return }
-$glyph = @{ thinking = '⏳'; working = '⚙'; waiting = '✓'; error = '✗' }[$State]
 $project = if ($env:CLAUDE_PROJECT_DIR) {
     Split-Path -Leaf $env:CLAUDE_PROJECT_DIR
 } else {
     Split-Path -Leaf $PWD
 }
-& wezterm.exe cli set-tab-title "cc $glyph $project" 2>$null
+# Bare project name only — no 'cc'/state prefix. WezTerm's format-tab-title
+# already shows the Claude icon and per-pane state dots (driven by the cc_state
+# user var below); a prefix would just waste tab width.
+& wezterm.exe cli set-tab-title $project 2>$null
 
 # Per-pane background tint by state (OSC 11; this pane only). Written to CONOUT$
 # so it reaches the WezTerm pane even though the hook's stdout is captured by Claude

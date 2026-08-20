@@ -19,11 +19,21 @@ The number matches the tab.
 `Ctrl+Space` `f` enters a font-size mode: `↑`/`↓` (or `k`/`j`) grow/shrink, `0` resets, `Esc` exits.
 
 ## Appearance
-Each tab shows ` <number>  <icon> <title> `: the title is **`tab.tab_title`** when set
-(the `cc` wrappers and Claude hooks set it via `wezterm cli set-tab-title`), else the
-active pane's **cwd leaf**. The icon tracks the foreground process (a robot while
-Claude runs). Tabs with Claude panes add one coloured **dot per pane** (● working
-peach / done green / error red, ○ idle) and the whole tab tints by its most urgent
-pane; other multi-pane tabs show a pane count, and a zoomed pane adds an icon. The
-status bar is quiet by default — just the mode badge; **`Ctrl+Space` `s`** reveals
-the workspace and `user@host │ path`. See `doc wezterm/workspace`.
+The bar is the taller **fancy** bar, fully hand-drawn. The **active tab is a solid
+accent block** — that is the "which tab am I on" signal. Each tab shows
+` <number>  <icon> [host ·] <title> `: the title is **`tab.tab_title`** when set
+(the `cc` wrappers and Claude hooks set the **bare project name** via
+`wezterm cli set-tab-title` — no `cc` prefix), else the active pane's **cwd leaf**,
+never a full path; panes on another machine get a ` host ·` chip. The icon is a
+robot for Claude panes, a remote-host glyph for ssh panes, else the foreground
+process. Tabs with Claude panes add one coloured **dot per pane** (● working peach /
+done green / error red, ○ idle) and inactive tabs tint by their most urgent pane;
+other multi-pane tabs show a pane count, a zoomed pane adds an icon, and an inactive
+tab with unseen output gets an accent dot.
+
+## Status bar
+Quiet by default: the left side is empty until the leader is pending or a repeat
+mode is live (then a coloured badge names it). The right side always shows the
+**Claude fleet** (working/done/error counts across every pane), the workspace name
+when it isn't `default`, and a clock; **`Ctrl+Space` `s`** adds `user@host │ path`
+for the active pane. See `doc wezterm/workspace`.

@@ -50,11 +50,25 @@ Render the template, then let WezTerm parse and execute it:
 ```
 
 Copy the matching `pane_nav.lua` next to the rendered file first — the config
-`require`s it. A Lua error prints a traceback and exits non-zero; success prints the
-key table. Run it once per value of any new gate (e.g. mux `on` and `off`).
+`require`s it. **A broken config does NOT fail the command**: `show-keys` exits 0
+and silently prints WezTerm's *default* key table instead (verified 2026-08-20
+with a deliberately broken config — no traceback on stdout/stderr either). Judge
+success by content, not exit code:
+
+```sh
+wezterm --config-file <rendered>.lua show-keys | grep -c LEADER   # 0 = config did not load
+```
+
+Run it once per value of any new gate (e.g. mux `on` and `off`).
+
+Because the chunk executes at load, you can also **inject `assert`-style tests of
+pure helper functions before `return config`** (mock `PaneInformation` tables and
+all) in a throwaway copy — a failed assertion aborts the config, which shows up as
+the default key table / `grep -c LEADER` → 0. Always run a deliberately-failing
+control once to prove the harness bites.
 
 **This is a behavioural test, not just a parse check.** `wezterm.gui` is **non-nil**
-under `show-keys`, so the whole `if wezterm.gui then … end` plugin block — tabline,
+under `show-keys`, so the whole `if wezterm.gui then … end` plugin block —
 sessionizer, resurrect — actually executes. `Leader+S` / `Leader+L` appearing in the
 output is real evidence the resurrect block ran. (Verified with a probe config that
 bound a different key depending on `wezterm.gui`; do not assume the opposite.)
