@@ -31,7 +31,7 @@ it, so a failure can't scroll past unnoticed.
 | `ghq` | `x-motemen.ghq` | recommended |
 | `lazygit` | `JesseDuffield.lazygit` | recommended |
 | `prettymark` | `Eagle1.PrettyMark` | recommended (markdown viewer, `pm` alias) |
-| `zed` | `Zed.Zed` | optional |
+| `zed` | `ZedIndustries.Zed` | optional |
 | `ffmpeg` | `Gyan.FFmpeg` | optional (ffplay for Claude TTS) |
 
 ## Daily commands

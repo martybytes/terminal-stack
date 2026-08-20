@@ -2,7 +2,7 @@
 
 Fast GPU-accelerated editor. **Optional** in the app catalog on every platform —
 opt in via `ts-config apps` (WSL/Linux/macOS) or `Set-TerminalStackConfig`
-(Windows; winget id `Zed.Zed`, brew cask `zed`). Install the `zed` CLI from
+(Windows; winget id `ZedIndustries.Zed`, brew cask `zed`). Install the `zed` CLI from
 Zed's menu (Zed → Install CLI), then drive it from the terminal.
 
 ## Launch
