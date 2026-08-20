@@ -300,6 +300,28 @@ Like tab tinting, TTS is stack infrastructure — but unlike `ccnotify` (a senti
 
 **Hooks vs MCP:** lifecycle alerts (stop, AskQuestion, permission) must stay **hooks** — IDEs fire those events; an MCP server would not hear them unless the model voluntarily called it. A future **terminal-stack-tts MCP** can share the same `cc-tts-lib` for on-demand `speak` from Claude Desktop / Co-work; it complements hooks rather than replacing them.
 
+*(Amended: the daemon upgrade below layers session-aware announcements on top of this design without changing any of it — the direct path described here is now the fallback, and everything in this entry still holds when the daemon is off or unreachable.)*
+
+## Why the TTS daemon is a native tray process, not a Docker container
+
+The session-aware announcement layer (`ccTtsDaemon`, `bootstrap/tts-daemon/ttsd`) needs two things a container can never have on Windows: an audio path to the host (Docker Desktop's utility VM has no sound device — there is no `/dev/snd` to pass through) and access to the host's per-app audio sessions (`ISimpleAudioVolume` enumerates only the caller's logon session, so a container cannot see or duck `Spotify.exe`'s mixer entry). Kokoro stays in Docker because synthesis is stateless HTTP — the daemon calls the same `:8880` endpoint the direct path always used. Everything that must touch host audio — playback, ducking, media pause/resume — lives in the one native process; anything else can reach it over `127.0.0.1:8890`.
+
+## Why hooks POST to the daemon *and* keep the direct path (never-silence)
+
+`cc-speak*` / `cursor-tts*` try the daemon first and `exec` the classic `cc-tts-notify` path on any failure — connection refused, timeout, bad token, native Linux, `ccTtsDaemon=off`. The invariant is **degrade to yesterday's behavior, never to silence**: a dead daemon must not eat a "done" announcement. Two consequences worth protecting. First, **no daemon state ever appears in the managed `settings.json`** — routing is a runtime decision inside the hook scripts, so the five `__CC_TTS_*__` tokens and both sync renderers are untouched, and enable/disable/uninstall cannot orphan hook entries. Second, the old machine-global debounce file and play lock still guard the *fallback* path only; the daemon's scheduler replaces them on the daemon path (mixing the two would double-drop). Don't "simplify" the fallback branch away, and don't add daemon knobs to the settings templates.
+
+## Why the daemon source lives in `bootstrap/tts-daemon/` with the venv outside the clone
+
+Same reasoning as `wso`: chezmoi-ignored (`bootstrap/**`), run from the runtime clone, so `ts-update` ships daemon fixes without a profile re-sync. The venv sits at `%LOCALAPPDATA%\terminal-stack\tts-daemon\venv` — *outside* the clone — so pulls never churn it, and `run-daemon.cmd` resolves the clone at launch time so a `ts-doctor --repair` relocation doesn't strand the autostart entry. The daemon reports the clone's git SHA in `/healthz`; `ts-update` and `ts-doctor` compare it and *nudge* — never auto-restart, for the same reason the WezTerm mux server is never auto-restarted (it may be mid-announcement or holding a duck).
+
+## Why ducking snapshots pre-duck volumes to disk before touching anything
+
+Windows persists per-app mixer volume indefinitely. A daemon that dies between ramp-down and restore leaves the music at 30% until the user finds the Volume Mixer — so the duck engine writes `state\duck-snapshot.json` *before* the first volume change, restores any stale snapshot at next startup, runs a 15 s watchdog while holding, and exposes `POST /v1/duck/release` plus a `--restore-volumes` oneshot that `ts-doctor --repair` invokes. Pause mode uses the Windows media-session API (`TryPauseAsync` only on sessions that were Playing, resume exactly those) and never simulates the media key, which is a blind toggle other apps can hijack.
+
+## Why the `self` summarizer instruction is a marker block in the user's CLAUDE.md
+
+`summarizer self` needs the model to end each turn with a `<!-- speak: … -->` one-liner, which requires an instruction visible to every Claude Code session. The repo deliberately does **not** manage `~/.claude/CLAUDE.md` whole-file (it is the user's global memory — "the repo owns infrastructure; you own preferences", above) and does not force an output style. Instead `ts-config tts summarizer self` edits a `<!-- terminal-stack-tts-start/end -->` marker block into the user's file — the exact discipline `$PROFILE` uses — with `.bak.YYYYMMDD` backups, and switching to any other mode removes exactly that block. Cursor's global User Rules live in a GUI-only settings store, so the Cursor side ships as a copy-paste rule in `docs/kb/windows/tts-daemon.md`; Cursor events without a marker simply fall back to template lines. This asymmetry is deliberate — don't try to manage Cursor's rules DB from a dotfiles repo.
+
 ## Why `settings.json` ships only shared infra — no model, prefs, permissions, or plugins
 
 `~/.claude/settings.json` is managed whole-file (see "Why a whole-file `~/.zshrc` and a marker-block `$PROFILE`?"), so on every `chezmoi apply` the live file is replaced by the tracked template. That makes the template a poor place for anything you'd want to *choose per machine or per session* — the apply silently reverts it. So the tracked templates carry **only** the things that are genuinely part of this terminal stack: the `statusLine` command, the `wez-tab-status` hooks, and (when `ccTtsEnabled`) the `cc-speak` TTS hooks. Everything that is a personal choice is deliberately kept out:

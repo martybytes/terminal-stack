@@ -151,6 +151,48 @@ Update-TsResolvedTheme
 Get-Ts<Key>                                   # must still be 'on'
 ```
 
+## 4b. TTS daemon changes (`bootstrap/tts-daemon/`)
+
+The daemon's pure logic (scheduler, registry, summarizer, event parsing) has a
+real test suite — run it on any machine, no COM/audio needed:
+
+```sh
+cd bootstrap/tts-daemon && python -m pytest tests -q
+```
+
+Full-pipeline checks (these speak — Windows, Kokoro up):
+
+```sh
+# one fixture through parse → registry → schedule → summarize → synth → play:
+python -m ttsd --simulate fixtures/stop.json          # from bootstrap/tts-daemon/
+
+# live daemon drills (use a test port so the real one is undisturbed):
+python -m ttsd --no-tray --port 8899 &
+curl -s http://127.0.0.1:8899/healthz                 # version = clone HEAD sha
+# three stops within ~1s → expect ONE coalesced utterance; check /v1/status:
+#   spoken:1, lastLine "Three sessions finished: …"
+curl -s -X POST http://127.0.0.1:8899/v1/shutdown
+```
+
+The two invariants to drill after touching the hook senders:
+
+- **Fallback (never-silence):** `~/.claude/hooks/cc-tts-test.sh --daemon-fallback`
+  (pwsh `-DaemonFallback`) forces a dead port — the phrase must still play via
+  the direct path.
+- **Inert while off:** with `ccTtsDaemon=off` (the default), a `chezmoi apply`
+  on an unchanged config must produce **zero** `updated` lines for
+  `settings.json` / `hooks.json`, and the hooks must not POST anywhere
+  (`cc_tts_daemon_ready` gates on `.daemon.enabled`).
+
+Duck-restore drill (music playing): trigger speech, kill the daemon mid-duck
+(`taskkill /f` on its pythonw), confirm music is stuck quiet, then
+`ts-doctor --repair` (or restart the daemon) — volumes must come back and
+`state\duck-snapshot.json` must be gone.
+
+New wizard/menu text (`ts_prompt_cc_tts_daemon` ↔ `Read-TsCcTtsDaemon`,
+`ts-config tts -h` both shells, both TTS submenus) goes through the §3
+byte-diff like everything else.
+
 ## 5. What you cannot verify from a dev clone
 
 `chezmoi source-path` points at the **runtime** clone

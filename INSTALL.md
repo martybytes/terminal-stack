@@ -44,6 +44,7 @@ Every question works the same way: the default is **marked with `>` and captione
 - **Restore last session** — whether launching WezTerm reopens the workspace you last had (panes, layout and scrollback) or starts clean. Defaults to **off**; the autosave runs either way, so `Ctrl+Space` `L` still restores by hand and `ts-config restore on` flips it later. Skipped on headless servers. Skip with `TS_WEZ_RESTORE=on|off`.
 - **Apps** — accept the recommended set (`eza fzf bat delta ripgrep zoxide glow micro neovim gh ghq lazygit`, plus `tmux` off-Windows and `prettymark` on Windows), take **everything** (adds `zed`, `ffmpeg` on Windows; `zed`, `tldr`, `nvtop`, `lazydocker` elsewhere), choose which ones (type a comma-separated list, or press Enter to be asked one at a time), or skip them all. The Nerd Font, Starship, chezmoi, git and zsh are always installed. Skip with `TS_APPS=recommended|all|none|id,id,…`.
 - **Claude Code voice notifications** — off unless a local Kokoro TTS server answers on `http://127.0.0.1:8880`, in which case enabling is the default. Skip with `TS_CC_TTS=on|off`.
+- **TTS tray daemon** (asked only when voice notifications were enabled, on Windows/WSL, never headless) — route announcements through a small native daemon that names the session ("terminal-stack finished — added the retry logic"), queues and coalesces simultaneous completions, and ducks (or pauses) your music while speaking. Defaults to **classic direct playback**; choosing the daemon creates a Python venv under `%LOCALAPPDATA%\terminal-stack\tts-daemon` and an autostart entry (needs Python 3.10+ — the installer prints the winget one-liner if it's missing and never installs it for you). Change later with `ts-config tts daemon on|off`; hooks fall back to direct playback whenever the daemon is unreachable. Skip with `TS_CC_TTS_DAEMON=on|off`. Details: `doc windows/tts-daemon`.
 - **Workspace directory** — pre-filled with the autodetected candidate (`C:\DATA\Workspace` / `~/Documents/Workspace` / `~/workspace` / `~/Workspace`). Press Enter to accept. Persisted to `~/.zshrc.local` (zsh) or `Documents\PowerShell\profile.local.ps1` (pwsh) *only* when it differs from the autodetect. Skip with `WORKSPACE_DIR=/path` / `$env:WORKSPACE_DIR`.
 
 Then a **review** — every answer listed, with `[P]roceed / [e]dit / [q]uit`. Nothing has been installed or written at that point, so `e` re-asks the questions and `q` leaves the machine untouched. The review is skipped when there is nothing to review (every answer came from an env var) or with `TS_ASSUME_YES=1` (bash).
@@ -69,7 +70,7 @@ cd $env:LOCALAPPDATA\terminal-stack\stack
 .\bootstrap\windows-bootstrap.ps1
 ```
 
-It runs the wizard (leader key / theme / WezTerm / mux / apps / TTS / workspace — see **Install wizard** above; set `$env:TS_LEADER`/`TS_THEME`/`TS_WEZTERM`/`TS_WEZ_MUX`/`TS_WEZ_RESTORE`/`TS_APPS` to skip prompts), shows the review, and only then installs:
+It runs the wizard (leader key / theme / WezTerm / mux / apps / TTS + optional tray daemon / workspace — see **Install wizard** above; set `$env:TS_LEADER`/`TS_THEME`/`TS_WEZTERM`/`TS_WEZ_MUX`/`TS_WEZ_RESTORE`/`TS_APPS`/`TS_CC_TTS`/`TS_CC_TTS_DAEMON` to skip prompts), shows the review, and only then installs:
 - **Always:** JetBrainsMono Nerd Font (`DEVCOM.JetBrainsMonoNerdFont`), Starship (`Starship.Starship`), chezmoi (`twpayne.chezmoi`)
 - **WezTerm, if you asked for it:** `wez.wezterm.nightly` (default) or `wez.wezterm` (stable). A nightly that won't install — its winget manifest is republished more often than its hash is refreshed, so `Installer hash does not match` is routine — falls back to stable rather than leaving you with no terminal
 - **Selected apps** (recommended set by default): eza, fzf, bat, delta, ripgrep, zoxide, glow, micro, neovim, gh, ghq, lazygit, prettymark; optionally `zed`, `ffmpeg` (one winget each)
@@ -368,6 +369,8 @@ chezmoi doctor | head -5
 ```
 
 Open WezTerm, confirm the active tab renders as a solid accent block and the clock shows on the right of the bar (`Ctrl+Space` `s` adds `user@host │ path`). Open a zsh pane, confirm Starship prompt with the branch glyph renders. Open a pwsh pane, run `cc` from a project dir, confirm the tab shows the Claude icon and the bare project name (a coloured state dot appears once Claude starts working).
+
+If you enabled the TTS daemon: `ts-config tts daemon status` should report healthy with the clone's git SHA, and `~/.claude/hooks/cc-tts-test.sh --daemon` (pwsh: `cc-tts-test.ps1 -Daemon`) should speak "Daemon test…". Then prove the never-silence fallback once: `cc-tts-test.sh --daemon-fallback` must still speak through the classic direct path.
 
 ### Phase 10 — Done
 

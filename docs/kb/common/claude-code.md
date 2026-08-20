@@ -58,6 +58,7 @@ Optional voice when an agent **finishes**, **errors**, **asks a question**, or *
 | `ts-config tts test --source claude` | Test with Claude prefix + template |
 | `ts-config tts test --source cursor` | Test with Cursor prefix + template |
 | `ts-config tts …` | Full control (prefix, project, excitement, templates, events) |
+| `ts-config tts daemon on` | Windows: session-aware announcements via the ttsd tray daemon (names the project, coalesces, ducks music) — `doc windows/tts-daemon` |
 | `/test-voice` | Slash command in Claude Code or Cursor (user home) |
 
 ### Config layout
