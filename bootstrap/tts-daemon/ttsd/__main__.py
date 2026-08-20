@@ -14,6 +14,7 @@ import logging
 import logging.handlers
 import subprocess
 import sys
+import threading
 import time
 import urllib.request
 from pathlib import Path
@@ -179,19 +180,25 @@ def main(argv: list[str] | None = None) -> int:
         listener.start()
     log.info("ttsd %s listening on port %d", version[:12], port)
 
+    tray_holder: dict = {"icon": None}
+    stop_evt = threading.Event()
+
     def _shutdown(icon=None) -> None:
         log.info("shutting down")
         for listener in listeners:
             listener.shutdown()
         app.dispatcher.stop()
         app.audio.stop()
-        if icon is not None:
-            icon.stop()
+        stop_evt.set()
+        live_icon = icon or tray_holder.get("icon")
+        if live_icon is not None:
+            live_icon.stop()
+
+    app.on_shutdown = _shutdown
 
     if args.no_tray:
         try:
-            while True:
-                time.sleep(3600)
+            stop_evt.wait()
         except KeyboardInterrupt:
             _shutdown()
         return 0
@@ -199,12 +206,12 @@ def main(argv: list[str] | None = None) -> int:
     try:
         from .tray import build_icon
         icon = build_icon(app, log_path, on_quit=_shutdown)
-        icon.run()  # blocks the main thread until Quit
+        tray_holder["icon"] = icon
+        icon.run()  # blocks the main thread until Quit or /v1/shutdown
     except Exception as exc:  # noqa: BLE001 — tray is optional chrome
         log.warning("tray unavailable (%s) — running headless", exc)
         try:
-            while True:
-                time.sleep(3600)
+            stop_evt.wait()
         except KeyboardInterrupt:
             _shutdown()
     return 0

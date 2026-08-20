@@ -35,6 +35,7 @@ class App:
         self.version = version
         self.token = token
         self.received = 0
+        self.on_shutdown = None  # wired by __main__; POST /v1/shutdown
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -162,6 +163,11 @@ class _Handler(BaseHTTPRequestHandler):
         elif self.path == "/v1/duck/release":
             app.audio.force_restore()
             self._send(200, {"ok": True})
+        elif self.path == "/v1/shutdown":
+            self._send(200, {"ok": True})
+            if app.on_shutdown is not None:
+                threading.Thread(target=app.on_shutdown, daemon=True,
+                                 name="ttsd-shutdown").start()
         elif self.path == "/v1/dnd":
             body = self._read_json() or {}
             enabled = bool(body.get("enabled", True))
