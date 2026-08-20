@@ -42,7 +42,7 @@ No file in this repo hard-codes a username. The username is resolved at apply ti
 
 The WSL bootstrap (`bootstrap/wsl-bootstrap.sh`) prompts for the Windows username at install time (pre-filling the interop-detected value) and persists it under `[data]`.
 
-`__WIN_USER__` is one of several tokens the sync substitutes: the saved wizard config supplies `__LEADER_KEY__` / `__LEADER_MODS__` (WezTerm leader), `__THEME_MODE__` / `__THEME_RESOLVED__` (theme), `__TMUX_PREFIX__`, and the optional `__CC_TTS_*__` hook blocks. See `CLAUDE.md` § "User config tokens" and the header of `run_after_90-sync-windows.sh` for the full list.
+`__WIN_USER__` is one of several tokens the sync substitutes: the saved wizard config supplies `__LEADER_KEY__` / `__LEADER_MODS__` (WezTerm leader), `__THEME_MODE__` / `__THEME_RESOLVED__` (theme), `__TMUX_PREFIX__`, `__WEZ_MUX__` (WezTerm multiplexer domain, `ts-mux`), and the optional `__CC_TTS_*__` hook blocks. See `CLAUDE.md` § "User config tokens" and the header of `run_after_90-sync-windows.sh` for the full list.
 
 ### The run_after hook
 

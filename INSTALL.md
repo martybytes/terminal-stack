@@ -39,6 +39,8 @@ curl -fsSL https://raw.githubusercontent.com/martybytes/terminal-stack/main/inst
 
 Change any of these later with **`ts-config`** (interactive menu) or one-shot — `ts-config theme follow`, `ts-config leader ctrl-a`, `ts-config apps`, `ts-config show`. In a combined Windows+WSL setup, run `ts-config` from WSL (its `chezmoi apply` is authoritative for the Windows-side files).
 
+One setting the wizard deliberately doesn't ask about is the WezTerm **multiplexer domain** — whether panes are hosted by `wezterm-mux-server` (so a GUI crash leaves them alive) instead of the GUI. It installs **off**; turn it on with `ts-mux on` once you've read the trade-offs in `ts-mux -h` (config changes then need `ts-mux restart`, which kills every pane, and mux panes can't render the per-pane Claude tint).
+
 **If something looks wrong** — `doc: command not found` after an update, a clone you moved, leftover old clones — run **`ts-doctor`** (read-only health check) and **`ts-doctor --repair`** (pwsh: `ts-doctor -Repair`) to repoint chezmoi's `sourceDir`, re-apply, and clean up. The installers run the same check automatically at the end.
 
 If you want to walk through each step instead (recommended for first-time inspection, or when chezmoi would clobber an existing hand-edited dotfile), keep reading.

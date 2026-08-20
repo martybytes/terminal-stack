@@ -132,6 +132,7 @@ $tok = @{
     '__THEME_MODE__'             = if ($tsCfg.themeMode)          { $tsCfg.themeMode }          else { 'dark' }
     '__THEME_RESOLVED__'         = if ($tsCfg.resolvedTheme)      { $tsCfg.resolvedTheme }      else { 'dark' }
     '__TMUX_PREFIX__'            = if ($tsCfg.tmuxPrefixResolved) { $tsCfg.tmuxPrefixResolved } else { 'C-b' }
+    '__WEZ_MUX__'                = if ($tsCfg.weztermMux)         { $tsCfg.weztermMux }         else { 'off' }
     '__CC_TTS_STOP_HOOK__'       = $ccTtsStopHook
     '__CC_TTS_STOPFAILURE_HOOK__'= $ccTtsStopFailureHook
     '__CC_TTS_CURSOR_HOOKS__'    = $ccTtsCursorHooks
@@ -234,8 +235,9 @@ if (Test-Path -LiteralPath $mergeHelper) {
 Write-Host "sync-windows: user=$WinUser, $created created, $updated updated, $unchanged unchanged"
 
 # The mux server (unix domain 'main') loads its own copy of .wezterm.lua and is
-# never restarted automatically — that would kill every live pane. Remind instead.
-if ($weztermChanged) {
+# never restarted automatically — that would kill every live pane. Remind instead,
+# and only when the mux is actually the thing hosting panes.
+if ($weztermChanged -and $tok['__WEZ_MUX__'] -eq 'on') {
     Write-Warning 'WezTerm config changed. The GUI reloads live, but wezterm-mux-server keeps the old config for spawning panes.'
-    Write-Warning "When convenient (closes all panes!): close WezTerm, then 'taskkill /IM wezterm-mux-server.exe /F' and relaunch."
+    Write-Warning "When convenient (closes all panes!): 'ts-mux restart'."
 }

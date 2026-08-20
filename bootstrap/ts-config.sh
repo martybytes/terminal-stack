@@ -10,6 +10,7 @@
 #   ts-config theme  <mode>   dark | light | follow
 #   ts-config tmux   <chord>  tmux prefix, e.g. ctrl-a
 #   ts-config apps [recommended|all|none|id,id,...]   (no arg → interactive picker)
+#   ts-config mux [on|off|...]  hand-off to ts-mux (WezTerm multiplexer domain)
 #
 # Config lives in chezmoi [data] (~/.config/chezmoi/chezmoi.toml); changes are
 # persisted with ts_save_config, then `chezmoi apply` re-renders every file.
@@ -65,12 +66,18 @@ set_tmux()   { ts_save_config "$(cur leaderChord ctrl-space)" "$(cur themeMode d
 # shellcheck disable=SC2086
 set_apps()   { ts_save_config "$(cur leaderChord ctrl-space)" "$(cur themeMode dark)" "$(cur tmuxPrefix ctrl-b)" $1; install_apps "$1"; finish; }
 
+# The mux has its own verbs (kill/restart/reset), so ts-config just hands off.
+run_mux() {
+    TERMINAL_STACK_DIR="$SRC" TERMINAL_STACK_CHEZMOI="$CZ" bash "$SRC/bootstrap/ts-mux.sh" "$@"
+}
+
 show() {
     echo "terminal-stack config:"
     echo "  leader : $(cur leaderChord ctrl-space)   (WezTerm: $(cur leaderMods CTRL)+$(cur leaderKey phys:Space))"
     echo "  theme  : $(cur themeMode dark)   (baked palette: $(cur resolvedTheme dark))"
     echo "  tmux   : $(cur tmuxPrefix ctrl-b)   (prefix: $(cur tmuxPrefixResolved C-b))"
     echo "  apps   : $(curapps)"
+    echo "  wezmux : $(ts_wez_mux_get)   (ts-mux on|off|status)"
 }
 
 menu() {
@@ -78,7 +85,7 @@ menu() {
         echo
         show
         echo
-        echo "  1) leader key   2) theme   3) tmux prefix   4) apps   5) re-apply   6) Claude TTS   q) quit"
+        echo "  1) leader key   2) theme   3) tmux prefix   4) apps   5) re-apply   6) Claude TTS   7) WezTerm mux   q) quit"
         local c; c="$(ts_tty_prompt 'Choose: ')"
         case "$c" in
             1) set_leader "$(ts_prompt_leader)" ;;
@@ -87,6 +94,7 @@ menu() {
             4) set_apps "$(ts_prompt_apps)" ;;
             5) finish ;;
             6) ts_config_tts show; echo; ts_config_tts_menu ;;
+            7) run_mux status ;;
             q|Q|"") return 0 ;;
             *) echo "?" ;;
         esac
@@ -105,9 +113,13 @@ case "${1:-}" in
     tts)
         shift
         ts_config_tts "$@" ;;
+    mux)
+        shift
+        run_mux "$@" ;;
     -h|--help|help)
-        sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'
+        sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'
         echo "  tts show|on|off|test|reset|engine|message|voice|..."
+        echo "  mux status|on|off|list|kill|restart|reset  (see: ts-mux -h)"
         ;;
-    *) echo "ts-config: unknown command '$1' (try: show, leader, theme, tmux, apps, tts)" >&2; exit 2 ;;
+    *) echo "ts-config: unknown command '$1' (try: show, leader, theme, tmux, apps, tts, mux)" >&2; exit 2 ;;
 esac

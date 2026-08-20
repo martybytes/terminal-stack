@@ -30,19 +30,27 @@ for _, dom in ipairs(config.ssh_domains) do
   dom.assume_shell = 'Posix'
 end
 
--- Host panes in a multiplexer process outside the GUI, so losing the GUI does
--- not kill the shells. Motivation: the WebGpu panic documented at config.front_end
--- below took out three live Claude Code sessions on 2026-08-18. With a mux domain,
--- a GUI crash leaves every pane (and everything running in it) alive; relaunching
--- WezTerm reattaches. Note the mux server loads its OWN copy of this file -- after
--- changing config that affects pane spawning, restart wezterm-mux-server, not just
--- the GUI (the sync scripts print a reminder). Known trade-off: pane background
--- tints (below) need pane:inject_output, which is local-pane-only — mux panes
--- fall back to the hook's raw OSC 11, which ConPTY eats on Windows, so per-pane
--- tints may not render under the mux domain. Failures are logged (Ctrl+Shift+L).
--- To back this out: delete these two lines and re-sync.
-config.unix_domains = { { name = 'main' } }
-config.default_domain = 'main'
+-- Optional: host panes in a multiplexer process outside the GUI, so losing the
+-- GUI does not kill the shells. Motivation: the WebGpu panic documented at
+-- config.front_end below took out three live Claude Code sessions on 2026-08-18.
+-- With a mux domain a GUI crash leaves every pane (and everything running in it)
+-- alive; relaunching WezTerm reattaches.
+--
+-- OFF by default, because the mux has real costs: the mux server loads its OWN
+-- copy of this file, so config that affects pane spawning needs a mux restart
+-- (which kills every pane) and not just a GUI reload; and pane background tints
+-- (below) need pane:inject_output, which is local-pane-only — mux panes fall
+-- back to the hook's raw OSC 11, which ConPTY eats on Windows, so per-pane tints
+-- may not render. Failures are logged (Ctrl+Shift+L).
+--
+-- Toggle with `ts-mux on` / `ts-mux off`; `ts-mux -h` also has status / kill /
+-- restart / reset. __WEZ_MUX__ is injected by the Windows sync from the saved
+-- config key `weztermMux`.
+local MUX_ENABLED = '__WEZ_MUX__' == 'on'
+if MUX_ENABLED then
+  config.unix_domains = { { name = 'main' } }
+  config.default_domain = 'main'
+end
 
 -- ── Theme palette (light / dark, optional follow-OS) ──────────────────────────
 -- THEME_MODE is injected from the saved terminal-stack config:

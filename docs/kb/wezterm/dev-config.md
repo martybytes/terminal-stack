@@ -53,16 +53,21 @@ Then:
 | `.wezterm.lua` | Usually auto-reloads when the deployed file changes |
 | `pane_nav.lua` | **`Ctrl+Space` `r`** (`ReloadConfiguration`) |
 
-No need to quit WezTerm — but see the mux-server caveat below.
+No need to quit WezTerm — but see the mux-server caveat below if you turned
+the mux on (`ts-mux`).
 
-## Mux server (Windows)
+## Mux server (opt-in)
 
-On Windows the panes live in `wezterm-mux-server` (`default_domain = 'main'`),
-which loads its **own** copy of `.wezterm.lua`. A GUI reload does not update the
-config the mux uses for spawning panes; both sync scripts print a reminder when a
-WezTerm file changed. Nothing restarts the mux automatically — that would kill
-every live pane. When convenient (closes all panes!): close WezTerm, then
-`taskkill /IM wezterm-mux-server.exe /F`, and relaunch.
+The multiplexer domain is **off by default** — panes are spawned by the GUI. Turn
+it on with `ts-mux on` and they move into `wezterm-mux-server` instead, where a GUI
+crash can't take them with it. `ts-mux -h` has the full story; `ts-mux status`
+tells you which mode you're actually in.
+
+While it is on, the mux server loads its **own** copy of `.wezterm.lua`, so a GUI
+reload does not update the config it uses for spawning panes. Both sync scripts
+print a reminder when a WezTerm file changed and the mux is on. Nothing restarts it
+automatically — that would kill every live pane. When convenient (closes all
+panes!): `ts-mux restart`.
 
 ## Plugins
 

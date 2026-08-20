@@ -122,16 +122,40 @@ The P/Invoke version (`Native.ConsoleCP::GetConsoleOutputCP()`) asks the OS dire
 
 An older, different WebGpu incident is kept for history. On some Intel iGPU drivers (an earlier Windows 11 setup, May 2026) WebGpu had an output-buffer queueing behavior where rapid post-redirect output from a child process (Claude Code starting up, a large `cat` of a colored log) didn't trigger an immediate redraw — the buffer flushed only on the next input event, so "type `ccd`, hit Enter, nothing happens; hit space and Claude Code's whole intro screen appears at once." We switched to `OpenGL` for a while (commit `7922da8`); a later WezTerm-nightly / driver update cleared it and the configs returned to WebGpu — until the crash above retired it on Windows for good.
 
-## Why Windows panes live in a mux domain (`unix_domains` 'main')
+## Why the mux domain is opt-in, not the default (`ts-mux`)
 
-The same WebGpu crash motivated a structural fix beyond the renderer swap: with panes local to the GUI process, *any* GUI abort — renderer panic, driver update, misclick on a "close window" prompt — kills every shell and everything running in them. `windows/.wezterm.lua.tmpl` therefore declares `config.unix_domains = { { name = 'main' } }` and `config.default_domain = 'main'`, hosting panes in a `wezterm-mux-server` process outside the GUI. A GUI crash now leaves every pane alive; relaunching WezTerm reattaches.
+The same WebGpu crash motivated a structural fix beyond the renderer swap: with panes local to the GUI process, *any* GUI abort — renderer panic, driver update, misclick on a "close window" prompt — kills every shell and everything running in them. Hosting panes in a `wezterm-mux-server` process outside the GUI (`config.unix_domains = { { name = 'main' } }` + `config.default_domain = 'main'`) fixes that: a GUI crash leaves every pane alive and relaunching WezTerm reattaches.
 
-Two trade-offs, both documented in the config comments:
+It shipped unconditionally in August 2026 and that was the mistake. The mux is a real change in how the terminal behaves, and it arrived through a routine `ts-update` — panes started coming up in a domain the user never asked for, with two visible side effects:
 
 - **Per-pane background tints may not render under the mux domain.** The Claude cc-state tint is driven by `pane:inject_output` (see the ConPTY entry in `powershell-quirks.md`), which is local-pane-only; mux panes fall back to the hook's raw OSC 11, which ConPTY eats on Windows. Failures log once per pane to the debug overlay (`Ctrl+Shift+L`). Tab dots and title tints are unaffected (they ride the user var, not the byte stream).
-- **The mux server loads its own copy of `.wezterm.lua`.** A GUI reload does not change how the mux spawns panes, so after config changes the sync scripts print a restart reminder — and *never* restart the mux automatically, because that would kill every live pane, defeating the point of having it. The manual path (closes all panes!): close WezTerm, `taskkill /IM wezterm-mux-server.exe /F`, relaunch.
+- **The mux server loads its own copy of `.wezterm.lua`.** A GUI reload does not change how the mux spawns panes, so every config change needs a mux restart — which kills every live pane. Nothing in the stack restarts it automatically for exactly that reason; the sync scripts print a reminder instead.
 
-To back the mux domain out: delete the two config lines and re-sync.
+So the domain is now a **saved setting** (`weztermMux`, `on`|`off`) that defaults to **off** — the pre-August behaviour — and both GUI configs gate it:
+
+```lua
+local MUX_ENABLED = '<on|off>' == 'on'   -- __WEZ_MUX__ / {{ .weztermMux }}
+if MUX_ENABLED then
+  config.unix_domains = { { name = 'main' } }
+  config.default_domain = 'main'
+end
+```
+
+Defaulting to *off* rather than preserving the shipped-on behaviour is deliberate: crash resilience is worth having, but it is worth **choosing**, and a machine that silently gained a mux is better served by landing back where it started and opting back in with one command.
+
+`ts-mux` is that command, and it also owns the live server, because the manual path (`taskkill /IM wezterm-mux-server.exe /F`) is both easy to get wrong and impossible from WSL without knowing the interop trick:
+
+| Command | Does |
+|---|---|
+| `ts-mux` / `ts-mux status` | the setting, the *rendered* setting (catches an un-applied change), the server pid, the pane count |
+| `ts-mux on` / `off` | flip `weztermMux`, re-render, and say what takes effect when |
+| `ts-mux list` | `wezterm cli list` |
+| `ts-mux kill` / `restart` | stop / cycle `wezterm-mux-server` (confirmed — it kills every pane it hosts) |
+| `ts-mux reset` | back to the default: off + re-apply + kill + clear stale sockets |
+
+Two implementations, as everywhere else in this repo: `bootstrap/ts-mux.sh` (zsh wrapper in `dot_zshrc`) and `Invoke-TsMux` in `$PROFILE`. On WSL the GUI, the mux server and the rendered config are all Windows-side, so the bash script drives them over interop (`tasklist.exe` / `taskkill.exe` / `wezterm.exe`) rather than the Linux process table.
+
+`status` deliberately reports the **rendered** value separately from the saved one. A config written before this toggle existed has no `MUX_ENABLED` line at all, so it reads the unconditional `config.default_domain = 'main'` and reports `on (pre-toggle)` — which is exactly the state a machine is in between pulling this change and applying it.
 
 ## Why not just use a single GUI tool like Microsoft Terminal?
 
@@ -272,9 +296,9 @@ Trade-off: the browser/Obsidian `.html` export is gone. It was the weakest-justi
 
 ## Why config lives in chezmoi `[data]` + a Windows JSON mirror
 
-The wizard/`ts-config` choices (leader chord, theme mode, tmux prefix, app selection) need to survive every `ts-update` and be readable by *all* the apply paths. The stack already had exactly the right bridge: chezmoi `[data]` in `~/.config/chezmoi/chezmoi.toml` — the same place `windowsUsername` is stored and consumed by the WSL `run_after` hook to render Windows-side files. So the choices live there too. `.chezmoi.toml.tmpl` re-emits them (so a bare `chezmoi init` doesn't drop them) and *derives* the concrete bindings — `leaderChord "ctrl-space"` → `leaderKey "phys:Space"` + `leaderMods "CTRL"`, `tmuxPrefix "ctrl-b"` → `tmuxPrefixResolved "C-b"` — in one Go-template mapping. WSL/native chezmoi templates read them directly (`{{ .leaderKey }}`); the WSL hook reads them via `chezmoi execute-template` and substitutes `__LEADER_*__`/`__THEME_*__`/`__TMUX_PREFIX__` tokens into the Windows `.tmpl` files (same mechanism as `__WIN_USER__`).
+The wizard/`ts-config` choices (leader chord, theme mode, tmux prefix, app selection, and the `ts-mux` domain toggle) need to survive every `ts-update` and be readable by *all* the apply paths. The stack already had exactly the right bridge: chezmoi `[data]` in `~/.config/chezmoi/chezmoi.toml` — the same place `windowsUsername` is stored and consumed by the WSL `run_after` hook to render Windows-side files. So the choices live there too. `.chezmoi.toml.tmpl` re-emits them (so a bare `chezmoi init` doesn't drop them) and *derives* the concrete bindings — `leaderChord "ctrl-space"` → `leaderKey "phys:Space"` + `leaderMods "CTRL"`, `tmuxPrefix "ctrl-b"` → `tmuxPrefixResolved "C-b"` — in one Go-template mapping. WSL/native chezmoi templates read them directly (`{{ .leaderKey }}`); the WSL hook reads them via `chezmoi execute-template` and substitutes `__LEADER_*__`/`__THEME_*__`/`__TMUX_PREFIX__`/`__WEZ_MUX__` tokens into the Windows `.tmpl` files (same mechanism as `__WIN_USER__`).
 
-The wrinkle: a **Windows-standalone** install (no WSL) never runs chezmoi, so it can't read chezmoi `[data]`. That path gets a JSON mirror at `%LOCALAPPDATA%\terminal-stack\config.json` (next to the existing `rollback-sha`), written by `windows-bootstrap.ps1` / the pwsh `ts-config` and read by `scripts/sync-windows.ps1`. To keep the two stores from drifting in a **combined** Windows+WSL setup, the WSL side is authoritative: `ts_save_config` (bash) also writes the Windows `config.json` mirror when `/mnt/c/Users/<user>` exists, and the docs tell you to run `ts-config` from WSL. Defaults are baked into every consumer (`hasKey` guards in the templates, `cfg <key> <default>` in the hook, fallbacks in `sync-windows.ps1`), so a clone that predates the wizard renders today's behaviour (Ctrl+Space, Mocha) until you run it.
+The wrinkle: a **Windows-standalone** install (no WSL) never runs chezmoi, so it can't read chezmoi `[data]`. That path gets a JSON mirror at `%LOCALAPPDATA%\terminal-stack\config.json` (next to the existing `rollback-sha`), written by `windows-bootstrap.ps1` / the pwsh `ts-config` and read by `scripts/sync-windows.ps1`. To keep the two stores from drifting in a **combined** Windows+WSL setup, the WSL side is authoritative: `ts_save_config` (bash) also writes the Windows `config.json` mirror when `/mnt/c/Users/<user>` exists, and the docs tell you to run `ts-config` from WSL. Defaults are baked into every consumer (`hasKey` guards in the templates, `cfg <key> <default>` in the hook, fallbacks in `sync-windows.ps1`), so a clone that predates the wizard renders today's behaviour (Ctrl+Space, Mocha, mux off) until you run it.
 
 A single dedicated config file (one TOML/JSON on every platform) was the alternative. Rejected: it would duplicate the cross-side plumbing that chezmoi `[data]` + the sync hook already provide for `windowsUsername`, and chezmoi templates can't cleanly read an arbitrary external file on every apply. Reusing the existing bridge keeps the mapping in one Go template and the I/O in `bootstrap/_config.{sh,ps1}`.
 

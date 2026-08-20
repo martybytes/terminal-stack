@@ -8,13 +8,15 @@
 | `ts-rollback` | undo the last `ts-update` — see below |
 | `ts-doctor [--repair]` | health-check / fix the install — see below |
 | `ts-config` | change leader, theme, tmux prefix, apps, TTS — see below |
+| `ts-mux` | WezTerm multiplexer domain: on/off, status, kill/restart/reset — see below |
 | `plain` | vanilla shell, no rc/profile (no oh-my-zsh/starship/aliases) — `exit` to return |
 | `chezmoi diff` / `chezmoi apply -v` | preview / apply configs (run from inside WSL on Windows) |
 | `chezmoi re-add ~/.zshrc` | capture a hand-edit of a managed file back into the repo |
 | `scripts\sync-windows.ps1 -SourceDir <clone>` | Windows-side deploy — see `doc wezterm/dev-config` |
 
 pwsh function names: `Update-TerminalStack`, `Restore-TerminalStack`,
-`Set-TerminalStackConfig`, `Invoke-TsDoctor` — all aliased to the same `ts-*` names.
+`Set-TerminalStackConfig`, `Invoke-TsDoctor`, `Invoke-TsMux` — all aliased to the
+same `ts-*` names.
 
 ## Clone locations
 
@@ -85,10 +87,41 @@ repair offers the same canonical move and re-syncs (a pin is written to
 | `ts-config tmux <chord>` | tmux prefix, e.g. `ctrl-a` — see `doc common/tmux` |
 | `ts-config apps [recommended\|all\|none\|id,…]` | app catalog; no arg → picker; installs, never uninstalls |
 | `ts-config tts <show\|on\|off\|test\|…>` | Claude/Cursor voice — see `doc common/claude-code` |
+| `ts-config mux [on\|off\|…]` | hand-off to `ts-mux` (WezTerm multiplexer domain) |
 
 Every change persists (chezmoi `[data]` on WSL/Linux, `config.json` on Windows) and
 re-applies. In a combined WSL+Windows setup run it from **WSL** — its apply is
 authoritative for the Windows-side files too.
+
+## `ts-mux`
+The WezTerm **multiplexer domain**: with it on, your shells run inside
+`wezterm-mux-server` instead of the GUI, so a GUI crash leaves every pane alive and
+relaunching WezTerm reattaches. **Off by default** — see the trade-offs below.
+
+| Command | What it does |
+|---|---|
+| `ts-mux` / `ts-mux status` | the setting, the *rendered* setting, the server pid, the pane count |
+| `ts-mux on` / `ts-mux off` | flip it and re-render `.wezterm.lua` |
+| `ts-mux list` | `wezterm cli list` — every pane the mux knows about |
+| `ts-mux kill` | stop `wezterm-mux-server` — **kills every pane it hosts** |
+| `ts-mux restart` | stop it, start a fresh one, so it re-reads the config |
+| `ts-mux reset` | back to the default: off + re-apply + kill + clear stale sockets |
+| `-y` / `--yes` | skip the confirmation on kill / restart / reset |
+
+Why it is off by default: the mux server loads its **own** copy of `.wezterm.lua`,
+so a config change needs `ts-mux restart` (which kills every pane) and not just a
+GUI reload; and the Claude per-pane tint rides `pane:inject_output`, which mux panes
+don't have (tab dots and title tints still work).
+
+`on`/`off` take effect for newly spawned tabs; relaunch WezTerm for a clean switch.
+Panes already hosted by the mux stay there until you close them or `ts-mux kill`.
+`status` prints the *rendered* value next to the saved one, so a setting you changed
+but never applied — or a `.wezterm.lua` older than the toggle, reported as
+`on (pre-toggle)` — shows up as stale instead of silently disagreeing.
+
+The setting is saved with the rest of the config (`ts-config show` prints it as
+`wezmux`; `ts-config mux …` is the same command). On WSL the mux server is a
+**Windows** process — `ts-mux` reaches it over interop, so it works from either side.
 
 ## SSH (stack shortcut)
 `ssht host [session]` — SSH and attach-or-create a remote tmux session in one shot

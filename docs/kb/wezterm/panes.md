@@ -68,4 +68,11 @@ grows the pane right 9 cells.
 | `Shift+Enter` | send a literal newline (LF) — newline-without-submit in CLI REPLs like Claude Code, whose keybinding alone can't fire because terminals don't deliver a distinct Shift+Enter (`doc common/claude-code`) |
 | `Ctrl+Space` `Ctrl+Space` | send a real `Ctrl+Space` to the app — the escape hatch, since the leader eats the first press (leader, then `Ctrl+Space`, whatever your leader is) |
 
+## Do panes survive a GUI crash?
+Only if the **multiplexer domain** is on, and it is **off by default** — panes are
+spawned by the GUI, so a GUI crash takes them with it. `ts-mux on` moves them into
+`wezterm-mux-server`, where they (and everything running in them) survive; `ts-mux`
+alone reports which mode you're in. Trade-offs and the kill/restart/reset verbs:
+`ts-mux -h`, `doc common/stack`.
+
 > macOS: free `Ctrl+Space` and the F-row from the OS first — see `doc macos/wezterm`.
