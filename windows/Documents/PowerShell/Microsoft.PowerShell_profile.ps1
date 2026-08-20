@@ -570,7 +570,8 @@ function Restore-TerminalStack {
 }
 Set-Alias -Name ts-rollback -Value Restore-TerminalStack
 
-# Configure the stack: leader key, theme (dark/light/follow), tmux prefix, apps.
+# Configure the stack: leader key, theme (dark/light/follow), tmux prefix, apps,
+# and the WezTerm mux / startup-restore toggles.
 # Bare `ts-config` opens an interactive menu; `ts-config theme follow` etc. set one
 # value. Writes %LOCALAPPDATA%\terminal-stack\config.json and re-syncs the Windows
 # files. NOTE: in a combined WSL+Windows setup, prefer running `ts-config` from WSL

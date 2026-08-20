@@ -487,7 +487,8 @@ ts-rollback() {
   echo "==> done. run ts-update to return to latest."
 }
 
-# Configure the stack: leader key, theme (dark/light/follow), tmux prefix, apps.
+# Configure the stack: leader key, theme (dark/light/follow), tmux prefix, apps,
+# and the WezTerm mux / startup-restore toggles.
 # Bare `ts-config` opens an interactive menu; `ts-config theme follow` etc. set one
 # value. Thin wrapper over the shared bootstrap/ts-config.sh in the clone, which
 # persists to chezmoi [data] and re-applies. In a combined WSL+Windows setup, run

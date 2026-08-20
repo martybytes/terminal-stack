@@ -17,7 +17,8 @@ Keeps dotfiles in a git "source tree" and renders them into `$HOME`. This repo
   `~/.local/share/terminal-stack` on native Linux/macOS. Dev clones at workspace
   tier paths are invisible unless pinned, and a pin that points at nothing is
   warned about and skipped rather than obeyed — see `doc common/stack`.
-- Wizard choices (leader, theme, tmux prefix, Windows username) live under
+- Wizard choices (leader, theme, tmux prefix, WezTerm mux + session restore,
+  Windows username) live under
   `[data]` in `~/.config/chezmoi/chezmoi.toml`, mirrored to
   `%LOCALAPPDATA%\terminal-stack\config.json` for Windows-standalone.
 - Edit the `.tmpl` source, not the rendered file — the next apply overwrites it.
