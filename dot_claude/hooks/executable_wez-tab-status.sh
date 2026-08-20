@@ -2,19 +2,19 @@
 state="${1:-}"
 [ -z "$WEZTERM_PANE" ] && exit 0
 case "$state" in
-    thinking) glyph='⏳' ;;
-    working)  glyph='⚙'  ;;
-    waiting)  glyph='✓'  ;;
-    error)    glyph='✗'  ;;
+    thinking|working|waiting|error) ;;
     *) exit 0 ;;
 esac
 project_dir="${CLAUDE_PROJECT_DIR:-$PWD}"
 project=$(basename "$project_dir")
+# Bare project name only — no 'cc'/state prefix. WezTerm's format-tab-title
+# already shows the Claude icon and per-pane state dots (driven by the cc_state
+# user var below); a prefix would just waste tab width.
 # wezterm on Mac/native-Linux; wezterm.exe via interop on WSL.
 if command -v wezterm >/dev/null 2>&1; then
-    wezterm cli set-tab-title "cc $glyph $project" 2>/dev/null || true
+    wezterm cli set-tab-title "$project" 2>/dev/null || true
 elif command -v wezterm.exe >/dev/null 2>&1; then
-    wezterm.exe cli set-tab-title "cc $glyph $project" 2>/dev/null || true
+    wezterm.exe cli set-tab-title "$project" 2>/dev/null || true
 fi
 
 # ── Per-pane background tint by Claude state (OSC 11; this pane only) ─────────

@@ -47,7 +47,7 @@ Then sync with:
 
 You do not need to quit and relaunch WezTerm — with one caveat, and only if you turned the multiplexer domain on (`ts-mux on`; it is off by default). With the mux on, panes are hosted in `wezterm-mux-server` and the mux server loads its **own** copy of `.wezterm.lua`: a GUI reload does not update the config the mux uses for spawning panes. Both sync scripts print a reminder when a WezTerm file changed and the mux is on; nothing restarts it automatically, because that would kill every live pane. When convenient (closes all panes!): `ts-mux restart`. `ts-mux status` shows the setting, the rendered setting, and the live server.
 
-### Plugins (tabline / sessionizer / resurrect)
+### Plugins (sessionizer / resurrect)
 
 Note before you tidy it: the resurrect block deliberately does **not** call
 `resurrect.setup()`. That helper registers a `gui-startup` handler
@@ -56,7 +56,7 @@ previous session at every launch. We drive its two save engines directly and
 register the handler ourselves only when `ts-config restore` is on — see
 `docs/decisions.md` § "Why the startup session restore is opt-in".
 
-The status bar (`tabline.wez`), the `Ctrl+Space` `p` project picker (`sessionizer.wezterm`), and session save/restore (`resurrect.wezterm`) are WezTerm plugins loaded from **pinned forks under `github.com/martybytes`**, so an upstream archival or breaking change can't take the stack down. `wezterm.plugin.require` clones each fork at the **first GUI start** — that one start needs network access; afterwards the clone is cached in WezTerm's plugin directory. Each load is pcall-guarded: if tabline fails, the hand-rolled status handler takes over; if sessionizer or resurrect fail, only their keybindings are lost.
+The `Ctrl+Space` `p` project picker (`sessionizer.wezterm`) and session save/restore (`resurrect.wezterm`) are WezTerm plugins loaded from **pinned forks under `github.com/martybytes`**, so an upstream archival or breaking change can't take the stack down. `wezterm.plugin.require` clones each fork at the **first GUI start** — that one start needs network access; afterwards the clone is cached in WezTerm's plugin directory. Each load is pcall-guarded: if either fails, only its keybindings are lost. (The tab bar and status bar are **not** plugins — they are hand-rolled in the config itself; `tabline.wez` was dropped, see `docs/decisions.md` § "Why the tab bar is fancy and fully hand-rolled".)
 
 To update a plugin, pull upstream into the fork deliberately, then either run `wezterm.plugin.update_all()` from the debug overlay (**`Ctrl+Shift+L`**) or delete the plugin cache directory and restart WezTerm.
 

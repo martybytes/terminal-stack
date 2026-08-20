@@ -2,9 +2,9 @@
 -- chezmoi applies this only on darwin; native Linux hosts in this stack are
 -- headless (ssh/PuTTY) and need no WezTerm GUI config.
 -- Structure: theme palettes → base options → QoL (quick select, hyperlinks) →
--- keys/key_tables → plugins (tabline status bar, sessionizer, resurrect; each
--- pcall-guarded with a hand-rolled fallback) → tab titles + Claude cc_state
--- rendering → pane background tint → pane_nav (F1..F6 directional nav-or-split).
+-- keys/key_tables → plugins (sessionizer, resurrect; each pcall-guarded) →
+-- tab titles + Claude cc_state rendering → pane background tint → status bar
+-- (mode badge, Claude fleet, clock) → pane_nav (F1..F6 directional nav-or-split).
 -- Keep in sync with windows/.wezterm.lua.tmpl.
 --
 -- This file is a chezmoi template: leader chord + theme mode are injected from
@@ -62,8 +62,11 @@ local PALETTES = {
     inactive_hsb = { brightness = 0.85, saturation = 0.72, hue = 1.0 },
     tab_bar = {
       background = '#11111b',
-      active_tab         = { bg_color = '#313244', fg_color = '#cdd6f4', intensity = 'Bold' },
-      inactive_tab       = { bg_color = '#181825', fg_color = '#a6adc8' },
+      inactive_tab_edge = '#313244',
+      -- Solid accent block for the active tab: THE contrast fix — the old
+      -- surface-grey active tab was nearly indistinguishable from its neighbours.
+      active_tab         = { bg_color = '#89b4fa', fg_color = '#11111b', intensity = 'Bold' },
+      inactive_tab       = { bg_color = '#181825', fg_color = '#7f849c' },
       inactive_tab_hover = { bg_color = '#313244', fg_color = '#cdd6f4', italic = true },
       new_tab            = { bg_color = '#181825', fg_color = '#6c7086' },
       new_tab_hover      = { bg_color = '#313244', fg_color = '#cdd6f4' },
@@ -81,8 +84,10 @@ local PALETTES = {
     inactive_hsb = { brightness = 1.0, saturation = 1.0, hue = 1.0 },
     tab_bar = {
       background = '#ececec',
-      active_tab         = { bg_color = '#ffffff', fg_color = '#1e1e1e', intensity = 'Bold' },
-      inactive_tab       = { bg_color = '#ececec', fg_color = '#616161' },
+      inactive_tab_edge = '#d4d4d4',
+      -- Solid accent block for the active tab (see the dark palette note).
+      active_tab         = { bg_color = '#005fb8', fg_color = '#ffffff', intensity = 'Bold' },
+      inactive_tab       = { bg_color = '#ececec', fg_color = '#8a8a8a' },
       inactive_tab_hover = { bg_color = '#ffffff', fg_color = '#1e1e1e', italic = true },
       new_tab            = { bg_color = '#ececec', fg_color = '#616161' },
       new_tab_hover      = { bg_color = '#ffffff', fg_color = '#1e1e1e' },
@@ -131,15 +136,25 @@ if P.scheme_def then
 else
   config.color_scheme = P.scheme_name
 end
--- Retro tab bar (required by tabline.wez; our fallback tab renderer styles it
--- via colors.tab_bar). The fancy bar's window_frame styling no longer applies.
-config.use_fancy_tab_bar = false
+-- Fancy tab bar, deliberately: the retro bar's height is hard-locked to one
+-- terminal cell and WezTerm has no multi-line bar (open feature request
+-- wezterm/wezterm#3789) — the fancy bar's window_frame.font_size is the only
+-- sanctioned way to get a taller, more readable bar. Tabs and status stay fully
+-- hand-drawn (format-tab-title / update-status below); flipping this to false
+-- renders the same content in the retro bar via colors.tab_bar.
+config.use_fancy_tab_bar = true
+config.window_frame = {
+  font = wezterm.font_with_fallback { 'JetBrainsMono Nerd Font', 'CaskaydiaCove Nerd Font', 'Menlo' },
+  font_size = 12.5,   -- > terminal font_size (11.5) → a taller, breathable bar
+  active_titlebar_bg = P.tab_bar.background,
+  inactive_titlebar_bg = P.tab_bar.background,
+}
 config.show_new_tab_button_in_tab_bar = false
 config.hide_tab_bar_if_only_one_tab = false
 config.window_decorations = 'INTEGRATED_BUTTONS|RESIZE'
 config.initial_cols = 120
 config.initial_rows = 40
-config.tab_max_width = 120
+config.tab_max_width = 120   -- retro-bar fallback only; the fancy bar sizes tabs to content
 
 -- WebGpu is WezTerm's modern, fastest backend (set explicitly). It is
 -- Metal-backed on macOS and does not have the Windows DX12 crash — the Windows
@@ -277,11 +292,11 @@ local function kill_workspace(window, pane)
   }, pane)
 end
 
--- Status-bar detail toggle (Leader+s): show/hide the workspace name and the
--- user@host + path segment. OFF by default — the mode badge is the only thing
--- worth a permanent slot; "msampson@host │ ~/some/path │ default" is noise you
--- already know, and the tab titles carry the per-pane context. Press Leader+s
--- when you actually need to see where a pane is.
+-- Status-bar detail toggle (Leader+s): show/hide the user@host + path segment
+-- for the active pane. OFF by default — "you@host │ ~/some/path" is noise you
+-- already know; the tab titles carry the per-pane context and the always-on
+-- segments (Claude fleet, workspace, clock) don't need it. Press Leader+s when
+-- you actually need to see where a pane is.
 -- wezterm.GLOBAL survives config reloads (a plain local would reset); it does
 -- not survive a GUI restart, so every launch starts quiet.
 if wezterm.GLOBAL.show_identity == nil then wezterm.GLOBAL.show_identity = false end
@@ -464,86 +479,24 @@ local function pane_location(pane)
   return titlecase(user), titlecase(host), path
 end
 
--- The workspace name for the status bar; '' when the detail is toggled off
--- (Leader+s) and for the implicit 'default' workspace, which names nothing.
+-- The workspace name for the status bar; '' for the implicit 'default'
+-- workspace, which names nothing. Always visible — a non-default workspace is a
+-- deliberate context worth a permanent slot (the Leader+s toggle only gates the
+-- identity/path segment).
 local function status_workspace(window)
-  if wezterm.GLOBAL.show_identity == false then return '' end
   local ws = window:active_workspace()
   if ws == nil or ws == '' or ws == 'default' then return '' end
   return ws
 end
 
--- The identity + path string for the status bar; '' when toggled off (Leader+s).
-local function status_identity(window, pane)
-  if wezterm.GLOBAL.show_identity == false then return '' end
-  local pu, ph, ppath = pane_location(pane)
-  local identity = (#pu > 0 and #ph > 0) and (pu .. '@' .. ph) or (pu .. ph)
-  if ppath ~= '' then return identity .. '  │  ' .. ppath end
-  return identity
-end
-
--- ── Plugins: tabline (status bar), sessionizer (Leader+p), resurrect ─────────
--- All are pinned forks under github.com/martybytes (upstream archival can't
--- break us; update by pulling upstream into the fork deliberately). Each load
--- is pcall-guarded: a clone failure logs and falls back — tabline falls back to
--- the hand-rolled status handler below; the other two just lose their binding.
+-- ── Plugins: sessionizer (Leader+p), resurrect (Leader+S/L) ───────────────────
+-- Both are pinned forks under github.com/martybytes (upstream archival can't
+-- break us; update by pulling upstream into the fork deliberately). Each load is
+-- pcall-guarded: a clone failure logs and only that binding is lost.
+-- (tabline.wez was dropped when the bar went hand-rolled — see docs/decisions.md
+-- § "Why the tab bar is fancy and fully hand-rolled".)
 -- Plugins load only in the GUI process (wezterm.gui is nil in the mux server).
-local have_tabline = false
 if wezterm.gui then
-  -- tabline.wez: mode/workspace on the left, identity+path on the right.
-  -- tabs_enabled = false — tab titles stay with our format-tab-title below,
-  -- because tabline components can't express per-pane coloured cc_state dots.
-  local ok, tabline = pcall(wezterm.plugin.require, 'https://github.com/martybytes/tabline.wez')
-  if ok and tabline then
-    local scheme_colors = P.scheme_def or wezterm.color.get_builtin_schemes()[P.scheme_name]
-    local function mode_theme(color)
-      return {
-        a = { fg = P.tab_bar.background, bg = color },
-        b = { fg = color, bg = P.surface0 },
-        c = { fg = P.text, bg = P.tab_bar.inactive_tab.bg_color },
-      }
-    end
-    local setup_ok, setup_err = pcall(function()
-      tabline.setup {
-        options = {
-          icons_enabled = true,
-          tabs_enabled = false,
-          theme = {
-            foreground = P.text,
-            background = P.tab_bar.background,
-            cursor = { bg = P.surface0 },
-            ansi = scheme_colors.ansi,
-            tab_bar = { inactive_tab = { bg_color = P.tab_bar.inactive_tab.bg_color } },
-          },
-          theme_overrides = {
-            move_mode   = mode_theme(P.accent),
-            resize_mode = mode_theme(P.peach),
-            rotate_mode = mode_theme(P.teal),
-            tab_mode    = mode_theme(P.green),
-            font_mode   = mode_theme(P.lavender),
-          },
-        },
-        sections = {
-          tabline_a = { { 'mode', fmt = function(str, window)
-            if window:leader_is_active() then return '⌨ LEADER' end
-            return str
-          end } },
-          tabline_b = { status_workspace },
-          tabline_c = { ' ' },
-          tabline_x = { status_identity },
-          tabline_y = {},
-          tabline_z = {},
-        },
-      }
-    end)
-    have_tabline = setup_ok
-    if not setup_ok then
-      wezterm.log_error('tabline setup failed, using fallback status: ' .. tostring(setup_err))
-    end
-  else
-    wezterm.log_error('tabline plugin unavailable, using fallback status: ' .. tostring(tabline))
-  end
-
   -- sessionizer.wezterm: Leader+p fuzzy project picker over the wso workspace
   -- layout (<workspace>/<tier>/github.com/<owner>/<repo>) plus suffix siblings.
   -- Needs `fd` on PATH for repo discovery.
@@ -624,31 +577,42 @@ if wezterm.gui then
   end
 end
 
--- ── Tab labels: " <idx>  <icon> <title>  <badge|dots> " ───────────────────────
+-- ── Tab labels: " <idx>  <icon> [host ·] <title>  <dots|count> " ──────────────
 -- Title precedence: tab.tab_title (set by the cc wrappers / Claude hooks via
 -- `wezterm cli set-tab-title` — sticky, survives the TUI overwriting pane.title),
--- then the active pane's cwd leaf, then pane.title.
--- Per-pane Claude state comes from the `cc_state` user var the wez-tab-status hook
--- sets (working/done/error, cleared on exit). We show a coloured dot per pane,
--- wash the tab background by the most urgent state (error > done > working), and
--- tint the label to match — active or inactive tab, so a background Claude run
--- is obvious at a glance. The process icon is best-effort from the foreground
--- process; Claude is detected via the user var because Windows/WSL often report a
--- wrapper process rather than `claude`. Nerd-font lookups are fallback-guarded
--- (unknown names resolve to nil) so a missing glyph can't break the bar.
--- (Registered after tabline.setup: tabline has tabs_enabled=false and returns
--- nil from its format-tab-title handler, so ours renders the tabs.)
+-- then the active pane's cwd leaf, then the leaf of whatever path the pane title
+-- carries. Labels are deliberately short: Claude panes show the bare project
+-- name (the wrappers/hooks no longer prefix 'cc' — the icon and dots already say
+-- Claude), everything else is reduced to its directory leaf, never a full path.
+-- Remote panes get a host chip ( host ·) from OSC 7 / the SSH domain / a
+-- 'host: path' title.
+-- Per-pane Claude state comes from the `cc_state` user var the wez-tab-status
+-- hook sets (working/done/error, cleared on exit): a coloured dot per pane, the
+-- tab background washed by the most urgent state (error > done > working) and
+-- the label tinted to match while unfocused — so a background Claude run is
+-- obvious at a glance. The ACTIVE tab always keeps the solid accent block (its
+-- one job is to be findable); its dots still carry the Claude state. Inactive
+-- tabs with unseen output get an accent dot. Nerd-font lookups are fallback-
+-- guarded (unknown names resolve to nil) so a missing glyph can't break the bar.
 local PROC_ICONS = {
   pwsh = wezterm.nerdfonts.md_powershell, powershell = wezterm.nerdfonts.md_powershell,
   zsh = wezterm.nerdfonts.md_console, bash = wezterm.nerdfonts.md_console,
   sh = wezterm.nerdfonts.md_console, wsl = wezterm.nerdfonts.md_console,
+  wslhost = wezterm.nerdfonts.md_console,
   nvim = wezterm.nerdfonts.custom_vim, vim = wezterm.nerdfonts.custom_vim,
-  git = wezterm.nerdfonts.dev_git, node = wezterm.nerdfonts.md_nodejs,
+  git = wezterm.nerdfonts.dev_git, lazygit = wezterm.nerdfonts.dev_git,
+  node = wezterm.nerdfonts.md_nodejs, deno = wezterm.nerdfonts.md_nodejs,
   python = wezterm.nerdfonts.md_language_python, python3 = wezterm.nerdfonts.md_language_python,
+  cargo = wezterm.nerdfonts.dev_rust, rustc = wezterm.nerdfonts.dev_rust,
+  go = wezterm.nerdfonts.md_language_go,
+  docker = wezterm.nerdfonts.md_docker, kubectl = wezterm.nerdfonts.md_kubernetes,
+  tmux = wezterm.nerdfonts.cod_terminal_tmux,
+  micro = wezterm.nerdfonts.md_pencil, nano = wezterm.nerdfonts.md_pencil,
 }
 local ICON_CLAUDE   = wezterm.nerdfonts.md_robot or '*'
 local ICON_FALLBACK = wezterm.nerdfonts.md_console or '>'
 local ICON_ZOOM     = wezterm.nerdfonts.md_fullscreen or 'Z'
+local ICON_REMOTE   = wezterm.nerdfonts.md_remote_desktop or wezterm.nerdfonts.md_lan_connect or '@'
 local TAB = {  -- derived from the active palette
   text = P.text, inactive = P.subtext0, dim = P.overlay1,
   working = P.peach, done = P.green, error = P.maroon,
@@ -675,68 +639,148 @@ local function pane_cc(pane)
   return s
 end
 
+-- This machine's short hostname, lowercased — panes that resolve to it (or to
+-- localhost) get no host chip.
+local LOCAL_HOST = (function()
+  local h = wezterm.hostname() or ''
+  local dot = h:find('[.]')
+  if dot then h = h:sub(1, dot - 1) end
+  return h:lower()
+end)()
+
+-- Remote host for the tab chip: OSC 7 host, else the SSH domain, else a
+-- 'host: path' pane title; '' when the pane is (or looks) local.
+local function tab_remote_host(pane)
+  local host = ''
+  local cwd = pane.current_working_dir
+  if cwd and type(cwd) == 'userdata' and cwd.host and cwd.host ~= '' then
+    host = cwd.host
+  end
+  if host == '' then
+    local dom = pane.domain_name or ''
+    local label = dom:match('^SSH:(.+)$') or dom:match('^SSHMUX:(.+)$')
+    if label then host = label:gsub('^[^@]+@', ''):gsub(':%d+$', '') end
+  end
+  if host == '' then
+    host = (pane.title or ''):match('^([%w%-_]+):%s') or ''
+  end
+  -- Trim a DNS suffix, but never dot-split an IP address.
+  if not host:match('^%d[%d.]*$') then
+    local dot = host:find('[.]')
+    if dot then host = host:sub(1, dot - 1) end
+  end
+  if host == '' or host:lower() == LOCAL_HOST or host == 'localhost' then return '' end
+  return host
+end
+
+-- Strip a legacy Claude prefix ('cc • x' / 'cc-x' / 'cc ⚙ x') from a stored tab
+-- title. The wrappers/hooks now set the bare project name; this keeps titles
+-- from not-yet-updated machines rendering clean too.
+local function strip_cc_prefix(s)
+  local rest = s:match('^[cC][cC](.*)$')
+  if not rest or rest == '' then return s end
+  if rest:sub(1, 1):match('%w') then return s end   -- 'ccsomething' is a real name
+  rest = rest:gsub('^[^%w~/\\.]+', '')
+  if rest ~= '' then return rest end
+  return s
+end
+
+-- The label + host chip for a tab. Explicit titles win; otherwise the active
+-- pane's cwd leaf; otherwise the leaf of whatever path the pane title carries.
+local function tab_label(tab)
+  local active = tab.active_pane
+  local t = tab.tab_title
+  if t and #t > 0 then
+    local sshspec = t:match('^ssh%-(.+)$')   -- ssht sets 'ssh-<host>:<session>'
+    if sshspec then
+      local host = sshspec:match('^([^:]+)') or sshspec
+      local sess = sshspec:match(':(.+)$')
+      return ((sess and sess ~= 'main') and sess or host), host
+    end
+    return strip_cc_prefix(t), tab_remote_host(active)
+  end
+  local host = tab_remote_host(active)
+  local leaf = dir_leaf(active)
+  if leaf then return leaf, host end
+  local pathleaf = path_from_title(active.title or ''):gsub('[/\\]+$', ''):match('[^/\\]+$')
+  if pathleaf and #pathleaf > 0 then return pathleaf, host end
+  return active.title or '', host
+end
+
 wezterm.on('format-tab-title', function(tab, tabs, panes, cfg, hover, max_width)
   local active = tab.active_pane
-  -- tab.tab_title first (the `wezterm cli set-tab-title` contract), cwd leaf after.
-  local label = tab.tab_title
-  if not label or #label == 0 then
-    label = dir_leaf(active) or active.title or ''
-  end
-  local leaf = wezterm.truncate_right(label, 24)
+  local label, rhost = tab_label(tab)
+  label = wezterm.truncate_right(label, 28)
 
-  -- icon: Claude (by user var) else the foreground process, with a fallback glyph.
+  -- icon: Claude (by user var), else remote, else the foreground process.
   local icon
   if pane_cc(active) then
     icon = ICON_CLAUDE
+  elseif rhost ~= '' then
+    icon = ICON_REMOTE
   else
     local p = proc_leaf(active)
     icon = (p and PROC_ICONS[p]) or ICON_FALLBACK
   end
 
-  -- per-pane dots + aggregate state; note Claude panes and zoom.
-  local dots, agg, any_cc, zoomed = {}, nil, false, false
+  -- per-pane dots + aggregate state; note zoom and unseen output.
+  local dots, agg, any_cc, zoomed, unseen = {}, nil, false, false, false
   for _, p in ipairs(tab.panes) do
     local s = pane_cc(p)
     if s then
       any_cc = true
-      table.insert(dots, { c = TAB[s] or TAB.dim, g = '●' })
+      table.insert(dots, { c = TAB[s] or TAB.dim, g = '●', st = true })
       if s == 'error' then agg = 'error'
       elseif s == 'done' and agg ~= 'error' then agg = 'done'
       elseif s == 'working' and not agg then agg = 'working' end
     else
-      table.insert(dots, { c = TAB.dim, g = '○' })
+      table.insert(dots, { c = TAB.dim, g = '○', st = false })
     end
     if p.is_zoomed then zoomed = true end
+    if p.has_unseen_output then unseen = true end
   end
 
-  -- label colour: cc state tints the tab even when it is not focused.
-  local fg = TAB.text
-  if agg == 'error' then fg = TAB.error
-  elseif agg == 'done' then fg = TAB.done
-  elseif agg == 'working' then fg = TAB.working
-  elseif not tab.is_active then fg = TAB.inactive end
+  -- The active tab keeps its solid accent block (bg comes from colors.tab_bar);
+  -- inactive tabs are dim, background-washed by the cc tint when Claude has state.
+  local fg
+  if tab.is_active then
+    fg = P.tab_bar.active_tab.fg_color
+  elseif agg then
+    fg = TAB[agg]
+  else
+    fg = P.tab_bar.inactive_tab.fg_color
+  end
   local bold = tab.is_active or agg ~= nil
 
   local items = {}
-  if agg then
+  if not tab.is_active and agg then
     table.insert(items, { Background = { Color = P['cc_' .. agg] } })
   end
   table.insert(items, { Attribute = { Intensity = bold and 'Bold' or 'Normal' } })
   table.insert(items, { Foreground = { Color = fg } })
-  table.insert(items, { Text = ' ' .. (tab.tab_index + 1) .. '  ' .. icon .. ' ' .. leaf .. ' ' })
+  table.insert(items, { Text = ' ' .. (tab.tab_index + 1) .. '  ' .. icon .. '  ' })
+  if rhost ~= '' and rhost ~= label then
+    table.insert(items, { Text = rhost .. ' · ' })
+  end
+  table.insert(items, { Text = label .. ' ' })
   if any_cc then                         -- dots imply the pane count
     table.insert(items, { Text = ' ' })
     for _, d in ipairs(dots) do
-      table.insert(items, { Foreground = { Color = d.c } })
+      -- On the accent block, empty dots take the tab fg so they stay visible.
+      table.insert(items, { Foreground = { Color = (tab.is_active and not d.st) and fg or d.c } })
       table.insert(items, { Text = d.g })
     end
   elseif #tab.panes > 1 then
-    table.insert(items, { Foreground = { Color = TAB.dim } })
+    table.insert(items, { Foreground = { Color = tab.is_active and fg or TAB.dim } })
     table.insert(items, { Text = ' ' .. #tab.panes })
   end
   if zoomed then
-    table.insert(items, { Foreground = { Color = TAB.dim } })
+    table.insert(items, { Foreground = { Color = tab.is_active and fg or TAB.dim } })
     table.insert(items, { Text = ' ' .. ICON_ZOOM })
+  end
+  if unseen and not tab.is_active and not any_cc then
+    table.insert(items, { Foreground = { Color = P.accent } })
+    table.insert(items, { Text = ' ●' })
   end
   table.insert(items, { Text = ' ' })
   return items
@@ -810,57 +854,138 @@ wezterm.on('window-config-reloaded', function(window)
   sync_pane_backgrounds(window, true)
 end)
 
--- Keep the pane tints re-synced on the status cadence, whether or not tabline
--- owns the status text (multiple update-status handlers all run).
+-- ── Status bar: mode badge (left) · fleet / workspace / detail / clock (right) ─
+-- Hand-rolled (tabline.wez was dropped — its permanent 'NORMAL' mode badge is
+-- exactly what this bar must not show). The left badge appears ONLY while
+-- something is pending — leader held, or a repeatable mode live — and names
+-- itself in the mode's colour; the normal state renders nothing there. The right
+-- side is segments: the Claude fleet (every cc pane in the mux, counted by
+-- state), the non-default workspace, the Leader+s identity/path detail, and a
+-- clock. Pane tints ride the same cadence.
+local MODE_BADGE = {
+  move_mode   = { label = '✛ MOVE ↑↓←→',   color = P.accent },
+  resize_mode = { label = '⤢ RESIZE ↑↓←→', color = P.peach },
+  rotate_mode = { label = '⟳ ROTATE ←→',   color = P.teal },
+  tab_mode    = { label = '⇥ TAB ←→',      color = P.green },
+  font_mode   = { label = 'A± FONT ↑↓0',   color = P.lavender },
+}
+local ICON_WORKSPACE = wezterm.nerdfonts.cod_window or '⬡'
+local ICON_USER      = wezterm.nerdfonts.md_account or '@'
+local ICON_PATH      = wezterm.nerdfonts.md_folder_outline or '/'
+local ICON_CLOCK     = wezterm.nerdfonts.md_clock_outline or ''
+local ICON_CAL       = wezterm.nerdfonts.md_calendar_blank or ''
+
+local function left_badge(window)
+  local kt = window:active_key_table()
+  local label, color
+  if kt then
+    local m = MODE_BADGE[kt]
+    label = (m and m.label or kt) .. ' · Esc'
+    color = m and m.color or P.accent
+  elseif window:leader_is_active() then
+    label, color = '⌨ LEADER', P.peach
+  end
+  if not label then return '' end
+  return wezterm.format {
+    { Background = { Color = color } },
+    { Foreground = { Color = P.tab_bar.background } },
+    { Attribute = { Intensity = 'Bold' } },
+    { Text = '  ' .. label .. '  ' },
+  }
+end
+
+-- Claude fleet: cc_state across every pane in every mux window — answers "is
+-- anything done or broken?" without scanning the tabs.
+local function cc_fleet_counts()
+  local counts = { working = 0, done = 0, error = 0 }
+  local total = 0
+  for _, w in ipairs(wezterm.mux.all_windows()) do
+    for _, t in ipairs(w:tabs()) do
+      for _, p in ipairs(t:panes()) do
+        local ok, uv = pcall(function() return p:get_user_vars() end)
+        local s = ok and uv and uv.cc_state or nil
+        if s and counts[s] then
+          counts[s] = counts[s] + 1
+          total = total + 1
+        end
+      end
+    end
+  end
+  return counts, total
+end
+
+-- '…/last/three/segments' — a long path never eats the bar.
+local function shorten_path(path)
+  if not path or path == '' then return '' end
+  local segs = {}
+  for seg in path:gmatch('[^/\\]+') do table.insert(segs, seg) end
+  if #segs <= 3 then return path end
+  return '…/' .. segs[#segs - 2] .. '/' .. segs[#segs - 1] .. '/' .. segs[#segs]
+end
+
 wezterm.on('update-status', function(window, pane)
   sync_pane_backgrounds(window)
-end)
+  window:set_left_status(left_badge(window))
 
--- ── Fallback status (only when tabline failed to load) ────────────────────────
--- [badge] [⬡ workspace │] user@host │ path — same content the tabline sections
--- render, hand-formatted. Honors the Leader+s identity toggle.
-if not have_tabline then
-  wezterm.on('update-right-status', function(window, pane)
-    local items = {}
-    local kt = window:active_key_table()
-    if kt then                                  -- in a repeatable mode: accent badge
-      local MODE = {
-        resize_mode = '⤢ RESIZE ↑↓←→', move_mode = '✛ MOVE ↑↓←→',
-        rotate_mode = '⟳ ROTATE ←→', tab_mode = '⇥ TAB ←→', font_mode = 'A± FONT ↑↓0',
-      }
-      table.insert(items, { Background = { Color = P.accent } })
-      table.insert(items, { Foreground = { Color = P.base } })
-      table.insert(items, { Attribute = { Intensity = 'Bold' } })
-      table.insert(items, { Text = ' ' .. (MODE[kt] or kt) .. ' · Esc ' })
-      table.insert(items, { Background = { Color = P.crust } })
-      table.insert(items, { Foreground = { Color = P.overlay1 } })
+  local items = {}
+  local function sep()
+    if #items > 0 then
+      table.insert(items, { Foreground = { Color = P.overlay0 } })
       table.insert(items, { Attribute = { Intensity = 'Normal' } })
-      table.insert(items, { Text = '  ' })
-    elseif window:leader_is_active() then        -- leader pending: bold peach badge
-      table.insert(items, { Background = { Color = P.peach } })
-      table.insert(items, { Foreground = { Color = P.base } })
-      table.insert(items, { Attribute = { Intensity = 'Bold' } })
-      table.insert(items, { Text = ' ⌨ LEADER ' })
-      table.insert(items, { Background = { Color = P.crust } })
-      table.insert(items, { Foreground = { Color = P.overlay1 } })
-      table.insert(items, { Attribute = { Intensity = 'Normal' } })
-      table.insert(items, { Text = '  ' })
-    end
-    local ws = status_workspace(window)   -- '' when toggled off or 'default'
-    if ws ~= '' then
-      table.insert(items, { Foreground = { Color = P.accent } })
-      table.insert(items, { Text = '⬡ ' .. ws })
-      table.insert(items, { Foreground = { Color = P.overlay1 } })
       table.insert(items, { Text = '  │  ' })
     end
-    local id_text = status_identity(window, pane)
-    if id_text ~= '' then
-      table.insert(items, { Foreground = { Color = P.teal } })
-      table.insert(items, { Text = id_text .. '  ' })
+  end
+
+  local counts, total = cc_fleet_counts()
+  if total > 0 then
+    sep()
+    table.insert(items, { Foreground = { Color = TAB.dim } })
+    table.insert(items, { Text = ICON_CLAUDE .. ' ' })
+    local first = true
+    for _, s in ipairs { 'working', 'done', 'error' } do
+      if counts[s] > 0 then
+        if not first then table.insert(items, { Text = ' ' }) end
+        first = false
+        table.insert(items, { Foreground = { Color = TAB[s] } })
+        table.insert(items, { Attribute = { Intensity = 'Bold' } })
+        table.insert(items, { Text = counts[s] .. '●' })
+        table.insert(items, { Attribute = { Intensity = 'Normal' } })
+      end
     end
-    window:set_right_status(wezterm.format(items))
-  end)
-end
+  end
+
+  local ws = status_workspace(window)
+  if ws ~= '' then
+    sep()
+    table.insert(items, { Foreground = { Color = P.accent } })
+    table.insert(items, { Text = ICON_WORKSPACE .. ' ' .. ws })
+  end
+
+  if wezterm.GLOBAL.show_identity then
+    local pu, ph, ppath = pane_location(pane)
+    local identity = (#pu > 0 and #ph > 0) and (pu .. '@' .. ph) or (pu .. ph)
+    if identity ~= '' then
+      sep()
+      table.insert(items, { Foreground = { Color = P.teal } })
+      table.insert(items, { Text = ICON_USER .. ' ' .. identity })
+    end
+    local short = shorten_path(ppath)
+    if short ~= '' then
+      sep()
+      table.insert(items, { Foreground = { Color = TAB.inactive } })
+      table.insert(items, { Text = ICON_PATH .. ' ' .. short })
+    end
+  end
+
+  sep()
+  table.insert(items, { Foreground = { Color = TAB.dim } })
+  table.insert(items, { Text = ICON_CAL .. ' ' .. wezterm.strftime('%a %b %d') .. '  ' })
+  table.insert(items, { Foreground = { Color = P.text } })
+  table.insert(items, { Text = ICON_CLOCK .. ' ' .. (wezterm.strftime('%I:%M %p'):gsub('^0', '')) })
+  table.insert(items, { Text = '  ' })
+
+  window:set_right_status(wezterm.format(items))
+end)
 
 -- ── Dim every pane while the window is unfocused ──────────────────────────────
 -- inactive_pane_hsb dims unfocused panes within a focused window; on blur we want
@@ -891,7 +1016,7 @@ end
 -- ── Repeatable leader modes (key tables) ─────────────────────────────────────
 -- Entered from the arrow / t / f bindings above; inside a mode plain arrows or
 -- j/k/i/m repeat. Every mode auto-exits (until_unknown + timeout); Esc/Enter
--- leave immediately. Names end in _mode so tabline colours them per mode.
+-- leave immediately. Names end in _mode so the status badge colours them per mode.
 -- The SHIFT/CTRL arrow duplicates are deliberate: after entering a mode you are
 -- often still holding the modifier — the modified press must keep repeating.
 config.key_tables = {

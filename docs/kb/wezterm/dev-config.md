@@ -78,13 +78,13 @@ panes!): `ts-mux restart`.
 The resurrect block deliberately avoids `resurrect.setup()` — it hard-wires a
 `gui-startup` session restore with no opt-out. Do not "simplify" it back.
 
-`tabline.wez` (status bar), `sessionizer.wezterm` (`Ctrl+Space` `p`), and
-`resurrect.wezterm` (save/restore) load from **pinned forks under
-`github.com/martybytes`** — upstream archival or a breaking change can't take the
-stack down. `wezterm.plugin.require` clones each fork at the **first GUI start**
-(needs network once; cached in WezTerm's plugin dir after that). Every load is
-pcall-guarded: tabline falls back to the hand-rolled status handler, the other two
-just lose their binding.
+`sessionizer.wezterm` (`Ctrl+Space` `p`) and `resurrect.wezterm` (save/restore)
+load from **pinned forks under `github.com/martybytes`** — upstream archival or a
+breaking change can't take the stack down. `wezterm.plugin.require` clones each
+fork at the **first GUI start** (needs network once; cached in WezTerm's plugin
+dir after that). Every load is pcall-guarded: a failed clone just loses that
+binding. The tab bar and status bar are **not** plugins — they are hand-rolled in
+the config itself (`tabline.wez` was dropped).
 
 To update a plugin: pull upstream into the fork deliberately, then run
 `wezterm.plugin.update_all()` from the debug overlay (**`Ctrl+Shift+L`**) — or
