@@ -44,5 +44,47 @@
   },
   "maxChars": {{ index . "ccTtsMaxChars" | default "120" }},
   "debounceSec": {{ index . "ccTtsDebounceSec" | default "5" }},
-  "player": {{ index . "ccTtsPlayer" | default "auto" | quote }}
+  "player": {{ index . "ccTtsPlayer" | default "auto" | quote }},
+  "daemon": {
+    "enabled": {{ if eq (index . "ccTtsDaemon" | default "off") "on" }}true{{ else }}false{{ end }},
+    "port": {{ index . "ccTtsDaemonPort" | default "8890" }},
+    "coalesceSec": 1.8,
+    "doneMaxAgeSec": 20,
+    "maxQueue": 12,
+    "postTimeoutMs": 250,
+    "hostOverride": "",
+    "suppressFocused": false,
+    "cursor": { "holdSec": 3, "cooldownSec": 15 }
+  },
+  "summarize": {
+    "mode": {{ index . "ccTtsSummarizer" | default "template" | quote }},
+    "haiku": {
+      "model": {{ index . "ccTtsHaikuModel" | default "claude-haiku-4-5" | quote }},
+      "keyEnv": "ANTHROPIC_API_KEY",
+      "timeoutSec": 3
+    },
+    "ollama": {
+      "url": {{ index . "ccTtsOllamaUrl" | default "http://127.0.0.1:11434" | quote }},
+      "model": {{ index . "ccTtsOllamaModel" | default "llama3.2:3b" | quote }},
+      "timeoutSec": 4
+    },
+    "emptyMeansSilent": false
+  },
+  "music": {
+    "mode": {{ index . "ccTtsMusicMode" | default "duck" | quote }},
+    "duckPercent": {{ index . "ccTtsDuckPercent" | default "30" }},
+    "smartThresholdSec": 5,
+    "apps": "all",
+    "maxDuckSec": 15
+  },
+  "voices": {
+    "perSession": false,
+    "pool": [{{ $vp := index . "ccTtsVoicePool" | default "am_adam,am_michael,af_heart,bm_george" }}{{ $vparts := splitList "," $vp }}{{ range $i, $v := $vparts }}{{ if $i }}, {{ end }}{{ trim $v | quote }}{{ end }}]
+  },
+  "quietHours": {
+    "enabled": false,
+    "start": "22:00",
+    "end": "07:00",
+    "allowInteractive": true
+  }
 }

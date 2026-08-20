@@ -37,6 +37,15 @@ ts_cc_tts_default() {
         ccTtsMaxChars)             echo 120 ;;
         ccTtsDebounceSec)          echo 5 ;;
         ccTtsPlayer)               echo auto ;;
+        ccTtsDaemon)               echo off ;;
+        ccTtsDaemonPort)           echo 8890 ;;
+        ccTtsSummarizer)           echo template ;;
+        ccTtsHaikuModel)           echo claude-haiku-4-5 ;;
+        ccTtsOllamaUrl)            echo http://127.0.0.1:11434 ;;
+        ccTtsOllamaModel)          echo llama3.2:3b ;;
+        ccTtsMusicMode)            echo duck ;;
+        ccTtsDuckPercent)          echo 30 ;;
+        ccTtsVoicePool)            echo am_adam,am_michael,af_heart,bm_george ;;
         *) return 1 ;;
     esac
 }
@@ -51,7 +60,9 @@ ts_cc_tts_keys() {
         ccTtsChatterboxCfgWeight ccTtsChatterboxTemperature ccTtsChatterboxTimeout \
         ccTtsEdgeEnabled ccTtsEdgeVoice \
         ccTtsTemplateWaiting ccTtsTemplateError ccTtsTemplateQuestion ccTtsTemplatePermission \
-        ccTtsMaxChars ccTtsDebounceSec ccTtsPlayer
+        ccTtsMaxChars ccTtsDebounceSec ccTtsPlayer \
+        ccTtsDaemon ccTtsDaemonPort ccTtsSummarizer ccTtsHaikuModel \
+        ccTtsOllamaUrl ccTtsOllamaModel ccTtsMusicMode ccTtsDuckPercent ccTtsVoicePool
 }
 
 # Read one TTS scalar from chezmoi [data], else default.
@@ -155,7 +166,7 @@ ts_cc_tts_finish() {
 
 # Emit ccTts JSON object for config.json mirror (single line, no external jq).
 ts_cc_tts_json_for_mirror() {
-    local en ev evjson="" e
+    local en ev evjson="" e vp vpjson="" v
     en="$(ts_cc_tts_get ccTtsEnabled)"
     ev="$(ts_cc_tts_get ccTtsEvents)"
     IFS=',' read -ra _evparts <<< "$ev"
@@ -164,6 +175,14 @@ ts_cc_tts_json_for_mirror() {
         e="${e%"${e##*[![:space:]]}"}"
         [ -n "$e" ] || continue
         evjson="${evjson}${evjson:+, }\"$e\""
+    done
+    vp="$(ts_cc_tts_get ccTtsVoicePool)"
+    IFS=',' read -ra _vpparts <<< "$vp"
+    for v in "${_vpparts[@]}"; do
+        v="${v#"${v%%[![:space:]]*}"}"
+        v="${v%"${v##*[![:space:]]}"}"
+        [ -n "$v" ] || continue
+        vpjson="${vpjson}${vpjson:+, }\"$v\""
     done
     cat <<EOF
   "ccTts": {
@@ -204,7 +223,22 @@ ts_cc_tts_json_for_mirror() {
     },
     "maxChars": $(ts_cc_tts_get ccTtsMaxChars),
     "debounceSec": $(ts_cc_tts_get ccTtsDebounceSec),
-    "player": "$(ts_cc_tts_get ccTtsPlayer)"
+    "player": "$(ts_cc_tts_get ccTtsPlayer)",
+    "daemon": {
+      "enabled": $([ "$(ts_cc_tts_get ccTtsDaemon)" = on ] && echo true || echo false),
+      "port": $(ts_cc_tts_get ccTtsDaemonPort)
+    },
+    "summarize": {
+      "mode": "$(ts_cc_tts_get ccTtsSummarizer)",
+      "haikuModel": "$(ts_cc_tts_get ccTtsHaikuModel)",
+      "ollamaUrl": "$(ts_cc_tts_get ccTtsOllamaUrl)",
+      "ollamaModel": "$(ts_cc_tts_get ccTtsOllamaModel)"
+    },
+    "music": {
+      "mode": "$(ts_cc_tts_get ccTtsMusicMode)",
+      "duckPercent": $(ts_cc_tts_get ccTtsDuckPercent)
+    },
+    "voicePool": [$vpjson]
   }
 EOF
 }

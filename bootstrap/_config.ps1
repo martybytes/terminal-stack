@@ -487,6 +487,13 @@ function Get-CcTtsDefaults {
         maxChars    = 120
         debounceSec = 5
         player      = 'auto'
+        daemon      = [ordered]@{ enabled = $false; port = 8890 }
+        summarize   = [ordered]@{
+            mode = 'template'; haikuModel = 'claude-haiku-4-5'
+            ollamaUrl = 'http://127.0.0.1:11434'; ollamaModel = 'llama3.2:3b'
+        }
+        music       = [ordered]@{ mode = 'duck'; duckPercent = 30 }
+        voicePool   = @('am_adam', 'am_michael', 'af_heart', 'bm_george')
     }
 }
 
@@ -518,13 +525,57 @@ function ConvertTo-CcTtsRuntimeJson {
         maxChars = [int]$Tts.maxChars
         debounceSec = [int]$Tts.debounceSec
         player = $Tts.player
+        daemon = [ordered]@{
+            enabled = [bool]$Tts.daemon.enabled
+            port = [int]$Tts.daemon.port
+            coalesceSec = 1.8
+            doneMaxAgeSec = 20
+            maxQueue = 12
+            postTimeoutMs = 250
+            hostOverride = ''
+            suppressFocused = $false
+            cursor = [ordered]@{ holdSec = 3; cooldownSec = 15 }
+        }
+        summarize = [ordered]@{
+            mode = $Tts.summarize.mode
+            haiku = [ordered]@{
+                model = $Tts.summarize.haikuModel
+                keyEnv = 'ANTHROPIC_API_KEY'
+                timeoutSec = 3
+            }
+            ollama = [ordered]@{
+                url = $Tts.summarize.ollamaUrl
+                model = $Tts.summarize.ollamaModel
+                timeoutSec = 4
+            }
+            emptyMeansSilent = $false
+        }
+        music = [ordered]@{
+            mode = $Tts.music.mode
+            duckPercent = [int]$Tts.music.duckPercent
+            smartThresholdSec = 5
+            apps = 'all'
+            maxDuckSec = 15
+        }
+        voices = [ordered]@{ perSession = $false; pool = @($Tts.voicePool) }
+        quietHours = [ordered]@{
+            enabled = $false; start = '22:00'; end = '07:00'; allowInteractive = $true
+        }
     }
 }
 
 function Get-CcTtsConfig {
     $c = Get-TsConfig
-    if ($c.ccTts) { return $c.ccTts }
-    return (Get-CcTtsDefaults)
+    if (-not $c.ccTts) { return (Get-CcTtsDefaults) }
+    # Fill members added after the config was first stored (pre-daemon upgrades).
+    $tts = $c.ccTts
+    $defaults = Get-CcTtsDefaults
+    foreach ($key in @('daemon', 'summarize', 'music', 'voicePool')) {
+        if ($null -eq $tts.$key) {
+            $tts | Add-Member -NotePropertyName $key -NotePropertyValue $defaults[$key] -Force
+        }
+    }
+    return $tts
 }
 
 function Export-CcTtsJson {

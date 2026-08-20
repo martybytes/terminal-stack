@@ -127,3 +127,13 @@ ccTtsTemplatePermission = {{ index . "ccTtsTemplatePermission" | default "Permis
 ccTtsMaxChars = {{ index . "ccTtsMaxChars" | default "120" | quote }}
 ccTtsDebounceSec = {{ index . "ccTtsDebounceSec" | default "5" | quote }}
 ccTtsPlayer = {{ index . "ccTtsPlayer" | default "auto" | quote }}
+{{- /* TTS daemon (Windows tray, queue/coalesce/duck) — "off" keeps direct playback. */}}
+ccTtsDaemon = {{ index . "ccTtsDaemon" | default "off" | quote }}
+ccTtsDaemonPort = {{ index . "ccTtsDaemonPort" | default "8890" | quote }}
+ccTtsSummarizer = {{ index . "ccTtsSummarizer" | default "template" | quote }}
+ccTtsHaikuModel = {{ index . "ccTtsHaikuModel" | default "claude-haiku-4-5" | quote }}
+ccTtsOllamaUrl = {{ index . "ccTtsOllamaUrl" | default "http://127.0.0.1:11434" | quote }}
+ccTtsOllamaModel = {{ index . "ccTtsOllamaModel" | default "llama3.2:3b" | quote }}
+ccTtsMusicMode = {{ index . "ccTtsMusicMode" | default "duck" | quote }}
+ccTtsDuckPercent = {{ index . "ccTtsDuckPercent" | default "30" | quote }}
+ccTtsVoicePool = {{ index . "ccTtsVoicePool" | default "am_adam,am_michael,af_heart,bm_george" | quote }}

@@ -15,5 +15,31 @@
       "question": "I have a question for you.",
       "permission": "Permission needed in {project}."
     }
+  },
+  "daemon": {
+    "coalesceSec": 1.8,
+    "doneMaxAgeSec": 20,
+    "maxQueue": 12,
+    "postTimeoutMs": 250,
+    "hostOverride": "",
+    "suppressFocused": false,
+    "cursor": { "holdSec": 3, "cooldownSec": 15 }
+  },
+  "summarize": {
+    "haiku": { "keyEnv": "ANTHROPIC_API_KEY", "timeoutSec": 3 },
+    "ollama": { "timeoutSec": 4 },
+    "emptyMeansSilent": false
+  },
+  "music": {
+    "smartThresholdSec": 5,
+    "apps": "all",
+    "maxDuckSec": 15
+  },
+  "voices": { "perSession": false },
+  "quietHours": {
+    "enabled": false,
+    "start": "22:00",
+    "end": "07:00",
+    "allowInteractive": true
   }
 }
