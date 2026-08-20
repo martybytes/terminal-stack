@@ -19,7 +19,7 @@ edits the highlighted topic. The reader is `less`: `/pattern` searches, `q` quit
 ## Layout
 
 - `common/` — cross-OS (git, ssh, tmux, clipboard, the stack itself, workspace navigation and the `wso` organizer, …)
-- `common/tools/` — per-tool cheat-sheets (eza, fzf, bat, ripgrep, zoxide, delta, starship, chezmoi, micro, glow, neovim, zed, cursor) — `doc eza`, `doc nvim`, …
+- `common/tools/` — per-tool cheat-sheets (eza, fzf, bat, ripgrep, zoxide, delta, starship, chezmoi, micro, glow, neovim, zed, cursor, llmfit) — `doc eza`, `doc nvim`, …
 - `linux/` — apt, VeraCrypt, ssh permissions, systemd, docker
 - `macos/` — Homebrew, macOS WezTerm toggles
 - `windows/` — pwsh, winget

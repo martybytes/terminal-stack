@@ -858,6 +858,22 @@ _doc_repo() {
 _doc_local() { echo "${DOC_LOCAL:-$HOME/.doc.local}"; }
 _doc_os() { [[ "$(uname -s)" == Darwin ]] && echo macos || echo linux; }
 
+# fzf's `become` action (replaces the fzf process with the editor) landed in
+# fzf 0.42.0. Debian/Ubuntu apt still ships 0.29 (bootstrap installs fzf via
+# apt), where `become(...)` is an unrecognized action and fzf errors out with
+# "unknown action: become(...)" as soon as alt-e is bound. Degrade to
+# `execute(...)+abort`, same fallback the pwsh side already uses.
+_doc_edit_bind() {
+  local ed="${EDITOR:-micro}" ver
+  ver="$(fzf --version 2>/dev/null)"; ver="${ver%% *}"
+  autoload -Uz is-at-least
+  if is-at-least 0.42.0 "$ver" 2>/dev/null; then
+    echo "become(${ed} {2})"
+  else
+    echo "execute(${ed} {2})+abort"
+  fi
+}
+
 # Rendering style: the repo ships glamour style JSONs in docs/kb/_style (they
 # ride the same mirror sync as the topics), so glow renders identically on
 # every platform/build. Theme follows the saved resolvedTheme; override with
@@ -933,7 +949,7 @@ _doc_finder() {
         --border --prompt='doc> ' \
         --preview="$prev" --preview-window='right,60%,wrap,border-left' \
         --bind='ctrl-u:preview-half-page-up,ctrl-d:preview-half-page-down,ctrl-/:toggle-preview' \
-        --bind="alt-e:become(${EDITOR:-micro} {2})" \
+        --bind="alt-e:$(_doc_edit_bind)" \
         --header='enter=open · ctrl-u/d=scroll preview · ctrl-/=toggle · alt-e=edit') || return 0
   [[ -n "$sel" ]] && _doc_view "${sel#*$'\t'}"
 }
