@@ -143,8 +143,18 @@ function Get-TsConfig {
         try { return (Get-Content $p -Raw | ConvertFrom-Json) } catch {}
     }
     return [pscustomobject]@{
-        leaderChord = 'ctrl-space'; themeMode = 'dark'; tmuxPrefix = 'ctrl-b'; apps = @()
+        leaderChord = 'ctrl-space'; themeMode = 'dark'; tmuxPrefix = 'ctrl-b'
+        weztermMux = 'off'; apps = @()
     }
+}
+
+# WezTerm multiplexer domain: 'on' hosts panes in wezterm-mux-server (they survive
+# a GUI crash), 'off' spawns them locally. Default off — see `ts-mux -h`.
+# POSIX twin: bootstrap/_config.sh ts_wez_mux_get.
+function Get-TsWeztermMux {
+    $v = (Get-TsConfig).weztermMux
+    if ($v -eq 'on') { return 'on' }
+    return 'off'
 }
 
 function Save-TsConfig {
@@ -153,6 +163,7 @@ function Save-TsConfig {
         [string]$ThemeMode   = 'dark',
         [string]$TmuxPrefix  = 'ctrl-b',
         [string[]]$Apps      = @(),
+        [string]$WeztermMux  = 'off',
         $CcTts                = $null
     )
     $l = ConvertTo-TsLeader $LeaderChord
@@ -165,6 +176,12 @@ function Save-TsConfig {
     if (-not $PSBoundParameters.ContainsKey('TmuxPrefix') -and $existing.tmuxPrefix) {
         $TmuxPrefix = $existing.tmuxPrefix
     }
+    # Same for the mux setting: only ts-mux passes it, so every other save must
+    # carry the stored value forward rather than resetting it to the default.
+    if (-not $PSBoundParameters.ContainsKey('WeztermMux') -and $existing.weztermMux) {
+        $WeztermMux = $existing.weztermMux
+    }
+    if ($WeztermMux -ne 'on') { $WeztermMux = 'off' }
     $obj = [ordered]@{
         leaderChord        = $LeaderChord
         leaderKey          = $l.key
@@ -173,6 +190,7 @@ function Save-TsConfig {
         resolvedTheme      = (Get-TsResolvedTheme $ThemeMode)
         tmuxPrefix         = $TmuxPrefix
         tmuxPrefixResolved = (ConvertTo-TsTmuxPrefix $TmuxPrefix)
+        weztermMux         = $WeztermMux
         apps               = @($Apps)
         ccTts              = $CcTts
     }

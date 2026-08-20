@@ -62,7 +62,7 @@ If you need a Windows-side file that should reference the username:
 2. Inside the file, use `__WIN_USER__` wherever the username should appear.
 3. `chezmoi apply` → the hook renders to `/mnt/c/Users/<you>/SomeApp/config.toml`.
 
-No additional placeholder syntax (no Go templates, no jinja) — just literal `__TOKEN__` substitution. Besides `__WIN_USER__`, the saved-config tokens listed above (`__LEADER_KEY__`, `__LEADER_MODS__`, `__THEME_MODE__`, `__THEME_RESOLVED__`, `__TMUX_PREFIX__`, `__CC_TTS_*__`) are available; see `CLAUDE.md` § "User config tokens".
+No additional placeholder syntax (no Go templates, no jinja) — just literal `__TOKEN__` substitution. Besides `__WIN_USER__`, the saved-config tokens listed above (`__LEADER_KEY__`, `__LEADER_MODS__`, `__THEME_MODE__`, `__THEME_RESOLVED__`, `__TMUX_PREFIX__`, `__WEZ_MUX__`, `__CC_TTS_*__`) are available; see `CLAUDE.md` § "User config tokens".
 
 ## The post-apply hook
 

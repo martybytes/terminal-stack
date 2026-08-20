@@ -22,6 +22,19 @@ for _, dom in ipairs(config.ssh_domains) do
   dom.assume_shell = 'Posix'
 end
 
+-- Optional: host panes in a multiplexer process outside the GUI, so a GUI crash
+-- leaves every pane (and everything running in it) alive and relaunching WezTerm
+-- reattaches. OFF by default — the mux server loads its OWN copy of this file, so
+-- config that affects pane spawning needs a mux restart (which kills every pane)
+-- and not just a GUI reload, and pane:inject_output (the Claude pane tint below)
+-- is local-pane-only. Toggle with `ts-mux on` / `ts-mux off`; `ts-mux -h` also has
+-- status / kill / restart / reset. Keep in sync with windows/.wezterm.lua.tmpl.
+local MUX_ENABLED = '{{ if hasKey . "weztermMux" }}{{ .weztermMux }}{{ else }}off{{ end }}' == 'on'
+if MUX_ENABLED then
+  config.unix_domains = { { name = 'main' } }
+  config.default_domain = 'main'
+end
+
 -- ── Theme palette (light / dark, optional follow-OS) ──────────────────────────
 -- THEME_MODE is injected from the saved terminal-stack config:
 --   'dark'  → Catppuccin Mocha · 'light' → VS Code Light Modern (official tokens) ·

@@ -491,6 +491,20 @@ ts-config() {
   TERMINAL_STACK_DIR="$src" TERMINAL_STACK_CHEZMOI="$cz" bash "$src/bootstrap/ts-config.sh" "$@"
 }
 
+# WezTerm multiplexer domain: `ts-mux` (status), `ts-mux on|off` (config + apply),
+# `ts-mux kill|restart|reset` (the live wezterm-mux-server). Thin wrapper over the
+# shared bootstrap/ts-mux.sh in the clone. On WSL the mux server is a WINDOWS
+# process — the script reaches it over interop, so this works from either side.
+ts-mux() {
+  local cz src
+  cz="$(_ts_chezmoi)" || { echo "ts-mux: chezmoi not found on PATH." >&2; return 1 }
+  src="$(_ts_src "$cz" ts-mux)" || return 1
+  if [[ ! -f "$src/bootstrap/ts-mux.sh" ]]; then
+    echo "ts-mux: $src/bootstrap/ts-mux.sh not found. Run 'ts-update'." >&2; return 1
+  fi
+  TERMINAL_STACK_DIR="$src" TERMINAL_STACK_CHEZMOI="$cz" bash "$src/bootstrap/ts-mux.sh" "$@"
+}
+
 # Diagnose / repair the install: stale chezmoi sourceDir, missing `doc`, leftover
 # old clones, tools off PATH. Read-only by default; `ts-doctor --repair` fixes
 # (repoints sourceDir + re-applies + offers cleanup, confirming each step).

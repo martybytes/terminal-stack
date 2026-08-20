@@ -15,6 +15,7 @@
 #   __THEME_MODE__      dark|light|follow    (from themeMode)
 #   __THEME_RESOLVED__  baked palette light|dark (from resolvedTheme)
 #   __TMUX_PREFIX__     tmux prefix spec     (from tmuxPrefixResolved)
+#   __WEZ_MUX__         on|off WezTerm mux domain (from weztermMux; see ts-mux)
 #   __CC_TTS_STOP_HOOK__ / __CC_TTS_STOPFAILURE_HOOK__ / __CC_TTS_CURSOR_HOOKS__ /
 #   __CC_TTS_PRETOOLUSE_TTS__ / __CC_TTS_INPUT_HOOKS__  optional cc-speak hooks (when ccTtsEnabled)
 #
@@ -91,6 +92,7 @@ LEADER_MODS="$(cfg leaderMods 'CTRL')"
 THEME_MODE="$(cfg themeMode 'dark')"
 THEME_RESOLVED="$(cfg resolvedTheme 'dark')"
 TMUX_PREFIX="$(cfg tmuxPrefixResolved 'C-b')"
+WEZ_MUX="$(cfg weztermMux 'off')"
 CC_TTS_ENABLED="$(cfg ccTtsEnabled false)"
 if [ "$CC_TTS_ENABLED" = true ]; then
   CC_TTS_STOP_HOOK=$',
@@ -194,6 +196,7 @@ sync_tree() {
       if command -v python3 >/dev/null 2>&1; then
         WIN_USER="$WIN_USER" LEADER_KEY="$LEADER_KEY" LEADER_MODS="$LEADER_MODS" \
         THEME_MODE="$THEME_MODE" THEME_RESOLVED="$THEME_RESOLVED" TMUX_PREFIX="$TMUX_PREFIX" \
+        WEZ_MUX="$WEZ_MUX" \
         CC_TTS_STOP_HOOK="$CC_TTS_STOP_HOOK" CC_TTS_STOPFAILURE_HOOK="$CC_TTS_STOPFAILURE_HOOK" \
         CC_TTS_CURSOR_HOOKS="$CC_TTS_CURSOR_HOOKS" CC_TTS_PRETOOLUSE_TTS="$CC_TTS_PRETOOLUSE_TTS" \
         CC_TTS_INPUT_HOOKS="$CC_TTS_INPUT_HOOKS" \
@@ -207,6 +210,7 @@ repl = {
     "__THEME_MODE__": os.environ.get("THEME_MODE", ""),
     "__THEME_RESOLVED__": os.environ.get("THEME_RESOLVED", ""),
     "__TMUX_PREFIX__": os.environ.get("TMUX_PREFIX", ""),
+    "__WEZ_MUX__": os.environ.get("WEZ_MUX", "off"),
     "__CC_TTS_STOP_HOOK__": os.environ.get("CC_TTS_STOP_HOOK", ""),
     "__CC_TTS_STOPFAILURE_HOOK__": os.environ.get("CC_TTS_STOPFAILURE_HOOK", ""),
     "__CC_TTS_CURSOR_HOOKS__": os.environ.get("CC_TTS_CURSOR_HOOKS", "{}"),
@@ -310,8 +314,9 @@ fi
 printf 'sync-windows: user=%s, %d created, %d updated, %d unchanged\n' "$WIN_USER" "$created" "$updated" "$unchanged"
 
 # The mux server (unix domain 'main') loads its own copy of .wezterm.lua and is
-# never restarted automatically — that would kill every live pane. Remind instead.
-if [ "$wezterm_cfg_changed" = 1 ]; then
+# never restarted automatically — that would kill every live pane. Remind instead,
+# and only when the mux is actually the thing hosting panes.
+if [ "$wezterm_cfg_changed" = 1 ] && [ "$WEZ_MUX" = on ]; then
   echo "sync-windows: WezTerm config changed. The GUI reloads live, but wezterm-mux-server keeps the old config for spawning panes." >&2
-  echo "  When convenient (closes all panes!): close WezTerm, then 'taskkill /IM wezterm-mux-server.exe /F' and relaunch." >&2
+  echo "  When convenient (closes all panes!): 'ts-mux restart'." >&2
 fi
