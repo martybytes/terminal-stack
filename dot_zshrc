@@ -175,6 +175,9 @@ ccr()   { _wez_tab_title "${PWD:t}"; { claude --resume "$@" }                   
 ccdr()  { _wez_tab_title "${PWD:t}"; { claude --dangerously-skip-permissions --resume "$@" }   always { _wez_tab_title "" } }
 cca()   { _wez_tab_title "agents";   { claude agents }                                         always { _wez_tab_title "" } }
 
+# Codex: resume a saved session with approvals and sandboxing bypassed.
+cyr()   { codex --yolo resume "$@" }
+
 # Escape hatch: vanilla zsh, no rc files (no oh-my-zsh/starship/aliases).
 # Nested — `exit` drops back to the customized shell.
 plain() { _wez_tab_title "plain • ${PWD:t}"; { zsh -df "$@" } always { _wez_tab_title "" } }

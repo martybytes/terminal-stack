@@ -283,7 +283,9 @@ sudo curl -sS https://starship.rs/install.sh | sh -s -- -y -b /usr/local/bin
 
 ### Phase 6 — Shell helpers
 
-Lands via `chezmoi apply` (zsh `ccs` / `ssht`).
+Lands via `chezmoi apply`: zsh `ccs` / `ssht`, plus `cyr` in both shells for
+`codex --yolo resume`. See `doc codex` for the richer Codex footer recipe and
+the security trade-off of `--yolo`.
 
 ### Phase 7 — Modern CLI tools
 

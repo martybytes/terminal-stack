@@ -20,6 +20,7 @@ edits the highlighted topic. The reader is `less`: `/pattern` searches, `q` quit
 
 - `common/` — cross-OS (git, ssh, tmux, clipboard, the stack itself, workspace navigation and the `wso` organizer, …)
 - `common/tools/` — per-tool cheat-sheets (eza, fzf, bat, ripgrep, zoxide, delta, starship, chezmoi, micro, glow, neovim, zed, cursor, llmfit) — `doc eza`, `doc nvim`, …
+- `common/codex.md` / `common/claude-code.md` — AI coding-agent shortcuts and footer configuration (`doc codex`, `doc claude-code`)
 - `linux/` — apt, VeraCrypt, ssh permissions, systemd, docker
 - `macos/` — Homebrew, macOS WezTerm toggles
 - `windows/` — pwsh, winget
