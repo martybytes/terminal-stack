@@ -10,7 +10,7 @@ Windows-specific bits:
 | `glow file.md` | render markdown (`glow .` for a browser) |
 | `zoxide-prune` | drop dead paths from zoxide's database |
 | `ll` / `la` / `lt` | eza long / hidden+long / tree |
-| `Ctrl+R` / `Ctrl+T` | fzf history / file finder |
+| `Ctrl+R` | PSReadLine reverse history search (native — the profile wires no fzf keys; see `doc common/tools/fzf`) |
 | `Ctrl+V` | paste (rebound so synthetic paste — Wispr Flow etc. — reaches Claude Code) |
 
 ## Agent vs interactive terminals

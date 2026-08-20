@@ -1,18 +1,34 @@
 # chezmoi (dotfile manager)
 
-Applies this repo to `$HOME`. On Windows, run it from **inside WSL**.
+Keeps dotfiles in a git "source tree" and renders them into `$HOME`. This repo
+**is** a chezmoi source tree — "running" the stack means `chezmoi apply`.
 
-| Command | What |
+## How this stack wires it
+
+- **Always apply from inside WSL** (or native Linux/macOS), never from Windows:
+  the `run_after_90-sync-windows.sh` hook needs a POSIX shell and `/mnt/c/`.
+- **`chezmoi diff` only shows WSL-side targets.** Windows files live under
+  `windows/**` (chezmoi-ignored) and are mirrored by the run_after hook, so the
+  diff never shows them — compare manually, or apply and read the
+  `created`/`updated` lines.
+- Wizard choices (leader, theme, tmux prefix, Windows username) live under
+  `[data]` in `~/.config/chezmoi/chezmoi.toml`, mirrored to
+  `%LOCALAPPDATA%\terminal-stack\config.json` for Windows-standalone.
+- Edit the `.tmpl` source, not the rendered file — the next apply overwrites it.
+
+| Command | What it does |
 |---|---|
-| `chezmoi diff` | preview pending changes |
-| `chezmoi apply -v` | apply (runs the windows-sync hook at the end) |
-| `chezmoi re-add ~/.zshrc` | capture a hand-edit of a managed file back to source |
+| `chezmoi diff` | preview pending WSL-side changes |
+| `chezmoi apply -v` | apply; runs the Windows-sync hook at the end |
+| `chezmoi re-add ~/.zshrc` | capture a hand-edit of a managed target back to source |
 | `chezmoi source-path` | print the clone path |
 | `chezmoi managed` | list every managed target |
-| `chezmoi edit <target>` | edit a target's source |
+| `chezmoi edit <target>` | edit a target's source (`.tmpl`-aware) |
 | `chezmoi cd` | shell into the source dir |
-| `chezmoi init` | regenerate config after the template changes |
+| `chezmoi init` | re-render the config after `.chezmoi.toml.tmpl` changes |
 
-Stack wrappers: `ts-update` (pull + apply), `ts-rollback` (undo) — see `doc common/stack`.
+Day to day you rarely call it directly: `ts-update` (pull + re-apply) and
+`ts-rollback` (undo the last update) wrap it — see `doc common/stack`.
 
-WezTerm dev (macOS): `chezmoi apply -v ~/.wezterm.lua ~/.wezterm/pane_nav.lua` — see `doc wezterm/dev-config`.
+WezTerm dev on macOS: `chezmoi apply -v ~/.wezterm.lua ~/.wezterm/pane_nav.lua`
+— see `doc wezterm/dev-config`.

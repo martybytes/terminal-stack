@@ -11,8 +11,19 @@
 | `lsr <dir>` | run it somewhere other than the current directory |
 | `cat file` / `bat file` | **bat** — syntax highlighting, line numbers |
 | `glow file.md` | render markdown in the terminal (`glow .` for a browser) |
+| `rmf <path…>` | force-delete recursively — **no confirmation, no undo** (see below) |
 | `df -h` | disk free, human-readable |
 | `du -sh *` | size of each item in the current dir |
+
+## `rmf` — force delete
+
+`rm -rf` in zsh; `Remove-Item -Recurse -Force -Confirm:$false` in pwsh. Both shells,
+same behavior: never prompts, takes read-only and hidden items with it, and does
+**not** use the Recycle Bin — there is no undo. Tab-complete the path and read it
+back before pressing Enter.
+
+`lt` is the tree view (`eza --tree`) in both shells — handy for checking what a
+directory holds *before* an `rmf`.
 
 ## `lsr` — which project did I touch last?
 

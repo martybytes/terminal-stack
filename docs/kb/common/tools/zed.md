@@ -1,7 +1,9 @@
 # Zed (GUI editor)
 
-Fast GPU-accelerated editor. Core on macOS/Windows; opt-in on Linux. Install the
-`zed` CLI from Zed's menu (Zed → Install CLI), then drive it from the terminal.
+Fast GPU-accelerated editor. **Optional** in the app catalog on every platform —
+opt in via `ts-config apps` (WSL/Linux/macOS) or `Set-TerminalStackConfig`
+(Windows; winget id `Zed.Zed`, brew cask `zed`). Install the `zed` CLI from
+Zed's menu (Zed → Install CLI), then drive it from the terminal.
 
 ## Launch
 | Command | What |

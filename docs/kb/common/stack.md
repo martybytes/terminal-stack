@@ -2,20 +2,72 @@
 
 | Command | What it does |
 |---|---|
-| `doc` | this knowledge base — fuzzy-find/open a topic (`doc -h` for all subcommands) |
-| `ref` | alias for `doc` |
+| `doc` / `ref` | this knowledge base (`doc -h` for subcommands) |
 | `wzr [topic]` | WezTerm key reference (`doc wezterm/...`) |
-| `ts-update` | fetch + show incoming commits, record rollback point, pull, re-apply configs |
-| `ts-rollback` | undo the last `ts-update`: reset the clone to the recorded SHA, re-apply |
+| `ts-update` | pull the latest stack and re-apply — see below |
+| `ts-rollback` | undo the last `ts-update` — see below |
+| `ts-doctor [--repair]` | health-check / fix the install — see below |
+| `ts-config` | change leader, theme, tmux prefix, apps, TTS — see below |
 | `plain` | vanilla shell, no rc/profile (no oh-my-zsh/starship/aliases) — `exit` to return |
-| `chezmoi diff` | preview pending config changes before an apply |
-| `chezmoi apply -v` | apply config (run from inside WSL on Windows) |
+| `chezmoi diff` / `chezmoi apply -v` | preview / apply configs (run from inside WSL on Windows) |
 | `chezmoi re-add ~/.zshrc` | capture a hand-edit of a managed file back into the repo |
-| `scripts\sync-windows.ps1 -SourceDir <clone>` | deploy `windows/**` + mirror `docs/kb/**` to `%LOCALAPPDATA%\terminal-stack\docs\kb\` — see `doc wezterm/dev-config` |
+| `scripts\sync-windows.ps1 -SourceDir <clone>` | Windows-side deploy — see `doc wezterm/dev-config` |
 
-## SSH (stack shortcut)
+pwsh function names: `Update-TerminalStack`, `Restore-TerminalStack`,
+`Set-TerminalStackConfig`, `Invoke-TsDoctor` — all aliased to the same `ts-*` names.
+
+## `ts-update`
+Resolves the clone (`$TERMINAL_STACK_DIR`, else `chezmoi source-path`; pwsh probes
+known paths and takes the newest commit), then: warns about any **other** clones on
+the machine — only the resolved one is updated, and a forgotten old clone would
+silently re-deploy an old profile (pwsh offers to pin the choice); fetches and lists
+the incoming commits; records the pre-pull HEAD as the rollback point; pulls
+`--ff-only`; re-bakes the resolved theme (matters in `follow` mode); re-applies
+(`chezmoi apply` / `sync-windows.ps1`); and finally offers to install any catalog
+apps missing from this machine — never behind your back. The rollback SHA is written
+only when commits are actually incoming, so a no-op re-run can't clobber the last
+real rollback point. State file: `~/.local/state/terminal-stack/rollback-sha`
+(WSL/Linux), `%LOCALAPPDATA%\terminal-stack\rollback-sha` (Windows).
+
+## `ts-rollback`
+Resets the clone to the recorded SHA and re-applies. It **refuses on a dirty
+clone** — the clone may double as a dev checkout, so commit or stash first. "No
+recorded rollback point" means no `ts-update` has pulled commits since the state
+file was written; recover manually with `git -C <clone> reset --hard <sha>` then
+`chezmoi apply` (Windows: `scripts\sync-windows.ps1`). One level deep: the next
+`ts-update` that pulls overwrites the recorded point.
+
+## `ts-doctor`
+Read-only health check; exits 0 when healthy. Checks that chezmoi exists, that its
+sourceDir is a real terminal-stack clone (a git repo whose `origin` names the
+project — a folder name is not proof), that `~/.zshrc` carries the stack block and
+the `doc` command, and that `zsh`/`starship` are on PATH. Leftover clones are noted
+but don't fail the check. `--quiet` hides the per-check ok lines.
+
+`ts-doctor --repair` fixes what it finds, confirming each step: repoints chezmoi's
+sourceDir at the real clone, re-applies, then offers an interactive checklist to
+remove old clones and leftover files (per-machine files — `profile.local.ps1`,
+`~/.doc.local`, rollback state — are never listed). On Windows the same pair is
+`Test-TerminalStack` / `Repair-TerminalStack`: checks the clone,
+`%LOCALAPPDATA%\terminal-stack\config.json`, and the `$PROFILE` marker block;
+repair persists `$env:TERMINAL_STACK_DIR` to `profile.local.ps1` and re-syncs.
+
+## `ts-config`
 | Command | What it does |
 |---|---|
-| `ssht host [session]` | SSH + remote tmux attach/create in one shot (defaults to session `main`) |
+| `ts-config` | interactive menu (leader / theme / tmux / apps / re-apply / TTS) |
+| `ts-config show` | print the saved config + the derived bindings |
+| `ts-config leader <chord>` | WezTerm leader, e.g. `ctrl-space`, `ctrl-a`, `alt-x` |
+| `ts-config theme <dark\|light\|follow>` | palette; `follow` tracks the OS theme |
+| `ts-config tmux <chord>` | tmux prefix, e.g. `ctrl-a` — see `doc common/tmux` |
+| `ts-config apps [recommended\|all\|none\|id,…]` | app catalog; no arg → picker; installs, never uninstalls |
+| `ts-config tts <show\|on\|off\|test\|…>` | Claude/Cursor voice — see `doc common/claude-code` |
 
-See `doc common/ssh-config`, `doc common/github-keys`, `doc common/scp-rsync` for SSH details.
+Every change persists (chezmoi `[data]` on WSL/Linux, `config.json` on Windows) and
+re-applies. In a combined WSL+Windows setup run it from **WSL** — its apply is
+authoritative for the Windows-side files too.
+
+## SSH (stack shortcut)
+`ssht host [session]` — SSH and attach-or-create a remote tmux session in one shot
+(default session `main`); also names the WezTerm tab `ssh-host:session`. **zsh
+only** — no pwsh counterpart. See `doc common/ssh-config`, `doc common/tmux`.
