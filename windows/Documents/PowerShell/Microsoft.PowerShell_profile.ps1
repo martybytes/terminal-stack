@@ -609,14 +609,15 @@ function Set-TerminalStackConfig {
             while ($true) {
                 Write-Host ''
                 Write-Host 'terminal-stack config:'
-                Write-Host "  leader : $leader"
-                Write-Host "  theme  : $theme   (palette $(Get-TsResolvedTheme $theme))"
-                Write-Host "  tmux   : $tmux"
-                Write-Host "  apps   : $($apps -join ', ')"
-                Write-Host "  cc-tts : $(if ($ccTts.enabled) { 'on' } else { 'off' })"
-                Write-Host "  wezmux : $(Get-TsWeztermMux)"
+                Write-Host "  leader     : $leader"
+                Write-Host "  theme      : $theme   (palette $(Get-TsResolvedTheme $theme))"
+                Write-Host "  tmux       : $tmux"
+                Write-Host "  apps       : $($apps -join ', ')"
+                Write-Host "  cc-tts     : $(if ($ccTts.enabled) { 'on' } else { 'off' })"
+                Write-Host "  wezmux     : $(Get-TsWeztermMux)"
+                Write-Host "  wezrestore : $(Get-TsWeztermRestore)"
                 Write-Host ''
-                Write-Host '  1) leader  2) theme  3) tmux prefix  4) apps  5) re-apply  6) Claude TTS  7) WezTerm mux  q) quit'
+                Write-Host '  1) leader  2) theme  3) tmux prefix  4) apps  5) re-apply  6) Claude TTS  7) WezTerm mux  8) session restore  q) quit'
                 switch (Read-Host 'Choose') {
                     '1' { $leader = Read-TsLeader; & $save }
                     '2' { $theme  = Read-TsTheme;  & $save }
@@ -632,16 +633,18 @@ function Set-TerminalStackConfig {
                         }
                     }
                     '7' { Invoke-TsMux status }
+                    '8' { $restore = Read-TsWeztermRestore; Save-TsConfig -WeztermRestore $restore | Out-Null; Invoke-TsSync $src; Write-Host '==> done.' }
                     default { return }
                 }
             }
         }
         'show' {
-            Write-Host "leader : $leader"
-            Write-Host "theme  : $theme   (palette $(Get-TsResolvedTheme $theme))"
-            Write-Host "tmux   : $tmux"
-            Write-Host "apps   : $($apps -join ', ')"
-            Write-Host "wezmux : $(Get-TsWeztermMux)   (ts-mux on|off|status)"
+            Write-Host "leader     : $leader"
+            Write-Host "theme      : $theme   (palette $(Get-TsResolvedTheme $theme))"
+            Write-Host "tmux       : $tmux"
+            Write-Host "apps       : $($apps -join ', ')"
+            Write-Host "wezmux     : $(Get-TsWeztermMux)   (ts-mux on|off|status)"
+            Write-Host "wezrestore : $(Get-TsWeztermRestore)   (ts-config restore on|off)"
         }
         'leader' { if (-not $Value) { Write-Warning 'usage: ts-config leader <chord>'; return }; $leader = $Value; & $save }
         'theme'  { if (-not $Value) { Write-Warning 'usage: ts-config theme <dark|light|follow>'; return }; $theme = $Value; & $save }
@@ -664,12 +667,20 @@ function Set-TerminalStackConfig {
                 & $save $Tts
             }
         }
+        # Reopening the last WezTerm session at startup. Stored on its own like the
+        # mux key, so flipping it need not re-state every other choice.
+        'restore' {
+            if ($Value -notin 'on', 'off') { Write-Warning 'usage: ts-config restore <on|off>'; return }
+            Save-TsConfig -WeztermRestore $Value | Out-Null
+            Invoke-TsSync $src
+            Write-Host '==> done.'
+        }
         # The mux has its own verbs (kill/restart/reset), so ts-config just hands off.
         'mux'    {
             $muxArgs = @(@($Value) + @($Rest) | Where-Object { $_ })
             Invoke-TsMux @muxArgs
         }
-        default { Write-Warning "ts-config: unknown command '$Action' (show, leader, theme, tmux, apps, tts, mux)" }
+        default { Write-Warning "ts-config: unknown command '$Action' (show, leader, theme, tmux, apps, tts, mux, restore)" }
     }
 }
 Set-Alias -Name ts-config -Value Set-TerminalStackConfig

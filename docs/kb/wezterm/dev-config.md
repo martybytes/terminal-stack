@@ -75,6 +75,9 @@ panes!): `ts-mux restart`.
 
 ## Plugins
 
+The resurrect block deliberately avoids `resurrect.setup()` — it hard-wires a
+`gui-startup` session restore with no opt-out. Do not "simplify" it back.
+
 `tabline.wez` (status bar), `sessionizer.wezterm` (`Ctrl+Space` `p`), and
 `resurrect.wezterm` (save/restore) load from **pinned forks under
 `github.com/martybytes`** — upstream archival or a breaking change can't take the

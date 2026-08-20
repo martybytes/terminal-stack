@@ -157,6 +157,70 @@ Two implementations, as everywhere else in this repo: `bootstrap/ts-mux.sh` (zsh
 
 `status` deliberately reports the **rendered** value separately from the saved one. A config written before this toggle existed has no `MUX_ENABLED` line at all, so it reads the unconditional `config.default_domain = 'main'` and reports `on (pre-toggle)` — which is exactly the state a machine is in between pulling this change and applying it.
 
+## Why the startup session restore is opt-in (and why we don't call `resurrect.setup()`)
+
+WezTerm reopened the previous session at every launch — the same tabs and panes, with
+their old scrollback replayed back into them — on every machine the stack was installed
+on. Nobody asked for it and no document in this repo described it. The GUI log named
+the culprit:
+
+```
+lua: resurrect: restoring workspace 'default' on gui-startup
+```
+
+`resurrect.setup()` registers the restore itself, unconditionally, with no option to
+decline:
+
+```lua
+-- plugin/init.lua, in setup()
+wezterm.on("gui-startup", pub.state_manager.resurrect_on_gui_startup)
+```
+
+The handler reads `current_state` from the plugin's state dir and, if it names a
+workspace, replays it with `restore_text = true`. Every autosave rewrites that file, so
+the behaviour re-arms itself forever — killing the mux, clearing sockets and restarting
+the GUI all leave it perfectly intact, which is what made it look like a mux problem.
+
+**The fix is to stop calling `setup()`.** With `keybindings = false` and
+`status_bar = false` — which we already passed — `setup()` reduces to exactly three
+things: `event_driven_save`, `periodic_save`, and that one `wezterm.on` line. So the
+config now calls the two save engines directly and registers the `gui-startup` handler
+itself, only when the setting says so:
+
+```lua
+local RESTORE_ENABLED = '<on|off>' == 'on'   -- __WEZ_RESTORE__ / {{ .weztermRestore }}
+...
+if RESTORE_ENABLED then
+  wezterm.on('gui-startup', resurrect.state_manager.resurrect_on_gui_startup)
+end
+```
+
+Forking around it was the alternative and was rejected: the fork is already pinned, and
+adding a `restore_on_startup` option there would mean a plugin-cache refresh on every
+machine before the fix took effect — while the config-side version ships with one
+`ts-update`. Skipping `setup()` costs us nothing today and the comment in both configs
+says loudly why it must not be "simplified" back.
+
+Default **off**, for the same reason the mux domain is: a terminal that silently
+reopens last week's shells is a surprise, not a feature you chose. `ts-config restore
+on` turns it back on, and that is a plain boolean with no live process behind it — which
+is why it lives in `ts-config` rather than earning its own `ts-*` command the way
+`ts-mux` did.
+
+Two deliberate consequences:
+
+- **The autosave keeps running when the setting is off.** `Leader+S` / `Leader+L` are
+  unaffected, and `current_state` keeps tracking your live workspace — so flipping the
+  setting on restores *the session you had*, not a stale one from whenever you turned it
+  off.
+- **No saved state is deleted.** Turning the feature off is not a reason to throw away
+  the user's sessions.
+
+A `ts-mux status`-style saved-vs-rendered drift line would be cheap here (the gate is a
+column-0 `local RESTORE_ENABLED = '<on|off>'`, greppable exactly like `MUX_ENABLED`) but
+is deliberately skipped: every `ts-config` mutation ends in an apply, so the drift the
+mux has to worry about — a live server disagreeing with both — has no analogue here.
+
 ## Why the status bar starts quiet
 
 The tabline status bar shipped showing the mode badge, the workspace name, and `user@host │ path` for the active pane. Two of those three are permanent noise: on a single-user laptop `user@host` never changes, the workspace is `default` until you deliberately make another one, and the path is already in the Starship prompt two lines below and in the tab title above. That left a status bar whose steady state was three facts you already knew, and whose one genuinely useful element — the mode badge that tells you a repeatable key table is armed — was competing with them.

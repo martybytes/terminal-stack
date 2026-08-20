@@ -35,6 +35,13 @@ if MUX_ENABLED then
   config.default_domain = 'main'
 end
 
+-- Optional: reopen the last session at GUI start — the tabs, panes, layout and
+-- scrollback you had when you last closed WezTerm. OFF by default: a terminal
+-- that silently reopens yesterday's shells is a surprise rather than a feature,
+-- and the autosave below keeps Leader+L available whenever you do want it back.
+-- Toggle with `ts-config restore on` / `off`.
+local RESTORE_ENABLED = '{{ if hasKey . "weztermRestore" }}{{ .weztermRestore }}{{ else }}off{{ end }}' == 'on'
+
 -- ── Theme palette (light / dark, optional follow-OS) ──────────────────────────
 -- THEME_MODE is injected from the saved terminal-stack config:
 --   'dark'  → Catppuccin Mocha · 'light' → VS Code Light Modern (official tokens) ·
@@ -582,15 +589,29 @@ if wezterm.gui then
 
   -- resurrect.wezterm (maintained fork): session save/restore across restarts.
   -- Autosave every 15 min + on focus loss; Leader+S saves the workspace now,
-  -- Leader+L fuzzy-restores a saved state. No encryption.
+  -- Leader+L fuzzy-restores a saved state on demand. No encryption. Reopening
+  -- the last session automatically at GUI start is a separate thing and is OFF
+  -- by default — see RESTORE_ENABLED above.
   local rok, resurrect = pcall(wezterm.plugin.require, 'https://github.com/martybytes/resurrect.wezterm')
   if rok and resurrect then
     local setup2_ok, setup2_err = pcall(function()
-      resurrect.setup(config, {
-        periodic_interval = 900,
-        keybindings = false,
-        status_bar = false,
-      })
+      -- Deliberately NOT resurrect.setup(): that helper registers
+      --   wezterm.on('gui-startup', state_manager.resurrect_on_gui_startup)
+      -- unconditionally, with no opt-out, and reopening the last session is
+      -- exactly what RESTORE_ENABLED gates. Everything else setup() would do for
+      -- us is these two save engines — its status bar and default keybindings we
+      -- already turned off, and we pass no restore_delay/safe_restore_processes.
+      resurrect.state_manager.event_driven_save {
+        save_workspaces = true, save_windows = true, save_tabs = true,
+        save_on_focus_loss = true,
+      }
+      resurrect.state_manager.periodic_save {
+        interval_seconds = 900,
+        save_workspaces = true, save_windows = true, save_tabs = true,
+      }
+      if RESTORE_ENABLED then
+        wezterm.on('gui-startup', resurrect.state_manager.resurrect_on_gui_startup)
+      end
     end)
     if setup2_ok then
       table.insert(config.keys, { key = 'S', mods = 'LEADER', action = resurrect.workspace_state.save_workspace_action() })

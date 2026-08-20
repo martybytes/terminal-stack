@@ -24,7 +24,15 @@ Persistent named sessions; each has its own windows and tabs.
 | `Ctrl+Space` `X` | kill — close every pane in this workspace |
 
 ## Save / restore (resurrect)
-Sessions autosave every 15 min and on window focus loss.
+Sessions autosave every 15 min, on window focus loss, and whenever you add or
+close a pane or tab.
+
+**Launching WezTerm starts clean by default** — it does not reopen what you had
+last time. `ts-config restore on` changes that: every launch then replays the
+last autosaved workspace, panes, layout, scrollback and all. Either way the
+autosave keeps running, so `Ctrl+Space` `L` restores a session by hand whenever
+you want one, and turning the setting on later gives you the session you had —
+not a stale one from whenever you flipped it off.
 
 | Key | Action |
 |---|---|

@@ -4,9 +4,9 @@
 #
 # Source of truth on this side is chezmoi [data] in ~/.config/chezmoi/chezmoi.toml.
 # We store the RAW choices (leaderChord, themeMode, tmuxPrefix, resolvedTheme,
-# weztermMux, apps) and let .chezmoi.toml.tmpl derive the concrete bindings
-# (leaderKey/leaderMods/tmuxPrefixResolved) on `chezmoi init`. resolvedTheme
-# needs live OS detection, so it is computed here (resolve_os_theme) and stored.
+# weztermMux, weztermRestore, apps) and let .chezmoi.toml.tmpl derive the
+# concrete bindings (leaderKey/leaderMods/tmuxPrefixResolved) on `chezmoi init`.
+# resolvedTheme needs live OS detection, so it is computed here and stored.
 #
 # This file is sourced, not executed. Do not `exit`; return non-zero instead.
 
@@ -273,6 +273,24 @@ ts_wez_mux_set() {
     ts_mirror_windows_config
 }
 
+# ── WezTerm session restore ─────────────────────────────────────────────────────
+# "on"  -> .wezterm.lua registers resurrect's gui-startup handler, so WezTerm
+#          reopens the last session (tabs, panes, scrollback) at launch.
+# "off" -> starts clean (the default). The autosave still runs either way, so
+#          Leader+L can restore on demand. Stored on its own like weztermMux.
+ts_wez_restore_get() {
+    local v; v="$(ts_data_get weztermRestore 2>/dev/null || true)"
+    case "$v" in on|off) echo "$v" ;; *) echo off ;; esac
+}
+
+# ts_wez_restore_set <on|off> — persist, regenerate derived keys, mirror to Windows.
+ts_wez_restore_set() {
+    case "$1" in on|off) ;; *) echo "ts_wez_restore_set: expected on|off" >&2; return 2 ;; esac
+    ts_data_set weztermRestore "$1"
+    local cz; if cz="$(ts_chezmoi_bin)"; then "$cz" init >/dev/null 2>&1 || true; fi
+    ts_mirror_windows_config
+}
+
 # ── OS appearance detection ─────────────────────────────────────────────────────
 # Echoes the baked palette (light|dark) for a theme mode. follow → detect; on any
 # failure default to dark (the stack's historical look).
@@ -358,6 +376,7 @@ ts_mirror_windows_config() {
   "tmuxPrefix": "$(ts_data_get tmuxPrefix)",
   "tmuxPrefixResolved": "$tr",
   "weztermMux": "$(ts_wez_mux_get)",
+  "weztermRestore": "$(ts_wez_restore_get)",
   "apps": [$jsonapps],
 $(ts_cc_tts_json_for_mirror)
 }

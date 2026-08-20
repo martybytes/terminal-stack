@@ -16,6 +16,7 @@
 #   __THEME_RESOLVED__  baked palette light|dark (from resolvedTheme)
 #   __TMUX_PREFIX__     tmux prefix spec     (from tmuxPrefixResolved)
 #   __WEZ_MUX__         on|off WezTerm mux domain (from weztermMux; see ts-mux)
+#   __WEZ_RESTORE__     on|off reopen last session (from weztermRestore)
 #   __CC_TTS_STOP_HOOK__ / __CC_TTS_STOPFAILURE_HOOK__ / __CC_TTS_CURSOR_HOOKS__ /
 #   __CC_TTS_PRETOOLUSE_TTS__ / __CC_TTS_INPUT_HOOKS__  optional cc-speak hooks (when ccTtsEnabled)
 #
@@ -93,6 +94,7 @@ THEME_MODE="$(cfg themeMode 'dark')"
 THEME_RESOLVED="$(cfg resolvedTheme 'dark')"
 TMUX_PREFIX="$(cfg tmuxPrefixResolved 'C-b')"
 WEZ_MUX="$(cfg weztermMux 'off')"
+WEZ_RESTORE="$(cfg weztermRestore 'off')"
 CC_TTS_ENABLED="$(cfg ccTtsEnabled false)"
 if [ "$CC_TTS_ENABLED" = true ]; then
   CC_TTS_STOP_HOOK=$',
@@ -196,7 +198,7 @@ sync_tree() {
       if command -v python3 >/dev/null 2>&1; then
         WIN_USER="$WIN_USER" LEADER_KEY="$LEADER_KEY" LEADER_MODS="$LEADER_MODS" \
         THEME_MODE="$THEME_MODE" THEME_RESOLVED="$THEME_RESOLVED" TMUX_PREFIX="$TMUX_PREFIX" \
-        WEZ_MUX="$WEZ_MUX" \
+        WEZ_MUX="$WEZ_MUX" WEZ_RESTORE="$WEZ_RESTORE" \
         CC_TTS_STOP_HOOK="$CC_TTS_STOP_HOOK" CC_TTS_STOPFAILURE_HOOK="$CC_TTS_STOPFAILURE_HOOK" \
         CC_TTS_CURSOR_HOOKS="$CC_TTS_CURSOR_HOOKS" CC_TTS_PRETOOLUSE_TTS="$CC_TTS_PRETOOLUSE_TTS" \
         CC_TTS_INPUT_HOOKS="$CC_TTS_INPUT_HOOKS" \
@@ -211,6 +213,7 @@ repl = {
     "__THEME_RESOLVED__": os.environ.get("THEME_RESOLVED", ""),
     "__TMUX_PREFIX__": os.environ.get("TMUX_PREFIX", ""),
     "__WEZ_MUX__": os.environ.get("WEZ_MUX", "off"),
+    "__WEZ_RESTORE__": os.environ.get("WEZ_RESTORE", "off"),
     "__CC_TTS_STOP_HOOK__": os.environ.get("CC_TTS_STOP_HOOK", ""),
     "__CC_TTS_STOPFAILURE_HOOK__": os.environ.get("CC_TTS_STOPFAILURE_HOOK", ""),
     "__CC_TTS_CURSOR_HOOKS__": os.environ.get("CC_TTS_CURSOR_HOOKS", "{}"),

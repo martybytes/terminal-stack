@@ -133,6 +133,7 @@ $tok = @{
     '__THEME_RESOLVED__'         = if ($tsCfg.resolvedTheme)      { $tsCfg.resolvedTheme }      else { 'dark' }
     '__TMUX_PREFIX__'            = if ($tsCfg.tmuxPrefixResolved) { $tsCfg.tmuxPrefixResolved } else { 'C-b' }
     '__WEZ_MUX__'                = if ($tsCfg.weztermMux)         { $tsCfg.weztermMux }         else { 'off' }
+    '__WEZ_RESTORE__'            = if ($tsCfg.weztermRestore)     { $tsCfg.weztermRestore }     else { 'off' }
     '__CC_TTS_STOP_HOOK__'       = $ccTtsStopHook
     '__CC_TTS_STOPFAILURE_HOOK__'= $ccTtsStopFailureHook
     '__CC_TTS_CURSOR_HOOKS__'    = $ccTtsCursorHooks

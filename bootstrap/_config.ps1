@@ -145,7 +145,7 @@ function Get-TsConfig {
     }
     return [pscustomobject]@{
         leaderChord = 'ctrl-space'; themeMode = 'dark'; tmuxPrefix = 'ctrl-b'
-        weztermMux = 'off'; apps = @()
+        weztermMux = 'off'; weztermRestore = 'off'; apps = @()
     }
 }
 
@@ -158,6 +158,16 @@ function Get-TsWeztermMux {
     return 'off'
 }
 
+# Reopen the last session at WezTerm start: 'on' registers resurrect's
+# gui-startup restore, 'off' (default) starts clean. The autosave runs either
+# way, so Leader+L still restores on demand.
+# POSIX twin: bootstrap/_config.sh ts_wez_restore_get.
+function Get-TsWeztermRestore {
+    $v = (Get-TsConfig).weztermRestore
+    if ($v -eq 'on') { return 'on' }
+    return 'off'
+}
+
 function Save-TsConfig {
     param(
         [string]$LeaderChord = 'ctrl-space',
@@ -165,6 +175,7 @@ function Save-TsConfig {
         [string]$TmuxPrefix  = 'ctrl-b',
         [string[]]$Apps      = @(),
         [string]$WeztermMux  = 'off',
+        [string]$WeztermRestore = 'off',
         $CcTts                = $null
     )
     $l = ConvertTo-TsLeader $LeaderChord
@@ -183,6 +194,10 @@ function Save-TsConfig {
         $WeztermMux = $existing.weztermMux
     }
     if ($WeztermMux -ne 'on') { $WeztermMux = 'off' }
+    if (-not $PSBoundParameters.ContainsKey('WeztermRestore') -and $existing.weztermRestore) {
+        $WeztermRestore = $existing.weztermRestore
+    }
+    if ($WeztermRestore -ne 'on') { $WeztermRestore = 'off' }
     $obj = [ordered]@{
         leaderChord        = $LeaderChord
         leaderKey          = $l.key
@@ -192,6 +207,7 @@ function Save-TsConfig {
         tmuxPrefix         = $TmuxPrefix
         tmuxPrefixResolved = (ConvertTo-TsTmuxPrefix $TmuxPrefix)
         weztermMux         = $WeztermMux
+        weztermRestore     = $WeztermRestore
         apps               = @($Apps)
         ccTts              = $CcTts
     }
@@ -202,8 +218,8 @@ function Save-TsConfig {
 }
 
 # ── Wizard prompts ──────────────────────────────────────────────────────────────
-# Env vars skip each prompt: TS_LEADER, TS_THEME, TS_WEZTERM, TS_WEZ_MUX, TS_APPS,
-# TS_CC_TTS
+# Env vars skip each prompt: TS_LEADER, TS_THEME, TS_WEZTERM, TS_WEZ_MUX,
+# TS_WEZ_RESTORE, TS_APPS, TS_CC_TTS
 # (and WORKSPACE_DIR for the workspace question in windows-bootstrap.ps1).
 
 # The menu prompt every wizard question uses. Marks the default and says how to
@@ -327,6 +343,22 @@ function Read-TsWeztermMux {
     ) -Options @(
         @{ Key = 'off'; Label = 'off'; Note = 'panes are spawned by the GUI' },
         @{ Key = 'on';  Label = 'on';  Note = 'panes survive a GUI crash' }
+    )
+}
+
+# Reopen the last session at WezTerm start (resurrect's gui-startup restore).
+# Default off: a terminal that silently reopens yesterday's shells is a surprise,
+# and the autosave runs either way so Leader+L can restore on demand.
+# Twin of bootstrap/_wizard.sh ts_prompt_wezterm_restore — keep the rendering identical.
+function Read-TsWeztermRestore {
+    if ($env:TS_WEZ_RESTORE) { if ($env:TS_WEZ_RESTORE -eq 'on') { return 'on' } else { return 'off' } }
+    Read-TsChoice -Title 'WezTerm session restore (reopen the last session at startup):' -Default 'off' -Intro @(
+        '  On: WezTerm reopens the tabs, panes and scrollback you had when you last',
+        '  closed it. Off: it starts clean, and Leader+L still restores a session on',
+        '  demand from the same autosaved state.'
+    ) -Options @(
+        @{ Key = 'off'; Label = 'off'; Note = 'start clean every time' },
+        @{ Key = 'on';  Label = 'on';  Note = 'reopen the last session' }
     )
 }
 function Read-TsApps {
