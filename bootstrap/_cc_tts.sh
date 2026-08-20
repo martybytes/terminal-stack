@@ -272,6 +272,15 @@ ts_cc_tts_daemon_installer() {
     "$pwsh_exe" -NoLogo -NonInteractive -ExecutionPolicy Bypass -File "$win" "$@"
 }
 
+ts_cc_tts_daemon_snapshot_path() {
+    # The daemon's crash-safe pre-duck volume snapshot (Windows side, via /mnt/c).
+    local winuser
+    [ -d /mnt/c/Users ] || return 1
+    winuser="$(cmd.exe /c 'echo %USERNAME%' 2>/dev/null | tr -d '\r\n')"
+    [ -n "$winuser" ] || return 1
+    printf '/mnt/c/Users/%s/AppData/Local/terminal-stack/tts-daemon/state/duck-snapshot.json' "$winuser"
+}
+
 ts_cc_tts_daemon_status() {
     local port health sha
     port="$(ts_cc_tts_get ccTtsDaemonPort)"

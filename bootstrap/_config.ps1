@@ -673,6 +673,35 @@ function Show-CcTtsDaemonStatus {
     }
 }
 
+function Test-CcTtsDaemonHealthy {
+    $tts = Get-CcTtsConfig
+    $port = if ($tts.daemon -and $tts.daemon.port) { [int]$tts.daemon.port } else { 8890 }
+    try {
+        $r = Invoke-WebRequest -Uri "http://127.0.0.1:$port/healthz" -TimeoutSec 2 -UseBasicParsing
+        return ($r.StatusCode -eq 200)
+    } catch { return $false }
+}
+
+function Get-CcTtsDuckSnapshotPath {
+    Join-Path $env:LOCALAPPDATA 'terminal-stack\tts-daemon\state\duck-snapshot.json'
+}
+
+function Repair-CcTtsDuckSnapshot {
+    # ts-doctor --repair: a snapshot left by a daemon that died mid-duck means
+    # per-app volumes are still lowered (Windows persists them). The daemon's
+    # own oneshot restores them; a live daemon owns its snapshot — leave it.
+    $snap = Get-CcTtsDuckSnapshotPath
+    if (-not (Test-Path -LiteralPath $snap)) { return }
+    if (Test-CcTtsDaemonHealthy) { return }
+    $venvPy = Join-Path $env:LOCALAPPDATA 'terminal-stack\tts-daemon\venv\Scripts\python.exe'
+    if (-not (Test-Path -LiteralPath $venvPy)) {
+        Write-Warning "stale duck snapshot at $snap but no daemon venv — reinstall (ts-config tts daemon install) or delete it"
+        return
+    }
+    Push-Location (Join-Path $PSScriptRoot 'tts-daemon')
+    try { & $venvPy -m ttsd --restore-volumes } finally { Pop-Location }
+}
+
 # ── `summarizer self` marker block in %USERPROFILE%\.claude\CLAUDE.md ──────────
 # Same discipline as the $PROFILE marker regions; the asset carries its own
 # start/end markers. Backups follow the repo's .bak.YYYYMMDD[.N] convention.
