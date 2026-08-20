@@ -5,15 +5,31 @@
 # (profile.local.ps1, the personal doc layer, rollback state, *.local.md).
 # Honors $env:TS_DRY_RUN = '1' (preview only).
 
-# Candidate clone locations on Windows (current + historical).
+# The canonical runtime clone location. Twin of the profile's
+# Get-TsCanonicalCloneDir (identical body — parse-time isolation forces the copy;
+# keep in sync both ways) and bootstrap/_config.sh ts_canonical_clone_dir.
+function Get-TsCanonicalCloneDir { Join-Path $env:LOCALAPPDATA 'terminal-stack\stack' }
+
+# True when a path is a DEV clone at a wso workspace tier path. Twin of the
+# profile's Test-TsDevClone and bootstrap/_cleanup.sh ts_is_dev_clone (master).
+function Test-TsDevClone([string]$Path) {
+    ($Path -replace '\\', '/') -match '/(src|public|archive|local|scratch)/[^/]+\.[^/]+/[^/]+/[^/]+/?$'
+}
+
+# CANONICAL CLONE CANDIDATE LIST (pwsh cleanup replica) — keep in sync with
+# docs/decisions.md § "Runtime clone location" and the siblings:
+# bootstrap/_cleanup.sh ts_clone_candidates (master), dot_zshrc
+# _ts_clone_candidates, profile Get-TsCloneCandidates.
 # Named Get-TsCleanupCloneCandidates (not Get-TsCloneCandidates) so dot-sourcing
 # this file never shadows the richer profile function of the old shared name.
 function Get-TsCleanupCloneCandidates {
     @(
+        (Get-TsCanonicalCloneDir),
         (Join-Path $env:USERPROFILE 'terminal-stack'),
         'C:\DATA\Workspace\terminal-stack',
         (Join-Path $env:USERPROFILE 'code\terminal-stack'),
         (Join-Path $env:USERPROFILE 'Documents\Workspace\terminal-stack'),
+        (Join-Path $env:USERPROFILE 'workspace\terminal-stack'),
         (Join-Path $env:USERPROFILE '.local\share\chezmoi')
     )
 }
@@ -26,19 +42,104 @@ function Test-TsStackClone([string]$dir) {
     return [bool]($url -match 'terminal-stack')
 }
 
-# Stack clones other than $current (resolved to a canonical path).
+# Stack clones other than $current (resolved to a canonical path). The canonical
+# runtime location and dev clones (workspace tier paths) are never offered.
 function Find-TsClones([string]$current) {
     $cur = if ($current -and (Test-Path $current)) { (Resolve-Path $current).Path } else { $current }
+    $canon = Get-TsCanonicalCloneDir
     $seen = New-Object System.Collections.Generic.HashSet[string]
     foreach ($d in Get-TsCleanupCloneCandidates) {
         if (-not (Test-Path $d)) { continue }
         if (-not (Test-TsStackClone $d)) { continue }
+        if (Test-TsDevClone $d) { continue }
         $rp = (Resolve-Path $d).Path
         if ($rp -ieq $cur) { continue }
+        if ($rp -ieq $canon -or $rp.TrimEnd('\') -ieq $canon.TrimEnd('\')) { continue }
         if (-not $seen.Add($rp)) { continue }
         [pscustomobject]@{ Path = $d; Tick = $true; Kind = 'clone';
             Label = ('old clone — ' + ((& git -C $d log -1 --format='%h %s' 2>$null) -join ' ')) }
     }
+}
+
+# Remove a stale $env:TERMINAL_STACK_DIR pin from profile.local.ps1 (backed up
+# first). Canonical needs no pin. Mirror logic of the profile's
+# Set-TsSourceDirPersisted — keep the two in sync.
+function Clear-TsSourceDirPin {
+    $localProfile = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'PowerShell\profile.local.ps1'
+    if ((Test-Path $localProfile) -and
+        (Get-Content $localProfile | Where-Object { $_ -match '^\s*\$env:TERMINAL_STACK_DIR\s*=' })) {
+        Backup-TsFile $localProfile
+        (Get-Content $localProfile) | Where-Object { $_ -notmatch '^\s*\$env:TERMINAL_STACK_DIR\s*=' } |
+            Set-Content $localProfile
+        Write-Host "==> removed the `$env:TERMINAL_STACK_DIR pin from $localProfile (canonical location needs none)"
+    }
+    if (Test-Path Env:TERMINAL_STACK_DIR) { Remove-Item Env:TERMINAL_STACK_DIR }
+}
+
+# Move the runtime clone to a new location, git state (incl. dirty worktree,
+# stashes, reflog) intact. Same-volume = instant rename; cross-volume = copy,
+# HEAD-verify, then remove source. Returns $true on success. The caller runs
+# sync/verify afterwards — this function has no sync side effect.
+function Move-TsClone {
+    param([Parameter(Mandatory)][string]$Source, [Parameter(Mandatory)][string]$Dest)
+    if (-not (Test-TsStackClone $Source)) { Write-Warning "Move-TsClone: '$Source' is not a terminal-stack clone."; return $false }
+    if (Test-Path $Dest) { Write-Warning "Move-TsClone: destination '$Dest' already exists."; return $false }
+    if (($Dest.TrimEnd('\') + '\') -like (($Source.TrimEnd('\')) + '\*')) {
+        Write-Warning 'Move-TsClone: destination is inside the source.'; return $false
+    }
+    if (& git -C $Source status --porcelain 2>$null) {
+        Write-Host '==> clone has uncommitted changes — they move with it.'
+    }
+    $head = (& git -C $Source rev-parse HEAD 2>$null)
+    $srcResolved = (Resolve-Path $Source).Path
+    $returnTo = $null
+    if ((Get-Location).Path.TrimEnd('\') -ieq $srcResolved.TrimEnd('\') -or
+        (Get-Location).Path -like "$srcResolved\*") {
+        # Windows can't rename a directory a process is sitting in — step out.
+        $returnTo = $true
+        Set-Location $env:USERPROFILE
+    }
+    New-Item -ItemType Directory -Force -Path (Split-Path $Dest) | Out-Null
+    Write-Host "==> moving $Source -> $Dest"
+    try {
+        [System.IO.Directory]::Move($srcResolved, $Dest)
+    } catch [System.IO.IOException] {
+        if ($_.Exception.Message -match 'not on the same volume|different volume') {
+            Copy-Item -LiteralPath $srcResolved -Destination $Dest -Recurse -Force
+            if ((& git -C $Dest rev-parse HEAD 2>$null) -ne $head) {
+                Write-Warning "Move-TsClone: HEAD mismatch after copy — source left at $Source; inspect $Dest."
+                return $false
+            }
+            Remove-Item -LiteralPath $srcResolved -Recurse -Force
+        } else {
+            Write-Warning "Move-TsClone: move failed ($($_.Exception.Message)). Close shells/editors open in $Source and re-run ts-doctor -Repair."
+            return $false
+        }
+    }
+    if ((& git -C $Dest rev-parse HEAD 2>$null) -ne $head) {
+        Write-Warning "Move-TsClone: HEAD mismatch after move — inspect $Dest before continuing."
+        return $false
+    }
+    if ($returnTo) { Set-Location $Dest }
+    # A pin at the old path is now stale; canonical needs no pin.
+    if ($env:TERMINAL_STACK_DIR -and
+        ($env:TERMINAL_STACK_DIR.TrimEnd('\') -ieq $Source.TrimEnd('\'))) {
+        Clear-TsSourceDirPin
+    }
+    # Normalize an origin URL left over from the renamed account.
+    $canonRemote = 'https://github.com/martybytes/terminal-stack.git'
+    $origin = (& git -C $Dest config --get remote.origin.url 2>$null)
+    if ($origin -and $origin -ne $canonRemote -and $origin -notmatch 'git@github\.com:martybytes/terminal-stack') {
+        if (-not [Console]::IsInputRedirected) {
+            $a = Read-Host "Origin is '$origin' — set it to $canonRemote? [Y/n]"
+            if ($a -notmatch '^(n|no)$') {
+                & git -C $Dest remote set-url origin $canonRemote
+                Write-Host "==> origin -> $canonRemote"
+            }
+        }
+    }
+    Write-Host "==> clone relocated to $Dest"
+    return $true
 }
 
 # Retired/leftover files under %USERPROFILE%. Known artifacts are pre-ticked;
@@ -146,6 +247,16 @@ function Test-TsInstall {
             _ok '$PROFILE has the terminal-stack block'
         } else { _bad '$PROFILE missing the terminal-stack block (re-run sync-windows.ps1)' }
     } else { _bad '$PROFILE not found (run sync-windows.ps1)' }
+
+    # Location advisory (not a health failure): a legacy-path clone can be moved.
+    $canon = Get-TsCanonicalCloneDir
+    if ($SourceDir -and $SourceDir.TrimEnd('\') -ne $canon.TrimEnd('\')) {
+        if (Test-TsDevClone $SourceDir) {
+            Write-Host '  note: pinned at a dev clone (workspace tier path) — deliberate, leaving it alone.'
+        } else {
+            Write-Host "  note: clone is at a legacy location; 'ts-doctor -Repair' can move it to $canon"
+        }
+    }
 
     # Leftover clones are advisory, not a health failure — note without counting.
     $others = @(Find-TsClones $SourceDir)

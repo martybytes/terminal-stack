@@ -122,12 +122,12 @@ Run on any chezmoi-source file we've just edited through a Windows-side tool. Th
 
 ## Running chezmoi from outside WSL
 
-The chezmoi.toml override at `~/.config/chezmoi/chezmoi.toml` points sourceDir at `/mnt/c/DATA/Workspace/terminal-stack`. This path exists in WSL (via the drvfs mount) but not directly on Windows.
+The chezmoi.toml override at `~/.config/chezmoi/chezmoi.toml` points sourceDir at `/mnt/c/Users/<you>/AppData/Local/terminal-stack/stack`. This path exists in WSL (via the drvfs mount) but not directly on Windows.
 
 If you wanted to run chezmoi from the Windows side natively (without WSL), you'd:
 
 1. Install chezmoi on Windows (`winget install twpayne.chezmoi`)
-2. Write a separate `%USERPROFILE%\AppData\Local\chezmoi\chezmoi.toml` with `sourceDir = "C:\\DATA\\Workspace\\terminal-stack"` (note: Windows path)
+2. Write a separate `%USERPROFILE%\AppData\Local\chezmoi\chezmoi.toml` with `sourceDir = "C:\\Users\\<you>\\AppData\\Local\\terminal-stack\\stack"` (note: Windows path)
 3. Run `chezmoi apply` from Windows pwsh — this would apply to `C:\Users\<you>\` directly, *without* running the run_after script (since `.sh` files require a shell to execute, and chezmoi's Windows binary doesn't have a POSIX shell to fall back on for `run_after_*.sh`)
 
 We deliberately don't do this. Running chezmoi from WSL on this machine gives us one orchestrator and one source of truth.

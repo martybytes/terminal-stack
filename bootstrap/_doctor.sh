@@ -18,6 +18,75 @@ fi
 : "${INFO:=$'\033[1;34m==>\033[0m'}"
 : "${WARN:=$'\033[1;33m!!\033[0m'}"
 
+TS_CANONICAL_REMOTE="https://github.com/martybytes/terminal-stack.git"
+
+# Move the runtime clone to a new location, git state (incl. dirty worktree,
+# stashes, reflog) intact, then repoint chezmoi and fix stale pins.
+# Same-volume moves are instant renames; a cross-device move (ext4 -> /mnt/c)
+# copies, verifies HEAD, then removes the source.
+ts_relocate_clone() {
+    local src="$1" dst="$2" cz head ans
+    ts_is_stack_clone "$src" || { echo "$WARN relocate: '$src' is not a terminal-stack clone."; return 1; }
+    [ -e "$dst" ] && { echo "$WARN relocate: destination '$dst' already exists."; return 1; }
+    case "$dst/" in "$src"/*) echo "$WARN relocate: destination is inside the source."; return 1 ;; esac
+    if [ -n "$(git -C "$src" status --porcelain 2>/dev/null)" ]; then
+        echo "$INFO relocate: clone has uncommitted changes — they move with it."
+    fi
+    head="$(git -C "$src" rev-parse HEAD 2>/dev/null)"
+    mkdir -p -- "$(dirname -- "$dst")" || return 1
+    echo "$INFO moving $src -> $dst"
+    mv -- "$src" "$dst" || { echo "$WARN relocate: move failed; nothing changed."; return 1; }
+    if [ "$(git -C "$dst" rev-parse HEAD 2>/dev/null)" != "$head" ]; then
+        echo "$WARN relocate: HEAD mismatch after move — inspect $dst before continuing."; return 1
+    fi
+    # ext4 -> drvfs: silence mode-bit churn on the Windows filesystem.
+    case "$dst" in /mnt/c/*) git -C "$dst" config core.filemode false 2>/dev/null || true ;; esac
+
+    # Repoint chezmoi at the new location and re-apply.
+    if cz="$(ts_chezmoi_bin)"; then
+        ts_ensure_source_dir "$dst"
+        echo "$INFO re-applying from $dst…"
+        "$cz" apply || echo "$WARN chezmoi apply failed — run it manually after fixing the issue."
+    fi
+
+    # Normalize an origin URL left over from the renamed account.
+    local origin
+    origin="$(git -C "$dst" config --get remote.origin.url 2>/dev/null || true)"
+    if [ -n "$origin" ] && [ "$origin" != "$TS_CANONICAL_REMOTE" ] \
+       && printf '%s' "$origin" | grep -qiE 'martsamp77|terminal-stack'; then
+        case "$origin" in
+            git@github.com:martybytes/terminal-stack*) : ;;  # SSH form of the canonical remote — leave it
+            *)
+                ans="$(ts_tty_prompt "Origin is '$origin' — set it to $TS_CANONICAL_REMOTE? [Y/n]: ")"
+                case "$ans" in n|N|no|NO) : ;; *) git -C "$dst" remote set-url origin "$TS_CANONICAL_REMOTE" \
+                    && echo "$INFO origin -> $TS_CANONICAL_REMOTE" ;; esac ;;
+        esac
+    fi
+
+    # WSL cross-fix: a Windows-side TERMINAL_STACK_DIR pin at the OLD path is now
+    # stale. Canonical needs no pin, so remove the line (backed up first).
+    if [ -r /proc/version ] && grep -qi microsoft /proc/version 2>/dev/null; then
+        local winsrc plps fixed=0
+        winsrc="$(printf '%s' "$src" | sed -E 's|^/mnt/c/|C:/|' | tr '/' '\\')"
+        for plps in /mnt/c/Users/*/Documents/PowerShell/profile.local.ps1 \
+                    /mnt/c/Users/*/OneDrive*/Documents/PowerShell/profile.local.ps1; do
+            [ -f "$plps" ] || continue
+            if grep -iq 'TERMINAL_STACK_DIR' "$plps" 2>/dev/null \
+               && grep -iqF "$winsrc" "$plps" 2>/dev/null; then
+                ts_backup_file "$plps"
+                sed -i '/TERMINAL_STACK_DIR/d' "$plps"
+                echo "$INFO removed the stale \$env:TERMINAL_STACK_DIR pin from $plps"
+                fixed=1
+            fi
+        done
+        if [ "$fixed" -eq 0 ]; then
+            echo "$INFO if pwsh pins TERMINAL_STACK_DIR at the old path, remove that line from profile.local.ps1 (canonical needs no pin)."
+        fi
+    fi
+
+    echo "$INFO clone relocated. If your shell's cwd was inside it: cd $dst"
+}
+
 # Diagnose. Prints a checklist; returns 0 when healthy, 1 when issues are found.
 # Set TS_DOCTOR_QUIET=1 to suppress the per-check "ok" lines (warnings still show).
 ts_doctor() {
@@ -64,6 +133,18 @@ ts_doctor() {
         if command -v "$t" >/dev/null 2>&1; then _ok "$t on PATH"; else _bad "$t not on PATH"; fi
     done
 
+    # Location advisories (not health failures): a legacy-path runtime clone can
+    # be moved to the canonical location; a dev-clone pin is deliberate.
+    local canon=""
+    command -v ts_canonical_clone_dir >/dev/null 2>&1 && canon="$(ts_canonical_clone_dir 2>/dev/null || true)"
+    if [ -n "$src" ] && [ -n "$canon" ] && [ "$(_ts_realpath "$src")" != "$(_ts_realpath "$canon")" ]; then
+        if command -v ts_is_dev_clone >/dev/null 2>&1 && ts_is_dev_clone "$src"; then
+            echo "  note: sourceDir points at a dev clone (workspace tier path) — deliberate pin, leaving it alone."
+        else
+            echo "  note: clone is at a legacy location; 'ts-doctor --repair' can move it to $canon"
+        fi
+    fi
+
     # Leftover clones are advisory, not a health failure — note them without
     # counting an issue, so a working install still reports "all checks passed".
     others="$(ts_find_old_clones "${src:-$HOME/code/terminal-stack}" 2>/dev/null)"
@@ -104,6 +185,25 @@ ts_repair() {
         fi
     fi
 
+    # Offer the canonical-location move first (relocation repoints + applies itself).
+    local canon=""
+    command -v ts_canonical_clone_dir >/dev/null 2>&1 && canon="$(ts_canonical_clone_dir 2>/dev/null || true)"
+    if [ -n "$canon" ] && [ "$(_ts_realpath "$desired")" != "$(_ts_realpath "$canon")" ] \
+       && ! ts_is_dev_clone "$desired"; then
+        if [ -e "$canon" ]; then
+            echo "$WARN canonical location $canon already exists — not moving '$desired'; resolve via the cleanup menu."
+        else
+            ans="$(ts_tty_prompt "Move '$desired' to the canonical location '$canon'? [Y/n]: ")"
+            case "$ans" in
+                n|N|no|NO) echo "$INFO left the clone where it is." ;;
+                *) if ts_relocate_clone "$desired" "$canon"; then
+                       desired="$canon"
+                       src="$("$cz" source-path 2>/dev/null || true)"
+                   fi ;;
+            esac
+        fi
+    fi
+
     if [ "$src" != "$desired" ]; then
         ans="$(ts_tty_prompt "Repoint chezmoi sourceDir from '${src:-<unset>}' to '$desired'? [Y/n]: ")"
         case "$ans" in
@@ -117,4 +217,7 @@ ts_repair() {
     fi
 
     ts_cleanup_menu "$desired"
+
+    # Final quiet verify pass so the user sees the end state.
+    TS_DOCTOR_QUIET=1 ts_doctor || true
 }

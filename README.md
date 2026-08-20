@@ -30,7 +30,7 @@ curl -fsSL https://raw.githubusercontent.com/martybytes/terminal-stack/main/inst
 curl -fsSL https://raw.githubusercontent.com/martybytes/terminal-stack/main/install-mac.sh | bash
 ```
 
-Defaults: the Windows installer clones to `%USERPROFILE%\terminal-stack` (visible from WSL as `/mnt/c/Users/<you>/terminal-stack`); Linux and macOS clone to `~/code/terminal-stack`. Override with `$env:TERMINAL_STACK_DIR` (PowerShell) or `TERMINAL_STACK_DIR=…` (bash). Expects a clean home directory — if you already have a hand-edited `~/.zshrc` or `$PROFILE`, see `INSTALL.md` for the per-step path that preserves user content.
+Defaults: Windows and WSL share **one** clone at `%LOCALAPPDATA%\terminal-stack\stack` (visible from WSL as `/mnt/c/Users/<you>/AppData/Local/terminal-stack/stack`); Linux and macOS clone to `~/.local/share/terminal-stack`. Override with `$env:TERMINAL_STACK_DIR` (PowerShell) or `TERMINAL_STACK_DIR=…` (bash). An existing clone at an old location is offered a move to the canonical path. Expects a clean home directory — if you already have a hand-edited `~/.zshrc` or `$PROFILE`, see `INSTALL.md` for the per-step path that preserves user content.
 
 ## Configuring (`ts-config`)
 

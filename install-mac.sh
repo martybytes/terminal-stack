@@ -52,7 +52,8 @@ fi
 
 # 3. Choose clone location ($TERMINAL_STACK_DIR skips the prompt), then clone.
 REPO_URL='https://github.com/martybytes/terminal-stack.git'
-DEFAULT_DIR="$HOME/code/terminal-stack"
+# Canonical default: the XDG data home (see docs/decisions.md).
+DEFAULT_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/terminal-stack"
 if [ -n "${TERMINAL_STACK_DIR:-}" ]; then
     TARGET_DIR="$TERMINAL_STACK_DIR"
     echo "$INFO Clone location: $TARGET_DIR (from \$TERMINAL_STACK_DIR)"
@@ -66,6 +67,45 @@ else
         "~")   TARGET_DIR="$HOME" ;;
         "~/"*) TARGET_DIR="$HOME/${TARGET_DIR#\~/}" ;;
     esac
+fi
+
+
+# 2a. Existing clone at a legacy location: pull it first (that lands the
+# move routine inside it), then offer to move it to the target instead of
+# cloning fresh — preserves history, stashes, and dirty state. Minimal legacy
+# scan; master list: bootstrap/_cleanup.sh ts_clone_candidates.
+if [ ! -d "$TARGET_DIR/.git" ]; then
+    LEGACY=""
+    for c in "$HOME/code/terminal-stack"              "$HOME/terminal-stack"              "$HOME/Workspace/terminal-stack"              "$HOME/Documents/Workspace/terminal-stack"; do
+        [ -d "$c/.git" ] || continue
+        git -C "$c" config --get remote.origin.url 2>/dev/null | grep -qi terminal-stack || continue
+        LEGACY="$c"; break
+    done
+    if [ -n "$LEGACY" ]; then
+        echo "$INFO Existing clone found at $LEGACY"
+        mv_ans="m"
+        if { true > /dev/tty; } 2>/dev/null; then
+            IFS= read -r -p "  [M]ove it to $TARGET_DIR / [K]eep it there / [F]resh clone? [M]: " mv_ans < /dev/tty || mv_ans="m"
+        fi
+        case "$mv_ans" in
+            k|K*) TARGET_DIR="$LEGACY"; echo "$INFO Keeping $LEGACY" ;;
+            f|F*) : ;;
+            *)
+                git -C "$LEGACY" pull --ff-only >/dev/null 2>&1 || true
+                if [ -f "$LEGACY/bootstrap/_doctor.sh" ]; then
+                    set +e
+                    # shellcheck source=/dev/null
+                    . "$LEGACY/bootstrap/_doctor.sh"
+                    if command -v ts_relocate_clone >/dev/null 2>&1; then
+                        ts_relocate_clone "$LEGACY" "$TARGET_DIR"                             || echo "$WARN Move failed; cloning fresh instead."
+                    else
+                        echo "$WARN This clone predates the move routine; cloning fresh (old clone offered for cleanup later)."
+                    fi
+                    set -e
+                fi
+                ;;
+        esac
+    fi
 fi
 
 if [ -d "$TARGET_DIR/.git" ]; then

@@ -16,9 +16,29 @@
 pwsh function names: `Update-TerminalStack`, `Restore-TerminalStack`,
 `Set-TerminalStackConfig`, `Invoke-TsDoctor` — all aliased to the same `ts-*` names.
 
+## Clone locations
+
+| Path | Role |
+|---|---|
+| `%LOCALAPPDATA%\terminal-stack\stack` (WSL: `/mnt/c/Users/<you>/AppData/Local/terminal-stack/stack`) | canonical runtime clone — Windows + WSL share this **one** clone |
+| `~/.local/share/terminal-stack` | canonical runtime clone — native Linux/macOS |
+| `<workspace>/<tier>/github.com/<owner>/terminal-stack` | dev clone — **invisible** to resolution/doctor/`doc` unless pinned |
+
+The canonical path resolves without a pin — set `TERMINAL_STACK_DIR`
+(`$env:TERMINAL_STACK_DIR`) only for a **non-canonical** location, e.g. a dev clone
+you deliberately work against; that pin is how `ts-update` can update it, since dev
+clones are otherwise skipped. At a legacy path `ts-update` prints a one-line notice
+and `ts-doctor --repair` offers to move the clone to the canonical location (git
+state intact). `%LOCALAPPDATA%\terminal-stack` also holds `config.json`,
+`rollback-sha`, and the `docs\kb` mirror alongside `stack\`. Rationale:
+`docs/decisions.md` § "Runtime clone location".
+
 ## `ts-update`
-Resolves the clone (`$TERMINAL_STACK_DIR`, else `chezmoi source-path`; pwsh probes
-known paths and takes the newest commit), then: warns about any **other** clones on
+Resolves the **runtime** clone — the pin (`$TERMINAL_STACK_DIR`) first, else the
+canonical location, else legacy defaults; dev clones at workspace tier paths are
+never picked up unless pinned, so `ts-update` can't mutate the tree you develop
+in. Then: prints a one-line notice if the clone sits at a legacy path (`ts-doctor
+--repair` moves it); warns about any **other** clones on
 the machine — only the resolved one is updated, and a forgotten old clone would
 silently re-deploy an old profile (pwsh offers to pin the choice); fetches and lists
 the incoming commits; records the pre-pull HEAD as the rollback point; pulls
@@ -44,13 +64,16 @@ project — a folder name is not proof), that `~/.zshrc` carries the stack block
 the `doc` command, and that `zsh`/`starship` are on PATH. Leftover clones are noted
 but don't fail the check. `--quiet` hides the per-check ok lines.
 
-`ts-doctor --repair` fixes what it finds, confirming each step: repoints chezmoi's
-sourceDir at the real clone, re-applies, then offers an interactive checklist to
+`ts-doctor --repair` fixes what it finds, confirming each step: offers to **move**
+a legacy-path clone to the canonical location (git state intact), repoints chezmoi's
+sourceDir at the real clone, fixes stale pins, can normalize an old-account origin
+URL, re-applies, then offers an interactive checklist to
 remove old clones and leftover files (per-machine files — `profile.local.ps1`,
 `~/.doc.local`, rollback state — are never listed). On Windows the same pair is
 `Test-TerminalStack` / `Repair-TerminalStack`: checks the clone,
 `%LOCALAPPDATA%\terminal-stack\config.json`, and the `$PROFILE` marker block;
-repair persists `$env:TERMINAL_STACK_DIR` to `profile.local.ps1` and re-syncs.
+repair offers the same canonical move and re-syncs (a pin is written to
+`profile.local.ps1` only when the clone stays at a non-canonical path).
 
 ## `ts-config`
 | Command | What it does |

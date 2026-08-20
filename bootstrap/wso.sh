@@ -120,12 +120,19 @@ ts_ws_all_repos() {
 # -------------------------------------------------------------------- plan ----
 
 # Emit the full migration plan as TSV: status<TAB>src<TAB>dest<TAB>note.
-# status is one of: move, skip-exists, conflict, blocked.
+# status is one of: move, skip-exists, conflict, blocked, runtime.
 ts_ws_build_plan() {
-    local d out tier rel note dest
+    local d out tier rel note dest runtime
+    runtime="$(ts_ws_runtime_clone 2>/dev/null || true)"
     local -a seen_dest=() seen_src=()
     while IFS= read -r d; do
         [ -n "$d" ] || continue
+        # Never plan the active runtime clone into the tree — relocating it
+        # breaks the install; ts-doctor --repair owns that move.
+        if [ -n "$runtime" ] && [ "$( (cd "$d" 2>/dev/null && pwd -P) || printf '%s' "$d")" = "$runtime" ]; then
+            printf 'runtime\t%s\t\t%s\n' "$d" "active terminal-stack runtime clone — not migrated (relocate with ts-doctor --repair)"
+            continue
+        fi
         out="$(ts_ws_dest_for "$d")"
         tier="$(printf '%s' "$out" | cut -f1)"
         rel="$(printf '%s' "$out" | cut -f2)"
@@ -185,7 +192,7 @@ cmd_plan() {
         done
     done
     local conflicts
-    conflicts="$(printf '%s\n' "$plan" | awk -F'\t' '$1=="conflict" || $1=="blocked"')"
+    conflicts="$(printf '%s\n' "$plan" | awk -F'\t' '$1=="conflict" || $1=="blocked" || $1=="runtime"')"
     if [ -n "$conflicts" ]; then
         echo
         echo "-- BLOCKED ------------------------------------------------------------"
@@ -198,7 +205,7 @@ cmd_plan() {
     fi
     movec="$(printf '%s\n' "$plan" | awk -F'\t' '$1=="move"' | grep -c . || true)"
     conflictc="$(printf '%s\n' "$plan" | awk -F'\t' '$1=="conflict"' | grep -c . || true)"
-    blockedc="$(printf '%s\n' "$plan" | awk -F'\t' '$1=="blocked"' | grep -c . || true)"
+    blockedc="$(printf '%s\n' "$plan" | awk -F'\t' '$1=="blocked" || $1=="runtime"' | grep -c . || true)"
     inplacec="$(printf '%s\n' "$plan" | awk -F'\t' '$1=="inplace"' | grep -c . || true)"
     echo
     printf '%s ready, %s conflicted, %s blocked, %s already correct\n' \

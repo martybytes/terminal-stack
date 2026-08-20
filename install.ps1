@@ -9,7 +9,9 @@
 #   1. Verifies winget is available (App Installer).
 #   2. Ensures Git is installed (winget Git.Git if missing).
 #   3. Clones github.com/martybytes/terminal-stack to $TERMINAL_STACK_DIR
-#      (default: $env:USERPROFILE\terminal-stack). git pull if already cloned.
+#      (default: %LOCALAPPDATA%\terminal-stack\stack — the app-data dir the
+#      stack already owns). git pull if already cloned; an existing clone at a
+#      legacy location is offered a move to the canonical path instead.
 #   4. Runs bootstrap\windows-bootstrap.ps1 from the clone.
 #   5. Prints the WSL one-liner for the next step (chezmoi apply runs in WSL).
 
@@ -44,14 +46,53 @@ if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
 }
 
 # 3. Choose clone location ($env:TERMINAL_STACK_DIR skips the prompt), then clone.
+# Canonical default: inside the app-data dir the stack already owns (see
+# docs/decisions.md § "Runtime clone location"). Canonical needs no pin.
 $repoUrl = 'https://github.com/martybytes/terminal-stack.git'
-$defaultDir = Join-Path $env:USERPROFILE 'terminal-stack'
+$defaultDir = Join-Path $env:LOCALAPPDATA 'terminal-stack\stack'
 if ($env:TERMINAL_STACK_DIR) {
     $targetDir = $env:TERMINAL_STACK_DIR
     Write-Host "==> Clone location: $targetDir (from `$env:TERMINAL_STACK_DIR)"
 } else {
     $answer = Read-Host "Where should the terminal-stack repo live? [$defaultDir]"
     $targetDir = if ($answer) { $answer } else { $defaultDir }
+}
+
+# 3a. An existing clone at a legacy location: pull it first (that lands the
+# move routine inside it), then offer to move it to the target instead of
+# cloning fresh — preserves history, stashes, and any dirty state.
+# Minimal legacy scan; master list: bootstrap\_cleanup.ps1 Get-TsCleanupCloneCandidates.
+if (-not (Test-Path (Join-Path $targetDir '.git'))) {
+    $legacy = $null
+    foreach ($d in @(
+        (Join-Path $env:USERPROFILE 'terminal-stack'),
+        'C:\DATA\Workspace\terminal-stack',
+        (Join-Path $env:USERPROFILE 'code\terminal-stack'),
+        (Join-Path $env:USERPROFILE 'Documents\Workspace\terminal-stack'),
+        (Join-Path $env:USERPROFILE 'workspace\terminal-stack')
+    )) {
+        if (Test-Path (Join-Path $d '.git')) { $legacy = $d; break }
+    }
+    if ($legacy) {
+        Write-Host "==> Existing clone found at $legacy"
+        $choice = Read-Host "  [M]ove it to $targetDir / [K]eep it there / [F]resh clone at the new location? [M]"
+        switch -Regex ($choice) {
+            '^(k|keep)$'  { $targetDir = $legacy; Write-Host "==> Keeping $legacy" }
+            '^(f|fresh)$' { }
+            default {
+                & git -C $legacy pull --ff-only 2>$null | Out-Null
+                $legacyCleanup = Join-Path $legacy 'bootstrap\_cleanup.ps1'
+                if (Test-Path $legacyCleanup) { . $legacyCleanup }
+                if (Get-Command Move-TsClone -ErrorAction SilentlyContinue) {
+                    if (-not (Move-TsClone -Source $legacy -Dest $targetDir)) {
+                        Write-Warning 'Move failed; falling back to a fresh clone.'
+                    }
+                } else {
+                    Write-Warning 'This clone predates the move routine; cloning fresh instead (old clone offered for cleanup later).'
+                }
+            }
+        }
+    }
 }
 
 if (Test-Path (Join-Path $targetDir '.git')) {
@@ -70,7 +111,9 @@ if (Test-Path $cleanup) {
     . $cleanup
     Invoke-TsCleanupMenu $targetDir
 }
-if ($targetDir -ne $defaultDir) {
+# Pins are only for NON-canonical locations; the canonical path resolves on its
+# own, and a stale pin there would shadow future relocations.
+if ($targetDir.TrimEnd('\') -ne $defaultDir.TrimEnd('\')) {
     $localProfile = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'PowerShell\profile.local.ps1'
     New-Item -ItemType Directory -Force -Path (Split-Path $localProfile) | Out-Null
     $line = "`$env:TERMINAL_STACK_DIR = '$targetDir'"
@@ -80,6 +123,8 @@ if ($targetDir -ne $defaultDir) {
         Add-Content -Path $localProfile -Value $line
     }
     Write-Host "==> persisted `$env:TERMINAL_STACK_DIR = $targetDir to $localProfile"
+} elseif (Get-Command Clear-TsSourceDirPin -ErrorAction SilentlyContinue) {
+    Clear-TsSourceDirPin
 }
 
 # 4. Bootstrap (winget packages + binaries)

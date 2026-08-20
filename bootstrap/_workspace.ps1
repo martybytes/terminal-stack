@@ -102,6 +102,19 @@ function Get-TsWsRoot {
 
 function Get-TsWsStateDir { Join-Path $env:LOCALAPPDATA 'terminal-stack' }
 
+# The ACTIVE terminal-stack runtime clone (the one ts-update updates), resolved.
+# wso must never migrate it: relocating the runtime clone breaks the install
+# (that's ts-doctor's job). $env:TERMINAL_STACK_DIR → the canonical location.
+function Get-TsWsRuntimeClone {
+    $src = $env:TERMINAL_STACK_DIR
+    if (-not $src) {
+        $canon = Join-Path $env:LOCALAPPDATA 'terminal-stack\stack'
+        if (Test-Path (Join-Path $canon '.git')) { $src = $canon }
+    }
+    if (-not $src -or -not (Test-Path -LiteralPath $src)) { return $null }
+    return (Resolve-Path -LiteralPath $src).Path
+}
+
 # ----------------------------------------------------------- remote parsing ----
 
 # Returns @{Host;Owner;Repo} or $null. Handles every form git emits:
