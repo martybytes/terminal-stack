@@ -12,22 +12,23 @@
 # and not listed here. WezTerm is a wizard choice (Read-TsWezterm), not a
 # prerequisite. tmux/tldr/nvtop/lazydocker are WSL/Linux-only.
 $script:TsWingetIds = @{
-    eza     = 'eza-community.eza'
-    fzf     = 'junegunn.fzf'
-    bat     = 'sharkdp.bat'
-    delta   = 'dandavison.delta'
-    ripgrep = 'BurntSushi.ripgrep.MSVC'
-    zoxide  = 'ajeetdsouza.zoxide'
-    glow    = 'charmbracelet.glow'
-    micro   = 'zyedidia.micro'
-    neovim  = 'Neovim.Neovim'
-    zed     = 'Zed.Zed'
-    gh      = 'GitHub.cli'
-    ghq     = 'x-motemen.ghq'
-    lazygit = 'JesseDuffield.lazygit'
-    ffmpeg  = 'Gyan.FFmpeg'
+    eza        = 'eza-community.eza'
+    fzf        = 'junegunn.fzf'
+    bat        = 'sharkdp.bat'
+    delta      = 'dandavison.delta'
+    ripgrep    = 'BurntSushi.ripgrep.MSVC'
+    zoxide     = 'ajeetdsouza.zoxide'
+    glow       = 'charmbracelet.glow'
+    micro      = 'zyedidia.micro'
+    neovim     = 'Neovim.Neovim'
+    zed        = 'Zed.Zed'
+    gh         = 'GitHub.cli'
+    ghq        = 'x-motemen.ghq'
+    lazygit    = 'JesseDuffield.lazygit'
+    ffmpeg     = 'Gyan.FFmpeg'
+    prettymark = 'Eagle1.PrettyMark'
 }
-$script:TsAppsRecommended = @('eza','fzf','bat','delta','ripgrep','zoxide','glow','micro','neovim','gh','ghq','lazygit')
+$script:TsAppsRecommended = @('eza','fzf','bat','delta','ripgrep','zoxide','glow','micro','neovim','gh','ghq','lazygit','prettymark')
 $script:TsAppsOptional    = @('zed','ffmpeg')
 $script:TsAppsAll         = $script:TsAppsRecommended + $script:TsAppsOptional
 
@@ -38,6 +39,20 @@ function Get-TsAppBin([string]$id) {
         'neovim'  { 'nvim' }
         default   { $id }
     }
+}
+
+# Apps whose winget install doesn't register a PATH binary — GUI apps that only
+# land in Program Files. Checked as a fallback so Get-TsAppsPending doesn't nag
+# forever about something that's actually installed. Keep in sync with the exe
+# path the `pm` launcher (in $PROFILE) resolves.
+$script:TsAppFixedPaths = @{
+    prettymark = "$env:ProgramFiles\PrettyMark\PrettyMark.exe"
+}
+
+function Test-TsAppInstalled([string]$id) {
+    if (Get-Command (Get-TsAppBin $id) -ErrorAction SilentlyContinue) { return $true }
+    if ($script:TsAppFixedPaths.ContainsKey($id)) { return (Test-Path $script:TsAppFixedPaths[$id]) }
+    return $false
 }
 
 # Apps this machine is expected to have but doesn't. Two sources, deliberately:
@@ -54,7 +69,7 @@ function Get-TsAppsPending {
         if (-not $id) { continue }
         if ($seen[$id]) { continue }
         $seen[$id] = $true
-        if (Get-Command (Get-TsAppBin $id) -ErrorAction SilentlyContinue) { continue }
+        if (Test-TsAppInstalled $id) { continue }
         # Only offer what this platform can actually install.
         if (-not $script:TsWingetIds.ContainsKey($id)) { continue }
         $out += $id
@@ -78,6 +93,7 @@ function Get-TsAppDesc([string]$id) {
         'ghq'     { 'clone into the derived workspace path' }
         'lazygit' { 'git TUI (the wso status hand-off)' }
         'ffmpeg'  { 'ffplay for Claude TTS on Windows (Gyan.FFmpeg)' }
+        'prettymark' { 'markdown viewer (pm alias)' }
         default   { '' }
     }
 }

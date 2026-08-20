@@ -1042,6 +1042,28 @@ function npp {
     & $exe @resolved
 }
 
+# pm [files...] — open file(s) in PrettyMark (like `npp`, but for PrettyMark's md viewer).
+function pm {
+    param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Paths)
+    $exe = (Get-Command prettymark -ErrorAction SilentlyContinue).Source
+    if (-not $exe) {
+        $c = "$env:ProgramFiles\PrettyMark\PrettyMark.exe"
+        if (Test-Path $c) { $exe = $c }
+    }
+    if (-not $exe) {
+        Write-Warning 'pm: PrettyMark not found — install it or add PrettyMark.exe to PATH'
+        return
+    }
+    if (-not $Paths) { & $exe; return }
+    $resolved = foreach ($p in $Paths) {
+        $full = Resolve-Path -LiteralPath $p -ErrorAction SilentlyContinue
+        if     ($full)                               { $full.Path }
+        elseif ([System.IO.Path]::IsPathRooted($p))  { $p }
+        else                                          { Join-Path (Get-Location).Path $p }
+    }
+    & $exe @resolved
+}
+
 # c [folder] — open folder in Cursor with the classic UI (like `npp`, but for Cursor).
 function c {
     param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Paths)

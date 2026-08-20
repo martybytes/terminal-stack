@@ -30,6 +30,7 @@ it, so a failure can't scroll past unnoticed.
 | `gh` | `GitHub.cli` | recommended |
 | `ghq` | `x-motemen.ghq` | recommended |
 | `lazygit` | `JesseDuffield.lazygit` | recommended |
+| `prettymark` | `Eagle1.PrettyMark` | recommended (markdown viewer, `pm` alias) |
 | `zed` | `Zed.Zed` | optional |
 | `ffmpeg` | `Gyan.FFmpeg` | optional (ffplay for Claude TTS) |
 
@@ -47,3 +48,6 @@ it, so a failure can't scroll past unnoticed.
 
 `ts-update` compares this catalog against what's on PATH after every pull and
 offers to install anything the catalog gained — see `doc common/stack`.
+PrettyMark is the one entry whose winget install doesn't land on `PATH`; its
+presence check falls back to the fixed `C:\Program Files\PrettyMark\PrettyMark.exe`
+path instead (same one the `pm` alias resolves).
