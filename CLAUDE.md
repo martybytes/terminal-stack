@@ -24,7 +24,7 @@ chezmoi re-add ~/.zshrc
 chezmoi re-add ~/.claude/settings.json
 ```
 
-There is no CI. Verification is manual — see `INSTALL.md` § Phase 9.
+There is no CI. Verification is manual: `docs/verifying-changes.md` is the pre-commit checklist (syntax gates, headless WezTerm config load test, the byte-identical menu diff, throwaway config stores), and `INSTALL.md` § Phase 9 is the post-install smoke test for a fresh machine.
 
 ## The architectural twist: one source repo, three targets
 
@@ -116,6 +116,7 @@ Any script in this repo that overwrites a user file must write a backup first as
 - `docs/cross-side-chezmoi.md` — deep dive on the chezmoi + run_after mechanism
 - `docs/developing-wezterm.md` — edit → sync/apply → reload loop for WezTerm config (Windows `sync-windows.ps1`, macOS chezmoi)
 - `docs/powershell-quirks.md` — every weird Windows-side workaround with cause and fix
+- `docs/verifying-changes.md` — how to check a change before committing (replaces the missing CI)
 - `docs/decisions.md` — design choices that aren't obvious from the code
 
 ## Personal-path note
