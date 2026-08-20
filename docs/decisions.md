@@ -446,6 +446,41 @@ clone as `runtime … not migrated` if it is ever scanned.
 a pin there would shadow future relocations, so the installer and `Move-TsClone`/
 `ts_relocate_clone` strip a stale pin (backed up) instead of rewriting it.
 
+**A persisted pin is honoured only while a clone lives at it.** `profile.local.ps1` is
+dot-sourced by `$PROFILE`, so a pin written by an earlier install is set in *every*
+pwsh session — `irm … | iex` never sees a clean environment, and `install.ps1` cannot
+tell "the user prefixed the one-liner" from "this machine was pinned in 2024" by
+looking at the variable alone. It compares against the persisted line instead: a value
+that matches `profile.local.ps1` **and** has no clone behind it is a leftover, so the
+installer says so and falls back to the canonical default (the pin line is then removed
+by the existing `Clear-TsSourceDirPin` branch, backed up first). A pin exported for one
+run is not in that file and is always obeyed. POSIX persists its pin as chezmoi's
+`sourceDir` rather than an env var, so there `TERMINAL_STACK_DIR` is only overridden
+when it is dangling *and* the canonical location holds a real clone.
+
+**A dangling pin degrades; it never dead-ends.** `Resolve-TsSourceDir` / `_ts_src` warn
+and fall through to the candidate search when `$TERMINAL_STACK_DIR` names a path with no
+clone. The two pin sources are deliberately not equivalent: an explicit `-SourceDir` is
+typed per call, so a bad one still fails loudly, while the env pin arrives unbidden in
+every session and a stale line would otherwise brick `ts-update` / `wso` / `doc`
+machine-wide with no way out short of hand-editing `profile.local.ps1`. That is exactly
+what happened.
+
+**The runtime clone never goes inside a workspace root.** All four installers warn and
+default to the canonical path when the chosen target sits under a detected workspace
+root, because `wso migrate` derives a repo's destination from its `origin` and will
+relocate it to `<tier>/github.com/<owner>/terminal-stack` — a path no resolver knows.
+Dev-clone tier paths stay exempt: pinning one is deliberate.
+
+**wso will not migrate an un-tiered terminal-stack clone, active or not.** The original
+guard compared each candidate against the *resolved* runtime clone, which meant a `$null`
+from `Get-TsWsRuntimeClone` switched the guard off — in precisely the broken states where
+it matters (dangling pin, clone at a legacy path). It is layered now: the guard delegates
+to `Resolve-TsSourceDir`, the pwsh `wso` shim exports what it resolved (the zsh twin
+already did), and any scan candidate whose `origin` names the project is blocked outright.
+A genuine dev clone already lives at a tier path and is therefore never a scan candidate,
+so nothing legitimate is caught.
+
 **Migration is ts-doctor's job.** `ts-doctor --repair` (pwsh `-Repair`) offers to move
 a legacy-path clone to the canonical location: a plain directory move (same-volume
 rename; cross-volume copy + HEAD-verify), then repoints chezmoi `sourceDir` (POSIX) or
@@ -454,3 +489,60 @@ re-applies. `ts-update` only prints a one-line notice — an update must never m
 directories as a side effect. Installers default to the canonical paths and offer the
 same move when they find an existing legacy clone (pulling it first so the move
 routine is present inside it).
+
+When the canonical location is *already occupied*, `Move-TsClone` refuses (it will not
+overwrite a destination) and the cleanup menu cannot help — `Find-TsClones` never offers
+the canonical path, by design. That combination used to be a dead end, so `-Repair`
+resolves it directly: if the occupant is a real stack clone it becomes the one in use and
+the cleanup menu offers the other; if it is merely a directory in the way, it says so and
+names the fix.
+
+## Why the wizard re-prompts instead of defaulting on bad input
+
+Every wizard question used to be a `switch (Read-Host 'Choose [1]') { … default { … } }`
+(pwsh) or `case "$ans" in … *) … ;; esac` (bash). Both are total functions: `9`, `y`, a
+stray paste, or a mis-hit key all fell into the default branch and the install continued
+as if option 1 had been chosen deliberately. The defaults are good, which is exactly why
+this was hard to notice — you got a working stack that was not the one you asked for.
+
+A default should be what you get when you *decline to choose*, not what you get when the
+program cannot understand you. So `Read-TsChoice` / `ts_prompt_choice` treat an empty
+answer as consent to the default and anything unrecognised as a question worth asking
+again (three times, then the default, so an automated caller can never spin). While the
+two implementations were being written anyway, they also gained what the old ones lacked:
+the default is marked and captioned "press Enter" rather than encoded in a `[1]` nobody
+reads, and an option's name works wherever its number does (`dark`, `stable`, `none`).
+
+They are two implementations, not a wrapper and a shim — the same rule `wso` follows, for
+the same reason (bash cannot source a `.ps1` and pwsh cannot source a `.sh`). Keep the
+rendered output byte-identical; a diff of the two menus is the test.
+
+**Why the review step.** The wizard's answers used to be applied as they were given, and
+the Windows workspace question was asked *after* every winget install — so a mis-answer
+was only discoverable once the machine had already changed, and the fix was a full re-run.
+Collecting first and showing a `[P]roceed / [e]dit / [q]uit` summary makes a wrong answer
+cost a keystroke. `q` is meaningful precisely because nothing has happened yet.
+
+`TS_WIZ_ASKED` counts the questions a human was actually shown, and it is tallied in
+`ts_wizard_ask` rather than inside `ts_prompt_choice`: every prompt is called through
+`$(…)`, so an increment in the subshell would be discarded. It exists because "is there a
+`/dev/tty`" and "is there a person" are different questions — a run whose every answer
+came from `TS_*` env vars has nothing to review, and prompting anyway would block forever
+in CI, where the tty exists and nobody is watching it.
+
+## Why WezTerm is a choice, and why a failed nightly falls back to stable
+
+WezTerm sat in the always-installed set next to the Nerd Font, Starship, and chezmoi.
+Those three are load-bearing — the configs this repo deploys are meaningless without them.
+WezTerm is not in the same category: the stack is useful under Windows Terminal, over ssh,
+or on a machine that already has WezTerm from somewhere else, and the `.wezterm.lua` we
+deploy is inert when the binary is absent.
+
+It was also the least reliable install in the set. `wez.wezterm.nightly`'s winget manifest
+is republished more often than its hash is refreshed, so `Installer hash does not match`
+is a routine outcome rather than an exotic one — and the bootstrap's response was a
+`Write-Warning` that scrolled past behind a dozen more package installs, leaving an
+install that looked clean and had no terminal. Nightly is still the default (the config
+targets current builds), but a nightly that will not install now falls back to stable
+rather than to nothing, and every package that failed is reprinted at the end with the
+command to retry it.
