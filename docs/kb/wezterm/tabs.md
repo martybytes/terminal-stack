@@ -25,5 +25,5 @@ active pane's **cwd leaf**. The icon tracks the foreground process (a robot whil
 Claude runs). Tabs with Claude panes add one coloured **dot per pane** (● working
 peach / done green / error red, ○ idle) and the whole tab tints by its most urgent
 pane; other multi-pane tabs show a pane count, and a zoomed pane adds an icon. The
-status bar shows mode/workspace on the left and `user@host │ path` on the right —
-see `doc wezterm/workspace`.
+status bar is quiet by default — just the mode badge; **`Ctrl+Space` `s`** reveals
+the workspace and `user@host │ path`. See `doc wezterm/workspace`.

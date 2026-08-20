@@ -10,6 +10,7 @@
 #   TS_LEADER=ctrl-a   TS_THEME=dark|light|follow   TS_TMUX=ctrl-b
 #   TS_APPS=recommended|all|none|id,id,...   (none or "skip all" = no optional apps)
 #   TS_WEZTERM=nightly|stable|skip           (macOS only; WSL/Linux never install it)
+#   TS_WEZ_MUX=on|off                        WezTerm multiplexer domain (ts-mux)
 #   TS_CC_TTS=on|off|skip   Claude Code Kokoro TTS at install
 #   TS_ASSUME_YES=1         skip the review prompt (answers still come from the above)
 #
@@ -136,6 +137,24 @@ ts_prompt_wezterm() {
     fi
 }
 
+# The multiplexer domain (ts-mux). Asked wherever a WezTerm GUI actually runs —
+# macOS, Windows, and WSL, whose GUI is the Windows one — and skipped headless.
+# Default off: it changes how every pane is hosted and how a config reload
+# behaves, which is a decision to make once at install rather than inherit.
+# Twin of bootstrap/_config.ps1 Read-TsWeztermMux — keep the rendering identical.
+ts_prompt_wezterm_mux() {
+    if [ -n "${TS_WEZ_MUX:-}" ]; then
+        case "$TS_WEZ_MUX" in on) printf 'on\n' ;; *) printf 'off\n' ;; esac
+        return 0
+    fi
+    ts_prompt_choice off 'WezTerm multiplexer (keeps panes alive when the GUI dies):' \
+'  On: your shells run in wezterm-mux-server, so a GUI crash leaves every
+  pane alive and relaunching WezTerm reattaches. Cost: config changes then
+  need "ts-mux restart" (kills every pane) and mux panes lose the Claude tint.' \
+        'off|off|panes are spawned by the GUI' \
+        'on|on|panes survive a GUI crash'
+}
+
 # Expand a TS_APPS env value (recommended|all|none|csv) to a space list.
 ts_expand_apps() {
     case "$1" in
@@ -210,6 +229,7 @@ ts_wizard_review() {
     printf '    Leader       %s\n' "$TS_WIZ_LEADER"
     printf '    Theme        %s\n' "$theme_label"
     [ -n "${TS_WIZ_WEZTERM:-}" ] && printf '    WezTerm      %s\n' "$TS_WIZ_WEZTERM"
+    printf '    WezTerm mux  %s\n' "${TS_WIZ_WEZ_MUX:-off}"
     printf '    tmux prefix  %s\n' "$TS_WIZ_TMUX"
     printf '    Apps         %s\n' "${TS_WIZ_APPS:-<none>}"
     printf '    Claude TTS   %s\n' "${TS_WIZ_CC_TTS:-off}"
@@ -241,6 +261,13 @@ ts_wizard_ask() {
         TS_WIZ_WEZTERM="$(ts_prompt_wezterm)"
         [ -n "${TS_WEZTERM:-}" ] || TS_WIZ_ASKED=$((TS_WIZ_ASKED + 1))
     fi
+
+    # The mux only matters where a WezTerm GUI runs; a headless server has none,
+    # so skip the question there — same rule as the leader key above.
+    if [ -n "${TS_WEZ_MUX:-}" ]; then
+        case "$TS_WEZ_MUX" in on) TS_WIZ_WEZ_MUX=on ;; *) TS_WIZ_WEZ_MUX=off ;; esac
+    elif command -v ts_is_headless >/dev/null 2>&1 && ts_is_headless; then TS_WIZ_WEZ_MUX=off
+    else TS_WIZ_WEZ_MUX="$(ts_prompt_wezterm_mux)"; TS_WIZ_ASKED=$((TS_WIZ_ASKED + 1)); fi
 
     if [ -n "${TS_APPS:-}" ]; then TS_WIZ_APPS="$(ts_expand_apps "$TS_APPS")"
     else TS_WIZ_APPS="$(ts_prompt_apps)"; TS_WIZ_ASKED=$((TS_WIZ_ASKED + 1)); fi
@@ -275,7 +302,7 @@ ts_wizard_collect() {
         esac
     done
 
-    export TS_WIZ_LEADER TS_WIZ_THEME TS_WIZ_APPS TS_WIZ_TMUX TS_WIZ_CC_TTS TS_WIZ_WEZTERM
-    echo "$INFO Config: leader=$TS_WIZ_LEADER theme=$TS_WIZ_THEME tmux-prefix=$TS_WIZ_TMUX cc-tts=${TS_WIZ_CC_TTS:-off}"
+    export TS_WIZ_LEADER TS_WIZ_THEME TS_WIZ_APPS TS_WIZ_TMUX TS_WIZ_CC_TTS TS_WIZ_WEZTERM TS_WIZ_WEZ_MUX
+    echo "$INFO Config: leader=$TS_WIZ_LEADER theme=$TS_WIZ_THEME tmux-prefix=$TS_WIZ_TMUX wez-mux=${TS_WIZ_WEZ_MUX:-off} cc-tts=${TS_WIZ_CC_TTS:-off}"
     echo "$INFO Apps: ${TS_WIZ_APPS:-<none>}"
 }

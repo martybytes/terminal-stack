@@ -301,9 +301,14 @@ local function kill_workspace(window, pane)
   }, pane)
 end
 
--- Right-status identity toggle (Leader+s): show/hide the user@host + path
--- segment. wezterm.GLOBAL survives config reloads (a plain local would reset).
-if wezterm.GLOBAL.show_identity == nil then wezterm.GLOBAL.show_identity = true end
+-- Status-bar detail toggle (Leader+s): show/hide the workspace name and the
+-- user@host + path segment. OFF by default — the mode badge is the only thing
+-- worth a permanent slot; "msampson@host │ ~/some/path │ default" is noise you
+-- already know, and the tab titles carry the per-pane context. Press Leader+s
+-- when you actually need to see where a pane is.
+-- wezterm.GLOBAL survives config reloads (a plain local would reset); it does
+-- not survive a GUI restart, so every launch starts quiet.
+if wezterm.GLOBAL.show_identity == nil then wezterm.GLOBAL.show_identity = false end
 
 config.keys = {
   { key = 'l', mods = 'ALT', action = act.ShowLauncherArgs {
@@ -331,7 +336,7 @@ config.keys = {
   -- Domain splits (Shift = "remote"): H = pick domain → top/bottom, V = pick domain → left/right.
   { key = 'H', mods = 'LEADER', action = wezterm.action_callback(function(w, p) pick_domain_split(w, p, 'Down') end) },
   { key = 'V', mods = 'LEADER', action = wezterm.action_callback(function(w, p) pick_domain_split(w, p, 'Right') end) },
-  -- Toggle the user@host + path segment in the status bar.
+  -- Toggle the status-bar detail (workspace + user@host + path); off by default.
   { key = 's', mods = 'LEADER', action = wezterm.action_callback(function(window)
       wezterm.GLOBAL.show_identity = not wezterm.GLOBAL.show_identity
     end) },
@@ -483,6 +488,15 @@ local function pane_location(pane)
   return titlecase(user), titlecase(host), path
 end
 
+-- The workspace name for the status bar; '' when the detail is toggled off
+-- (Leader+s) and for the implicit 'default' workspace, which names nothing.
+local function status_workspace(window)
+  if wezterm.GLOBAL.show_identity == false then return '' end
+  local ws = window:active_workspace()
+  if ws == nil or ws == '' or ws == 'default' then return '' end
+  return ws
+end
+
 -- The identity + path string for the status bar; '' when toggled off (Leader+s).
 local function status_identity(window, pane)
   if wezterm.GLOBAL.show_identity == false then return '' end
@@ -538,7 +552,7 @@ if wezterm.gui then
             if window:leader_is_active() then return '⌨ LEADER' end
             return str
           end } },
-          tabline_b = { 'workspace' },
+          tabline_b = { status_workspace },
           tabline_c = { ' ' },
           tabline_x = { status_identity },
           tabline_y = {},
@@ -847,8 +861,8 @@ if not have_tabline then
       table.insert(items, { Attribute = { Intensity = 'Normal' } })
       table.insert(items, { Text = '  ' })
     end
-    local ws = window:active_workspace()
-    if ws ~= 'default' then                              -- workspace only when non-default
+    local ws = status_workspace(window)   -- '' when toggled off or 'default'
+    if ws ~= '' then
       table.insert(items, { Foreground = { Color = P.accent } })
       table.insert(items, { Text = '⬡ ' .. ws })
       table.insert(items, { Foreground = { Color = P.overlay1 } })

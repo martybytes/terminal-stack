@@ -202,7 +202,8 @@ function Save-TsConfig {
 }
 
 # ── Wizard prompts ──────────────────────────────────────────────────────────────
-# Env vars skip each prompt: TS_LEADER, TS_THEME, TS_WEZTERM, TS_APPS, TS_CC_TTS
+# Env vars skip each prompt: TS_LEADER, TS_THEME, TS_WEZTERM, TS_WEZ_MUX, TS_APPS,
+# TS_CC_TTS
 # (and WORKSPACE_DIR for the workspace question in windows-bootstrap.ps1).
 
 # The menu prompt every wizard question uses. Marks the default and says how to
@@ -311,6 +312,22 @@ function Read-TsWezterm {
             @{ Key = 'skip';    Label = "skip — I'll use Windows Terminal or install it myself" }
         )
     }
+}
+
+# The multiplexer domain (ts-mux). Default off: it changes how every pane is
+# hosted and how a config reload behaves, which is a decision to make once at
+# install rather than inherit.
+# Twin of bootstrap/_wizard.sh ts_prompt_wezterm_mux — keep the rendering identical.
+function Read-TsWeztermMux {
+    if ($env:TS_WEZ_MUX) { if ($env:TS_WEZ_MUX -eq 'on') { return 'on' } else { return 'off' } }
+    Read-TsChoice -Title 'WezTerm multiplexer (keeps panes alive when the GUI dies):' -Default 'off' -Intro @(
+        '  On: your shells run in wezterm-mux-server, so a GUI crash leaves every',
+        '  pane alive and relaunching WezTerm reattaches. Cost: config changes then',
+        '  need "ts-mux restart" (kills every pane) and mux panes lose the Claude tint.'
+    ) -Options @(
+        @{ Key = 'off'; Label = 'off'; Note = 'panes are spawned by the GUI' },
+        @{ Key = 'on';  Label = 'on';  Note = 'panes survive a GUI crash' }
+    )
 }
 function Read-TsApps {
     if ($env:TS_APPS) {

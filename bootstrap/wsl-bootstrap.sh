@@ -67,6 +67,9 @@ fi
 if [ -f "$TOML" ]; then
     # shellcheck disable=SC2086
     ts_save_config "${TS_WIZ_LEADER:-ctrl-space}" "${TS_WIZ_THEME:-dark}" "${TS_WIZ_TMUX:-ctrl-b}" ${TS_WIZ_APPS:-}
+    # Stored on its own, not through ts_save_config: the mux key is positional-
+    # argument-free by design so ts-mux can flip it without re-stating the rest.
+    ts_wez_mux_set "${TS_WIZ_WEZ_MUX:-off}"
     ts_cc_tts_apply_wizard_choice "${TS_WIZ_CC_TTS:-off}"
     ts_cc_tts_finish
     echo "$INFO Saved terminal-stack config to $TOML [data]"

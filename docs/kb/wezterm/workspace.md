@@ -32,6 +32,11 @@ Sessions autosave every 15 min and on window focus loss.
 | `Ctrl+Space` `L` | restore a saved state — fuzzy picker |
 
 ## Status bar
-Left shows the active mode badge (or `⌨ LEADER`) and the workspace; right shows
-`user@host │ path` for the **active pane**. **`Ctrl+Space` `s`** toggles the
-identity+path segment on/off (survives config reloads).
+**Quiet by default.** All you get is the active mode badge (or `⌨ LEADER`) on the
+left — `user@host`, the path, and the workspace name are the kind of thing you
+already know, and the tab titles carry the per-pane context.
+
+**`Ctrl+Space` `s`** reveals them: the workspace on the left (hidden anyway while
+you're in the implicit `default` one) and `user@host │ path` for the **active
+pane** on the right. Press it again to go quiet. The state survives config
+reloads but not a WezTerm restart, so every launch starts clean.
