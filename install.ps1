@@ -4,6 +4,10 @@
 #
 # Optional: override the clone location before invoking.
 #   $env:TERMINAL_STACK_DIR = 'D:\dotfiles\terminal-stack'; irm ... | iex
+# Two caveats on that override: a target inside a workspace root is refused by
+# default (wso migrate would relocate it), and a pin already persisted in
+# profile.local.ps1 with no clone behind it is treated as a leftover and ignored
+# -- $PROFILE sets that variable in every session, so it is not evidence of intent.
 #
 # What it does:
 #   1. Verifies winget is available (App Installer).
@@ -45,7 +49,7 @@ if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
     Write-Host "==> git already present ($((Get-Command git).Source))"
 }
 
-# 3. Choose clone location ($env:TERMINAL_STACK_DIR skips the prompt), then clone.
+# 3. Choose clone location (a live $env:TERMINAL_STACK_DIR skips the prompt), then clone.
 # Canonical default: inside the app-data dir the stack already owns (see
 # docs/decisions.md § "Runtime clone location"). Canonical needs no pin.
 $repoUrl = 'https://github.com/martybytes/terminal-stack.git'

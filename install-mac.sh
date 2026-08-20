@@ -12,7 +12,8 @@
 #   2. Installs Homebrew if absent.
 #   3. brew install git if absent.
 #   4. Clones github.com/martybytes/terminal-stack to ~/code/terminal-stack
-#      (or $TERMINAL_STACK_DIR). git pull if already cloned.
+#      (or $TERMINAL_STACK_DIR, unless that names a workspace root). git pull if
+#      already cloned.
 #   5. Runs bootstrap/mac-bootstrap.sh.
 #   6. Runs chezmoi apply -v. The post-apply hook self-no-ops without /mnt/c/Users/.
 

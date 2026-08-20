@@ -10,7 +10,8 @@
 #   1. Ensures git + curl are installed (apt).
 #   2. Auto-detects Windows username via cmd.exe interop.
 #   3. Clones github.com/martybytes/terminal-stack to /mnt/c/Users/<WIN_USER>/terminal-stack
-#      (or $TERMINAL_STACK_DIR). git pull if already cloned.
+#      (or $TERMINAL_STACK_DIR, unless that names a workspace root). git pull if
+#      already cloned.
 #   4. Runs bootstrap/wsl-bootstrap.sh non-interactively (WIN_USER from env).
 #   5. Runs chezmoi apply -v.
 

@@ -10,7 +10,8 @@
 # What it does:
 #   1. Ensures git + curl are installed (apt).
 #   2. Clones github.com/martybytes/terminal-stack to ~/code/terminal-stack
-#      (or $TERMINAL_STACK_DIR). git pull if already cloned.
+#      (or $TERMINAL_STACK_DIR, unless that names a workspace root). git pull if
+#      already cloned.
 #   3. Runs bootstrap/linux-bootstrap.sh.
 #   4. Runs chezmoi apply -v. The post-apply hook self-no-ops without /mnt/c/Users/.
 

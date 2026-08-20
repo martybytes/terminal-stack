@@ -26,20 +26,31 @@ curl -fsSL https://raw.githubusercontent.com/martybytes/terminal-stack/main/inst
 
 **Clone location.** Each installer **prompts** for where to put the repo, pre-filled with the per-platform canonical default (Windows and WSL share **one** clone at `%LOCALAPPDATA%\terminal-stack\stack`, which WSL sees as `/mnt/c/Users/<you>/AppData/Local/terminal-stack/stack`; Linux/macOS `~/.local/share/terminal-stack`). Press Enter to accept, or set `$env:TERMINAL_STACK_DIR` (PowerShell) / `TERMINAL_STACK_DIR=…` (bash) to skip the prompt. If an existing clone sits at an old location, the installer offers to move it to the canonical path (git state intact). The WSL installer auto-detects your Windows username via `cmd.exe` interop, so it runs without prompts under `curl | bash`.
 
+Two guards on that choice, both there because the alternative bit us:
+
+- **Not inside a workspace root.** If the target sits under a detected workspace (`C:\DATA\Workspace`, `~/workspace`, …), the installer warns and offers the canonical path instead — `wso migrate` derives destinations from a repo's `origin` and will otherwise relocate the runtime clone to a tier path, orphaning the install. Answer `n` to override; a dev clone already at a tier path is exempt.
+- **A stale pin is ignored, not obeyed.** `profile.local.ps1` is dot-sourced by `$PROFILE`, so a `TERMINAL_STACK_DIR` written by an earlier install is set in *every* pwsh session — `irm … | iex` never starts clean. If that persisted pin points at a path with no clone, the installer says so, falls back to the canonical default, and removes the dead line (backed up first). A pin you export for one run is not in that file and is always honoured.
+
 **Cleaning up old installs.** After cloning, the installer scans for **old terminal-stack clones at other paths** and **retired leftover files** (`command-reference.{md,txt,html}`, `~/.local/bin/wzr`, `~/.wezterm-ref`) and offers a checklist — safe items pre-ticked, one confirmation before anything is removed, your per-machine files (`~/.zshrc.local`/`profile.local.ps1`, `~/.doc.local`, `*.local.md`) never touched. Preview without deleting via `TS_DRY_RUN=1`. This is also what prevents the "I re-installed but `doc` still isn't found" trap: a stale `chezmoi sourceDir` pointing at an old clone is repointed automatically.
 
 **Install wizard.** The bootstraps run a short wizard, each prompt skippable via an env var (so scripted installs stay non-interactive — the bash prompts read `/dev/tty` directly and degrade to their defaults when no terminal is attached). Your answers are **saved** (chezmoi `[data]` on WSL/Linux/macOS; `%LOCALAPPDATA%\terminal-stack\config.json` on Windows) so `ts-update` keeps honoring them and `ts-config` can change them later.
 
-- **Leader key** (WezTerm) — `Ctrl+Space` (recommended), `Ctrl+A`, `Ctrl+B`, or a custom `mod-key` chord (e.g. `alt-space`). Skip with `TS_LEADER=ctrl-a`.
-- **Theme** — `dark` (Catppuccin Mocha, recommended), `light` (VS Code Light Modern), or `follow` (track the OS light/dark setting; WezTerm switches live, the Starship/tmux palette is baked at apply and refreshed by `ts-update`/`ts-config`). Skip with `TS_THEME=dark|light|follow`.
-- **Apps** — accept the recommended set (`eza fzf bat delta ripgrep zoxide glow micro neovim gh ghq lazygit`, plus `tmux` off-Windows) or customize per-app (also offers `zed`, `tldr`, `nvtop`, `lazydocker`). Required tools (WezTerm, the Nerd Font, Starship, chezmoi, git, zsh) are always installed. Skip with `TS_APPS=recommended|all|none|id,id,…`.
+Every question works the same way: the default is **marked with `>` and captioned "press Enter"**, an option's **name works wherever its number does** (`dark`, `stable`, `none`), and anything it doesn't recognise **asks again** rather than quietly taking the default — after three tries it gives up and takes the default, so an automated caller can't hang.
+
+- **Leader key** (WezTerm) — `Ctrl+Space` (default), `Ctrl+A`, `Ctrl+B`, `Alt+Space`, or a custom `mod-key` chord (e.g. `ctrl-x`). Skip with `TS_LEADER=ctrl-a`.
+- **Theme** — `dark` (Catppuccin Mocha, default), `light` (VS Code Light Modern), or `follow` (track the OS light/dark setting; WezTerm switches live, the Starship/tmux palette is baked at apply and refreshed by `ts-update`/`ts-config`). Skip with `TS_THEME=dark|light|follow`.
+- **WezTerm** (Windows and macOS only — WSL and native Linux use the host's GUI terminal) — `nightly` (default; what this stack's config targets), `stable`, or `skip` if you already have it or use a different terminal. When WezTerm is already on `PATH` the default flips to keeping it. A nightly whose package manifest has gone stale falls back to stable automatically. Skip with `TS_WEZTERM=nightly|stable|skip`. There is no `ts-config` entry for this — change it later with a plain `winget install wez.wezterm` / `brew install --cask wezterm@nightly`.
+- **Apps** — accept the recommended set (`eza fzf bat delta ripgrep zoxide glow micro neovim gh ghq lazygit`, plus `tmux` off-Windows), take **everything** (adds `zed`, `ffmpeg` on Windows; `zed`, `tldr`, `nvtop`, `lazydocker` elsewhere), choose which ones (type a comma-separated list, or press Enter to be asked one at a time), or skip them all. The Nerd Font, Starship, chezmoi, git and zsh are always installed. Skip with `TS_APPS=recommended|all|none|id,id,…`.
+- **Claude Code voice notifications** — off unless a local Kokoro TTS server answers on `http://127.0.0.1:8880`, in which case enabling is the default. Skip with `TS_CC_TTS=on|off`.
 - **Workspace directory** — pre-filled with the autodetected candidate (`C:\DATA\Workspace` / `~/Documents/Workspace` / `~/workspace` / `~/Workspace`). Press Enter to accept. Persisted to `~/.zshrc.local` (zsh) or `Documents\PowerShell\profile.local.ps1` (pwsh) *only* when it differs from the autodetect. Skip with `WORKSPACE_DIR=/path` / `$env:WORKSPACE_DIR`.
+
+Then a **review** — every answer listed, with `[P]roceed / [e]dit / [q]uit`. Nothing has been installed or written at that point, so `e` re-asks the questions and `q` leaves the machine untouched. The review is skipped when there is nothing to review (every answer came from an env var) or with `TS_ASSUME_YES=1` (bash).
 
 **Headless servers.** On a host with no graphical session (a server reached over ssh/PuTTY), the bootstrap auto-detects "headless", tells you so, and lets you confirm or flip it; force it with `TS_HEADLESS=1` (or `=0` for a desktop). Headless mode **skips the Nerd Font download and the WezTerm leader-key prompt** — there's no GUI terminal to use them — while still installing tmux, Starship, zsh, and the CLI tools. (WSL is treated as a desktop: it renders in a Windows GUI terminal.)
 
 Change any of these later with **`ts-config`** (interactive menu) or one-shot — `ts-config theme follow`, `ts-config leader ctrl-a`, `ts-config apps`, `ts-config show`. In a combined Windows+WSL setup, run `ts-config` from WSL (its `chezmoi apply` is authoritative for the Windows-side files).
 
-**If something looks wrong** — `doc: command not found` after an update, a clone you moved, leftover old clones — run **`ts-doctor`** (read-only health check) and **`ts-doctor --repair`** (pwsh: `ts-doctor -Repair`) to repoint chezmoi's `sourceDir`, re-apply, and clean up. The installers run the same check automatically at the end.
+**If something looks wrong** — `doc: command not found` after an update, a clone you moved, leftover old clones — run **`ts-doctor`** (read-only health check) and **`ts-doctor --repair`** (pwsh: `ts-doctor -Repair`) to repoint chezmoi's `sourceDir`, move a legacy-path clone to the canonical location, re-apply, and clean up. If the canonical location is *already* occupied, `--repair` switches to the clone that lives there and offers the other one for removal — a case that used to have no way forward. The installers run the same check automatically at the end.
 
 If you want to walk through each step instead (recommended for first-time inspection, or when chezmoi would clobber an existing hand-edited dotfile), keep reading.
 
@@ -56,11 +67,12 @@ cd $env:LOCALAPPDATA\terminal-stack\stack
 .\bootstrap\windows-bootstrap.ps1
 ```
 
-It runs the wizard (leader key / theme / apps — see **Install wizard** above; set `$env:TS_LEADER`/`TS_THEME`/`TS_APPS` to skip prompts), then installs:
-- **Always:** WezTerm nightly (`wez.wezterm.nightly`), JetBrainsMono Nerd Font (`DEVCOM.JetBrainsMonoNerdFont`), Starship (`Starship.Starship`), chezmoi (`twpayne.chezmoi`)
-- **Selected apps** (recommended set by default): eza, fzf, bat, delta, ripgrep, zoxide, glow, micro, neovim; optional `zed` (one winget each)
+It runs the wizard (leader key / theme / WezTerm / apps / TTS / workspace — see **Install wizard** above; set `$env:TS_LEADER`/`TS_THEME`/`TS_WEZTERM`/`TS_APPS` to skip prompts), shows the review, and only then installs:
+- **Always:** JetBrainsMono Nerd Font (`DEVCOM.JetBrainsMonoNerdFont`), Starship (`Starship.Starship`), chezmoi (`twpayne.chezmoi`)
+- **WezTerm, if you asked for it:** `wez.wezterm.nightly` (default) or `wez.wezterm` (stable). A nightly that won't install — its winget manifest is republished more often than its hash is refreshed, so `Installer hash does not match` is routine — falls back to stable rather than leaving you with no terminal
+- **Selected apps** (recommended set by default): eza, fzf, bat, delta, ripgrep, zoxide, glow, micro, neovim, gh, ghq, lazygit; optionally `zed`, `ffmpeg` (one winget each)
 
-It saves your choices to `%LOCALAPPDATA%\terminal-stack\config.json`. Pass `-WhatIf` to preview without installing. UAC prompts on machine-scope installs; approve each.
+It saves your choices to `%LOCALAPPDATA%\terminal-stack\config.json`. Any package that failed is **listed again at the end with the command to retry it**, so a failure can't scroll past unnoticed. Pass `-WhatIf` to preview without installing. UAC prompts on machine-scope installs; approve each.
 
 ### 2. WSL side
 
@@ -119,9 +131,10 @@ Installs via Homebrew (installing Homebrew itself first if absent):
 - oh-my-zsh (unattended)
 - chezmoi, Starship
 - eza, zoxide, fzf, bat, git-delta, ripgrep
-- WezTerm nightly (`--cask wezterm@nightly`) and JetBrainsMono Nerd Font (`--cask font-jetbrains-mono-nerd-font`)
+- JetBrainsMono Nerd Font (`--cask font-jetbrains-mono-nerd-font`)
+- WezTerm, if you asked for it: `--cask wezterm@nightly` (default) or `--cask wezterm` (stable)
 
-The plain `wezterm` cask is pinned to the stale `20240203` stable; the stack uses the `wezterm@nightly` cask so macOS matches the WezTerm nightly installed on the Windows side.
+The plain `wezterm` cask is pinned to the stale `20240203` stable, so the stack defaults to the `wezterm@nightly` cask and macOS matches the Windows side. It is a wizard question rather than a fixed step (`TS_WEZTERM=nightly|stable|skip`), and a nightly that won't install falls back to the stable cask. Headless Macs skip both casks — there is no window server to render them.
 
 It also writes `~/.config/chezmoi/chezmoi.toml` with `sourceDir` pointing at the
 clone (auto-detected from the script's own location). macOS keeps the system
@@ -214,12 +227,17 @@ sh -c "$(curl -fsLS get.chezmoi.io)" -- -b "$HOME/.local/bin"
 
 Log out and back in (or close/reopen the WSL terminal) so the new login shell takes effect.
 
-### Phase 1 — WezTerm nightly (Windows)
+### Phase 1 — WezTerm (Windows)
 
 ```powershell
 winget install --id wez.wezterm.nightly --exact --silent
 wezterm.exe --version    # expect 2025+ build, not 20240203
 ```
+
+Optional — the rest of the stack works without it, under Windows Terminal or an
+existing WezTerm. If nightly fails with `Installer hash does not match` (its
+manifest is republished more often than its hash is refreshed), use the stable
+package instead: `winget install --id wez.wezterm --exact --silent`.
 
 ### Phase 2 — `.wezterm.lua`
 

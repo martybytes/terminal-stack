@@ -8,8 +8,9 @@
 # theme mapping here mirror .chezmoi.toml.tmpl / bootstrap/_config.sh.
 
 # ── App catalog (winget ids) ─────────────────────────────────────────────────────
-# Required prerequisites (WezTerm, Nerd Font, Starship, chezmoi, Git) are always
-# installed and not listed here. tmux/tldr/nvtop/lazydocker are WSL/Linux-only.
+# Required prerequisites (Nerd Font, Starship, chezmoi, Git) are always installed
+# and not listed here. WezTerm is a wizard choice (Read-TsWezterm), not a
+# prerequisite. tmux/tldr/nvtop/lazydocker are WSL/Linux-only.
 $script:TsWingetIds = @{
     eza     = 'eza-community.eza'
     fzf     = 'junegunn.fzf'
@@ -182,7 +183,9 @@ function Save-TsConfig {
     return $obj
 }
 
-# ── Wizard prompts (env vars TS_LEADER / TS_THEME / TS_APPS skip each) ──────────
+# ── Wizard prompts ──────────────────────────────────────────────────────────────
+# Env vars skip each prompt: TS_LEADER, TS_THEME, TS_WEZTERM, TS_APPS, TS_CC_TTS
+# (and WORKSPACE_DIR for the workspace question in windows-bootstrap.ps1).
 
 # The menu prompt every wizard question uses. Marks the default and says how to
 # take it, accepts the option's name as well as its number, and RE-PROMPTS on
