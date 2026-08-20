@@ -1070,6 +1070,37 @@ function pm {
     & $exe @resolved
 }
 
+# pm's Paths only makes sense as markdown files — restrict Tab-completion to
+# .md files (and directories, so subfolders stay navigable). No key-rebinding
+# needed: Tab already cycles whatever a completer returns, so `pm ` + Tab
+# cycling every .md file and `pm ins` + Tab narrowing to INSTALL.md are the
+# same completer, just with an empty vs. partial $wordToComplete.
+Register-ArgumentCompleter -CommandName pm -ParameterName Paths -ScriptBlock {
+    param($commandName, $parameterName, $wordToComplete, $commandAst, $fakeBoundParameters)
+    # A trailing separator means "list this directory's contents" — Split-Path
+    # would otherwise treat the directory name itself as the leaf-in-progress
+    # and match the directory, not descend into it.
+    if ($wordToComplete -and $wordToComplete[-1] -in '\', '/') {
+        $dir = $wordToComplete; $leaf = ''
+    } elseif ($wordToComplete) {
+        $dir = Split-Path $wordToComplete -Parent
+        $leaf = Split-Path $wordToComplete -Leaf
+    } else {
+        $dir = ''; $leaf = ''
+    }
+    $searchDir = if ($dir) { $dir } else { '.' }
+    Get-ChildItem -LiteralPath $searchDir -ErrorAction SilentlyContinue |
+        Where-Object { $_.PSIsContainer -or $_.Extension -eq '.md' } |
+        Where-Object { $_.Name -like "$leaf*" } |
+        Sort-Object { -not $_.PSIsContainer }, Name |
+        ForEach-Object {
+            $rel = if ($dir) { Join-Path $dir $_.Name } else { $_.Name }
+            if ($_.PSIsContainer) { $rel += '\' }
+            $text = if ($rel -match "[\s']") { "'$($rel -replace "'", "''")'" } else { $rel }
+            [System.Management.Automation.CompletionResult]::new($text, $_.Name, 'ParameterValue', $rel)
+        }
+}
+
 # c [folder] — open folder in Cursor with the classic UI (like `npp`, but for Cursor).
 function c {
     param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Paths)

@@ -7,7 +7,7 @@ Windows-specific bits:
 | Command | What it does |
 |---|---|
 | `npp file` | open file(s) in Notepad++ (GUI; `npp` alone opens it empty) |
-| `pm file.md` | open file(s) in PrettyMark (GUI; `pm` alone opens it empty) |
+| `pm file.md` | open file(s) in PrettyMark (GUI; `pm` alone opens it empty; Tab-completes `.md` files only — `pm ` + Tab cycles them, directories stay Tab-navigable) |
 | `glow file.md` | render markdown (`glow .` for a browser) |
 | `zoxide-prune` | drop dead paths from zoxide's database |
 | `ll` / `la` / `lt` | eza long / hidden+long / tree |
