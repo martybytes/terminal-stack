@@ -115,7 +115,7 @@ Commit: [`a63044a`](../CHANGELOG.md).
 
 **Cause.** Claude Code's TUI emits its own OSC 0 / OSC 2 with a conversation-derived title. OSC writes to `pane.title`, which is mutable. Last writer wins. Claude Code writes after our wrapper does.
 
-**Fix.** Use `wezterm cli set-tab-title` to set `tab.tab_title` instead of `pane.title`. `tab.tab_title` is independent of OSC streams and Claude Code can't touch it. Our `format-tab-title` Lua already prefers `tab.tab_title` over `pane.title`.
+**Fix.** Use `wezterm cli set-tab-title` to set `tab.tab_title` instead of `pane.title`. `tab.tab_title` is independent of OSC streams and Claude Code can't touch it. Our `format-tab-title` Lua reads `tab.tab_title` first and only falls back — to the active pane's cwd leaf, then `pane.title` — when it is empty.
 
 ```powershell
 function Set-WezTabTitle([string]$title) {

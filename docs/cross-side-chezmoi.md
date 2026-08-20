@@ -28,14 +28,14 @@ Files under `windows/` use absolute-path-mirror naming (with `$WIN_USER` resolve
 
 | Source path | Sync destination |
 |---|---|
-| `windows/.wezterm.lua` | `/mnt/c/Users/$WIN_USER/.wezterm.lua` |
+| `windows/.wezterm.lua.tmpl` | `/mnt/c/Users/$WIN_USER/.wezterm.lua` (rendered) |
 | `windows/.config/starship.toml` | `/mnt/c/Users/$WIN_USER/.config/starship.toml` |
 | `windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1` | `/mnt/c/Users/$WIN_USER/Documents/PowerShell/Microsoft.PowerShell_profile.ps1` |
 | `windows/.claude/settings.json.tmpl` | `/mnt/c/Users/$WIN_USER/.claude/settings.json` (rendered) |
 | `windows/.claude/hooks/wez-tab-status.ps1` | `/mnt/c/Users/$WIN_USER/.claude/hooks/wez-tab-status.ps1` |
 | `docs/kb/**` | `/mnt/c/Users/$WIN_USER/AppData/Local/terminal-stack/docs/kb/**` (plain copy; `doc` read fallback) |
 
-The destination is computed from the source relative path by joining onto `$dst_dir` (`/mnt/c/Users/$WIN_USER`) for `windows/**`, or onto `$dst_dir/AppData/Local/terminal-stack/docs/kb` for the kb mirror. Files ending in `.tmpl` under `windows/` are rendered through a `sed` substitution that replaces `__WIN_USER__` with the resolved value, then the `.tmpl` suffix is stripped from the destination path.
+The destination is computed from the source relative path by joining onto `$dst_dir` (`/mnt/c/Users/$WIN_USER`) for `windows/**`, or onto `$dst_dir/AppData/Local/terminal-stack/docs/kb` for the kb mirror. Files ending in `.tmpl` under `windows/` are rendered through a small **python3** substitution (python3 is required — a sed fallback was removed because it could not render the multi-line `__CC_TTS_*__` tokens and broke on two-modifier leader values) that replaces `__WIN_USER__` and the saved-config tokens (`__LEADER_KEY__`, `__LEADER_MODS__`, `__THEME_MODE__`, `__THEME_RESOLVED__`, `__TMUX_PREFIX__`, `__CC_TTS_*__`) with their resolved values, then the `.tmpl` suffix is stripped from the destination path.
 
 ## Username resolution
 
@@ -62,7 +62,7 @@ If you need a Windows-side file that should reference the username:
 2. Inside the file, use `__WIN_USER__` wherever the username should appear.
 3. `chezmoi apply` → the hook renders to `/mnt/c/Users/<you>/SomeApp/config.toml`.
 
-No additional placeholder syntax (no Go templates, no jinja). Just the single `__WIN_USER__` token.
+No additional placeholder syntax (no Go templates, no jinja) — just literal `__TOKEN__` substitution. Besides `__WIN_USER__`, the saved-config tokens listed above (`__LEADER_KEY__`, `__LEADER_MODS__`, `__THEME_MODE__`, `__THEME_RESOLVED__`, `__TMUX_PREFIX__`, `__CC_TTS_*__`) are available; see `CLAUDE.md` § "User config tokens".
 
 ## The post-apply hook
 

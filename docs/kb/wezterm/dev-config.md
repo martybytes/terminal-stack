@@ -9,10 +9,10 @@ flags.
 | Platform | Edit in clone | WezTerm loads |
 |---|---|---|
 | Windows | `windows/.wezterm.lua.tmpl` | `%USERPROFILE%\.wezterm.lua` |
-| Windows | `windows/.wezterm/pane_grid.lua` | `%USERPROFILE%\.wezterm\pane_grid.lua` |
+| Windows | `windows/.wezterm/pane_nav.lua` | `%USERPROFILE%\.wezterm\pane_nav.lua` |
 | Windows | `docs/kb/**` | `%LOCALAPPDATA%\terminal-stack\docs\kb\` (`doc` read fallback) |
 | macOS | `dot_wezterm.lua.tmpl` | `~/.wezterm.lua` |
-| macOS | `dot_wezterm/pane_grid.lua` | `~/.wezterm/pane_grid.lua` |
+| macOS | `dot_wezterm/pane_nav.lua` | `~/.wezterm/pane_nav.lua` |
 
 Keep the Windows and macOS twins in sync when changing shared behaviour. On
 Windows + WSL, the GUI is still the **Windows** process — WSL home gets no WezTerm
@@ -49,9 +49,32 @@ Then:
 | What changed | How to pick it up |
 |---|---|
 | `.wezterm.lua` | Usually auto-reloads when the deployed file changes |
-| `pane_grid.lua` | **`Ctrl+Space` `r`** (`ReloadConfiguration`) |
+| `pane_nav.lua` | **`Ctrl+Space` `r`** (`ReloadConfiguration`) |
 
-No need to quit WezTerm.
+No need to quit WezTerm — but see the mux-server caveat below.
+
+## Mux server (Windows)
+
+On Windows the panes live in `wezterm-mux-server` (`default_domain = 'main'`),
+which loads its **own** copy of `.wezterm.lua`. A GUI reload does not update the
+config the mux uses for spawning panes; both sync scripts print a reminder when a
+WezTerm file changed. Nothing restarts the mux automatically — that would kill
+every live pane. When convenient (closes all panes!): close WezTerm, then
+`taskkill /IM wezterm-mux-server.exe /F`, and relaunch.
+
+## Plugins
+
+`tabline.wez` (status bar), `sessionizer.wezterm` (`Ctrl+Space` `p`), and
+`resurrect.wezterm` (save/restore) load from **pinned forks under
+`github.com/martybytes`** — upstream archival or a breaking change can't take the
+stack down. `wezterm.plugin.require` clones each fork at the **first GUI start**
+(needs network once; cached in WezTerm's plugin dir after that). Every load is
+pcall-guarded: tabline falls back to the hand-rolled status handler, the other two
+just lose their binding.
+
+To update a plugin: pull upstream into the fork deliberately, then run
+`wezterm.plugin.update_all()` from the debug overlay (**`Ctrl+Shift+L`**) — or
+delete the plugin cache dir and restart WezTerm.
 
 ## Windows 11 — what sync covers (test checklist)
 
@@ -64,7 +87,7 @@ new tabs as needed.
 | Edit in clone | Deployed to | Test by |
 |---|---|---|
 | `windows/.wezterm.lua.tmpl` | `%USERPROFILE%\.wezterm.lua` | Keys, theme, tab bar, status line, launch menu |
-| `windows/.wezterm/pane_grid.lua` | `%USERPROFILE%\.wezterm\pane_grid.lua` | `F1`–`F6`, leader+`1`–`6` grid |
+| `windows/.wezterm/pane_nav.lua` | `%USERPROFILE%\.wezterm\pane_nav.lua` | `F1`–`F4` directional nav-or-split, `F5`/`F6` PaneSelect, leader+`1`–`6` |
 | `windows/.claude/settings.json.tmpl` | `%USERPROFILE%\.claude\settings.json` | Claude hook wiring |
 | `windows/.claude/hooks/wez-tab-status.ps1` | `%USERPROFILE%\.claude\hooks\…` | Tab tint + `cc_state` user var |
 | `windows/Documents/PowerShell/…profile.ps1` | `$PROFILE` | `cc*` wrappers, `wezterm cli set-tab-title` |
@@ -72,7 +95,7 @@ new tabs as needed.
 | `windows/AppData/Roaming/Cursor/User/terminal-stack.terminal.json` | same path under `%USERPROFILE%` | Fragment merged into `%APPDATA%\Cursor\User\settings.json` (`automationProfile`) |
 | `docs/kb/**` | `%LOCALAPPDATA%\terminal-stack\docs\kb\` | `doc` / `wzr` only — not WezTerm |
 
-WezTerm loads only `.wezterm.lua` and `require 'pane_grid'` — both are under
+WezTerm loads only `.wezterm.lua` and `require 'pane_nav'` — both are under
 `windows/` and sync covers them.
 
 ### After sync — pick up changes
@@ -80,7 +103,7 @@ WezTerm loads only `.wezterm.lua` and `require 'pane_grid'` — both are under
 | What you changed | Do this |
 |---|---|
 | `.wezterm.lua` | Usually auto-reloads; else **`Ctrl+Space` `r`** |
-| `pane_grid.lua` | **`Ctrl+Space` `r`** (required) |
+| `pane_nav.lua` | **`Ctrl+Space` `r`** (required) |
 | `$PROFILE` or Starship | **New pwsh tab** or `. $PROFILE` |
 | Claude hooks / settings | **Restart Claude Code** in that pane |
 
@@ -123,10 +146,10 @@ Use this when you are also changing WSL-side chezmoi targets in one session.
 ## macOS — deploy after save
 
 ```sh
-chezmoi apply -v ~/.wezterm.lua ~/.wezterm/pane_grid.lua
+chezmoi apply -v ~/.wezterm.lua ~/.wezterm/pane_nav.lua
 ```
 
-Reload: auto for `~/.wezterm.lua`; **`Ctrl+Space` `r`** for `pane_grid.lua`.
+Reload: auto for `~/.wezterm.lua`; **`Ctrl+Space` `r`** for `pane_nav.lua`.
 
 ## Optional shortcuts
 
@@ -143,18 +166,18 @@ Write-Host "Watching $src — Ctrl+C to stop"
 while ($true) { Start-Sleep 60 }
 ```
 
-Still **`Ctrl+Space` `r`** after `pane_grid.lua` edits.
+Still **`Ctrl+Space` `r`** after `pane_nav.lua` edits.
 
-**Symlink `pane_grid.lua`** — iterate on the grid module without re-syncing each
+**Symlink `pane_nav.lua`** — iterate on the grid module without re-syncing each
 save (symlinks may need Developer Mode / elevated shell on Windows):
 
 ```powershell
 $clone = 'C:\DATA\Workspace\terminal-stack'
 New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.wezterm" | Out-Null
-Remove-Item "$env:USERPROFILE\.wezterm\pane_grid.lua" -ErrorAction SilentlyContinue
+Remove-Item "$env:USERPROFILE\.wezterm\pane_nav.lua" -ErrorAction SilentlyContinue
 New-Item -ItemType SymbolicLink `
-  -Path "$env:USERPROFILE\.wezterm\pane_grid.lua" `
-  -Target (Join-Path $clone 'windows\.wezterm\pane_grid.lua')
+  -Path "$env:USERPROFILE\.wezterm\pane_nav.lua" `
+  -Target (Join-Path $clone 'windows\.wezterm\pane_nav.lua')
 ```
 
 A full `sync-windows.ps1` replaces the symlink with a regular copy — re-create the
@@ -165,4 +188,4 @@ link if that happens.
 - Hand-edit `%USERPROFILE%\.wezterm.lua` or `~/.wezterm.lua` — the next sync/apply
   overwrites it (`.bak.YYYYMMDD` backup). Edit the `.tmpl` / repo source.
 - Point `WEZTERM_CONFIG_FILE` at the clone — this stack deploys to `%USERPROFILE%`
-  and `require 'pane_grid'` from `~/.wezterm/`. Use the sync script instead.
+  and `require 'pane_nav'` from `~/.wezterm/`. Use the sync script instead.

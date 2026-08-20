@@ -48,9 +48,10 @@ the old profile until restarted).
 
 ## Recommended WezTerm model (one OS window)
 Use WezTerm **workspaces** (`Ctrl+Space w` picker, `Ctrl+Space n` to create) as the
-unit of "what I'm working on". Inside a workspace use **panes** (`Ctrl+Space h`/`v`
-to split, `j/k/i/m` move, `J/K/I/M` resize, `z` zoom, `F1`–`F6` / `Ctrl+Space 1`–`6`
-build-or-focus a 3×2 grid) for things you watch simultaneously. Need a remote shell
+unit of "what I'm working on". Inside a workspace use **panes** (`F1`–`F4` /
+`Ctrl+Space 1`–`4` focus-or-split by direction, `F5`/`F6` jump/swap via PaneSelect,
+`Ctrl+Space h`/`v` to split, leader+arrows for move/resize modes, `z` zoom) for
+things you watch simultaneously. Need a remote shell
 beside your work? `Ctrl+Space H`/`V` opens a domain picker (SSH/WSL) and splits it in.
 Tabs are cheap full-screen flips within a workspace — `Alt+1`…`9` to jump. This
 replaces needing multiple top-level WezTerm windows. Full keys: `doc wezterm/panes`,
@@ -59,5 +60,5 @@ replaces needing multiple top-level WezTerm windows. Full keys: `doc wezterm/pan
 ## Developing WezTerm config
 
 WezTerm loads from `%USERPROFILE%`, not the clone. After editing `windows/.wezterm.lua.tmpl`
-or `windows/.wezterm/pane_grid.lua`, run `scripts\sync-windows.ps1 -SourceDir <clone>`,
-then **`Ctrl+Space` `r`** for `pane_grid.lua` changes. Full loop: `doc wezterm/dev-config`.
+or `windows/.wezterm/pane_nav.lua`, run `scripts\sync-windows.ps1 -SourceDir <clone>`,
+then **`Ctrl+Space` `r`** for `pane_nav.lua` changes. Full loop: `doc wezterm/dev-config`.

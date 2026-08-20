@@ -1,19 +1,18 @@
--- ~/.wezterm.lua — macOS counterpart of windows/.wezterm.lua. Minimal baseline.
+-- ~/.wezterm.lua — macOS counterpart of windows/.wezterm.lua.tmpl.
 -- chezmoi applies this only on darwin; native Linux hosts in this stack are
 -- headless (ssh/PuTTY) and need no WezTerm GUI config.
--- Near-stock WezTerm + a small set of pane/tab keybindings. One lightweight
--- event handler (format-tab-title) renders flat "<index>: <dir>" tab labels and
--- tints them green (done) / red (error) from the Claude Code state glyph the
--- hooks write into the tab title. A second handler (update-right-status) shows
--- the workspace + cwd top-right.
--- Keep in sync with windows/.wezterm.lua.
+-- Structure: theme palettes → base options → QoL (quick select, hyperlinks) →
+-- keys/key_tables → plugins (tabline status bar, sessionizer, resurrect; each
+-- pcall-guarded with a hand-rolled fallback) → tab titles + Claude cc_state
+-- rendering → pane background tint → pane_nav (F1..F6 directional nav-or-split).
+-- Keep in sync with windows/.wezterm.lua.tmpl.
 --
 -- This file is a chezmoi template: leader chord + theme mode are injected from
 -- the saved config in chezmoi [data]. Change them with `ts-config`.
 
 local wezterm = require 'wezterm'
 local act = wezterm.action
-local pane_grid = require 'pane_grid'
+local pane_nav = require 'pane_nav'
 local config = wezterm.config_builder()
 
 -- On macOS the default program is the login shell (zsh) — no default_prog needed.
@@ -112,19 +111,31 @@ if P.scheme_def then
 else
   config.color_scheme = P.scheme_name
 end
-config.window_background_opacity = 1.0
-config.use_fancy_tab_bar = true    -- native/fancy tabs (styled via window_frame + colors.tab_bar)
+-- Retro tab bar (required by tabline.wez; our fallback tab renderer styles it
+-- via colors.tab_bar). The fancy bar's window_frame styling no longer applies.
+config.use_fancy_tab_bar = false
+config.show_new_tab_button_in_tab_bar = false
 config.hide_tab_bar_if_only_one_tab = false
 config.window_decorations = 'INTEGRATED_BUTTONS|RESIZE'
 config.initial_cols = 120
 config.initial_rows = 40
 config.tab_max_width = 120
-config.window_frame = {
-  font = wezterm.font { family = 'JetBrainsMono Nerd Font', weight = 'Bold' },
-  font_size = 11.0,
-  active_titlebar_bg = P.mantle,    -- focused
-  inactive_titlebar_bg = P.crust,   -- unfocused
+
+-- WebGpu is WezTerm's modern, fastest backend (set explicitly). It is
+-- Metal-backed on macOS and does not have the Windows DX12 crash — the Windows
+-- config intentionally runs OpenGL instead. If a render stall on child-process
+-- startup reappears, fall back to 'OpenGL'.
+config.front_end = 'WebGpu'
+config.scrollback_lines = 10000
+config.audible_bell = 'Disabled'
+-- Silent bell, visible pulse: flash the cursor colour instead of beeping.
+config.visual_bell = {
+  fade_in_duration_ms = 75,
+  fade_out_duration_ms = 75,
+  target = 'CursorColor',
 }
+config.adjust_window_size_when_changing_font_size = false
+config.status_update_interval = 100  -- ms; keep the LEADER indicator snappy
 -- Pane emphasis: dark = black active / lighter inactive; light = #FFFFFF active /
 -- #F8F8F8 inactive (editor.background vs sideBar.background). No HSB on light.
 -- Claude cc_state tints (pane + tab) are applied separately and survive both states.
@@ -140,11 +151,43 @@ if not P.scheme_def then
   config.colors.background = P.term_bg
 end
 
--- WebGpu is WezTerm's modern, fastest backend (set explicitly). If a render
--- stall on child-process startup reappears, fall back to 'OpenGL'.
-config.front_end = 'WebGpu'
-config.scrollback_lines = 10000
-config.status_update_interval = 100  -- ms; keep the LEADER indicator snappy (update-right-status)
+-- ── QoL: quick select, hyperlinks, prompt jumping ─────────────────────────────
+-- QuickSelect (Ctrl+Shift+Space): hint-label anything matching these patterns in
+-- the viewport and copy it — plus the built-in URL/path/hash defaults.
+config.quick_select_patterns = {
+  '[0-9a-f]{7,40}',            -- git SHAs
+  '[A-Za-z0-9._/-]+:[0-9]+',   -- file:line refs
+}
+
+-- Hyperlinks: keep the defaults (URLs), add `owner/repo` → GitHub and
+-- `path/to/file.ext:line` → Cursor (via the open-uri handler below).
+config.hyperlink_rules = wezterm.default_hyperlink_rules()
+table.insert(config.hyperlink_rules, {
+  regex = [=[["'\s]([\w-]+/[\w.-]+)["'\s]]=],
+  format = 'https://www.github.com/$1',
+  highlight = 1,
+})
+table.insert(config.hyperlink_rules, {
+  regex = [[\b([A-Za-z0-9._\\/-]+\.[A-Za-z0-9]+):([0-9]+)\b]],
+  format = 'file-line://$1:$2',
+})
+
+-- Cmd/Ctrl-click on a file:line → open in Cursor at that exact position.
+-- Relative paths are resolved against the clicked pane's cwd. Everything else
+-- falls through to the default handler (browser). Launched through a login
+-- shell so the `cursor` CLI is found even though GUI apps get a minimal PATH.
+wezterm.on('open-uri', function(window, pane, uri)
+  local spec = uri:match('^file%-line://(.+)$')
+  if not spec then return end
+  if not spec:match('^/') then
+    local ok, cwd = pcall(function() return pane:get_current_working_dir() end)
+    if ok and cwd and cwd.file_path then
+      spec = cwd.file_path .. '/' .. spec
+    end
+  end
+  wezterm.background_child_process { '/bin/sh', '-lc', 'cursor --goto ' .. "'" .. spec:gsub("'", "'\\''") .. "'" }
+  return false
+end)
 
 -- Leader key: injected from the saved config (default Ctrl+Space).
 -- phys:Space matches the physical key (kept identical to the Windows side).
@@ -214,6 +257,10 @@ local function kill_workspace(window, pane)
   }, pane)
 end
 
+-- Right-status identity toggle (Leader+s): show/hide the user@host + path
+-- segment. wezterm.GLOBAL survives config reloads (a plain local would reset).
+if wezterm.GLOBAL.show_identity == nil then wezterm.GLOBAL.show_identity = true end
+
 config.keys = {
   { key = 'l', mods = 'ALT', action = act.ShowLauncherArgs {
       flags = 'FUZZY|TABS|DOMAINS|LAUNCH_MENU_ITEMS|WORKSPACES|COMMANDS' } },
@@ -240,31 +287,37 @@ config.keys = {
   -- Domain splits (Shift = "remote"): H = pick domain → top/bottom, V = pick domain → left/right.
   { key = 'H', mods = 'LEADER', action = wezterm.action_callback(function(w, p) pick_domain_split(w, p, 'Down') end) },
   { key = 'V', mods = 'LEADER', action = wezterm.action_callback(function(w, p) pick_domain_split(w, p, 'Right') end) },
+  -- Toggle the user@host + path segment in the status bar.
+  { key = 's', mods = 'LEADER', action = wezterm.action_callback(function(window)
+      wezterm.GLOBAL.show_identity = not wezterm.GLOBAL.show_identity
+    end) },
   -- Arrow-driven pane control. Each does its first action AND enters a repeatable
   -- mode (key_tables below); inside a mode, plain arrows or j/k/i/m repeat.
-  -- Move = Leader+Arrow · Resize = Leader+Shift+Arrow · Rotate = Leader+Ctrl+Arrow.
-  { key = 'LeftArrow',  mods = 'LEADER', action = act.Multiple { act.ActivatePaneDirection 'Left',  act.ActivateKeyTable { name = 'activate_pane', one_shot = false, until_unknown = true, timeout_milliseconds = 1000 } } },
-  { key = 'RightArrow', mods = 'LEADER', action = act.Multiple { act.ActivatePaneDirection 'Right', act.ActivateKeyTable { name = 'activate_pane', one_shot = false, until_unknown = true, timeout_milliseconds = 1000 } } },
-  { key = 'UpArrow',    mods = 'LEADER', action = act.Multiple { act.ActivatePaneDirection 'Up',    act.ActivateKeyTable { name = 'activate_pane', one_shot = false, until_unknown = true, timeout_milliseconds = 1000 } } },
-  { key = 'DownArrow',  mods = 'LEADER', action = act.Multiple { act.ActivatePaneDirection 'Down',  act.ActivateKeyTable { name = 'activate_pane', one_shot = false, until_unknown = true, timeout_milliseconds = 1000 } } },
-  { key = 'LeftArrow',  mods = 'LEADER|SHIFT', action = act.Multiple { act.AdjustPaneSize { 'Left',  3 }, act.ActivateKeyTable { name = 'resize_pane', one_shot = false } } },
-  { key = 'RightArrow', mods = 'LEADER|SHIFT', action = act.Multiple { act.AdjustPaneSize { 'Right', 3 }, act.ActivateKeyTable { name = 'resize_pane', one_shot = false } } },
-  { key = 'UpArrow',    mods = 'LEADER|SHIFT', action = act.Multiple { act.AdjustPaneSize { 'Up',    3 }, act.ActivateKeyTable { name = 'resize_pane', one_shot = false } } },
-  { key = 'DownArrow',  mods = 'LEADER|SHIFT', action = act.Multiple { act.AdjustPaneSize { 'Down',  3 }, act.ActivateKeyTable { name = 'resize_pane', one_shot = false } } },
-  { key = 'LeftArrow',  mods = 'LEADER|CTRL', action = act.Multiple { act.RotatePanes 'CounterClockwise', act.ActivateKeyTable { name = 'rotate_pane', one_shot = false, until_unknown = true, timeout_milliseconds = 1500 } } },
-  { key = 'UpArrow',    mods = 'LEADER|CTRL', action = act.Multiple { act.RotatePanes 'CounterClockwise', act.ActivateKeyTable { name = 'rotate_pane', one_shot = false, until_unknown = true, timeout_milliseconds = 1500 } } },
-  { key = 'RightArrow', mods = 'LEADER|CTRL', action = act.Multiple { act.RotatePanes 'Clockwise', act.ActivateKeyTable { name = 'rotate_pane', one_shot = false, until_unknown = true, timeout_milliseconds = 1500 } } },
-  { key = 'DownArrow',  mods = 'LEADER|CTRL', action = act.Multiple { act.RotatePanes 'Clockwise', act.ActivateKeyTable { name = 'rotate_pane', one_shot = false, until_unknown = true, timeout_milliseconds = 1500 } } },
+  -- Move = Leader+Arrow · Resize = Leader+Shift+Arrow · Rotate = Leader+Ctrl+←/→.
+  { key = 'LeftArrow',  mods = 'LEADER', action = act.Multiple { act.ActivatePaneDirection 'Left',  act.ActivateKeyTable { name = 'move_mode', one_shot = false, until_unknown = true, timeout_milliseconds = 1000 } } },
+  { key = 'RightArrow', mods = 'LEADER', action = act.Multiple { act.ActivatePaneDirection 'Right', act.ActivateKeyTable { name = 'move_mode', one_shot = false, until_unknown = true, timeout_milliseconds = 1000 } } },
+  { key = 'UpArrow',    mods = 'LEADER', action = act.Multiple { act.ActivatePaneDirection 'Up',    act.ActivateKeyTable { name = 'move_mode', one_shot = false, until_unknown = true, timeout_milliseconds = 1000 } } },
+  { key = 'DownArrow',  mods = 'LEADER', action = act.Multiple { act.ActivatePaneDirection 'Down',  act.ActivateKeyTable { name = 'move_mode', one_shot = false, until_unknown = true, timeout_milliseconds = 1000 } } },
+  { key = 'LeftArrow',  mods = 'LEADER|SHIFT', action = act.Multiple { act.AdjustPaneSize { 'Left',  3 }, act.ActivateKeyTable { name = 'resize_mode', one_shot = false, until_unknown = true, timeout_milliseconds = 1500 } } },
+  { key = 'RightArrow', mods = 'LEADER|SHIFT', action = act.Multiple { act.AdjustPaneSize { 'Right', 3 }, act.ActivateKeyTable { name = 'resize_mode', one_shot = false, until_unknown = true, timeout_milliseconds = 1500 } } },
+  { key = 'UpArrow',    mods = 'LEADER|SHIFT', action = act.Multiple { act.AdjustPaneSize { 'Up',    3 }, act.ActivateKeyTable { name = 'resize_mode', one_shot = false, until_unknown = true, timeout_milliseconds = 1500 } } },
+  { key = 'DownArrow',  mods = 'LEADER|SHIFT', action = act.Multiple { act.AdjustPaneSize { 'Down',  3 }, act.ActivateKeyTable { name = 'resize_mode', one_shot = false, until_unknown = true, timeout_milliseconds = 1500 } } },
+  { key = 'LeftArrow',  mods = 'LEADER|CTRL', action = act.Multiple { act.RotatePanes 'CounterClockwise', act.ActivateKeyTable { name = 'rotate_mode', one_shot = false, until_unknown = true, timeout_milliseconds = 1500 } } },
+  { key = 'RightArrow', mods = 'LEADER|CTRL', action = act.Multiple { act.RotatePanes 'Clockwise', act.ActivateKeyTable { name = 'rotate_mode', one_shot = false, until_unknown = true, timeout_milliseconds = 1500 } } },
   -- Repeatable tab-switch (Leader+t) and font-size (Leader+f) modes.
-  { key = 't', mods = 'LEADER', action = act.ActivateKeyTable { name = 'switch_tab', one_shot = false, until_unknown = true, timeout_milliseconds = 1500 } },
-  { key = 'f', mods = 'LEADER', action = act.ActivateKeyTable { name = 'font_size', one_shot = false, until_unknown = true, timeout_milliseconds = 1500 } },
+  { key = 't', mods = 'LEADER', action = act.ActivateKeyTable { name = 'tab_mode', one_shot = false, until_unknown = true, timeout_milliseconds = 1500 } },
+  { key = 'f', mods = 'LEADER', action = act.ActivateKeyTable { name = 'font_mode', one_shot = false, until_unknown = true, timeout_milliseconds = 1500 } },
   { key = 'z', mods = 'LEADER', action = act.TogglePaneZoomState },
   { key = 'phys:Space', mods = 'LEADER|CTRL', action = act.SendKey { key = ' ', mods = 'CTRL' } },
   { key = 'r', mods = 'LEADER', action = act.ReloadConfiguration },
   -- Tab selection: Alt+1..9 (number matches tab); Ctrl+Tab / Ctrl+Shift+Tab cycle.
-  -- (Leader+1..6 build/focus the 3×2 pane grid; see pane_grid.lua.)
+  -- (Leader+1..6 mirror F1..F6; see pane_nav.lua.)
   { key = 'Tab', mods = 'CTRL',       action = act.ActivateTabRelative(1) },
   { key = 'Tab', mods = 'CTRL|SHIFT', action = act.ActivateTabRelative(-1) },
+  -- Jump between shell prompts in scrollback (needs OSC 133 shell integration;
+  -- zsh emits it via the sourced wezterm integration).
+  { key = 'UpArrow',   mods = 'CTRL|SHIFT', action = act.ScrollToPrompt(-1) },
+  { key = 'DownArrow', mods = 'CTRL|SHIFT', action = act.ScrollToPrompt(1) },
   -- Pop the current pane out into its own new window.
   -- Leader+o for muscle memory; Ctrl+Shift+O for quick access without the leader.
   { key = 'o', mods = 'LEADER',     action = wezterm.action_callback(function(window, pane) pane:move_to_new_window() end) },
@@ -278,180 +331,9 @@ config.keys = {
   { key = 'Enter', mods = 'SHIFT', action = act.SendString '\n' },
 }
 
--- ── Tab labels: " <idx>  <icon> <dir>  <badge|dots> " ─────────────────────────
--- Per-pane Claude state comes from the `cc_state` user var the wez-tab-status hook
--- sets (working/done/error, cleared on exit). We show a coloured dot per pane,
--- wash the tab background by the most urgent state (error > done > working), and
--- tint the label to match — active or inactive tab, so a background Claude run
--- is obvious at a glance. The process icon is best-effort from the foreground
--- process; Claude is detected via the user var because Windows/WSL often report a
--- wrapper process rather than `claude`. Nerd-font lookups are fallback-guarded
--- (unknown names resolve to nil) so a missing glyph can't break the bar.
-local PROC_ICONS = {
-  pwsh = wezterm.nerdfonts.md_powershell, powershell = wezterm.nerdfonts.md_powershell,
-  zsh = wezterm.nerdfonts.md_console, bash = wezterm.nerdfonts.md_console,
-  sh = wezterm.nerdfonts.md_console, wsl = wezterm.nerdfonts.md_console,
-  nvim = wezterm.nerdfonts.custom_vim, vim = wezterm.nerdfonts.custom_vim,
-  git = wezterm.nerdfonts.dev_git, node = wezterm.nerdfonts.md_nodejs,
-  python = wezterm.nerdfonts.md_language_python, python3 = wezterm.nerdfonts.md_language_python,
-}
-local ICON_CLAUDE   = wezterm.nerdfonts.md_robot or '*'
-local ICON_FALLBACK = wezterm.nerdfonts.md_console or '>'
-local ICON_ZOOM     = wezterm.nerdfonts.md_fullscreen or 'Z'
-local TAB = {  -- derived from the active palette
-  text = P.text, inactive = P.subtext0, dim = P.overlay1,
-  working = P.peach, done = P.green, error = P.maroon,
-}
-
-local function dir_leaf(pane)
-  local cwd = pane.current_working_dir
-  if not cwd then return nil end
-  local p = (type(cwd) == 'userdata' and cwd.file_path) or tostring(cwd)
-  p = p:gsub('^file://[^/]*', ''):gsub('[/\\]+$', '')
-  return p:match('[^/\\]+$')
-end
-
-local function proc_leaf(pane)
-  local name = pane.foreground_process_name
-  if not name or name == '' then return nil end
-  return (name:gsub('[/\\]+$', ''):match('[^/\\]+$') or name):gsub('%.exe$', ''):lower()
-end
-
--- Claude state from a pane's user var: 'working'|'done'|'error' or nil.
-local function pane_cc(pane)
-  local s = pane.user_vars and pane.user_vars.cc_state
-  if s == nil or s == '' then return nil end
-  return s
-end
-
-wezterm.on('format-tab-title', function(tab, tabs, panes, cfg, hover, max_width)
-  local active = tab.active_pane
-  local leaf = wezterm.truncate_right(dir_leaf(active) or active.title or '', 24)
-
-  -- icon: Claude (by user var) else the foreground process, with a fallback glyph.
-  local icon
-  if pane_cc(active) then
-    icon = ICON_CLAUDE
-  else
-    local p = proc_leaf(active)
-    icon = (p and PROC_ICONS[p]) or ICON_FALLBACK
-  end
-
-  -- per-pane dots + aggregate state; note Claude panes and zoom.
-  local dots, agg, any_cc, zoomed = {}, nil, false, false
-  for _, p in ipairs(tab.panes) do
-    local s = pane_cc(p)
-    if s then
-      any_cc = true
-      table.insert(dots, { c = TAB[s] or TAB.dim, g = '●' })
-      if s == 'error' then agg = 'error'
-      elseif s == 'done' and agg ~= 'error' then agg = 'done'
-      elseif s == 'working' and not agg then agg = 'working' end
-    else
-      table.insert(dots, { c = TAB.dim, g = '○' })
-    end
-    if p.is_zoomed then zoomed = true end
-  end
-
-  -- label colour: cc state tints the tab even when it is not focused.
-  local fg = TAB.text
-  if agg == 'error' then fg = TAB.error
-  elseif agg == 'done' then fg = TAB.done
-  elseif agg == 'working' then fg = TAB.working
-  elseif not tab.is_active then fg = TAB.inactive end
-  local bold = tab.is_active or agg ~= nil
-
-  local items = {}
-  if agg then
-    table.insert(items, { Background = { Color = P['cc_' .. agg] } })
-  end
-  table.insert(items, { Attribute = { Intensity = bold and 'Bold' or 'Normal' } })
-  table.insert(items, { Foreground = { Color = fg } })
-  table.insert(items, { Text = ' ' .. (tab.tab_index + 1) .. '  ' .. icon .. ' ' .. leaf .. ' ' })
-  if any_cc then                         -- dots imply the pane count
-    table.insert(items, { Text = ' ' })
-    for _, d in ipairs(dots) do
-      table.insert(items, { Foreground = { Color = d.c } })
-      table.insert(items, { Text = d.g })
-    end
-  elseif #tab.panes > 1 then
-    table.insert(items, { Foreground = { Color = TAB.dim } })
-    table.insert(items, { Text = ' ' .. #tab.panes })
-  end
-  if zoomed then
-    table.insert(items, { Foreground = { Color = TAB.dim } })
-    table.insert(items, { Text = ' ' .. ICON_ZOOM })
-  end
-  table.insert(items, { Text = ' ' })
-  return items
-end)
-
--- ── Per-pane background + Claude tint (ConPTY-proof) ────────────────────────
--- The hook also emits an OSC 11 background tint, but on Windows ConPTY eats OSC
--- 10/11/12 before they reach WezTerm (the cc_state user var survives because
--- ConPTY passes the unknown OSC 1337 through verbatim — that's why the tab dots
--- work but the pane never tinted). Re-drive from cc_state + focus here:
--- user-var-changed fires reliably, and pane:inject_output feeds the OSC 11 into
--- WezTerm's own emulator, bypassing ConPTY entirely. Local panes, every platform;
--- mux/SSH panes (no inject_output) fall back to the hook's raw OSC 11. macOS/Linux
--- have no ConPTY so the hook's OSC 11 already works — this re-sets the same colour.
-local CC_BG = { working = P.cc_working, done = P.cc_done, error = P.cc_error }
-local pane_bg_applied = {}
-
-local function pane_cc_state(pane)
-  local s = pane.user_vars and pane.user_vars.cc_state
-  if s == nil or s == '' then return nil end
-  return s
-end
-
-local function pane_bg_color(pane, is_active)
-  local cc = pane_cc_state(pane)
-  if cc and CC_BG[cc] then return CC_BG[cc] end
-  return is_active and P.pane_active or P.pane_inactive
-end
-
-local function clear_pane_bg_cache()
-  for k in pairs(pane_bg_applied) do pane_bg_applied[k] = nil end
-end
-
-local function inject_pane_surface(p, bg)
-  -- Background only (OSC 11). Do not inject OSC 10 — it fights ANSI/eza colours and
-  -- makes listing colours diverge between panes/domains.
-  pcall(function()
-    p:inject_output('\x1b]11;' .. bg .. '\x07')
-  end)
-end
-
-local function sync_pane_backgrounds(window, force)
-  local mux_win = window:mux_window()
-  if not mux_win then return end
-  for _, tab in ipairs(mux_win:tabs()) do
-    local active = tab:active_pane()
-    local active_id = active and active:pane_id()
-    for _, p in ipairs(tab:panes()) do
-      local pid = p:pane_id()
-      local bg = pane_bg_color(p, pid == active_id)
-      if force or pane_bg_applied[pid] ~= bg then
-        pane_bg_applied[pid] = bg
-        inject_pane_surface(p, bg)
-      end
-    end
-  end
-end
-
-wezterm.on('user-var-changed', function(window, pane, name, value)
-  if name ~= 'cc_state' then return end
-  sync_pane_backgrounds(window, true)
-end)
-
-wezterm.on('window-config-reloaded', function(window)
-  clear_pane_bg_cache()
-  sync_pane_backgrounds(window, true)
-end)
-
--- ── Top-right status: [⬡ workspace │] user@host │ current path ─────────────────
--- Identity and path follow the *active pane* (OSC 7, shell-integration user vars,
--- SSH/WSL domain, then pane title), not the WezTerm GUI process.
+-- ── Identity helpers (status bar user@host + path, from the *active pane*) ────
+-- OSC 7, shell-integration user vars, SSH/WSL domain, then pane title — not the
+-- WezTerm GUI process.
 local function titlecase(s)
   if not s or s == '' then return '' end
   return s:sub(1, 1):upper() .. s:sub(2):lower()
@@ -475,7 +357,11 @@ end
 
 local function path_from_title(title)
   if not title or title == '' then return '' end
-  local path = title:match(':[%s]*(.*)$')
+  -- A bare Windows path ('C:\Users\x') IS the path — don't split on its drive colon.
+  if title:match('^%a:[/\\]') then return title end
+  -- Otherwise take what follows the first ': ' separator ('host: /some/path'),
+  -- falling back to the last colon for legacy 'host:path' titles.
+  local path = title:match(':%s+(.*)$') or title:match('.*:[%s]*(.*)$')
   if not path then return '' end
   path = path:gsub('^%s+', ''):gsub('%s+$', '')
   return path
@@ -553,50 +439,380 @@ local function pane_location(pane)
   return titlecase(user), titlecase(host), path
 end
 
-wezterm.on('update-right-status', function(window, pane)
-  local items = {}
-  local kt = window:active_key_table()
-  if kt then                                  -- in a repeatable mode: accent badge
-    local MODE = {
-      resize_pane = '⤢ RESIZE ↑↓←→', activate_pane = '✛ MOVE ↑↓←→',
-      rotate_pane = '⟳ ROTATE ↑↓←→', switch_tab = '⇥ TAB ←→', font_size = 'A± FONT ↑↓0',
-    }
-    table.insert(items, { Background = { Color = P.accent } })
-    table.insert(items, { Foreground = { Color = P.base } })
-    table.insert(items, { Attribute = { Intensity = 'Bold' } })
-    table.insert(items, { Text = ' ' .. (MODE[kt] or kt) .. ' · Esc ' })
-    table.insert(items, { Background = { Color = P.crust } })
-    table.insert(items, { Foreground = { Color = P.overlay1 } })
-    table.insert(items, { Attribute = { Intensity = 'Normal' } })
-    table.insert(items, { Text = '  ' })
-  elseif window:leader_is_active() then        -- leader pending: bold peach badge
-    table.insert(items, { Background = { Color = P.peach } })
-    table.insert(items, { Foreground = { Color = P.base } })
-    table.insert(items, { Attribute = { Intensity = 'Bold' } })
-    table.insert(items, { Text = ' ⌨ LEADER ' })
-    table.insert(items, { Background = { Color = P.crust } })
-    table.insert(items, { Foreground = { Color = P.overlay1 } })
-    table.insert(items, { Attribute = { Intensity = 'Normal' } })
-    table.insert(items, { Text = '  ' })
-  end
-  local ws = window:active_workspace()
-  if ws ~= 'default' then                              -- workspace only when non-default
-    table.insert(items, { Foreground = { Color = P.accent } })
-    table.insert(items, { Text = '⬡ ' .. ws })
-    table.insert(items, { Foreground = { Color = P.overlay1 } })
-    table.insert(items, { Text = '  │  ' })
-  end
-  table.insert(items, { Foreground = { Color = P.teal } })   -- identity (active pane)
+-- The identity + path string for the status bar; '' when toggled off (Leader+s).
+local function status_identity(window, pane)
+  if wezterm.GLOBAL.show_identity == false then return '' end
   local pu, ph, ppath = pane_location(pane)
   local identity = (#pu > 0 and #ph > 0) and (pu .. '@' .. ph) or (pu .. ph)
-  table.insert(items, { Text = identity })
-  table.insert(items, { Foreground = { Color = P.overlay1 } })
-  table.insert(items, { Text = '  │  ' })
-  table.insert(items, { Foreground = { Color = P.subtext0 } })
-  table.insert(items, { Text = ppath .. '  ' })
-  window:set_right_status(wezterm.format(items))
+  if ppath ~= '' then return identity .. '  │  ' .. ppath end
+  return identity
+end
+
+-- ── Plugins: tabline (status bar), sessionizer (Leader+p), resurrect ─────────
+-- All are pinned forks under github.com/martybytes (upstream archival can't
+-- break us; update by pulling upstream into the fork deliberately). Each load
+-- is pcall-guarded: a clone failure logs and falls back — tabline falls back to
+-- the hand-rolled status handler below; the other two just lose their binding.
+-- Plugins load only in the GUI process (wezterm.gui is nil in the mux server).
+local have_tabline = false
+if wezterm.gui then
+  -- tabline.wez: mode/workspace on the left, identity+path on the right.
+  -- tabs_enabled = false — tab titles stay with our format-tab-title below,
+  -- because tabline components can't express per-pane coloured cc_state dots.
+  local ok, tabline = pcall(wezterm.plugin.require, 'https://github.com/martybytes/tabline.wez')
+  if ok and tabline then
+    local scheme_colors = P.scheme_def or wezterm.color.get_builtin_schemes()[P.scheme_name]
+    local function mode_theme(color)
+      return {
+        a = { fg = P.tab_bar.background, bg = color },
+        b = { fg = color, bg = P.surface0 },
+        c = { fg = P.text, bg = P.tab_bar.inactive_tab.bg_color },
+      }
+    end
+    local setup_ok, setup_err = pcall(function()
+      tabline.setup {
+        options = {
+          icons_enabled = true,
+          tabs_enabled = false,
+          theme = {
+            foreground = P.text,
+            background = P.tab_bar.background,
+            cursor = { bg = P.surface0 },
+            ansi = scheme_colors.ansi,
+            tab_bar = { inactive_tab = { bg_color = P.tab_bar.inactive_tab.bg_color } },
+          },
+          theme_overrides = {
+            move_mode   = mode_theme(P.accent),
+            resize_mode = mode_theme(P.peach),
+            rotate_mode = mode_theme(P.teal),
+            tab_mode    = mode_theme(P.green),
+            font_mode   = mode_theme(P.lavender),
+          },
+        },
+        sections = {
+          tabline_a = { { 'mode', fmt = function(str, window)
+            if window:leader_is_active() then return '⌨ LEADER' end
+            return str
+          end } },
+          tabline_b = { 'workspace' },
+          tabline_c = { ' ' },
+          tabline_x = { status_identity },
+          tabline_y = {},
+          tabline_z = {},
+        },
+      }
+    end)
+    have_tabline = setup_ok
+    if not setup_ok then
+      wezterm.log_error('tabline setup failed, using fallback status: ' .. tostring(setup_err))
+    end
+  else
+    wezterm.log_error('tabline plugin unavailable, using fallback status: ' .. tostring(tabline))
+  end
+
+  -- sessionizer.wezterm: Leader+p fuzzy project picker over the wso workspace
+  -- layout (<workspace>/<tier>/github.com/<owner>/<repo>) plus suffix siblings.
+  -- Needs `fd` on PATH for repo discovery.
+  local sok, sessionizer = pcall(wezterm.plugin.require, 'https://github.com/martybytes/sessionizer.wezterm')
+  if sok and sessionizer then
+    local function workspace_roots()
+      local candidates = {}
+      for _, env in ipairs { 'WORKSPACE_DIR', 'WORK_WORKSPACE_DIR' } do
+        local v = os.getenv(env)
+        if v and #v > 0 then table.insert(candidates, v) end
+      end
+      local home = wezterm.home_dir
+      table.insert(candidates, home .. '/Documents/Workspace')
+      table.insert(candidates, home .. '/workspace')
+      table.insert(candidates, home .. '/Workspace')
+      local roots, seen = {}, {}
+      for _, c in ipairs(candidates) do
+        for _, suffix in ipairs { '', '_Personal', '-Personal', '_Public', '-Public', '_Work', '-Work' } do
+          local p = c .. suffix
+          if not seen[p] and #wezterm.glob(p) > 0 then
+            seen[p] = true
+            table.insert(roots, p)
+          end
+        end
+      end
+      return roots
+    end
+    local schema = {
+      options = { title = 'Projects', prompt = 'Project: ' },
+      sessionizer.DefaultWorkspace {},
+      sessionizer.AllActiveWorkspaces {},
+    }
+    for _, root in ipairs(workspace_roots()) do
+      table.insert(schema, sessionizer.FdSearch { root, max_depth = 6 })
+    end
+    schema.processing = sessionizer.for_each_entry(function(entry)
+      entry.label = entry.label:gsub('^.*/([^/]+/[^/]+/[^/]+)$', '%1')
+    end)
+    table.insert(config.keys, { key = 'p', mods = 'LEADER', action = sessionizer.show(schema) })
+  else
+    wezterm.log_error('sessionizer plugin unavailable: ' .. tostring(sessionizer))
+  end
+
+  -- resurrect.wezterm (maintained fork): session save/restore across restarts.
+  -- Autosave every 15 min + on focus loss; Leader+S saves the workspace now,
+  -- Leader+L fuzzy-restores a saved state. No encryption.
+  local rok, resurrect = pcall(wezterm.plugin.require, 'https://github.com/martybytes/resurrect.wezterm')
+  if rok and resurrect then
+    local setup2_ok, setup2_err = pcall(function()
+      resurrect.setup(config, {
+        periodic_interval = 900,
+        keybindings = false,
+        status_bar = false,
+      })
+    end)
+    if setup2_ok then
+      table.insert(config.keys, { key = 'S', mods = 'LEADER', action = resurrect.workspace_state.save_workspace_action() })
+      table.insert(config.keys, { key = 'L', mods = 'LEADER', action = resurrect.fuzzy_loader.restore_action() })
+    else
+      wezterm.log_error('resurrect setup failed: ' .. tostring(setup2_err))
+    end
+  else
+    wezterm.log_error('resurrect plugin unavailable: ' .. tostring(resurrect))
+  end
+end
+
+-- ── Tab labels: " <idx>  <icon> <title>  <badge|dots> " ───────────────────────
+-- Title precedence: tab.tab_title (set by the cc wrappers / Claude hooks via
+-- `wezterm cli set-tab-title` — sticky, survives the TUI overwriting pane.title),
+-- then the active pane's cwd leaf, then pane.title.
+-- Per-pane Claude state comes from the `cc_state` user var the wez-tab-status hook
+-- sets (working/done/error, cleared on exit). We show a coloured dot per pane,
+-- wash the tab background by the most urgent state (error > done > working), and
+-- tint the label to match — active or inactive tab, so a background Claude run
+-- is obvious at a glance. The process icon is best-effort from the foreground
+-- process; Claude is detected via the user var because Windows/WSL often report a
+-- wrapper process rather than `claude`. Nerd-font lookups are fallback-guarded
+-- (unknown names resolve to nil) so a missing glyph can't break the bar.
+-- (Registered after tabline.setup: tabline has tabs_enabled=false and returns
+-- nil from its format-tab-title handler, so ours renders the tabs.)
+local PROC_ICONS = {
+  pwsh = wezterm.nerdfonts.md_powershell, powershell = wezterm.nerdfonts.md_powershell,
+  zsh = wezterm.nerdfonts.md_console, bash = wezterm.nerdfonts.md_console,
+  sh = wezterm.nerdfonts.md_console, wsl = wezterm.nerdfonts.md_console,
+  nvim = wezterm.nerdfonts.custom_vim, vim = wezterm.nerdfonts.custom_vim,
+  git = wezterm.nerdfonts.dev_git, node = wezterm.nerdfonts.md_nodejs,
+  python = wezterm.nerdfonts.md_language_python, python3 = wezterm.nerdfonts.md_language_python,
+}
+local ICON_CLAUDE   = wezterm.nerdfonts.md_robot or '*'
+local ICON_FALLBACK = wezterm.nerdfonts.md_console or '>'
+local ICON_ZOOM     = wezterm.nerdfonts.md_fullscreen or 'Z'
+local TAB = {  -- derived from the active palette
+  text = P.text, inactive = P.subtext0, dim = P.overlay1,
+  working = P.peach, done = P.green, error = P.maroon,
+}
+
+local function dir_leaf(pane)
+  local cwd = pane.current_working_dir
+  if not cwd then return nil end
+  local p = (type(cwd) == 'userdata' and cwd.file_path) or tostring(cwd)
+  p = p:gsub('^file://[^/]*', ''):gsub('[/\\]+$', '')
+  return p:match('[^/\\]+$')
+end
+
+local function proc_leaf(pane)
+  local name = pane.foreground_process_name
+  if not name or name == '' then return nil end
+  return (name:gsub('[/\\]+$', ''):match('[^/\\]+$') or name):gsub('%.exe$', ''):lower()
+end
+
+-- Claude state from a pane's user var: 'working'|'done'|'error' or nil.
+local function pane_cc(pane)
+  local s = pane.user_vars and pane.user_vars.cc_state
+  if s == nil or s == '' then return nil end
+  return s
+end
+
+wezterm.on('format-tab-title', function(tab, tabs, panes, cfg, hover, max_width)
+  local active = tab.active_pane
+  -- tab.tab_title first (the `wezterm cli set-tab-title` contract), cwd leaf after.
+  local label = tab.tab_title
+  if not label or #label == 0 then
+    label = dir_leaf(active) or active.title or ''
+  end
+  local leaf = wezterm.truncate_right(label, 24)
+
+  -- icon: Claude (by user var) else the foreground process, with a fallback glyph.
+  local icon
+  if pane_cc(active) then
+    icon = ICON_CLAUDE
+  else
+    local p = proc_leaf(active)
+    icon = (p and PROC_ICONS[p]) or ICON_FALLBACK
+  end
+
+  -- per-pane dots + aggregate state; note Claude panes and zoom.
+  local dots, agg, any_cc, zoomed = {}, nil, false, false
+  for _, p in ipairs(tab.panes) do
+    local s = pane_cc(p)
+    if s then
+      any_cc = true
+      table.insert(dots, { c = TAB[s] or TAB.dim, g = '●' })
+      if s == 'error' then agg = 'error'
+      elseif s == 'done' and agg ~= 'error' then agg = 'done'
+      elseif s == 'working' and not agg then agg = 'working' end
+    else
+      table.insert(dots, { c = TAB.dim, g = '○' })
+    end
+    if p.is_zoomed then zoomed = true end
+  end
+
+  -- label colour: cc state tints the tab even when it is not focused.
+  local fg = TAB.text
+  if agg == 'error' then fg = TAB.error
+  elseif agg == 'done' then fg = TAB.done
+  elseif agg == 'working' then fg = TAB.working
+  elseif not tab.is_active then fg = TAB.inactive end
+  local bold = tab.is_active or agg ~= nil
+
+  local items = {}
+  if agg then
+    table.insert(items, { Background = { Color = P['cc_' .. agg] } })
+  end
+  table.insert(items, { Attribute = { Intensity = bold and 'Bold' or 'Normal' } })
+  table.insert(items, { Foreground = { Color = fg } })
+  table.insert(items, { Text = ' ' .. (tab.tab_index + 1) .. '  ' .. icon .. ' ' .. leaf .. ' ' })
+  if any_cc then                         -- dots imply the pane count
+    table.insert(items, { Text = ' ' })
+    for _, d in ipairs(dots) do
+      table.insert(items, { Foreground = { Color = d.c } })
+      table.insert(items, { Text = d.g })
+    end
+  elseif #tab.panes > 1 then
+    table.insert(items, { Foreground = { Color = TAB.dim } })
+    table.insert(items, { Text = ' ' .. #tab.panes })
+  end
+  if zoomed then
+    table.insert(items, { Foreground = { Color = TAB.dim } })
+    table.insert(items, { Text = ' ' .. ICON_ZOOM })
+  end
+  table.insert(items, { Text = ' ' })
+  return items
+end)
+
+-- ── Per-pane background + Claude tint ─────────────────────────────────────────
+-- The hook also emits an OSC 11 background tint; macOS/Linux have no ConPTY so
+-- that usually works already — this re-sets the same colour from cc_state +
+-- focus so local panes always agree. inject_output is local-pane-only; remote
+-- (mux/SSH) panes fall back to the hook's raw OSC 11, and failures are logged.
+local CC_BG = { working = P.cc_working, done = P.cc_done, error = P.cc_error }
+local pane_bg_applied = {}
+local pane_bg_logged = {}
+
+local function pane_cc_state(pane)
+  local s = pane.user_vars and pane.user_vars.cc_state
+  if s == nil or s == '' then return nil end
+  return s
+end
+
+local function pane_bg_color(pane, is_active)
+  local cc = pane_cc_state(pane)
+  if cc and CC_BG[cc] then return CC_BG[cc] end
+  return is_active and P.pane_active or P.pane_inactive
+end
+
+local function clear_pane_bg_cache()
+  for k in pairs(pane_bg_applied) do pane_bg_applied[k] = nil end
+end
+
+local function inject_pane_surface(p, bg)
+  -- Background only (OSC 11). Do not inject OSC 10 — it fights ANSI/eza colours and
+  -- makes listing colours diverge between panes/domains.
+  local ok, err = pcall(function()
+    p:inject_output('\x1b]11;' .. bg .. '\x07')
+  end)
+  if not ok then
+    local pid = p:pane_id()
+    if not pane_bg_logged[pid] then
+      pane_bg_logged[pid] = true
+      wezterm.log_error('pane tint: inject_output failed for pane ' .. tostring(pid)
+        .. ' (mux/remote pane?): ' .. tostring(err))
+    end
+  end
+end
+
+local function sync_pane_backgrounds(window, force)
+  local mux_win = window:mux_window()
+  if not mux_win then return end
+  for _, tab in ipairs(mux_win:tabs()) do
+    local active = tab:active_pane()
+    local active_id = active and active:pane_id()
+    for _, p in ipairs(tab:panes()) do
+      local pid = p:pane_id()
+      local bg = pane_bg_color(p, pid == active_id)
+      if force or pane_bg_applied[pid] ~= bg then
+        pane_bg_applied[pid] = bg
+        inject_pane_surface(p, bg)
+      end
+    end
+  end
+end
+
+wezterm.on('user-var-changed', function(window, pane, name, value)
+  if name ~= 'cc_state' then return end
+  sync_pane_backgrounds(window, true)
+end)
+
+wezterm.on('window-config-reloaded', function(window)
+  clear_pane_bg_cache()
+  sync_pane_backgrounds(window, true)
+end)
+
+-- Keep the pane tints re-synced on the status cadence, whether or not tabline
+-- owns the status text (multiple update-status handlers all run).
+wezterm.on('update-status', function(window, pane)
   sync_pane_backgrounds(window)
 end)
+
+-- ── Fallback status (only when tabline failed to load) ────────────────────────
+-- [badge] [⬡ workspace │] user@host │ path — same content the tabline sections
+-- render, hand-formatted. Honors the Leader+s identity toggle.
+if not have_tabline then
+  wezterm.on('update-right-status', function(window, pane)
+    local items = {}
+    local kt = window:active_key_table()
+    if kt then                                  -- in a repeatable mode: accent badge
+      local MODE = {
+        resize_mode = '⤢ RESIZE ↑↓←→', move_mode = '✛ MOVE ↑↓←→',
+        rotate_mode = '⟳ ROTATE ←→', tab_mode = '⇥ TAB ←→', font_mode = 'A± FONT ↑↓0',
+      }
+      table.insert(items, { Background = { Color = P.accent } })
+      table.insert(items, { Foreground = { Color = P.base } })
+      table.insert(items, { Attribute = { Intensity = 'Bold' } })
+      table.insert(items, { Text = ' ' .. (MODE[kt] or kt) .. ' · Esc ' })
+      table.insert(items, { Background = { Color = P.crust } })
+      table.insert(items, { Foreground = { Color = P.overlay1 } })
+      table.insert(items, { Attribute = { Intensity = 'Normal' } })
+      table.insert(items, { Text = '  ' })
+    elseif window:leader_is_active() then        -- leader pending: bold peach badge
+      table.insert(items, { Background = { Color = P.peach } })
+      table.insert(items, { Foreground = { Color = P.base } })
+      table.insert(items, { Attribute = { Intensity = 'Bold' } })
+      table.insert(items, { Text = ' ⌨ LEADER ' })
+      table.insert(items, { Background = { Color = P.crust } })
+      table.insert(items, { Foreground = { Color = P.overlay1 } })
+      table.insert(items, { Attribute = { Intensity = 'Normal' } })
+      table.insert(items, { Text = '  ' })
+    end
+    local ws = window:active_workspace()
+    if ws ~= 'default' then                              -- workspace only when non-default
+      table.insert(items, { Foreground = { Color = P.accent } })
+      table.insert(items, { Text = '⬡ ' .. ws })
+      table.insert(items, { Foreground = { Color = P.overlay1 } })
+      table.insert(items, { Text = '  │  ' })
+    end
+    local id_text = status_identity(window, pane)
+    if id_text ~= '' then
+      table.insert(items, { Foreground = { Color = P.teal } })
+      table.insert(items, { Text = id_text .. '  ' })
+    end
+    window:set_right_status(wezterm.format(items))
+  end)
+end
 
 -- ── Dim every pane while the window is unfocused ──────────────────────────────
 -- inactive_pane_hsb dims unfocused panes within a focused window; on blur we want
@@ -626,10 +842,12 @@ end
 
 -- ── Repeatable leader modes (key tables) ─────────────────────────────────────
 -- Entered from the arrow / t / f bindings above; inside a mode plain arrows or
--- j/k/i/m repeat. resize_pane is sticky (Esc/Enter/q to leave); the others
--- auto-exit (until_unknown + timeout). window:active_key_table() drives the badge.
+-- j/k/i/m repeat. Every mode auto-exits (until_unknown + timeout); Esc/Enter
+-- leave immediately. Names end in _mode so tabline colours them per mode.
+-- The SHIFT/CTRL arrow duplicates are deliberate: after entering a mode you are
+-- often still holding the modifier — the modified press must keep repeating.
 config.key_tables = {
-  activate_pane = {
+  move_mode = {
     { key = 'LeftArrow',  action = act.ActivatePaneDirection 'Left' },
     { key = 'RightArrow', action = act.ActivatePaneDirection 'Right' },
     { key = 'UpArrow',    action = act.ActivatePaneDirection 'Up' },
@@ -641,7 +859,7 @@ config.key_tables = {
     { key = 'Escape', action = 'PopKeyTable' },
     { key = 'Enter',  action = 'PopKeyTable' },
   },
-  resize_pane = {
+  resize_mode = {
     { key = 'LeftArrow',  action = act.AdjustPaneSize { 'Left',  3 } },
     { key = 'RightArrow', action = act.AdjustPaneSize { 'Right', 3 } },
     { key = 'UpArrow',    action = act.AdjustPaneSize { 'Up',    3 } },
@@ -658,23 +876,17 @@ config.key_tables = {
     { key = 'Enter',  action = 'PopKeyTable' },
     { key = 'q',      action = 'PopKeyTable' },
   },
-  rotate_pane = {
+  rotate_mode = {
     { key = 'LeftArrow',  action = act.RotatePanes 'CounterClockwise' },
-    { key = 'UpArrow',    action = act.RotatePanes 'CounterClockwise' },
     { key = 'RightArrow', action = act.RotatePanes 'Clockwise' },
-    { key = 'DownArrow',  action = act.RotatePanes 'Clockwise' },
     { key = 'LeftArrow',  mods = 'CTRL', action = act.RotatePanes 'CounterClockwise' },
-    { key = 'UpArrow',    mods = 'CTRL', action = act.RotatePanes 'CounterClockwise' },
     { key = 'RightArrow', mods = 'CTRL', action = act.RotatePanes 'Clockwise' },
-    { key = 'DownArrow',  mods = 'CTRL', action = act.RotatePanes 'Clockwise' },
     { key = 'j', action = act.RotatePanes 'CounterClockwise' },
-    { key = 'i', action = act.RotatePanes 'CounterClockwise' },
     { key = 'k', action = act.RotatePanes 'Clockwise' },
-    { key = 'm', action = act.RotatePanes 'Clockwise' },
     { key = 'Escape', action = 'PopKeyTable' },
     { key = 'Enter',  action = 'PopKeyTable' },
   },
-  switch_tab = {
+  tab_mode = {
     { key = 'RightArrow', action = act.ActivateTabRelative(1) },
     { key = 'LeftArrow',  action = act.ActivateTabRelative(-1) },
     { key = 'k', action = act.ActivateTabRelative(1) },
@@ -684,7 +896,7 @@ config.key_tables = {
     { key = 'Escape', action = 'PopKeyTable' },
     { key = 'Enter',  action = 'PopKeyTable' },
   },
-  font_size = {
+  font_mode = {
     { key = 'UpArrow',   action = act.IncreaseFontSize },
     { key = 'DownArrow', action = act.DecreaseFontSize },
     { key = 'k', action = act.IncreaseFontSize },
@@ -698,6 +910,6 @@ config.key_tables = {
   },
 }
 
-pane_grid.bind_keys(config.keys, wezterm)
+pane_nav.bind_keys(config.keys, wezterm)
 
 return config

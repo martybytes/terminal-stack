@@ -164,17 +164,19 @@ _wez_tab_title() {
     printf '%s' "$uv" > /dev/tty 2>/dev/null
   fi
 }
-cc()    { _wez_tab_title "cc • ${PWD:t}"; claude "$@";                                           local rc=$?; _wez_tab_title ""; return $rc }
-ccc()   { _wez_tab_title "cc • ${PWD:t}"; claude --continue "$@";                                local rc=$?; _wez_tab_title ""; return $rc }
-ccd()   { _wez_tab_title "cc • ${PWD:t}"; claude --dangerously-skip-permissions "$@";            local rc=$?; _wez_tab_title ""; return $rc }
-ccdc()  { _wez_tab_title "cc • ${PWD:t}"; claude --dangerously-skip-permissions --continue "$@"; local rc=$?; _wez_tab_title ""; return $rc }
-ccr()   { _wez_tab_title "cc • ${PWD:t}"; claude --resume "$@";                                  local rc=$?; _wez_tab_title ""; return $rc }
-ccdr()  { _wez_tab_title "cc • ${PWD:t}"; claude --dangerously-skip-permissions --resume "$@";   local rc=$?; _wez_tab_title ""; return $rc }
-cca()   { _wez_tab_title "cc • agents";   claude agents;                                         local rc=$?; _wez_tab_title ""; return $rc }
+# { } always { }: the title clears even when Ctrl+C aborts the function body
+# (matches the pwsh wrappers' try/finally); exit status of the body is preserved.
+cc()    { _wez_tab_title "cc • ${PWD:t}"; { claude "$@" }                                           always { _wez_tab_title "" } }
+ccc()   { _wez_tab_title "cc • ${PWD:t}"; { claude --continue "$@" }                                always { _wez_tab_title "" } }
+ccd()   { _wez_tab_title "cc • ${PWD:t}"; { claude --dangerously-skip-permissions "$@" }            always { _wez_tab_title "" } }
+ccdc()  { _wez_tab_title "cc • ${PWD:t}"; { claude --dangerously-skip-permissions --continue "$@" } always { _wez_tab_title "" } }
+ccr()   { _wez_tab_title "cc • ${PWD:t}"; { claude --resume "$@" }                                  always { _wez_tab_title "" } }
+ccdr()  { _wez_tab_title "cc • ${PWD:t}"; { claude --dangerously-skip-permissions --resume "$@" }   always { _wez_tab_title "" } }
+cca()   { _wez_tab_title "cc • agents";   { claude agents }                                         always { _wez_tab_title "" } }
 
 # Escape hatch: vanilla zsh, no rc files (no oh-my-zsh/starship/aliases).
 # Nested — `exit` drops back to the customized shell.
-plain() { _wez_tab_title "plain • ${PWD:t}"; zsh -df "$@"; local rc=$?; _wez_tab_title ""; return $rc }
+plain() { _wez_tab_title "plain • ${PWD:t}"; { zsh -df "$@" } always { _wez_tab_title "" } }
 
 # Fix Home/End keys in PuTTY / some terminals.
 bindkey "\e[1~" beginning-of-line
@@ -295,7 +297,7 @@ _ts_clones() {
     [[ -n "$d" && -d "$d/.git" ]] || continue
     case " $seen " in *" $d "*) continue ;; esac
     u="$(git -C "$d" config --get remote.origin.url 2>/dev/null)"
-    [[ "$u" == *terminal-stack* ]] || continue
+    [[ "${u:l}" == *terminal-stack* ]] || continue   # :l — match case-insensitively like the pwsh side
     seen="$seen $d"
     echo "$d"
   done
@@ -628,6 +630,7 @@ command -v fzf    >/dev/null && source <(fzf --zsh 2>/dev/null)
 # Bold blue directories in eza listings (consistent across WezTerm panes/domains).
 export EZA_COLORS='di=1;34:da=1;34:ln=1;36'
 command -v eza    >/dev/null && alias ls='eza --icons=always --git --group-directories-first'
+command -v eza    >/dev/null && alias lt='eza --tree --icons=always --git --group-directories-first'   # matches the pwsh lt
 command -v bat    >/dev/null && alias ccat='bat --paging=never'   # ccat, not cat — don't shadow real cat
 alias rmf='rm -rf'   # force-delete file/folder recursively, no confirmation
 command -v cursor >/dev/null 2>&1 && c() { cursor "${1:-.}" --classic "${@:2}" }
@@ -974,7 +977,10 @@ cctts() {
         test) ts-config tts test ;;
         show) ts-config tts show ;;
         *)
-            if ts_data_get ccTtsEnabled 2>/dev/null | grep -qx true; then
+            # Read the rendered config (first "enabled" is the top-level one;
+            # engines.edge.enabled comes later). ts_data_get is bash-only and
+            # not sourced here — calling it always reported OFF.
+            if grep -m1 '"enabled"' "$HOME/.claude/tts/config.json" 2>/dev/null | grep -q true; then
                 echo 'CC TTS: ON  (cctts off to disable; ts-config tts for settings)'
             else
                 echo 'CC TTS: OFF (cctts on to enable)'

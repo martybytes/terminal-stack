@@ -143,6 +143,7 @@ $today = Get-Date -Format 'yyyyMMdd'
 $created = 0
 $updated = 0
 $unchanged = 0
+$weztermChanged = $false
 
 function Get-BackupPath([string]$dst, [string]$stamp) {
     $bak = "$dst.bak.$stamp"
@@ -172,7 +173,9 @@ function Sync-MirrorTree {
             $relOut = $rel.Substring(0, $rel.Length - 5)
             $rendered = [IO.Path]::GetTempFileName()
             $content = (Get-Content -LiteralPath $src -Raw)
-            foreach ($k in $tok.Keys) { $content = $content -replace $k, $tok[$k] }
+            # String .Replace, not -replace: regex replacement would interpret
+            # $1/$& in token values and silently corrupt the render.
+            foreach ($k in $tok.Keys) { $content = $content.Replace($k, [string]$tok[$k]) }
             $content | Set-Content -LiteralPath $rendered -NoNewline -Encoding utf8
             $effectiveSrc = $rendered
         } else {
@@ -195,6 +198,7 @@ function Sync-MirrorTree {
                 Copy-Item -LiteralPath $dst -Destination $bak -Force
                 Copy-Item -LiteralPath $effectiveSrc -Destination $dst -Force
                 $script:updated++
+                if ($relOut -like '.wezterm*') { $script:weztermChanged = $true }
                 Write-Host "updated  $dst  (backup: $bak)"
             } else {
                 if (-not (Test-Path -LiteralPath $dstDir -PathType Container)) {
@@ -202,6 +206,7 @@ function Sync-MirrorTree {
                 }
                 Copy-Item -LiteralPath $effectiveSrc -Destination $dst -Force
                 $script:created++
+                if ($relOut -like '.wezterm*') { $script:weztermChanged = $true }
                 Write-Host "created  $dst"
             }
         } finally {
@@ -227,3 +232,10 @@ if (Test-Path -LiteralPath $mergeHelper) {
 }
 
 Write-Host "sync-windows: user=$WinUser, $created created, $updated updated, $unchanged unchanged"
+
+# The mux server (unix domain 'main') loads its own copy of .wezterm.lua and is
+# never restarted automatically — that would kill every live pane. Remind instead.
+if ($weztermChanged) {
+    Write-Warning 'WezTerm config changed. The GUI reloads live, but wezterm-mux-server keeps the old config for spawning panes.'
+    Write-Warning "When convenient (closes all panes!): close WezTerm, then 'taskkill /IM wezterm-mux-server.exe /F' and relaunch."
+}

@@ -144,7 +144,10 @@ cc_tts_build_speech() {
     max_chars="$(cc_tts_json .maxChars 120)"
     include_project="$(cc_tts_json .announce.includeProject true)"
     message_mode="$(cc_tts_json .announce.messageMode template)"
-    [ "$message_mode" = template ] || message_mode="$(cc_tts_json .messageMode template)"
+    # Only consult the legacy top-level .messageMode when announce.messageMode
+    # is unset/default — a configured 'hook' must survive. (The old condition
+    # was inverted and silently reset 'hook' back to 'template'.)
+    [ "$message_mode" != template ] || message_mode="$(cc_tts_json .messageMode template)"
 
     if [ "$include_project" != true ]; then
         project=""

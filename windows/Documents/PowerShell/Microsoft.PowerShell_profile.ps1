@@ -86,7 +86,7 @@ function wsj {
     foreach ($t in @('src', 'public', 'archive', 'local')) {
         $p = Join-Path $root $t
         if (-not (Test-Path -LiteralPath $p)) { continue }
-        $repos += Get-ChildItem -LiteralPath $p -Directory -Recurse -Depth 3 -Force -ErrorAction SilentlyContinue |
+        $repos += Get-ChildItem -LiteralPath $p -Directory -Recurse -Depth 4 -Force -ErrorAction SilentlyContinue |
                   Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName '.git') } |
                   ForEach-Object { $_.FullName.Substring($root.Length).TrimStart('\') }
     }
@@ -969,7 +969,13 @@ function doc {
 
 # ---- clipboard-start ----
 # ccat — bat without paging (we deliberately don't shadow `cat`/Get-Content).
-function ccat { & bat --paging=never @args }
+function ccat {
+    if (-not (Get-Command bat -ErrorAction SilentlyContinue)) {
+        Write-Warning 'ccat: bat not found — install it or use Get-Content'
+        return
+    }
+    & bat --paging=never @args
+}
 
 # clipcopy — pipe input to the clipboard; catclip — a file's contents.
 function clipcopy { $input | Set-Clipboard }

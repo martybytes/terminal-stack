@@ -1,8 +1,8 @@
 # macOS — free the WezTerm keys first
 
 macOS grabs both `Ctrl+Space` and the bare `F1`–`F6` keys before WezTerm sees
-them, so the leader and the pane-grid keys (see `doc wezterm/panes`) look dead
-until you flip two toggles:
+them, so the leader and the directional pane keys (see `doc wezterm/panes`) look
+dead until you flip two toggles:
 
 1. **F-row → real function keys.** System Settings → Keyboard → enable
    **"Use F1, F2, etc. keys as standard function keys"** (or hold **Fn** when pressing F1–F6).
@@ -14,5 +14,5 @@ Until `Ctrl+Space` is freed, the `Ctrl+Space 1`–`6` fallback for the F-keys wo
 Keybindings themselves are identical across Windows/macOS/Linux — see
 `doc wezterm/panes`, `doc wezterm/tabs`, `doc wezterm/workspace`.
 
-Developing config: edit `dot_wezterm.lua.tmpl` / `dot_wezterm/pane_grid.lua`, then
+Developing config: edit `dot_wezterm.lua.tmpl` / `dot_wezterm/pane_nav.lua`, then
 `chezmoi apply -v` — see `doc wezterm/dev-config`.

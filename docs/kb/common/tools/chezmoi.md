@@ -15,4 +15,4 @@ Applies this repo to `$HOME`. On Windows, run it from **inside WSL**.
 
 Stack wrappers: `ts-update` (pull + apply), `ts-rollback` (undo) — see `doc common/stack`.
 
-WezTerm dev (macOS): `chezmoi apply -v ~/.wezterm.lua ~/.wezterm/pane_grid.lua` — see `doc wezterm/dev-config`.
+WezTerm dev (macOS): `chezmoi apply -v ~/.wezterm.lua ~/.wezterm/pane_nav.lua` — see `doc wezterm/dev-config`.

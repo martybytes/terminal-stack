@@ -34,7 +34,7 @@ Defaults: the Windows installer clones to `%USERPROFILE%\terminal-stack` (visibl
 
 ## Configuring (`ts-config`)
 
-The install is a short **wizard** — pick your WezTerm **leader key** (`Ctrl+Space`/`Ctrl+A`/`Ctrl+B`/custom), a **theme** (`dark` Catppuccin Mocha / `light` Latte / `follow` the OS light-dark setting), and which **apps** to install (recommended set or a per-app picker). Choices are saved (chezmoi `[data]` on WSL/Linux/macOS, `%LOCALAPPDATA%\terminal-stack\config.json` on Windows) and survive `ts-update`.
+The install is a short **wizard** — pick your WezTerm **leader key** (`Ctrl+Space`/`Ctrl+A`/`Ctrl+B`/custom), a **theme** (`dark` Catppuccin Mocha / `light` VS Code Light Modern / `follow` the OS light-dark setting), and which **apps** to install (recommended set or a per-app picker). Choices are saved (chezmoi `[data]` on WSL/Linux/macOS, `%LOCALAPPDATA%\terminal-stack\config.json` on Windows) and survive `ts-update`.
 
 Change them anytime with **`ts-config`** (both shells): run it bare for an interactive menu, or one-shot — `ts-config theme follow`, `ts-config leader ctrl-a`, `ts-config tmux ctrl-a`, `ts-config apps`, `ts-config show`. It re-applies and installs any newly-selected apps (it never uninstalls). In `follow` mode WezTerm switches light/dark live; the Starship/tmux palette is baked at apply and refreshed by `ts-update`/`ts-config`. In a combined Windows+WSL setup, run `ts-config` from WSL (its `chezmoi apply` is authoritative for the Windows files). Scripted installs skip the prompts with `TS_LEADER` / `TS_THEME` / `TS_APPS` (see `INSTALL.md` § Install wizard).
 
@@ -69,15 +69,15 @@ Two caveats: the clone may double as a dev checkout — commit or stash before a
 
 ## Developing WezTerm config
 
-WezTerm loads from your home directory, not the clone. On Windows, run `scripts\sync-windows.ps1 -SourceDir <clone>` after editing `windows/.wezterm.lua.tmpl` or `windows/.wezterm/pane_grid.lua`, then reload (`Ctrl+Space` `r` for module changes). On macOS, `chezmoi apply` deploys `dot_wezterm.lua.tmpl` and `dot_wezterm/pane_grid.lua`. See `docs/developing-wezterm.md` for the full loop, `$env:TERMINAL_STACK_DIR`, and optional auto-sync.
+WezTerm loads from your home directory, not the clone. On Windows, run `scripts\sync-windows.ps1 -SourceDir <clone>` after editing `windows/.wezterm.lua.tmpl` or `windows/.wezterm/pane_nav.lua`, then reload (`Ctrl+Space` `r` for module changes; the sync prints a reminder when the mux server needs a restart too). On macOS, `chezmoi apply` deploys `dot_wezterm.lua.tmpl` and `dot_wezterm/pane_nav.lua`. See `docs/developing-wezterm.md` for the full loop, the plugin forks, `$env:TERMINAL_STACK_DIR`, and optional auto-sync.
 
 ## What you get
 
-- **WezTerm nightly** with a flat tab bar (each tab labelled `N: <dir>`, tinted green when Claude finishes / red on error; each Claude pane's background tints to match), integrated window buttons, JetBrainsMono Nerd Font at 11.5pt, and a right-status showing `user@host` · workspace · cwd. A **no-timeout leader** (`Ctrl+Space` by default — configurable via `ts-config leader`; peach-cursor "waiting" indicator) drives splits (`h`/`v` local; `H`/`V` into a chosen SSH/WSL domain) and **arrow-key repeatable modes** — `Ctrl+Space`+arrows move focus, `+Shift` resizes, `+Ctrl` rotates panes, plus `t`/`f` for tab-switch / font-size — each shown by an on-screen mode badge. Also `Alt+1…9` tab selection, `Ctrl+V` rebound for synthetic-paste (Wispr Flow, etc.), `Ctrl+Space o` to pop a pane into its own window, the `F1`–`F6` 3×2 grid, and workspace management (`Ctrl+Space R` rename, `Ctrl+Space X` close-all). The colour theme (Catppuccin **Mocha** dark / **Latte** light / **follow** the OS) is set by `ts-config theme` and switches live in follow mode. On macOS, two System Settings toggles free `Ctrl+Space` and the F-row first — see `INSTALL.md` § macOS.
+- **WezTerm nightly** with a retro tab bar (each tab shows an index, process icon, and the `tab.tab_title`-or-cwd-leaf title, tinted green when Claude finishes / red on error with a coloured dot per pane; each Claude pane's background tints to match), integrated window buttons, JetBrainsMono Nerd Font at 11.5pt, and a **tabline status bar** — mode/workspace on the left, `user@host │ path` for the active pane on the right (`Ctrl+Space s` toggles it). **`F1`–`F4` are directions** (left/right/down/up): press to focus the pane that way, or split one into existence if none is there; `Shift+F1`–`F4` always split into a fuzzy-picked SSH/WSL domain, `F5` jumps via a labelled PaneSelect overlay, `F6` swaps panes, and `Ctrl+Space 1`–`6` mirror the F-keys. A **no-timeout leader** (`Ctrl+Space` by default — configurable via `ts-config leader`; peach-cursor "waiting" indicator) drives splits (`h`/`v` local; `H`/`V` into a chosen domain) and **arrow-key repeatable modes** — `Ctrl+Space`+arrows move focus, `+Shift` resizes, `+Ctrl` rotates panes, plus `t`/`f` for tab-switch / font-size — each shown by an on-screen mode badge, all auto-exiting after a short idle. **`Ctrl+Space p`** fuzzy-picks a project workspace (sessionizer over the `wso` tree; needs `fd`), and **`Ctrl+Space S`/`L`** save/restore sessions (resurrect; 15-min autosave). QoL: QuickSelect patterns for git SHAs and `file:line` refs, hyperlink rules (`owner/repo` → GitHub; Ctrl-click a `file.ext:123` to open it in Cursor), `Ctrl+Shift+↑/↓` jump between shell prompts (OSC 133), `Alt+1…9` tab selection, `Ctrl+V` rebound for synthetic-paste (Wispr Flow, etc.), `Ctrl+Space o` to pop a pane into its own window, and workspace management (`Ctrl+Space R` rename, `Ctrl+Space X` close-all). On Windows, panes are hosted in a **mux server** (OpenGL renderer), so a GUI crash no longer kills your shells. The colour theme (Catppuccin **Mocha** dark / **VS Code Light Modern** light / **follow** the OS) is set by `ts-config theme` and switches live in follow mode. On macOS, two System Settings toggles free `Ctrl+Space` and the F-row first — see `INSTALL.md` § macOS.
 - **PowerShell 7 `$PROFILE`** with Starship prompt, OSC 7 cwd hint, tilde-abbreviated tab title, UTF-8 console restore (heals Claude-Code `Γ¥»` mojibake), and `cc`/`ccc`/`ccd`/`ccdc`/`cca` wrappers that set per-tab project titles.
 - **WSL zsh** with oh-my-zsh, theme cleared so Starship owns the prompt, a `precmd` that sets tab titles, and `ccs` / `ssht` helpers for tmux-attached Claude Code and SSH sessions.
 - **Claude Code hooks** that flip the WezTerm tab title to `cc ⏳ <project>` while Claude is thinking and `cc ✓ <project>` when it's waiting for your input — symmetric across Windows pwsh and WSL bash.
-- **Modern CLI tools**: eza, zoxide, fzf, bat, git-delta, ripgrep, `glow` (markdown renderer), the `micro` editor (a friendly nano alternative), and **Neovim** — installed on every target; **Zed** (GUI editor) on macOS/Windows and opt-in on Linux. Delta is wired into `git diff` and the stack's `git st/lg/lga/br/co/cm` aliases via a managed gitconfig include.
+- **Modern CLI tools**: eza, zoxide, fzf, bat, git-delta, ripgrep, `glow` (markdown renderer), the `micro` editor (a friendly nano alternative), and **Neovim** — installed on every target; **Zed** (GUI editor) is an opt-in pick in the app catalog on every platform. Delta is wired into `git diff` and the stack's `git st/lg/lga/br/co/cm` aliases via a managed gitconfig include.
 - **tmux** configured for Claude Code passthrough, extended keys, and mouse mode.
 - **`lsr` — top-level directories by most recent activity.** Ranks each directory by the newest mtime among its *immediate* children, so a project you edited files inside all day sorts first — unlike `ls -lt`/`eza -s modified`, which sort by the directory's own mtime and bury it. One level deep, never recursive. Both shells; `lsr -a` includes hidden dirs, and `lsrr` caps the list at the 20 most recent. See `doc common/files-disk`.
 
@@ -137,13 +137,15 @@ terminal-stack/
 │   └── kb/               # the `doc` knowledge base (common/, linux/, macos/, windows/, wezterm/)
 ├── dot_zshrc             # ↘ chezmoi-managed (WSL + native Linux + macOS home)
 ├── dot_zshrc.local.example  # template for per-machine overrides (~/.zshrc.local)
-├── dot_tmux.conf
-├── dot_wezterm.lua       # macOS WezTerm config (gated to darwin in .chezmoiignore)
+├── dot_tmux.conf.tmpl
+├── dot_wezterm.lua.tmpl  # macOS WezTerm config (gated to darwin in .chezmoiignore)
+├── dot_wezterm/          # WezTerm Lua modules (pane_nav.lua) — darwin-gated too
 ├── dot_config/
 ├── dot_claude/
 ├── .chezmoi.toml.tmpl    # OS-detection seam → [data].os = wsl|linux|darwin|windows
 ├── windows/              # ↘ NOT chezmoi-managed; synced by run_after hook (or sync-windows.ps1)
-│   ├── .wezterm.lua
+│   ├── .wezterm.lua.tmpl
+│   ├── .wezterm/         # pane_nav.lua (Windows mirror)
 │   ├── .config/
 │   ├── Documents/
 │   └── .claude/

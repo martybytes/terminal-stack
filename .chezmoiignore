@@ -25,6 +25,9 @@ scripts/**
 
 # WezTerm GUI config — applied on macOS only. Native Linux hosts in this stack
 # are headless (ssh/PuTTY); Windows gets windows/.wezterm.lua via the sync hook.
+# .wezterm/** covers the Lua modules (pane_nav.lua) — without the gate they'd
+# litter WSL/native-Linux home dirs with a module nothing requires.
 {{ if ne .chezmoi.os "darwin" }}
 .wezterm.lua
+.wezterm/**
 {{ end }}

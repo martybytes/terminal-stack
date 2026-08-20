@@ -379,7 +379,10 @@ function Get-TsWsManagedRepos([string[]]$Tiers = @('src', 'public', 'archive', '
     foreach ($t in $Tiers) {
         $p = Join-Path $root $t
         if (-not (Test-Path -LiteralPath $p)) { continue }
-        Get-ChildItem -LiteralPath $p -Directory -Recurse -Depth 3 -Force -ErrorAction SilentlyContinue |
+        # Depth 4, not 3: nested GitLab groups (tier/host/group/subgroup/repo)
+        # are a supported remote shape (see ConvertFrom-TsWsRemote) and the bash
+        # twin (ts_ws_managed_repos, -maxdepth 5) already finds them.
+        Get-ChildItem -LiteralPath $p -Directory -Recurse -Depth 4 -Force -ErrorAction SilentlyContinue |
             Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName '.git') } |
             ForEach-Object { $_.FullName }
     }

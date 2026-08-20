@@ -72,7 +72,7 @@ else
     fi
 fi
 
-# 5. oh-my-zsh (unattended) — same as WSL path
+# 4. oh-my-zsh (unattended) — same as WSL path
 if [ ! -d "$HOME/.oh-my-zsh" ]; then
     echo "$INFO Installing oh-my-zsh"
     RUNZSH=no CHSH=no KEEP_ZSHRC=no sh -c \
@@ -82,7 +82,7 @@ else
     echo "$INFO oh-my-zsh already present"
 fi
 
-# 6. Login shell -> zsh (macOS ships with zsh by default since Catalina, but check anyway)
+# 5. Login shell -> zsh (macOS ships with zsh by default since Catalina, but check anyway)
 current_shell="$(dscl . -read "/Users/$USER" UserShell | awk '{print $2}')"
 brew_zsh="$(brew --prefix)/bin/zsh"
 if [ "$current_shell" != "$brew_zsh" ] && [ "$current_shell" != "/bin/zsh" ]; then
@@ -96,7 +96,7 @@ else
     echo "$INFO Login shell already zsh"
 fi
 
-# 7. chezmoi.toml — point sourceDir at this repo.
+# 6. chezmoi.toml — point sourceDir at this repo.
 # Default: the repo this script lives in (bootstrap/ is one level below the root).
 # Override by exporting SOURCE_DIR before running. ts_ensure_source_dir creates
 # the toml or repoints a stale sourceDir (preserving [data]).
@@ -109,7 +109,7 @@ else
     echo "$WARN $SOURCE_DIR not found; set SOURCE_DIR and re-run, or edit $TOML manually."
 fi
 
-# 7b. Persist the wizard's config choices into chezmoi [data] (regenerates the
+# 6b. Persist the wizard's config choices into chezmoi [data] (regenerates the
 # derived leaderKey/leaderMods/resolvedTheme via `chezmoi init`).
 if [ -f "$TOML" ]; then
     # shellcheck disable=SC2086
@@ -119,7 +119,7 @@ if [ -f "$TOML" ]; then
     echo "$INFO Saved terminal-stack config to $TOML [data]"
 fi
 
-# 8. Git include — stack aliases + delta config (file lands via chezmoi apply;
+# 7. Git include — stack aliases + delta config (file lands via chezmoi apply;
 # git silently skips missing include files, so ordering is safe).
 GIT_INC="$HOME/.config/git/terminal-stack.gitconfig"
 if git config --global --get-all include.path 2>/dev/null | grep -qF "terminal-stack.gitconfig"; then
@@ -129,7 +129,7 @@ else
     git config --global --add include.path "$GIT_INC"
 fi
 
-# 9. Workspace directory for ws/wsp/wspu. Same contract as the Debian-family
+# 8. Workspace directory for ws/wsp/wspu. Same contract as the Debian-family
 # bootstraps: $WORKSPACE_DIR env skips the prompt; the /dev/tty read survives
 # curl|bash; the answer persists to ~/.zshrc.local only when it differs from
 # the autodetect (the shell-side _ts_workspace() covers the detected case).
