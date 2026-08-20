@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # ts-config.sh — view/change the saved terminal-stack config (leader key, theme,
-# tmux prefix, apps) and re-apply. Driven by the `ts-config` shell wrapper (zsh)
-# and runnable standalone. On Windows the pwsh ts-config is the counterpart.
+# tmux prefix, apps, WezTerm mux + session restore) and re-apply. Driven by the
+# `ts-config` shell wrapper (zsh) and runnable standalone. On Windows the pwsh
+# ts-config is the counterpart.
 #
 # Usage:
 #   ts-config                 interactive menu
@@ -128,7 +129,7 @@ case "${1:-}" in
             echo "usage: ts-config restore <on|off>" >&2; exit 2 ;; esac
         set_restore "$2" ;;
     -h|--help|help)
-        sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
+        sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'
         echo "  tts show|on|off|test|reset|engine|message|voice|..."
         echo "  mux status|on|off|list|kill|restart|reset  (see: ts-mux -h)"
         echo "  restore on|off   reopen the last WezTerm session at startup"

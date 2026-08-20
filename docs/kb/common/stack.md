@@ -7,7 +7,7 @@
 | `ts-update` | pull the latest stack and re-apply — see below |
 | `ts-rollback` | undo the last `ts-update` — see below |
 | `ts-doctor [--repair]` | health-check / fix the install — see below |
-| `ts-config` | change leader, theme, tmux prefix, apps, TTS — see below |
+| `ts-config` | change leader, theme, tmux prefix, apps, TTS, WezTerm mux/restore — see below |
 | `ts-mux` | WezTerm multiplexer domain: on/off, status, kill/restart/reset — see below |
 | `plain` | vanilla shell, no rc/profile (no oh-my-zsh/starship/aliases) — `exit` to return |
 | `chezmoi diff` / `chezmoi apply -v` | preview / apply configs (run from inside WSL on Windows) |
@@ -96,7 +96,7 @@ repair offers the same canonical move and re-syncs (a pin is written to
 ## `ts-config`
 | Command | What it does |
 |---|---|
-| `ts-config` | interactive menu (leader / theme / tmux / apps / re-apply / TTS) |
+| `ts-config` | interactive menu (leader / theme / tmux / apps / re-apply / TTS / WezTerm mux / session restore) |
 | — | WezTerm itself is an **install-time** choice, not a `ts-config` entry; change it with `winget install wez.wezterm` / `brew install --cask wezterm@nightly` |
 | `ts-config show` | print the saved config + the derived bindings |
 | `ts-config leader <chord>` | WezTerm leader, e.g. `ctrl-space`, `ctrl-a`, `alt-x` |
