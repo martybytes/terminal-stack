@@ -3,15 +3,22 @@
 import importlib.util
 import json
 import sys
+import tomllib
 from pathlib import Path
 
 
 HELPER = Path(__file__).resolve().parents[1] / "dot_codex/hooks/terminal_stack.py"
+PROFILE = Path(__file__).resolve().parents[1] / "dot_codex/terminal-stack.config.toml.tmpl"
 SPEC = importlib.util.spec_from_file_location("terminal_stack_codex", HELPER)
 assert SPEC and SPEC.loader
 codex = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = codex
 SPEC.loader.exec_module(codex)
+
+
+def test_enhanced_profile_hides_native_status_line():
+    profile = tomllib.loads(PROFILE.read_text(encoding="utf-8"))
+    assert profile["tui"]["status_line"] == []
 
 
 def test_bar_thresholds_and_size():

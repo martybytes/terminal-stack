@@ -21,7 +21,8 @@ and administrative commands such as `codex exec`, `codex review`, `codex mcp`,
 
 Inside WezTerm, an interactive launch creates a three-row bottom split for the
 lifetime of Codex. It is deliberately separate from Codex's native one-row
-footer:
+footer. The terminal-stack profile disables that native metadata row so the
+same facts do not appear twice:
 
 | Line | Segments |
 |---|---|
@@ -70,7 +71,8 @@ configured daemon is unreachable.
 ## Native footer
 
 The fullest native adaptive row remains configured in `~/.codex/config.toml` and
-is also what `codex-stock` uses:
+is what `codex-stock` uses. Enhanced interactive launches layer
+`tui.status_line = []` over it because the lower dashboard supersedes it:
 
 ```toml
 [tui]
