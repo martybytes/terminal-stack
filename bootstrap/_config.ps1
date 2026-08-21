@@ -150,6 +150,24 @@ function Get-TsResolvedTheme([string]$mode) {
 }
 
 # ── store I/O ────────────────────────────────────────────────────────────────────
+# Optional-property read that survives Set-StrictMode. Under strictness a missing
+# property on a pscustomobject -- exactly what ConvertFrom-Json hands back for a config
+# written before a key existed -- is a terminating error, not $null. Empty strings fall
+# back too, preserving the truthiness the dot-access callers relied on.
+function Get-TsProp($Object, [string]$Name, $Default = $null) {
+    if ($null -eq $Object) { return $Default }
+    if ($Object -is [System.Collections.IDictionary]) {
+        if (-not $Object.Contains($Name)) { return $Default }
+        $value = $Object[$Name]
+    } else {
+        $prop = $Object.PSObject.Properties[$Name]
+        if ($null -eq $prop) { return $Default }
+        $value = $prop.Value
+    }
+    if ($null -eq $value -or $value -eq '') { return $Default }
+    return $value
+}
+
 function Get-TsConfigPath { Join-Path $env:LOCALAPPDATA 'terminal-stack\config.json' }
 
 function Get-TsConfig {
@@ -277,7 +295,8 @@ function Read-TsChoice {
     foreach ($line in $Intro) { Write-Host $line }
     for ($i = 0; $i -lt $Options.Count; $i++) {
         $o = $Options[$i]
-        $suffix = if ($o.Note) { "  ($($o.Note))" } else { '' }
+        $note = $o['Note']   # index, not dot: Note is optional and dot access throws under strictness
+        $suffix = if ($note) { "  ($note)" } else { '' }
         $mark = ' '
         if ($o.Key -eq $Default) { $mark = '>'; $suffix += '  [default — press Enter]' }
         Write-Host (" {0}  {1}) {2}{3}" -f $mark, ($i + 1), $o.Label, $suffix)
@@ -569,14 +588,14 @@ function ConvertTo-CcTtsRuntimeJson {
 }
 
 function Get-CcTtsConfig {
-    $c = Get-TsConfig
-    if (-not $c.ccTts) { return (Get-CcTtsDefaults) }
-    # Fill members added after the config was first stored (pre-daemon upgrades).
-    $tts = $c.ccTts
+    $tts = Get-TsProp (Get-TsConfig) ccTts
+    if (-not $tts) { return (Get-CcTtsDefaults) }
+    # Fill members added after the config was first stored (pre-daemon upgrades). The probe
+    # itself has to be strict-safe: testing for a missing member is the whole point.
     $defaults = Get-CcTtsDefaults
     foreach ($key in @('daemon', 'summarize', 'music', 'voicePool',
                        'prefixCodex', 'prefixCodexEnabled')) {
-        if ($null -eq $tts.$key) {
+        if ($null -eq (Get-TsProp $tts $key)) {
             $tts | Add-Member -NotePropertyName $key -NotePropertyValue $defaults[$key] -Force
         }
     }

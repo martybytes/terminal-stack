@@ -278,6 +278,45 @@ hook probe fails, rule out the harness before believing the hook — run the und
 interpreter directly first (`node ./hook.mjs` with the env var set), and only then the
 full wrapped command.
 
+## The caller's session may have `Set-StrictMode` on
+
+Every function here can be dot-sourced into a shell we do not control, and strictness is
+session-scoped and inherited. Under `Set-StrictMode` two patterns that are ordinarily
+harmless become **terminating** errors:
+
+| Pattern | Under strictness |
+|---|---|
+| reading a variable assigned only on some branch | `The variable '$x' cannot be retrieved because it has not been set.` |
+| `$obj.MissingProperty` (including `ConvertFrom-Json` output) | `The property 'X' cannot be found on this object.` |
+
+Both were live. `Resolve-TsSourceDir` assigned `$stalePin` only inside the dangling-pin
+branch and then read it unconditionally, so **`ts-update` and `ts-config` failed outright**
+in a strict session — before doing anything, with an error naming an internal variable.
+`Read-TsChoice` rendered its optional `Note` column with `$o.Note`, so the install wizard
+died on the very first question (leader key), whose options have no `Note`. `Get-CcTtsConfig`
+was worse: it *probed* for missing members with the syntax that throws on missing members.
+
+The rules:
+
+- **Initialize every variable you will read**, even when a branch is the only writer.
+- **Read optional hashtable keys by index** — `$o['Note']` returns `$null` for a missing key
+  under any strictness, `$o.Note` does not.
+- **Read optional object properties through `Get-TsProp`** (`bootstrap/_config.ps1`), which
+  probes `PSObject.Properties` and treats `$null`/empty as the caller's default. This matters
+  most for `ConvertFrom-Json` results: a `config.json` written before a key existed makes
+  plain dot access a crash rather than a fallback.
+- Do **not** fix this by adding `Set-StrictMode` yourself, and do not add it to a
+  dot-sourced helper — it leaks into the caller's session and outlives the call
+  (`bootstrap/_agentmemory.ps1` carries a comment saying exactly that). Write code that is
+  correct either way.
+
+Reproducing is a one-liner, and worth doing for anything on the `ts-config` / `ts-update` /
+wizard path:
+
+```powershell
+pwsh -NoProfile -Command "Set-StrictMode -Version Latest; . .\bootstrap\_config.ps1; Read-TsChoice -Title t -Default a -Options @(@{Key='a';Label='A'})"
+```
+
 ## `| Set-Content` silently no-ops when the pipeline is empty
 
 `Clear-TsSourceDirPin` (`bootstrap/_cleanup.ps1`) strips the `$env:TERMINAL_STACK_DIR`
