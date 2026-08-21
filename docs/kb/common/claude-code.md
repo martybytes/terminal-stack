@@ -20,6 +20,27 @@ The stack skips Starship and OSC title sequences in those shells while keeping
 git shortcuts, zoxide, and `cc*` wrappers. See `doc windows/pwsh` § "Agent vs
 interactive terminals".
 
+## Who owns `~/.claude/settings.json`
+
+Shared file. The stack renders `statusLine`, `hooks` and `theme`; **Claude Code owns
+everything else** — `model` (from `/model`), `enabledPlugins` and
+`extraKnownMarketplaces` (from `/plugin`), `permissions`, `env`.
+
+On Windows the sync splices its three keys in and leaves the rest byte-for-byte
+(`bootstrap/_merge_cursor_hooks.ps1` does the same for `~/.cursor/hooks.json`, per hook
+entry). So installing a plugin, switching model, or allowing an MCP tool survives an
+apply — and per-machine wiring an app needs (an MCP server URL in `env`, say) belongs
+in that file rather than in the repo.
+
+Two things follow:
+
+- **Don't `chezmoi re-add` it.** That captures Claude Code's private state into the
+  tracked template and pushes it to every machine on the next apply.
+- **A plugin that silently stops working is worth checking here first.** If
+  `enabledPlugins` loses an entry, the plugin's hooks and MCP server just stop
+  loading — no error, nothing in `chezmoi diff`. The `.bak.yyyyMMdd[.N]` chain beside
+  the file shows what a write removed.
+
 ## Statusline
 
 The three-line footer under the prompt is `~/.claude/statusline-command.sh`
@@ -108,6 +129,6 @@ WSL invokes the Windows GUI-subsystem EXE, whose WinRT MediaPlayer uses the same
 5. Trigger AskQuestion in Cursor plan mode — hear **Cursor. I have a question for you.**
 6. Claude permission or AskUserQuestion — hear **Claude.** + template
 
-**Cursor:** confirm `~/.cursor/hooks.json` has `afterAgentResponse`, `stop`, and `postToolUse` entries. `afterAgentResponse` carries the spoken completion text; `stop` is retained for failures. Restart Cursor after first deploy. Check **Settings → Hooks** if silent.
+**Cursor:** confirm `~/.cursor/hooks.json` has `afterAgentResponse`, `stop`, and `postToolUse` entries. `afterAgentResponse` carries the spoken completion text; `stop` is retained for failures. Other tools' entries sit in the same arrays and are expected — look for the one whose command is `terminal-stack-tts.exe`, not for a one-entry array. Restart Cursor after first deploy. Check **Settings → Hooks** if silent.
 
 Skip at bootstrap: `TS_CC_TTS=off`. Enable: `TS_CC_TTS=on`.

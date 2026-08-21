@@ -258,6 +258,26 @@ Defensive practices used in this stack:
 - Strip `\r` from any file edited via Windows-side tools that will be parsed by bash: `sed -i 's/\r$//' <file>`.
 - For paths in JSON consumed by shell layers, use forward slashes.
 
+**One more layer nobody counts: Git Bash rewrites arguments that start with `/`.** MSYS
+path conversion turns `/d` `/s` `/c` into Windows paths before `cmd.exe` ever sees them,
+so reproducing a configured Windows hook command from the Bash tool fails in a way that
+looks exactly like the hook being broken:
+
+```sh
+# looks like "the hook doesn't work" — actually /d /s /c became paths
+printf '%s' "$payload" | cmd.exe /d /s /c "set VAR=x&& node ./hook.mjs"
+
+# what actually tests the configured command
+MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' \
+  cmd.exe /d /s /c "set VAR=x&& node ./hook.mjs" < payload.json
+```
+
+This bit during the Cursor hook verification: the first form silently captured nothing
+(agent hooks swallow their own errors and exit 0), the second landed correctly. When a
+hook probe fails, rule out the harness before believing the hook — run the underlying
+interpreter directly first (`node ./hook.mjs` with the env var set), and only then the
+full wrapped command.
+
 ## `| Set-Content` silently no-ops when the pipeline is empty
 
 `Clear-TsSourceDirPin` (`bootstrap/_cleanup.ps1`) strips the `$env:TERMINAL_STACK_DIR`

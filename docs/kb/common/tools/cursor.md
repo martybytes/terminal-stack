@@ -20,6 +20,11 @@ yourself and enable its shell command.
   formatting survive.
 - Cursor Agent TTS hooks (`~/.cursor/hooks`, synced by the stack) can announce
   stop/error/question events — see `doc common/claude-code` § "Local TTS".
+- `~/.cursor/hooks.json` is **part-owned**: the sync splices in only the stack's own
+  hook entries (`bootstrap/_merge_cursor_hooks.ps1`) and leaves anyone else's alone,
+  so tools that register their own hooks — agentmemory shares the `stop` and
+  `postToolUse` arrays with ours — survive an apply. Add your own hooks straight to
+  the file; the stack will not remove them. Never let anything copy that file whole.
 
 | Command | What it does |
 |---|---|
