@@ -329,6 +329,20 @@ config.keys = {
   { key = 'H', mods = 'LEADER', action = wezterm.action_callback(function(w, p) pick_domain_split(w, p, 'Down') end) },
   { key = 'V', mods = 'LEADER', action = wezterm.action_callback(function(w, p) pick_domain_split(w, p, 'Right') end) },
   -- Toggle the status-bar detail (workspace + user@host + path); off by default.
+  -- Toggle the TTS mute without leaving the keyboard. Fire-and-forget: the EXE writes
+  -- the sentinel that this config polls, so the chip follows within a second.
+  { key = 'm', mods = 'LEADER', action = wezterm.action_callback(function(window, pane)
+    local base = os.getenv('LOCALAPPDATA')
+    if not base then
+      window:toast_notification('terminal-stack', 'TTS mute is Windows-only here', nil, 3000)
+      return
+    end
+    local exe = base .. '\\terminal-stack\\tts-daemon\\terminal-stack-tts.exe'
+    local ok = pcall(wezterm.background_child_process, { exe, 'mute' })
+    if not ok then
+      window:toast_notification('terminal-stack', 'terminal-stack-tts.exe not found', nil, 3000)
+    end
+  end) },
   { key = 's', mods = 'LEADER', action = wezterm.action_callback(function(window)
       wezterm.GLOBAL.show_identity = not wezterm.GLOBAL.show_identity
     end) },
@@ -873,6 +887,31 @@ local MODE_BADGE = {
 local ICON_WORKSPACE = wezterm.nerdfonts.cod_window or '⬡'
 local ICON_USER      = wezterm.nerdfonts.md_account or '@'
 local ICON_PATH      = wezterm.nerdfonts.md_folder_outline or '/'
+local ICON_MUTE      = wezterm.nerdfonts.md_volume_off or 'x'
+
+-- The TTS mute, as the tray icon, the global hotkey and `ccmute` all write it: one
+-- sentinel file. Read at most once a second on purpose -- update-status fires at 10 Hz,
+-- and a child process in that handler would stall the UI outright (a stat will not).
+-- A forgotten mute is the failure mode this chip exists to prevent: without it, silence
+-- looks exactly like broken TTS.
+local MUTE_SENTINEL = (function()
+  local base = os.getenv('LOCALAPPDATA')
+  if not base then return nil end
+  return base .. '\\terminal-stack\\tts-daemon\\state\\muted'
+end)()
+local mute_cache = { at = 0, muted = false }
+
+local function tts_muted()
+  if not MUTE_SENTINEL then return false end
+  local now = os.time()
+  if now - mute_cache.at >= 1 then
+    mute_cache.at = now
+    local handle = io.open(MUTE_SENTINEL, 'r')
+    mute_cache.muted = handle ~= nil
+    if handle then handle:close() end
+  end
+  return mute_cache.muted
+end
 
 local function left_badge(window)
   local kt = window:active_key_table()
@@ -933,6 +972,14 @@ wezterm.on('update-status', function(window, pane)
       table.insert(items, { Attribute = { Intensity = 'Normal' } })
       table.insert(items, { Text = '  │  ' })
     end
+  end
+
+  if tts_muted() then
+    sep()
+    table.insert(items, { Foreground = { Color = P.maroon } })
+    table.insert(items, { Attribute = { Intensity = 'Bold' } })
+    table.insert(items, { Text = ICON_MUTE .. ' MUTED' })
+    table.insert(items, { Attribute = { Intensity = 'Normal' } })
   end
 
   local counts, total = cc_fleet_counts()

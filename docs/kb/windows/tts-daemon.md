@@ -33,8 +33,8 @@ What you hear: `"Claude. terminal-stack finished. Added the retry logic."` —
 project name (with "two"/"three" when several sessions share one project),
 what happened, and questions/permissions speak immediately while several
 near-simultaneous "done"s coalesce into one line ("Three sessions finished:
-…"). Tray icon menu: DND, mute 1 hour, music mode, summarizer mode, test
-speak, unduck now.
+…"). **Left-click the tray icon to mute** (it greys out with a slash); the menu also
+has music mode, summarizer mode, test speak, unduck now.
 
 ## Summarizer modes
 
@@ -81,10 +81,11 @@ repeat the fixed waiting template unless the hook supplied no response text.
 | log | `%LOCALAPPDATA%\terminal-stack\tts-daemon\logs\ttsd.log` |
 | duck snapshot (crash safety) | `…\tts-daemon\state\duck-snapshot.json` |
 | utterance history (SQLite) | `…\tts-daemon\state\history.db` |
+| mute sentinel (existence = muted) | `…\tts-daemon\state\muted` |
 | play lock (direct path only) | `…\tts-daemon\state\speak.lock` |
 | runtime knobs | `~/.claude/tts/config.json` + untracked `local.json` |
 | autostart | HKCU `…\CurrentVersion\Run` → `"…\terminal-stack-tts.exe" daemon` |
-| HTTP API | `http://127.0.0.1:8890` — `/healthz`, `/v1/status`, `/v1/dnd`, `/v1/duck/release`, `/v1/history` |
+| HTTP API | `http://127.0.0.1:8890` — `/healthz`, `/v1/status`, `/v1/dnd`, `/v1/duck/release`, `/v1/history`, `/v1/mute` |
 
 Music stuck quiet after a crash? `ts-doctor --repair` (or just start the
 daemon — it restores the stale snapshot at startup). Emergency by hand:
@@ -109,6 +110,38 @@ the positional argument is never read. It exercises the pipeline, not a phrase o
 choosing. To have the voice say something specific, use the `self` summarizer: end the
 turn with a `<!-- speak: … -->` marker, which is what the Stop hook reads.
 
+## Going quiet for a call
+
+```powershell
+ccmute            # toggle. Also: ccmute on | off | status
+```
+
+Four ways to the same switch, all instant and none of them touching config or running an
+apply:
+
+| | |
+|---|---|
+| `ccmute` | either shell; works with the daemon stopped |
+| left-click the tray icon | it greys out with a slash while muted |
+| `Ctrl+Alt+Shift+M` | anywhere, including with Teams focused |
+| `Leader+m` | in WezTerm; the status bar shows a `MUTED` chip |
+
+It is **sticky** — muted until you unmute — and **absolute**: questions, permission
+prompts and errors are silenced too, which the old tray "Do not disturb" never did. Muting
+also cuts off whatever is speaking at that moment. It survives a reboot and the daemon
+dying, because it is a file (`state\muted`); `ccmute status`, the WezTerm chip and
+`ts-doctor` all report it, so a mute you forgot about cannot masquerade as broken TTS.
+
+**`ccmute` is not `cctts off`.** `cctts off` is the structural switch: it rewrites the
+saved setting and removes the hooks on the next apply, taking 5–15 seconds and a wall of
+output. `ccmute` writes one sentinel file. Use `ccmute` for a call and `cctts off` when you
+want the feature gone.
+
+If nothing speaks and `ccmute status` says *not muted*, check
+`~/.claude/tts/local.json` for `"enabled": false` — that untracked override wins over the
+rendered config, and it is the one thing that can silence everything while `cctts` still
+reports ON. `ts-doctor` now flags it.
+
 ## It said the same thing twice (or two voices at once)
 
 Ask it what happened — every decision is recorded, including the ones where it stayed quiet:
@@ -122,13 +155,14 @@ ts-config tts history --dupes    # anything that spoke twice inside 8s, last 24h
 ```
 13:49:10  spoken       p0 question   direct kokoro   5.8s    Claude. alpha: I have a question…
 13:49:10  deduped      p0 question   direct                  Claude. alpha: I have a question…
-13:49:11  deduped      p0 permission direct                  Claude. Permission needed in alpha.
+13:49:11  deduped      p0 question   direct                  Claude. alpha: I have a question…
 ```
 
-That is the healthy shape. **One `AskUserQuestion` fires three hooks** — `Notification`,
-`PermissionRequest`, and the `AskUserQuestion` `PreToolUse` matcher — so seeing three rows
-per question is normal; seeing three `spoken` rows is not. `--dupes` reporting nothing over
-a day of work is the check that matters.
+That is the healthy shape. **One `AskUserQuestion` fires two hooks** — `Notification` and
+the `AskUserQuestion` `PreToolUse` matcher — so seeing two rows per question is normal;
+seeing two `spoken` rows is not. `--dupes` reporting nothing over a day of work is the
+check that matters. (A third hook, `PermissionRequest`, was removed: it said "wants to run
+AskUserQuestion. AskUserQuestion" and added nothing.)
 
 If duplicates *are* showing up:
 
@@ -169,7 +203,7 @@ chezmoi execute-template '{{ .ccTtsEnabled }}'      # from WSL — authoritative
 
 Disagree? Re-save **from WSL** — `ts-config tts on` — which is the only path
 that writes both stores, then confirm `~/.claude/settings.json` has TTS entries
-under `Stop`, `StopFailure`, `Notification`, `PermissionRequest` and the
+under `Stop`, `StopFailure`, `Notification` and the
 `AskUserQuestion` `PreToolUse` matcher. Same rule for every `ts-config`
 setting on a combined Windows+WSL machine, not just TTS.
 

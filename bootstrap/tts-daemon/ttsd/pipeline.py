@@ -15,7 +15,7 @@ import logging
 import threading
 import time
 
-from . import history
+from . import history, mute
 from .events import P0_INTERACTIVE, P1_ERROR, P2_DONE, Event
 
 log = logging.getLogger(__name__)
@@ -34,7 +34,6 @@ class Dispatcher(threading.Thread):
         self.audio = audio
         self.wez = wez
         self._stop = threading.Event()
-        self.dnd_until: float | None = None  # time.time(); None = off
         self.spoken = 0
         self.suppressed = 0
         self.last_line = ""
@@ -44,23 +43,16 @@ class Dispatcher(threading.Thread):
         with self.scheduler.cond:
             self.scheduler.cond.notify()
 
-    # ── DND ───────────────────────────────────────────────────────────────
+    # ── mute / quiet hours ────────────────────────────────────────────────
+    #
+    # `dnd_active` used to be a float on this object, set from the tray. Three problems:
+    # it died with the process, a direct worker in another process could not see it, and
+    # the enforcement below let every P0/P1 event through anyway. `mute.py` replaces it
+    # with a sentinel file that all three paths read; this method survives only so
+    # /healthz and /v1/status keep reporting the same field.
 
     def dnd_active(self) -> bool:
-        if self.dnd_until is None:
-            return False
-        if self.dnd_until == 0:
-            return True  # indefinite
-        if time.time() >= self.dnd_until:
-            self.dnd_until = None
-            return False
-        return True
-
-    def set_dnd(self, enabled: bool, minutes: float | None = None) -> None:
-        if not enabled:
-            self.dnd_until = None
-        else:
-            self.dnd_until = time.time() + minutes * 60 if minutes else 0
+        return mute.is_muted()
 
     def _quiet_hours(self) -> bool:
         if not self.cfg.get("quietHours.enabled", False):
@@ -175,8 +167,16 @@ class Dispatcher(threading.Thread):
             log.info("duplicate suppressed: %s p%s within %.0fs",
                      ev.session_key, ev.priority, dedupe_sec)
             return True
+        # Muted is absolute -- no allowInteractive escape. That exemption is why the old
+        # tray "Do not disturb" silenced "done" announcements and let every question,
+        # permission prompt and error through, which is exactly backwards.
+        if mute.is_muted():
+            history.record(history.MUTED, event=ev, daemon=True)
+            self.suppressed += 1
+            return True
+        # Quiet hours keep their own escape hatch: they are a schedule, not a panic button.
         interactive = ev.priority in (P0_INTERACTIVE, P1_ERROR)
-        if self.dnd_active() or self._quiet_hours():
+        if self._quiet_hours():
             if not (interactive and self.cfg.get("quietHours.allowInteractive", True)):
                 history.record(history.SUPPRESSED_DND, event=ev, daemon=True)
                 self.suppressed += 1

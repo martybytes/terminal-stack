@@ -795,6 +795,7 @@ ts-config tts — agent local TTS (Kokoro / Chatterbox / edge-tts)
   music duck|smart|pause|off | duck-level <0-100>
   voices show|<v1,v2,...> | port <n>
   history [<n>] | history --dupes [<sec>]  (what was said, and what was suppressed)
+  (to go quiet right now use ccmute — instant, no apply; tray icon and hotkey share it)
 EOF
             ;;
         *)

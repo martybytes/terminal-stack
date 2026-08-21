@@ -1131,6 +1131,18 @@ function ccnotify {
     }
 }
 
+# The instant mute -- same sentinel the tray icon and the global hotkey use, so all
+# three agree and it survives the daemon dying. Writes no config store, runs no apply.
+function ccmute {
+    param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Rest)
+    $exe = Join-Path $env:LOCALAPPDATA 'terminal-stack\tts-daemon\terminal-stack-tts.exe'
+    if (-not (Test-Path -LiteralPath $exe)) {
+        Write-Warning "terminal-stack-tts.exe not found at $exe (ts-config tts daemon install)"
+        return
+    }
+    & $exe mute @Rest | Out-Host
+}
+
 function cctts {
     param([string]$Action, [string]$Extra)
     switch ($Action) {
@@ -1139,13 +1151,21 @@ function cctts {
         'test' { ts-config tts test }
         'show' { ts-config tts show }
         default {
+            # The effective value, not the mirror: local.json is deep-merged over
+            # config.json and wins, so the mirror can say ON while the machine is silent.
             $en = $false
-            $cfgPath = Join-Path $env:LOCALAPPDATA 'terminal-stack\config.json'
-            if (Test-Path $cfgPath) {
-                try { $en = [bool](Get-Content $cfgPath -Raw | ConvertFrom-Json).ccTts.enabled } catch {}
+            foreach ($f in @((Join-Path $HOME '.claude\tts\local.json'),
+                             (Join-Path $HOME '.claude\tts\config.json'))) {
+                if (-not (Test-Path -LiteralPath $f)) { continue }
+                try {
+                    $j = Get-Content $f -Raw | ConvertFrom-Json
+                    $p = $j.PSObject.Properties['enabled']
+                    if ($p) { $en = [bool]$p.Value; break }
+                } catch {}
             }
             if ($en) { Write-Host 'CC TTS: ON  (cctts off to disable; ts-config tts for settings)' }
             else     { Write-Host 'CC TTS: OFF (cctts on to enable)' }
+            ccmute status
         }
     }
 }

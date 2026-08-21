@@ -145,7 +145,7 @@ ts_doctor() {
         # One line of forensics from the utterance history. Both numbers below are
         # invisible otherwise: every hook exits 0 whether it spoke once, three times, or
         # fell back to the direct path for fifteen hours.
-        local _hexe _hchk _hage _hdup
+        local _hexe _hchk _hage _hdup _mute
         _hexe="$(ts_cc_tts_exe_path 2>/dev/null || true)"
         if [ -n "$_hexe" ] && [ -f "$_hexe" ]; then
             _hchk="$("$_hexe" history --check 2>/dev/null | tr -d "\015")"
@@ -154,6 +154,20 @@ ts_doctor() {
                     _hage="${_hchk##*daemon_silent_for=}"; _hage="${_hage%% *}"
                     _hdup="${_hchk##*dupes=}"; _hdup="${_hdup%% *}" ;;
             esac
+        fi
+        # A mute is a note, never a failure -- but an unreported one is indistinguishable
+        # from broken TTS, which is exactly how an afternoon got lost to a stale override.
+        if [ -n "$_hexe" ] && [ -f "$_hexe" ]; then
+            _mute="$("$_hexe" mute status 2>/dev/null | tr -d "\015")"
+            case "$_mute" in
+                *MUTED*) echo "  note: ${_mute#tts: } - unmute with ccmute, or the tray icon" ;;
+            esac
+        fi
+        # The untracked local override wins over the rendered config, so `cctts on` can
+        # report success while every hook stays silent.
+        if [ -f "$HOME/.claude/tts/local.json" ] \
+            && grep -q '"enabled"[[:space:]]*:[[:space:]]*false' "$HOME/.claude/tts/local.json" 2>/dev/null; then
+            _bad "tts: ~/.claude/tts/local.json forces enabled=false, which overrides the saved setting - remove that key (ccmute is the way to go quiet)"
         fi
         if [ -n "${_hdup:-}" ] && [ "$_hdup" != 0 ]; then
             echo "  note: $_hdup session(s) spoke twice within 8s in the last day - inspect: ts-config tts history --dupes"

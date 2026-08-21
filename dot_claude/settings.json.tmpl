@@ -75,17 +75,6 @@
           }
         ]
       }
-    ],
-    "PermissionRequest": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "{{ .chezmoi.homeDir }}/.claude/hooks/cc-speak-input.sh permission"
-          }
-        ]
-      }
     ]{{ end }}
   },
   "theme": "{{ if hasKey . "resolvedTheme" }}{{ .resolvedTheme }}{{ else }}dark{{ end }}"

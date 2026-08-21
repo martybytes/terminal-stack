@@ -216,6 +216,24 @@ fails instantly and `probe_duration` raises — you get `play_failed` rows, or n
 all, and conclude the wrong thing. Source mode is fine for `history`, `--check` and the
 pytest suite.
 
+Mute drills, in the same sandbox (`ccmute` is the EXE's `mute` subcommand):
+
+```sh
+HOME=$S USERPROFILE=$S LOCALAPPDATA=$S dist/terminal-stack-tts.exe mute        # toggle
+# then fire the burst: expect zero `spoken` and one `muted` row per hook
+HOME=$S USERPROFILE=$S LOCALAPPDATA=$S dist/terminal-stack-tts.exe history
+```
+
+The three that actually matter, because each covers a way the old DND failed:
+
+- **With the daemon stopped**, a muted hook must still be silent — that path never consulted
+  the old in-memory flag at all.
+- **A `P0` question and a `P1` error must both be silenced.** The old `Do not disturb` let
+  every question, permission prompt and error through, because it shared
+  `quietHours.allowInteractive`, whose default is `true`.
+- **An unusable state dir must read as *not* muted.** The mute fails open toward speech, the
+  opposite of the history store: a mute you cannot lift looks exactly like broken TTS.
+
 The invariants to drill after touching the hook senders:
 
 - **No console process:** inspect the built PE Optional Header (`Subsystem=2`,

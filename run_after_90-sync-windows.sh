@@ -157,17 +157,6 @@ if [ "$CC_TTS_ENABLED" = true ]; then
           }
         ]
       }
-    ],
-    "PermissionRequest": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "C:/Users/'"$WIN_USER"'/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe hook --source claude --event permission --state permission"
-          }
-        ]
-      }
     ]'
 else
   CC_TTS_STOP_HOOK=""

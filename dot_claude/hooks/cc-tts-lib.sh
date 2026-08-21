@@ -32,6 +32,25 @@ cc_tts_windows_hook() {
         --state "$state"
 }
 
+# The absolute mute, as the tray icon / hotkey / ccmute write it. The sentinel lives in
+# the Windows daemon's state dir, because on a combined host that is the process that does
+# the talking; a native Linux host, which has no ttsd, keeps its own next to the config.
+cc_tts_mute_path() {
+    local winuser
+    if [ -d /mnt/c/Users ]; then
+        winuser="$(cmd.exe /c 'echo %USERNAME%' 2>/dev/null | tr -d '\r\n')"
+        if [ -n "$winuser" ]; then
+            printf '/mnt/c/Users/%s/AppData/Local/terminal-stack/tts-daemon/state/muted' "$winuser"
+            return 0
+        fi
+    fi
+    printf '%s/.claude/tts/muted' "$HOME"
+}
+
+cc_tts_muted() {
+    [ -f "$(cc_tts_mute_path)" ]
+}
+
 cc_tts_init_config() {
     [ -n "$CONFIG" ] && [ -f "$CONFIG" ] && return 0
 

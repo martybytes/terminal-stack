@@ -12,7 +12,7 @@ import urllib.request
 import uuid
 from pathlib import Path
 
-from . import history, speaklock
+from . import history, mute, speaklock
 from .config import Config, daemon_root, state_dir
 from .events import EventError, parse_event
 from .playback import Playback
@@ -226,6 +226,20 @@ def submit_hook(source: str, event: str, state: str, raw: bytes) -> int:
     cfg = Config()
     if not cfg.get("enabled", False):
         return 0
+    # The mute is checked here, before the daemon POST and before any worker is spawned,
+    # because this is the one place every hook on every host passes through. It is
+    # deliberately absolute: no priority escape, since the whole point is silencing the
+    # questions and permission prompts during a call.
+    if mute.is_muted():
+        # Parse only to make the row readable -- which session, which priority. It costs a
+        # parse on the rare muted path and turns "why was it quiet" into one query.
+        try:
+            muted_event = parse_event(payload)
+        except EventError:
+            muted_event = None
+        history.record(history.MUTED, event=muted_event,
+                       hook_origin=str(payload.get("event") or ""))
+        return 0
     if payload.get("state") and payload["state"] not in (cfg.get("events") or []):
         return 0
     if cfg.get("daemon.enabled", False):
@@ -258,6 +272,11 @@ def direct_speak_file(path: Path) -> int:
 def direct_speak(payload: dict) -> int:
     cfg = Config()
     if not cfg.get("enabled", False):
+        return 0
+    # Checked again: a detached worker is a separate process that may have been queued
+    # before the mute landed, and this is the path that does the talking when the daemon
+    # is unreachable -- the case the old in-memory DND could never cover.
+    if mute.is_muted():
         return 0
     try:
         event = parse_event(payload)

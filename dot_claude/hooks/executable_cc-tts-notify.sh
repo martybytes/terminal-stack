@@ -22,6 +22,10 @@ esac
 cc_tts_init_config
 [ -f "$CONFIG" ] || { [ "$_foreground" -eq 1 ] && echo "cc-tts-notify: missing config" >&2; exit 1; }
 [ "$_foreground" -eq 0 ] && [ "$(cc_tts_json .enabled false)" != true ] && exit 0
+# Absolute: no priority escape, and checked here because this path plays audio itself
+# rather than delegating to the Windows EXE. A foreground run (cc-tts-test) is exempt --
+# you asked for that one.
+[ "$_foreground" -eq 0 ] && cc_tts_muted && exit 0
 cc_tts_event_enabled "$state" || exit 0
 
 project_dir="${CLAUDE_PROJECT_DIR:-${CURSOR_PROJECT_DIR:-$PWD}}"

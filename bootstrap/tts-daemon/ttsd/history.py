@@ -60,6 +60,7 @@ COALESCED = "coalesced"
 DEDUPED = "deduped"
 DROPPED_STALE = "dropped_stale"
 SUPPRESSED_DND = "suppressed_dnd"
+MUTED = "muted"
 COOLDOWN = "cooldown"
 
 _broken = False  # set after the first failure; keeps a bad disk from flooding the log

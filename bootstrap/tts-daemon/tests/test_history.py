@@ -210,11 +210,13 @@ def _dispatcher(cfg):
                       synth=None, playback=None, audio=None, wez=None)
 
 
-def test_three_hooks_for_one_question_speak_once(tmp_path, monkeypatch):
-    """Notification, PermissionRequest and PreToolUse all describe one AskUserQuestion.
+def test_both_hooks_for_one_question_speak_once(tmp_path, monkeypatch):
+    """Notification and the AskUserQuestion PreToolUse both describe one question.
 
-    They are all P0 and P0 is drained immediately, so the scheduler's (session, class) slot
-    never holds two at once. The history check is what collapses them.
+    Both are P0 and P0 is drained immediately, so the scheduler's (session, class) slot
+    never holds two at once. The history check is what collapses them. (A third hook,
+    PermissionRequest, used to pile on here; it was dropped because it echoed the tool
+    name twice and Notification already announces permission prompts.)
     """
     _isolate(tmp_path, monkeypatch)
     import ttsd.pipeline as pipeline
@@ -222,15 +224,15 @@ def test_three_hooks_for_one_question_speak_once(tmp_path, monkeypatch):
 
     disp = _dispatcher(_Cfg())
     notification = ev(state="question")
-    permission = ev(state="permission")
 
     # First hook: nothing spoken yet, so it passes the filter and is recorded as spoken.
     assert disp._suppress(notification) is False
     history.record(history.SPOKEN, event=notification, line="alpha has a question", daemon=True)
 
-    # Second hook, same session, same priority class, moments later: suppressed.
+    # The other hook, same session, same priority class, moments later: suppressed.
     assert disp._suppress(ev(state="question")) is True
-    # permission shares P0 with question, so the generic follow-up is suppressed too.
+    # And a permission event -- Cursor still sends these -- shares P0, so it collapses too.
+    permission = ev(state="permission")
     assert permission.priority == notification.priority
     assert disp._suppress(permission) is True
 
