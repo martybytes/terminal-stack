@@ -102,12 +102,12 @@ if [ "$CC_TTS_ENABLED" = true ]; then
   CC_TTS_STOP_HOOK=$',
           {
             "type": "command",
-            "command": "pwsh -NoLogo -NonInteractive -ExecutionPolicy Bypass -File C:/Users/'"$WIN_USER"'/.claude/hooks/cc-speak.ps1 -State waiting"
+            "command": "C:/Users/'"$WIN_USER"'/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe hook --source claude --event stop --state waiting"
           }'
   CC_TTS_STOPFAILURE_HOOK=$',
           {
             "type": "command",
-            "command": "pwsh -NoLogo -NonInteractive -ExecutionPolicy Bypass -File C:/Users/'"$WIN_USER"'/.claude/hooks/cc-speak.ps1 -State error"
+            "command": "C:/Users/'"$WIN_USER"'/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe hook --source claude --event stop_failure --state error"
           }'
   CC_TTS_CURSOR_HOOKS='{
     "afterFileEdit": [
@@ -116,16 +116,22 @@ if [ "$CC_TTS_ENABLED" = true ]; then
         "timeout": 1
       }
     ],
+    "afterAgentResponse": [
+      {
+        "command": "C:/Users/'"$WIN_USER"'/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe hook --source cursor --event cursor_response --state waiting",
+        "timeout": 15
+      }
+    ],
     "stop": [
       {
-        "command": "pwsh -NoLogo -NonInteractive -ExecutionPolicy Bypass -File C:/Users/'"$WIN_USER"'/.cursor/hooks/cursor-tts.ps1",
+        "command": "C:/Users/'"$WIN_USER"'/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe hook --source cursor --event cursor_stop --state waiting",
         "timeout": 15
       }
     ],
     "postToolUse": [
       {
         "matcher": "AskQuestion|AskUserQuestion",
-        "command": "pwsh -NoLogo -NonInteractive -ExecutionPolicy Bypass -File C:/Users/'"$WIN_USER"'/.cursor/hooks/cursor-tts-input.ps1",
+        "command": "C:/Users/'"$WIN_USER"'/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe hook --source cursor --event cursor_question --state question",
         "timeout": 15
       }
     ]
@@ -136,7 +142,7 @@ if [ "$CC_TTS_ENABLED" = true ]; then
         "hooks": [
           {
             "type": "command",
-            "command": "pwsh -NoLogo -NonInteractive -ExecutionPolicy Bypass -File C:/Users/'"$WIN_USER"'/.claude/hooks/cc-speak-input.ps1 -Event question"
+            "command": "C:/Users/'"$WIN_USER"'/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe hook --source claude --event question --state question"
           }
         ]
       }'
@@ -147,7 +153,7 @@ if [ "$CC_TTS_ENABLED" = true ]; then
         "hooks": [
           {
             "type": "command",
-            "command": "pwsh -NoLogo -NonInteractive -ExecutionPolicy Bypass -File C:/Users/'"$WIN_USER"'/.claude/hooks/cc-speak-input.ps1 -Event notification"
+            "command": "C:/Users/'"$WIN_USER"'/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe hook --source claude --event notification --state question"
           }
         ]
       }
@@ -158,7 +164,7 @@ if [ "$CC_TTS_ENABLED" = true ]; then
         "hooks": [
           {
             "type": "command",
-            "command": "pwsh -NoLogo -NonInteractive -ExecutionPolicy Bypass -File C:/Users/'"$WIN_USER"'/.claude/hooks/cc-speak-input.ps1 -Event permission"
+            "command": "C:/Users/'"$WIN_USER"'/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe hook --source claude --event permission --state permission"
           }
         ]
       }
@@ -174,6 +180,25 @@ fi
 dst_home="/mnt/c/Users/$WIN_USER"
 if [ ! -d "$dst_home" ]; then
   exit 0
+fi
+
+if [ "$CC_TTS_ENABLED" = true ]; then
+  tts_exe="$dst_home/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe"
+  if [ ! -f "$tts_exe" ]; then
+    installer="$stack_root/bootstrap/install-tts-daemon.ps1"
+    pwsh_exe="/mnt/c/Program Files/PowerShell/7/pwsh.exe"
+    [ -f "$installer" ] && [ -x "$pwsh_exe" ] || {
+      echo "sync-windows: TTS is enabled but its EXE installer is unavailable." >&2
+      exit 1
+    }
+    installer_win="$(wslpath -w "$installer")"
+    if [ "$(cfg ccTtsDaemon off)" = on ]; then
+      "$pwsh_exe" -NoLogo -NonInteractive -ExecutionPolicy Bypass -File "$installer_win"
+    else
+      "$pwsh_exe" -NoLogo -NonInteractive -ExecutionPolicy Bypass -File "$installer_win" -NoStart -NoAutostart
+    fi
+    [ -f "$tts_exe" ] || { echo "sync-windows: TTS EXE install failed." >&2; exit 1; }
+  fi
 fi
 
 today="$(date +%Y%m%d)"
@@ -264,7 +289,8 @@ PY
       printf 'created  %s\n' "$dst"
       case "$dst" in "$dst_home/.wezterm"*) wezterm_cfg_changed=1 ;; esac
     fi
-  done < <(find "$src_root" -type f -print0)
+  done < <(find "$src_root" -type d -name __pycache__ -prune -o \
+    -type f ! -name '*.pyc' ! -name '*.pyo' -print0)
 }
 
 sync_tree "$windows_src" "$dst_home" 1

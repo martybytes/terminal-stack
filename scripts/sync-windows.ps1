@@ -42,12 +42,27 @@ if (Test-Path -LiteralPath $cfgHelper) { . $cfgHelper }
 $tsCfg = if (Get-Command Get-TsConfig -ErrorAction SilentlyContinue) { Get-TsConfig } else { $null }
 $ccTtsEnabled = $false
 if ($tsCfg -and $tsCfg.ccTts -and $tsCfg.ccTts.enabled) { $ccTtsEnabled = $true }
+if ($ccTtsEnabled) {
+    $ttsExe = Join-Path $localApp 'terminal-stack\tts-daemon\terminal-stack-tts.exe'
+    if (-not (Test-Path -LiteralPath $ttsExe)) {
+        $installer = Join-Path $SourceDir 'bootstrap\install-tts-daemon.ps1'
+        if (-not (Test-Path -LiteralPath $installer)) {
+            throw "sync-windows: TTS is enabled but installer is missing: $installer"
+        }
+        $daemonEnabled = [bool]($tsCfg.ccTts.daemon -and $tsCfg.ccTts.daemon.enabled)
+        $installArgs = if ($daemonEnabled) { @() } else { @('-NoStart', '-NoAutostart') }
+        & $installer @installArgs
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $ttsExe)) {
+            throw 'sync-windows: failed to install terminal-stack-tts.exe'
+        }
+    }
+}
 $ccTtsStopHook = if ($ccTtsEnabled) {
 @"
 ,
           {
             `"type`": `"command`",
-            `"command`": `"pwsh -NoLogo -NonInteractive -ExecutionPolicy Bypass -File C:/Users/$WinUser/.claude/hooks/cc-speak.ps1 -State waiting`"
+            `"command`": `"C:/Users/$WinUser/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe hook --source claude --event stop --state waiting`"
           }
 "@
 } else { '' }
@@ -56,7 +71,7 @@ $ccTtsStopFailureHook = if ($ccTtsEnabled) {
 ,
           {
             `"type`": `"command`",
-            `"command`": `"pwsh -NoLogo -NonInteractive -ExecutionPolicy Bypass -File C:/Users/$WinUser/.claude/hooks/cc-speak.ps1 -State error`"
+            `"command`": `"C:/Users/$WinUser/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe hook --source claude --event stop_failure --state error`"
           }
 "@
 } else { '' }
@@ -69,16 +84,22 @@ $ccTtsCursorHooks = if ($ccTtsEnabled) {
         `"timeout`": 1
       }
     ],
+    `"afterAgentResponse`": [
+      {
+        `"command`": `"C:/Users/$WinUser/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe hook --source cursor --event cursor_response --state waiting`",
+        `"timeout`": 15
+      }
+    ],
     `"stop`": [
       {
-        `"command`": `"pwsh -NoLogo -NonInteractive -ExecutionPolicy Bypass -File C:/Users/$WinUser/.cursor/hooks/cursor-tts.ps1`",
+        `"command`": `"C:/Users/$WinUser/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe hook --source cursor --event cursor_stop --state waiting`",
         `"timeout`": 15
       }
     ],
     `"postToolUse`": [
       {
         `"matcher`": `"AskQuestion|AskUserQuestion`",
-        `"command`": `"pwsh -NoLogo -NonInteractive -ExecutionPolicy Bypass -File C:/Users/$WinUser/.cursor/hooks/cursor-tts-input.ps1`",
+        `"command`": `"C:/Users/$WinUser/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe hook --source cursor --event cursor_question --state question`",
         `"timeout`": 15
       }
     ]
@@ -93,7 +114,7 @@ $ccTtsPreToolUseTts = if ($ccTtsEnabled) {
         `"hooks`": [
           {
             `"type`": `"command`",
-            `"command`": `"pwsh -NoLogo -NonInteractive -ExecutionPolicy Bypass -File C:/Users/$WinUser/.claude/hooks/cc-speak-input.ps1 -Event question`"
+            `"command`": `"C:/Users/$WinUser/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe hook --source claude --event question --state question`"
           }
         ]
       }
@@ -108,7 +129,7 @@ $ccTtsInputHooks = if ($ccTtsEnabled) {
         `"hooks`": [
           {
             `"type`": `"command`",
-            `"command`": `"pwsh -NoLogo -NonInteractive -ExecutionPolicy Bypass -File C:/Users/$WinUser/.claude/hooks/cc-speak-input.ps1 -Event notification`"
+            `"command`": `"C:/Users/$WinUser/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe hook --source claude --event notification --state question`"
           }
         ]
       }
@@ -119,7 +140,7 @@ $ccTtsInputHooks = if ($ccTtsEnabled) {
         `"hooks`": [
           {
             `"type`": `"command`",
-            `"command`": `"pwsh -NoLogo -NonInteractive -ExecutionPolicy Bypass -File C:/Users/$WinUser/.claude/hooks/cc-speak-input.ps1 -Event permission`"
+            `"command`": `"C:/Users/$WinUser/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe hook --source claude --event permission --state permission`"
           }
         ]
       }
@@ -168,7 +189,10 @@ function Sync-MirrorTree {
         return
     }
 
-    Get-ChildItem -LiteralPath $SrcRoot -Recurse -File | ForEach-Object {
+    Get-ChildItem -LiteralPath $SrcRoot -Recurse -File | Where-Object {
+        $_.Extension -notin '.pyc', '.pyo' -and
+        $_.FullName -notmatch '[\\/]__pycache__[\\/]'
+    } | ForEach-Object {
         $src = $_.FullName
         $rel = $src.Substring($SrcRoot.Length).TrimStart('\','/')
 

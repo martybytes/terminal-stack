@@ -22,6 +22,11 @@ fi
 # shellcheck source=/dev/null
 . "$LIB"
 
+if cc_tts_windows_hook cursor cursor_question question "$input" >/dev/null 2>&1; then
+    printf '{}\n'
+    exit 0
+fi
+
 cc_tts_parse_input_state "$input" cursor_question
 state="${CC_TTS_PARSED_STATE:-question}"
 override="${CC_TTS_PARSED_OVERRIDE:-}"

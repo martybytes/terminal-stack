@@ -1,35 +1,33 @@
-# install-tts-daemon.ps1 — set up / remove the terminal-stack TTS daemon (ttsd).
+# install-tts-daemon.ps1 — build and install the console-free TTS executable.
 #
-# Idempotent. Called by the install wizard (daemon choice), `ts-config tts
-# daemon on|install`, or by hand:
-#   pwsh -File bootstrap\install-tts-daemon.ps1              # install + start
-#   pwsh -File bootstrap\install-tts-daemon.ps1 -Uninstall   # stop + deregister
-#   pwsh -File bootstrap\install-tts-daemon.ps1 -Uninstall -Purge  # + remove venv
-#
-# Mirrors the Kokoro stance: nothing is silently installed — if Python is
-# missing, we print the winget one-liner and stop.
+# Python is a build-time dependency only. Runtime hooks and autostart invoke
+# terminal-stack-tts.exe directly; no python.exe, cmd.exe, PowerShell, ffplay,
+# or ffprobe process is involved when a hook speaks.
 
 [CmdletBinding()]
 param(
     [switch]$Uninstall,
     [switch]$Purge,
-    [switch]$NoStart
+    [switch]$NoStart,
+    [switch]$NoAutostart
 )
 
 $ErrorActionPreference = 'Stop'
 
 $daemonRoot = Join-Path $env:LOCALAPPDATA 'terminal-stack\tts-daemon'
-$venvDir    = Join-Path $daemonRoot 'venv'
-$launcher   = Join-Path $daemonRoot 'run-daemon.cmd'
+$exePath = Join-Path $daemonRoot 'terminal-stack-tts.exe'
+$previousPath = Join-Path $daemonRoot 'terminal-stack-tts.previous.exe'
+$legacyVenv = Join-Path $daemonRoot 'venv'
+$legacyLauncher = Join-Path $daemonRoot 'run-daemon.cmd'
 $runKeyPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $runKeyName = 'terminal-stack-tts-daemon'
-$sourceDir  = Split-Path -Parent $PSScriptRoot   # the clone this script runs from
+$buildScript = Join-Path $PSScriptRoot 'tts-daemon\build.ps1'
 
 function Get-TtsdPort {
     $cfg = Join-Path $env:USERPROFILE '.claude\tts\config.json'
     if (Test-Path -LiteralPath $cfg) {
         try {
-            $port = (Get-Content $cfg -Raw | ConvertFrom-Json).daemon.port
+            $port = (Get-Content -LiteralPath $cfg -Raw | ConvertFrom-Json).daemon.port
             if ($port) { return [int]$port }
         } catch {}
     }
@@ -39,8 +37,9 @@ function Get-TtsdPort {
 function Test-TtsdHealthy {
     param([int]$Port)
     try {
-        $r = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/healthz" -TimeoutSec 2 -UseBasicParsing
-        return ($r.StatusCode -eq 200)
+        $response = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/healthz" `
+            -TimeoutSec 2 -UseBasicParsing
+        return ($response.StatusCode -eq 200)
     } catch { return $false }
 }
 
@@ -48,108 +47,156 @@ function Stop-Ttsd {
     param([int]$Port)
     if (-not (Test-TtsdHealthy -Port $Port)) { return }
     try {
-        Invoke-WebRequest -Uri "http://127.0.0.1:$Port/v1/duck/release" -Method Post -TimeoutSec 3 -UseBasicParsing | Out-Null
+        Invoke-WebRequest -Uri "http://127.0.0.1:$Port/v1/duck/release" `
+            -Method Post -TimeoutSec 3 -UseBasicParsing | Out-Null
     } catch {}
     try {
-        Invoke-WebRequest -Uri "http://127.0.0.1:$Port/v1/shutdown" -Method Post -TimeoutSec 3 -UseBasicParsing | Out-Null
-        Start-Sleep -Seconds 1
+        Invoke-WebRequest -Uri "http://127.0.0.1:$Port/v1/shutdown" `
+            -Method Post -TimeoutSec 3 -UseBasicParsing | Out-Null
     } catch {}
+    foreach ($attempt in 1..20) {
+        if (-not (Test-TtsdHealthy -Port $Port)) { return }
+        Start-Sleep -Milliseconds 250
+    }
+    throw "The existing TTS daemon did not stop on port $Port."
+}
+
+function Assert-ManagedPath {
+    param([string]$Path)
+    $root = [IO.Path]::GetFullPath($daemonRoot).TrimEnd('\')
+    $candidate = [IO.Path]::GetFullPath($Path)
+    if (-not $candidate.StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to modify a path outside the TTS install: $candidate"
+    }
+}
+
+function Remove-LegacyRuntime {
+    foreach ($path in @($legacyLauncher, $legacyVenv)) {
+        Assert-ManagedPath -Path $path
+        if (Test-Path -LiteralPath $path) {
+            $item = Get-Item -LiteralPath $path -Force
+            if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                throw "Refusing to remove legacy runtime reparse point: $path"
+            }
+            Remove-Item -LiteralPath $path -Recurse -Force
+        }
+    }
 }
 
 $port = Get-TtsdPort
 
 if ($Uninstall) {
     Stop-Ttsd -Port $port
-    try { Remove-ItemProperty -Path $runKeyPath -Name $runKeyName -ErrorAction Stop } catch {}
-    if ($Purge -and (Test-Path -LiteralPath $venvDir)) {
-        Remove-Item -Recurse -Force -Confirm:$false -LiteralPath $venvDir
+    try {
+        Remove-ItemProperty -Path $runKeyPath -Name $runKeyName -ErrorAction Stop
+    } catch {}
+    if ($Purge) {
+        foreach ($path in @($exePath, $previousPath, $legacyLauncher, $legacyVenv)) {
+            Assert-ManagedPath -Path $path
+            if (-not (Test-Path -LiteralPath $path)) { continue }
+            $item = Get-Item -LiteralPath $path -Force
+            if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                throw "Refusing to purge reparse point: $path"
+            }
+            Remove-Item -LiteralPath $path -Recurse -Force
+        }
     }
     Write-Host 'tts daemon: stopped and removed from autostart' -ForegroundColor Green
-    if (-not $Purge) { Write-Host "  (venv kept at $venvDir; -Purge removes it)" }
+    if (-not $Purge) { Write-Host "  executable kept at $exePath; -Purge removes it" }
     exit 0
 }
 
-# ── 1. Python 3.10+ ────────────────────────────────────────────────────────────
-$pyExe = $null; $pyArgs = @()
-foreach ($candidate in @(
-        @{ Exe = 'py'; Args = @('-3') },
-        @{ Exe = 'python'; Args = @() })) {
-    $cmd = Get-Command $candidate.Exe -ErrorAction SilentlyContinue
-    if (-not $cmd) { continue }
-    try {
-        $ver = (& $cmd.Source @($candidate.Args + @('-c', 'import sys; print("%d.%d" % sys.version_info[:2])')) 2>$null | Select-Object -First 1)
-        if ($ver -and ([version]$ver.Trim() -ge [version]'3.10')) {
-            $pyExe = $cmd.Source; $pyArgs = $candidate.Args; break
-        }
-    } catch {}
-}
-if (-not $pyExe) {
-    Write-Warning 'Python 3.10+ not found. Install it, then re-run:'
-    Write-Host '  winget install Python.Python.3.12' -ForegroundColor Yellow
-    Write-Host '  ts-config tts daemon install'
-    exit 1
+if (-not (Test-Path -LiteralPath $buildScript -PathType Leaf)) {
+    throw "TTS build script not found: $buildScript"
 }
 
-# ── 2. venv + deps (venv lives OUTSIDE the clone — ts-update never touches it) ─
-if (-not (Test-Path -LiteralPath (Join-Path $venvDir 'Scripts\python.exe'))) {
-    Write-Host "Creating venv at $venvDir ..."
-    New-Item -ItemType Directory -Force -Path $daemonRoot | Out-Null
-    & $pyExe @($pyArgs + @('-m', 'venv', $venvDir))
-}
-$venvPy = Join-Path $venvDir 'Scripts\python.exe'
-Write-Host 'Installing/refreshing daemon dependencies ...'
-& $venvPy -m pip install --quiet --disable-pip-version-check -r (Join-Path $sourceDir 'bootstrap\tts-daemon\requirements.txt')
-if ($LASTEXITCODE -ne 0) { Write-Warning 'pip install failed'; exit 1 }
-
-# ── 3. launcher (resolves the clone at LAUNCH time, so relocations survive) ────
-$cmdLines = @(
-    '@echo off'
-    'rem terminal-stack ttsd launcher - generated by install-tts-daemon.ps1'
-    'set "STACK=%LOCALAPPDATA%\terminal-stack\stack"'
-    'if defined TERMINAL_STACK_DIR set "STACK=%TERMINAL_STACK_DIR%"'
-    ('if not exist "%STACK%\bootstrap\tts-daemon\ttsd\__main__.py" set "STACK=' + $sourceDir + '"')
-    ('start "" "' + (Join-Path $venvDir 'Scripts\pythonw.exe') + '" -m ttsd')
-)
-# pythonw needs the package on sys.path — run from the tts-daemon directory.
-$cmdLines[-1] = 'cd /d "%STACK%\bootstrap\tts-daemon" && ' + $cmdLines[-1]
-Set-Content -LiteralPath $launcher -Value $cmdLines -Encoding ASCII
-
-# ── 4. autostart (HKCU Run — no admin, idempotent) ─────────────────────────────
-New-ItemProperty -Path $runKeyPath -Name $runKeyName -Value "`"$launcher`"" -PropertyType String -Force | Out-Null
-
-# ── 5. firewall rule for the WSL-facing listener (best effort; needs admin) ────
-$ruleName = 'terminal-stack ttsd (WSL)'
-if (-not (Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue)) {
-    try {
-        New-NetFirewallRule -DisplayName $ruleName -Direction Inbound -Action Allow `
-            -Protocol TCP -LocalPort $port -RemoteAddress 172.16.0.0/12 -Profile Any | Out-Null
-        Write-Host "Firewall rule added for WSL → daemon (port $port)."
-    } catch {
-        Write-Host 'Note: could not add the WSL firewall rule (needs an elevated shell).' -ForegroundColor Yellow
-        Write-Host "  Without it, WSL hooks fall back to direct playback (mirrored-networking WSL is unaffected)."
-        Write-Host "  Elevated one-liner: New-NetFirewallRule -DisplayName '$ruleName' -Direction Inbound -Action Allow -Protocol TCP -LocalPort $port -RemoteAddress 172.16.0.0/12"
+# Build and validate before disturbing a running installation.
+$stageDir = Join-Path $env:TEMP ("terminal-stack-tts-stage-" + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $stageDir | Out-Null
+try {
+    Write-Host 'Building terminal-stack-tts.exe (Python is used only for this build) ...'
+    & $buildScript -OutputDirectory $stageDir
+    if ($LASTEXITCODE -ne 0) { throw 'TTS executable build failed.' }
+    $stagedExe = Join-Path $stageDir 'terminal-stack-tts.exe'
+    if (-not (Test-Path -LiteralPath $stagedExe -PathType Leaf)) {
+        throw "Build did not produce $stagedExe"
     }
-}
+    $validation = Start-Process -FilePath $stagedExe -ArgumentList 'version' `
+        -WindowStyle Hidden -Wait -PassThru
+    if ($validation.ExitCode -ne 0) {
+        throw "Built TTS executable failed validation (exit $($validation.ExitCode))."
+    }
 
-# ── 6. start + probe ────────────────────────────────────────────────────────────
-if (-not $NoStart) {
-    if (Test-TtsdHealthy -Port $port) {
-        Write-Host 'tts daemon: already running' -ForegroundColor Green
+    New-Item -ItemType Directory -Path $daemonRoot -Force | Out-Null
+    Stop-Ttsd -Port $port
+
+    $newPath = Join-Path $daemonRoot 'terminal-stack-tts.new.exe'
+    Assert-ManagedPath -Path $newPath
+    Copy-Item -LiteralPath $stagedExe -Destination $newPath -Force
+    try {
+        if (Test-Path -LiteralPath $previousPath) {
+            Remove-Item -LiteralPath $previousPath -Force
+        }
+        if (Test-Path -LiteralPath $exePath) {
+            Move-Item -LiteralPath $exePath -Destination $previousPath
+        }
+        Move-Item -LiteralPath $newPath -Destination $exePath
+    } catch {
+        if ((-not (Test-Path -LiteralPath $exePath)) `
+                -and (Test-Path -LiteralPath $previousPath)) {
+            Move-Item -LiteralPath $previousPath -Destination $exePath
+        }
+        throw
+    }
+
+    if (-not $NoAutostart) {
+        New-ItemProperty -Path $runKeyPath -Name $runKeyName `
+            -Value "`"$exePath`" daemon" -PropertyType String -Force | Out-Null
     } else {
-        # Explicit cmd.exe host: Start-Process on a bare .cmd goes through
-        # ShellExecute, which is flaky from non-interactive/interop contexts.
-        Start-Process -FilePath "$env:ComSpec" -ArgumentList '/c', "`"$launcher`"" -WindowStyle Hidden
+        try {
+            Remove-ItemProperty -Path $runKeyPath -Name $runKeyName -ErrorAction Stop
+        } catch {}
+    }
+
+    # Best effort: loopback always works; WSL NAT needs this inbound rule.
+    $ruleName = 'terminal-stack ttsd (WSL)'
+    if (-not (Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue)) {
+        try {
+            New-NetFirewallRule -DisplayName $ruleName -Direction Inbound -Action Allow `
+                -Protocol TCP -LocalPort $port -RemoteAddress 172.16.0.0/12 `
+                -Profile Any -ErrorAction Stop | Out-Null
+            Write-Host "Firewall rule added for WSL to daemon (port $port)."
+        } catch {
+            Write-Host 'Note: WSL firewall rule was not added (admin is required).' `
+                -ForegroundColor Yellow
+        }
+    }
+
+    if (-not $NoStart) {
+        Start-Process -FilePath $exePath -ArgumentList 'daemon' -WindowStyle Hidden
         $healthy = $false
-        foreach ($i in 1..20) {
+        foreach ($attempt in 1..30) {
             Start-Sleep -Milliseconds 500
             if (Test-TtsdHealthy -Port $port) { $healthy = $true; break }
         }
-        if ($healthy) {
-            Write-Host "tts daemon: running on http://127.0.0.1:$port" -ForegroundColor Green
-        } else {
-            Write-Warning "daemon did not answer /healthz within 10s — check $daemonRoot\logs\ttsd.log"
-            exit 1
+        if (-not $healthy) {
+            throw "Daemon did not answer /healthz; check $daemonRoot\logs\ttsd.log"
         }
+        Write-Host "tts daemon: running on http://127.0.0.1:$port" `
+            -ForegroundColor Green
+    } else {
+        Write-Host "tts executable: installed at $exePath" -ForegroundColor Green
+    }
+
+    # For daemon installs this is deliberately after the health probe. Direct
+    # installs have already passed the packaged command validation above.
+    Remove-LegacyRuntime
+} finally {
+    $resolvedTemp = [IO.Path]::GetFullPath($env:TEMP).TrimEnd('\')
+    $resolvedStage = [IO.Path]::GetFullPath($stageDir)
+    if ($resolvedStage.StartsWith($resolvedTemp + '\', [StringComparison]::OrdinalIgnoreCase) `
+            -and (Split-Path -Leaf $resolvedStage) -like 'terminal-stack-tts-stage-*' `
+            -and (Test-Path -LiteralPath $resolvedStage -PathType Container)) {
+        Remove-Item -LiteralPath $resolvedStage -Recurse -Force
     }
 }
-exit 0

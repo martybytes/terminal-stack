@@ -1,9 +1,13 @@
 # Windows — TTS daemon (ttsd)
 
-Session-aware voice notifications for Claude Code and Cursor. Opt-in twice:
-`ts-config tts on` (the classic TTS layer) + `ts-config tts daemon on` (this
-daemon). When the daemon is off or dead, hooks fall back to classic direct
-playback — never silence.
+Console-free voice notifications for Claude Code, Cursor, and Codex. Enabling
+TTS builds and installs one GUI-subsystem `terminal-stack-tts.exe`; Python is a
+build-time dependency only. Hooks call that EXE directly. They do not launch
+PowerShell, `cmd.exe`, Python, `ffplay`, or `ffprobe` while speaking.
+
+`ts-config tts daemon on` adds session-aware queueing and the tray. When the
+daemon is off or unreachable, the same EXE launches a detached direct worker —
+never silence, and still no console window.
 
 **Combined Windows+WSL setup: run the `ts-config tts …` verbs from WSL.**
 pwsh `ts-config` saves only the Windows `config.json`, and the next WSL
@@ -14,7 +18,8 @@ it prints a reminder about the WSL half.)
 
 | Command | What it does |
 |---|---|
-| `ts-config tts daemon on` | install (venv + autostart), start, and route hooks through the daemon |
+| `ts-config tts on` | build/install the EXE if missing and enable voice hooks |
+| `ts-config tts daemon on` | build/install the EXE, register direct EXE autostart, and start the tray daemon |
 | `ts-config tts daemon off` | restore volumes, stop, remove autostart, back to direct playback |
 | `ts-config tts daemon status` | health, queue, version-vs-clone staleness |
 | `ts-config tts daemon restart` | the deliberate way to pick up a ts-update (never automatic) |
@@ -22,8 +27,7 @@ it prints a reminder about the WSL half.)
 | `ts-config tts music duck\|smart\|pause\|off` | what happens to music while speaking (default duck) |
 | `ts-config tts duck-level 30` | duck target as % of current volume |
 | `ts-config tts voices show\|am_adam,af_heart,…` | per-session voice pool |
-| `cc-tts-test.sh --daemon` / `-Daemon` | synthetic event through the daemon |
-| `cc-tts-test.sh --daemon-fallback` / `-DaemonFallback` | prove direct playback survives a dead daemon |
+| `ts-config tts test --source claude` | synthetic event through the installed EXE |
 
 What you hear: `"Claude. terminal-stack finished. Added the retry logic."` —
 project name (with "two"/"three" when several sessions share one project),
@@ -72,12 +76,12 @@ repeat the fixed waiting template unless the hook supplied no response text.
 
 | Thing | Path |
 |---|---|
-| daemon source | `<clone>\bootstrap\tts-daemon\ttsd` (ships via ts-update) |
-| venv (survives pulls) | `%LOCALAPPDATA%\terminal-stack\tts-daemon\venv` |
+| source + PyInstaller spec | `<clone>\bootstrap\tts-daemon` (ships via ts-update) |
+| installed runtime | `%LOCALAPPDATA%\terminal-stack\tts-daemon\terminal-stack-tts.exe` |
 | log | `%LOCALAPPDATA%\terminal-stack\tts-daemon\logs\ttsd.log` |
 | duck snapshot (crash safety) | `…\tts-daemon\state\duck-snapshot.json` |
 | runtime knobs | `~/.claude/tts/config.json` + untracked `local.json` |
-| autostart | HKCU `…\CurrentVersion\Run` → `terminal-stack-tts-daemon` |
+| autostart | HKCU `…\CurrentVersion\Run` → `"…\terminal-stack-tts.exe" daemon` |
 | HTTP API | `http://127.0.0.1:8890` — `/healthz`, `/v1/status`, `/v1/dnd`, `/v1/duck/release` |
 
 Music stuck quiet after a crash? `ts-doctor --repair` (or just start the
@@ -86,13 +90,13 @@ NirSoft `svcl.exe /SetVolume Spotify.exe 100`.
 
 ## WSL reachability
 
-NAT-mode WSL can't reach the daemon on `127.0.0.1`; the hook sender walks a
-ladder (config `daemon.hostOverride` → loopback → default gateway → resolv.conf
-nameserver) and authenticates against the gateway listener with the shared
-token at `…\tts-daemon\state\token`. The installer tries to add an inbound
+WSL hooks invoke the installed Windows EXE through interop, so hook execution
+does not need a WSL-to-Windows HTTP hop. The EXE itself uses loopback. The
+daemon also retains a token-guarded WSL gateway listener for API/status tools;
+its shared token is at `…\tts-daemon\state\token`. The installer tries to add an inbound
 firewall rule for that listener and prints an elevated one-liner when it can't
 — but check before bothering: on at least one machine the gateway path worked
 with **no** rule (the `vEthernet (WSL)` interface profile already allowed it).
 Verify with `ts-config tts daemon status` from WSL; if it reports unreachable
 there while healthy on Windows, the firewall rule is the thing to add. Either
-way, unreachable only ever means WSL hooks fall back to direct playback.
+way, unreachable only affects WSL API/status probes; spoken hooks still use the EXE.

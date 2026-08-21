@@ -28,6 +28,11 @@ fi
 # shellcheck source=/dev/null
 . "$LIB"
 
+if cc_tts_windows_hook cursor cursor_stop "$state" "$input" >/dev/null 2>&1; then
+    printf '{}\n'
+    exit 0
+fi
+
 export CC_TTS_HOOK_JSON="$input"
 export CC_TTS_PREFIX=Cursor
 export CC_TTS_SOURCE=cursor

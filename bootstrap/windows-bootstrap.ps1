@@ -188,13 +188,19 @@ if ($PSCmdlet.ShouldProcess('terminal-stack config.json', 'save config')) {
     Save-TsConfig -LeaderChord $leaderChord -ThemeMode $themeMode -Apps $selectedApps -WeztermMux $wizard.WezMux -WeztermRestore $wizard.WezRestore -CcTts $ccTts | Out-Null
     Export-CcTtsJson
     Write-Host "==> Saved config to $(Get-TsConfigPath)"
-    if ($wizard.CcTtsDaemon -eq 'on') {
-        if (Invoke-TsCcTtsDaemonInstaller) {
-            $ccTts.daemon.enabled = $true
+    if ($wizard.CcTts -eq 'on') {
+        $installerArgs = if ($wizard.CcTtsDaemon -eq 'on') { @() } `
+            else { @('-NoStart', '-NoAutostart') }
+        if (Invoke-TsCcTtsDaemonInstaller $installerArgs) {
+            $ccTts.daemon.enabled = ($wizard.CcTtsDaemon -eq 'on')
             Save-TsConfig -LeaderChord $leaderChord -ThemeMode $themeMode -Apps $selectedApps -WeztermMux $wizard.WezMux -WeztermRestore $wizard.WezRestore -CcTts $ccTts | Out-Null
             Export-CcTtsJson
         } else {
-            Write-Warning 'tts daemon: install failed — keeping direct playback (retry: ts-config tts daemon on)'
+            Write-Warning 'TTS executable build failed; voice hooks were not enabled.'
+            $ccTts.enabled = $false
+            $ccTts.daemon.enabled = $false
+            Save-TsConfig -LeaderChord $leaderChord -ThemeMode $themeMode -Apps $selectedApps -WeztermMux $wizard.WezMux -WeztermRestore $wizard.WezRestore -CcTts $ccTts | Out-Null
+            Export-CcTtsJson
         }
     }
 }

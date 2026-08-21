@@ -117,7 +117,8 @@ class Dispatcher(threading.Thread):
         self.audio.hold(duration)
         try:
             if result.media is not None:
-                self.playback.play(result.media)
+                if not self.playback.play(result.media):
+                    self.playback.speak_sapi(line)
             else:
                 self.playback.speak_sapi(result.sapi_text)
         finally:

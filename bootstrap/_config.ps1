@@ -25,11 +25,10 @@ $script:TsWingetIds = @{
     gh         = 'GitHub.cli'
     ghq        = 'x-motemen.ghq'
     lazygit    = 'JesseDuffield.lazygit'
-    ffmpeg     = 'Gyan.FFmpeg'
     prettymark = 'Eagle1.PrettyMark'
 }
 $script:TsAppsRecommended = @('eza','fzf','bat','delta','ripgrep','zoxide','glow','micro','neovim','gh','ghq','lazygit','prettymark')
-$script:TsAppsOptional    = @('zed','ffmpeg')
+$script:TsAppsOptional    = @('zed')
 $script:TsAppsAll         = $script:TsAppsRecommended + $script:TsAppsOptional
 
 # The binary an app id actually puts on PATH. Mostly identity; a few differ.
@@ -92,7 +91,6 @@ function Get-TsAppDesc([string]$id) {
         'gh'      { 'GitHub CLI (org enumeration for wso)' }
         'ghq'     { 'clone into the derived workspace path' }
         'lazygit' { 'git TUI (the wso status hand-off)' }
-        'ffmpeg'  { 'ffplay for Claude TTS on Windows (Gyan.FFmpeg)' }
         'prettymark' { 'markdown viewer (pm alias)' }
         default   { '' }
     }
@@ -645,9 +643,9 @@ function Read-TsCcTtsDaemon {
     Read-TsChoice -Title 'Route voice notifications through the tray daemon?' `
         -Default 'off' -Intro @(
             '  Queues/coalesces announcements, per-session voices, ducks music while speaking.',
-            '  Installs a small Python venv under %LOCALAPPDATA%\terminal-stack. Needs Python 3.10+.'
+            '  Builds one console-free EXE under %LOCALAPPDATA%\terminal-stack. Python is build-time only.'
         ) -Options @(
-            @{ Key = 'off'; Label = 'Classic direct playback' },
+            @{ Key = 'off'; Label = 'Direct EXE playback' },
             @{ Key = 'on';  Label = 'Tray daemon'; Note = 'installs now, autostarts at login' }
         )
 }
@@ -705,16 +703,15 @@ function Repair-CcTtsDuckSnapshot {
     $snap = Get-CcTtsDuckSnapshotPath
     if (-not (Test-Path -LiteralPath $snap)) { return }
     if (Test-CcTtsDaemonHealthy) { return }
-    $venvPy = Join-Path $env:LOCALAPPDATA 'terminal-stack\tts-daemon\venv\Scripts\python.exe'
-    if (-not (Test-Path -LiteralPath $venvPy)) {
-        Write-Warning "stale duck snapshot at $snap but no daemon venv — reinstall (ts-config tts daemon install) or delete it"
+    $ttsExe = Join-Path $env:LOCALAPPDATA 'terminal-stack\tts-daemon\terminal-stack-tts.exe'
+    if (-not (Test-Path -LiteralPath $ttsExe)) {
+        Write-Warning "stale duck snapshot at $snap but no TTS executable — reinstall with ts-config tts daemon install"
         return
     }
-    Push-Location (Join-Path $PSScriptRoot 'tts-daemon')
-    try { & $venvPy -m ttsd --restore-volumes } finally { Pop-Location }
+    & $ttsExe restore-volumes
 }
 
-# ── `summarizer self` marker block in %USERPROFILE%\.claude\CLAUDE.md ──────────
+# ── `summarizer self` marker blocks for Claude and Codex ──────────────────────
 # Same discipline as the $PROFILE marker regions; the asset carries its own
 # start/end markers. Backups follow the repo's .bak.YYYYMMDD[.N] convention.
 # Lines are collected into an array and written with -Value — never
@@ -831,7 +828,14 @@ function Invoke-TsConfigTts {
     $tts = Get-CcTtsConfig
     switch ($Sub) {
         'show' { Show-CcTtsConfig; return }
-        'on'   { $tts.enabled = $true }
+        'on'   {
+            $ttsExe = Join-Path $env:LOCALAPPDATA 'terminal-stack\tts-daemon\terminal-stack-tts.exe'
+            if ((-not (Test-Path -LiteralPath $ttsExe)) `
+                    -and (-not (Invoke-TsCcTtsDaemonInstaller @('-NoStart', '-NoAutostart')))) {
+                return
+            }
+            $tts.enabled = $true
+        }
         'off'  { $tts.enabled = $false }
         'engine' {
             if (-not $Arg) { Write-Warning 'usage: ts-config tts engine kokoro|chatterbox|auto'; return }
@@ -973,12 +977,12 @@ function Invoke-TsConfigTts {
             $tts.daemon.port = [int]$Arg
         }
         'test' {
-            $test = Join-Path $env:USERPROFILE '.claude\hooks\cc-tts-test.ps1'
+            $test = Join-Path $env:LOCALAPPDATA 'terminal-stack\tts-daemon\terminal-stack-tts.exe'
             if (Test-Path -LiteralPath $test) {
-                if ($Arg -eq '--source' -and $Arg2) { & $test -Source $Arg2 }
-                else { & $test }
+                $source = if ($Arg -eq '--source' -and $Arg2) { $Arg2 } else { 'test' }
+                & $test test --source $source
             } else {
-                Write-Warning "cc-tts-test.ps1 not found at $test (run sync-windows / chezmoi apply)"
+                Write-Warning "terminal-stack-tts.exe not found at $test (run ts-config tts on)"
             }
             return
         }

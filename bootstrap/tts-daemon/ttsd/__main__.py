@@ -1,6 +1,7 @@
 """ttsd entry point.
 
-    python -m ttsd                     # run (tray on the main thread)
+    python -m ttsd [daemon]            # run (tray on the main thread)
+    python -m ttsd hook ...            # console-free lifecycle hook client
     python -m ttsd --no-tray           # run headless (debugging)
     python -m ttsd --simulate f.json   # push one fixture through the pipeline
     python -m ttsd --restore-volumes   # oneshot stale-duck repair (ts-doctor)
@@ -12,7 +13,7 @@ import argparse
 import json
 import logging
 import logging.handlers
-import subprocess
+import socket
 import sys
 import threading
 import time
@@ -22,6 +23,7 @@ from pathlib import Path
 from .audio_duck import AudioController, restore_volumes_oneshot
 from .config import Config, load_or_create_token, logs_dir, state_dir
 from .events import parse_event
+from .hooks import direct_speak, direct_speak_file, submit_hook, test_payload
 from .pipeline import Dispatcher
 from .playback import Playback
 from .registry import Registry
@@ -30,6 +32,7 @@ from .server import App, Listener
 from .summarize import Summarizer
 from .synth import Synth
 from .wez import WezInfo
+from .winio import read_stdin_bytes, write_stdout
 
 log = logging.getLogger("ttsd")
 
@@ -51,33 +54,39 @@ def _setup_logging(console: bool) -> Path:
     return path
 
 
-def _clone_version() -> str:
-    """Git SHA of the clone this package runs from (staleness checks)."""
+def _build_version() -> str:
+    """Build-time Git SHA in frozen builds; Git fallback only in source mode."""
+    frozen_root = getattr(sys, "_MEIPASS", None)
+    if frozen_root:
+        try:
+            return (Path(frozen_root) / "ttsd-build-version.txt").read_text(
+                encoding="utf-8").strip() or "unknown"
+        except OSError:
+            return "unknown"
     clone = Path(__file__).resolve().parents[3]  # ttsd/ → tts-daemon/ → bootstrap/ → clone
     try:
-        return subprocess.run(
-            ["git", "-C", str(clone), "rev-parse", "HEAD"],
-            capture_output=True, text=True, timeout=5, check=True,
-        ).stdout.strip()
+        import subprocess
+
+        return subprocess.run(["git", "-C", str(clone), "rev-parse", "HEAD"],
+                              capture_output=True, text=True, timeout=5,
+                              check=True).stdout.strip()
     except (subprocess.SubprocessError, OSError):
         return "unknown"
 
 
 def _wsl_gateway_ip() -> str | None:
     """Windows-side IP of the WSL NAT adapter, if one exists."""
-    script = ("Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | "
-              "Where-Object { $_.InterfaceAlias -like 'vEthernet (WSL*' } | "
-              "Select-Object -First 1 -ExpandProperty IPAddress")
-    for shell in ("pwsh", "powershell"):
-        try:
-            out = subprocess.run(
-                [shell, "-NoLogo", "-NonInteractive", "-Command", script],
-                capture_output=True, text=True, timeout=10, check=True,
-            ).stdout.strip()
-            if out:
-                return out
-        except (subprocess.SubprocessError, OSError):
-            continue
+    try:
+        import psutil
+
+        for name, addresses in psutil.net_if_addrs().items():
+            if not name.lower().startswith("vethernet (wsl"):
+                continue
+            for address in addresses:
+                if address.family == socket.AF_INET and address.address:
+                    return str(address.address)
+    except Exception as exc:  # noqa: BLE001 — loopback still works without WSL listener
+        log.debug("WSL adapter discovery failed: %s", exc)
     return None
 
 
@@ -137,21 +146,52 @@ def _simulate(app: App, fixture: Path) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="ttsd")
+    parser.add_argument("command", nargs="?", default="daemon",
+                        choices=("daemon", "hook", "test", "simulate",
+                                 "restore-volumes", "version", "_direct"))
+    parser.add_argument("command_arg", nargs="?")
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--no-tray", action="store_true")
-    parser.add_argument("--simulate", metavar="EVENT_JSON")
-    parser.add_argument("--restore-volumes", action="store_true")
+    parser.add_argument("--simulate", metavar="EVENT_JSON")  # legacy spelling
+    parser.add_argument("--restore-volumes", action="store_true")  # legacy spelling
+    parser.add_argument("--source", default="claude")
+    parser.add_argument("--event", default="stop")
+    parser.add_argument("--state", default="waiting")
     args = parser.parse_args(argv)
 
-    if args.restore_volumes:
+    if args.command == "version":
+        write_stdout(_build_version() + "\n")
+        return 0
+    if args.command == "hook":
+        result = submit_hook(args.source, args.event, args.state, read_stdin_bytes())
+        if args.source.lower() == "cursor":
+            write_stdout("{}\n")
+        return result
+    if args.command == "_direct":
+        if not args.command_arg:
+            return 2
+        _setup_logging(console=False)
+        return direct_speak_file(Path(args.command_arg))
+    if args.command == "test":
+        _setup_logging(console=False)
+        payload = test_payload(args.source)
+        cfg = Config()
+        if cfg.get("daemon.enabled", False):
+            from .hooks import _post  # internal test path, same request as hooks
+
+            if _post(cfg, payload):
+                return 0
+        return direct_speak(payload)
+    if args.command == "restore-volumes" or args.restore_volumes:
         return restore_volumes_oneshot(state_dir() / "duck-snapshot.json")
 
-    log_path = _setup_logging(console=args.no_tray or bool(args.simulate))
+    simulate_path = args.command_arg if args.command == "simulate" else args.simulate
+    log_path = _setup_logging(console=args.no_tray or bool(simulate_path))
     cfg = Config()
-    version = _clone_version()
+    version = _build_version()
 
-    if args.simulate:
-        return _simulate(_build(cfg, version), Path(args.simulate))
+    if simulate_path:
+        return _simulate(_build(cfg, version), Path(simulate_path))
 
     port = args.port or int(cfg.get("daemon.port", 8890))
     app = _build(cfg, version)

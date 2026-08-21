@@ -15,9 +15,12 @@ LIB="$(dirname "$0")/cc-tts-lib.sh"
 notify="$(dirname "$0")/cc-tts-notify.sh"
 source="${CC_TTS_SOURCE:-claude}"
 export CC_TTS_SOURCE="$source"
+event=stop
+[ "$state" = error ] && event=stop_failure
+if cc_tts_windows_hook "$source" "$event" "$state" "$input" >/dev/null 2>&1; then
+    exit 0
+fi
 if cc_tts_daemon_ready; then
-    event=stop
-    [ "$state" = error ] && event=stop_failure
     (
         cc_tts_daemon_send "$source" "$event" "$state" "$input" "${2:-}" \
             || CC_TTS_HOOK_JSON="$input" "$notify" "$state" "${2:-}"

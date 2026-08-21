@@ -485,8 +485,8 @@ ts_prompt_cc_tts_daemon() {
     fi
     ts_prompt_choice off 'Route voice notifications through the tray daemon?' \
 '  Queues/coalesces announcements, per-session voices, ducks music while speaking.
-  Installs a small Python venv under %LOCALAPPDATA%\terminal-stack. Needs Python 3.10+.' \
-        'off|Classic direct playback' \
+  Builds one console-free EXE under %LOCALAPPDATA%\terminal-stack. Python is build-time only.' \
+        'off|Direct EXE playback' \
         'on|Tray daemon|installs now, autostarts at login'
 }
 
@@ -503,11 +503,21 @@ ts_cc_tts_apply_wizard_choice() {
             daemon=off
             ;;
     esac
-    if [ "$daemon" = on ] && ts_cc_tts_daemon_supported; then
-        if ts_cc_tts_daemon_installer; then
+    if [ "$choice" = on ] && ts_cc_tts_daemon_supported; then
+        if [ "$daemon" = on ]; then
+            ts_cc_tts_daemon_installer || {
+                echo "tts: executable build failed — disabling voice hooks" >&2
+                ts_cc_tts_set ccTtsEnabled false
+                ts_cc_tts_set ccTtsDaemon off
+                return 1
+            }
             ts_cc_tts_set ccTtsDaemon on
         else
-            echo "tts daemon: install failed — keeping direct playback (retry: ts-config tts daemon on)" >&2
+            ts_cc_tts_daemon_installer -NoStart -NoAutostart || {
+                echo "tts: executable build failed — disabling voice hooks" >&2
+                ts_cc_tts_set ccTtsEnabled false
+                return 1
+            }
             ts_cc_tts_set ccTtsDaemon off
         fi
     else
@@ -523,6 +533,11 @@ ts_config_tts() {
             ts_cc_tts_show
             ;;
         on)
+            if ts_cc_tts_daemon_supported; then
+                local exe
+                exe="/mnt/c/Users/$(cmd.exe /c 'echo %USERNAME%' 2>/dev/null | tr -d '\r\n')/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe"
+                [ -f "$exe" ] || ts_cc_tts_daemon_installer -NoStart -NoAutostart || return 1
+            fi
             ts_cc_tts_set ccTtsEnabled true
             ts_cc_tts_finish
             finish
