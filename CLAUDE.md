@@ -21,8 +21,9 @@ To capture a hand-edit that was made directly to the target (not the source):
 
 ```sh
 chezmoi re-add ~/.zshrc
-chezmoi re-add ~/.claude/settings.json
 ```
+
+Only for files the stack owns outright. **Never `re-add` a part-owned file** — `~/.claude/settings.json` and `~/.cursor/hooks.json` hold another tool's state (see the strategy table below), and re-adding commits it to the template.
 
 There is no CI. Verification is manual: `docs/verifying-changes.md` is the pre-commit checklist (syntax gates, headless WezTerm config load test, the byte-identical menu diff, throwaway config stores), and `INSTALL.md` § Phase 9 is the post-install smoke test for a fresh machine.
 
