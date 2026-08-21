@@ -54,10 +54,11 @@ require `ts-config tts daemon restart`.
 
 ## Cursor
 
-Cursor's stop/question hooks already POST to the daemon (the daemon holds and
-cools Cursor's per-turn stop storms). For `self`-mode summaries in Cursor, add
-a **User Rule** by hand (Cursor Settings → Rules — the rules store is GUI-only,
-the stack cannot manage it):
+Cursor's completion hook uses `afterAgentResponse`, because Cursor's `stop`
+payload contains status but no response text; `stop` remains installed for
+errors. In `self` mode, the final response is locally shortened to one spoken
+sentence when no explicit marker exists. For the best wording, optionally add
+this **User Rule** in Cursor Settings → Rules:
 
 > At the very end of your final message each turn, append an HTML comment
 > `<!-- speak: <one spoken-style sentence, 15 words or fewer> -->` describing

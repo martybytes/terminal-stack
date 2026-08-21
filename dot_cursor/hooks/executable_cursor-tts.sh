@@ -1,19 +1,22 @@
 #!/usr/bin/env bash
 # cursor-tts.sh — Cursor Agent stop hook → local TTS (same config as Claude Code).
-# Reads stop-event JSON from stdin; speaks on completed/error; returns {} immediately.
+# Reads stop-event JSON from stdin; speaks only on error; returns {} immediately.
 # Daemon-first (the daemon holds/cools Cursor's per-turn stop storms) with
 # direct-path fallback — never silence.
 set -euo pipefail
 
 input="$(cat 2>/dev/null || true)"
-state=waiting
+state=error
 
 if command -v jq >/dev/null 2>&1 && [ -n "$input" ]; then
     case "$(printf '%s' "$input" | jq -r '.status // "completed"')" in
         error)   state=error ;;
         aborted) printf '{}\n'; exit 0 ;;
-        *)       state=waiting ;;
+        *)       printf '{}\n'; exit 0 ;;
     esac
+elif [[ "$input" != *'"status"'*'"error"'* ]]; then
+    printf '{}\n'
+    exit 0
 fi
 
 LIB="${HOME}/.claude/hooks/cc-tts-lib.sh"

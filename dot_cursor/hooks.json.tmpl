@@ -8,6 +8,12 @@
         "timeout": 1
       }
     ],
+    "afterAgentResponse": [
+      {
+        "command": "{{ .chezmoi.homeDir }}/.cursor/hooks/cursor-tts-response.sh",
+        "timeout": 15
+      }
+    ],
     "stop": [
       {
         "command": "{{ .chezmoi.homeDir }}/.cursor/hooks/cursor-tts.sh",
