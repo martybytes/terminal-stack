@@ -89,6 +89,36 @@ ts_relocate_clone() {
 
 # Diagnose. Prints a checklist; returns 0 when healthy, 1 when issues are found.
 # Set TS_DOCTOR_QUIET=1 to suppress the per-check "ok" lines (warnings still show).
+# Read one dotted path out of the Windows config mirror. Prints __missing__ when the key
+# is absent, so a mirror written by an older version does not read as a disagreement.
+ts_doctor_mirror_value() {
+    python3 - "$1" "$2" <<'PY' 2>/dev/null || printf '__missing__'
+import json, sys
+try:
+    node = json.load(open(sys.argv[1], encoding="utf-8"))
+except Exception:
+    print("__missing__", end=""); raise SystemExit
+for part in sys.argv[2].split("."):
+    if not isinstance(node, dict) or part not in node:
+        print("__missing__", end=""); raise SystemExit
+    node = node[part]
+if isinstance(node, bool):
+    print("true" if node else "false", end="")
+else:
+    print(node, end="")
+PY
+}
+
+# The two stores spell the same answer differently: chezmoi [data] holds "true"/"false" and
+# on/off strings, the mirror holds real JSON booleans. Compare meaning, not spelling.
+ts_doctor_norm() {
+    case "$1" in
+        on|On|ON|true|True|TRUE|yes|1) printf 'true' ;;
+        off|Off|OFF|false|False|FALSE|no|0|'') printf 'false' ;;
+        *) printf '%s' "$1" ;;
+    esac
+}
+
 ts_doctor() {
     local issues=0 cz src others t
     local quiet="${TS_DOCTOR_QUIET:-}"
@@ -133,6 +163,66 @@ ts_doctor() {
         if command -v "$t" >/dev/null 2>&1; then _ok "$t on PATH"; else _bad "$t not on PATH"; fi
     done
 
+    # Config-store divergence, and whether any TTS hook exists at all. Both live OUTSIDE
+    # the ccTtsEnabled gate below, deliberately: the failure being checked for is one store
+    # saying "off" while the other says "on", so gating on either store blinds the check
+    # exactly when it matters. On 2026-08-21 the mirror said false, chezmoi [data] said
+    # true, the pwsh sync had deleted every TTS hook, and the doctor reported "tts daemon
+    # healthy".
+    #
+    # Report only, never repair: a disagreement can be a deliberate pwsh-side change, and
+    # overwriting it would be the same silent loss this check exists to expose.
+    if [ -d /mnt/c/Users ] && command -v ts_data_prefetch >/dev/null 2>&1 \
+        && command -v python3 >/dev/null 2>&1; then
+        local _dv_user _dv_mirror _dv_pair _dv_key _dv_path _dv_mine _dv_theirs _dv_found=0
+        _dv_user="$(ts_win_user 2>/dev/null || true)"
+        _dv_mirror="/mnt/c/Users/$_dv_user/AppData/Local/terminal-stack/config.json"
+        if [ -n "$_dv_user" ] && [ -f "$_dv_mirror" ]; then
+            # One render for every key, because a per-key chezmoi spawn costs seconds here.
+            # shellcheck disable=SC2086
+            ts_data_prefetch $TS_MIRROR_DATA_KEYS
+            # chezmoi [data] key : dotted path in the Windows mirror. Only the keys whose
+            # disagreement changes what gets rendered are worth reporting.
+            for _dv_pair in ccTtsEnabled:ccTts.enabled \
+                            ccTtsDaemon:ccTts.daemon.enabled \
+                            ccTtsEngine:ccTts.engine \
+                            ccTtsSummarizer:ccTts.summarize.mode \
+                            leaderChord:leaderChord \
+                            themeMode:themeMode \
+                            tmuxPrefix:tmuxPrefix \
+                            weztermMux:weztermMux \
+                            weztermRestore:weztermRestore; do
+                _dv_key="${_dv_pair%%:*}"
+                _dv_path="${_dv_pair#*:}"
+                _dv_mine="$(ts_data_get "$_dv_key" 2>/dev/null || true)"
+                _dv_theirs="$(ts_doctor_mirror_value "$_dv_mirror" "$_dv_path")"
+                [ "$_dv_theirs" = "__missing__" ] && continue
+                if [ "$(ts_doctor_norm "$_dv_mine")" != "$(ts_doctor_norm "$_dv_theirs")" ]; then
+                    _dv_found=1
+                    _bad "config stores disagree on $_dv_key: chezmoi [data]='$_dv_mine' but the Windows mirror='$_dv_theirs'"
+                    echo "      [data] wins for 'chezmoi apply' from WSL; the mirror wins for a pwsh sync."
+                fi
+            done
+            [ "$_dv_found" = 0 ] && _ok "config stores agree"
+        fi
+    fi
+
+    # A hook that does not exist cannot be degraded, slow, or muted - it is simply absent,
+    # and every other TTS check will still look healthy. This is the one-line version of
+    # the outage above.
+    if [ -d /mnt/c/Users ]; then
+        local _hk_user _hk_settings
+        _hk_user="$(ts_win_user 2>/dev/null || true)"
+        _hk_settings="/mnt/c/Users/$_hk_user/.claude/settings.json"
+        if [ -n "$_hk_user" ] && [ -f "$_hk_settings" ]; then
+            if grep -q 'terminal-stack-tts.exe hook' "$_hk_settings" 2>/dev/null; then
+                _ok "Claude TTS hooks installed"
+            elif [ "$(ts_cc_tts_get ccTtsEnabled 2>/dev/null)" = true ]; then
+                _bad "TTS is enabled but ~/.claude/settings.json has no terminal-stack-tts hooks - nothing will ever call the daemon; repair: ts-config tts on (from WSL)"
+            fi
+        fi
+    fi
+
     # Claude TTS (only when the feature is on). Kokoro down is a note (edge-tts
     # covers it); an enabled-but-dead daemon is a failure — the hooks are
     # silently degraded to direct playback and the user chose otherwise.
@@ -165,9 +255,17 @@ ts_doctor() {
         fi
         # The untracked local override wins over the rendered config, so `cctts on` can
         # report success while every hook stays silent.
-        if [ -f "$HOME/.claude/tts/local.json" ] \
-            && grep -q '"enabled"[[:space:]]*:[[:space:]]*false' "$HOME/.claude/tts/local.json" 2>/dev/null; then
-            _bad "tts: ~/.claude/tts/local.json forces enabled=false, which overrides the saved setting - remove that key (ccmute is the way to go quiet)"
+        # The Windows-side file on a combined host: that is the one the EXE merges. Reading
+        # $HOME here meant the WSL home, so this check could never have fired on the very
+        # machine it was written for.
+        local _lj="$HOME/.claude/tts/local.json" _lj_user
+        if [ -d /mnt/c/Users ]; then
+            _lj_user="$(ts_win_user 2>/dev/null || true)"
+            [ -n "$_lj_user" ] && _lj="/mnt/c/Users/$_lj_user/.claude/tts/local.json"
+        fi
+        if [ -f "$_lj" ] \
+            && grep -q '"enabled"[[:space:]]*:[[:space:]]*false' "$_lj" 2>/dev/null; then
+            _bad "tts: $_lj forces enabled=false, which overrides the saved setting - remove that key (ccmute is the way to go quiet)"
         fi
         if [ -n "${_hdup:-}" ] && [ "$_hdup" != 0 ]; then
             echo "  note: $_hdup session(s) spoke twice within 8s in the last day - inspect: ts-config tts history --dupes"

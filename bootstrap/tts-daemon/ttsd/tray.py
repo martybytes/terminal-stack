@@ -20,15 +20,37 @@ _MUSIC_MODES = ("duck", "smart", "pause", "off")
 _SUMMARIZER_MODES = ("template", "self", "haiku", "ollama")
 
 
+def state_for(enabled: bool, muted: bool) -> tuple[bool, bool]:
+    """(muted, disabled) for the icon. Disabled outranks muted.
+
+    Module level and pure so it can be tested without pystray or PIL, which are imported
+    inside build_icon and are not present outside the frozen build.
+    """
+    return (False, True) if not enabled else (muted, False)
+
+
+def title_for(muted: bool, disabled: bool) -> str:
+    if disabled:
+        return "terminal-stack TTS: disabled (no hooks installed)"
+    return "terminal-stack TTS — MUTED" if muted else "terminal-stack TTS"
+
+
 def build_icon(app, log_path, on_quit):
     import pystray
     from PIL import Image, ImageDraw
 
-    def _image(muted: bool = False) -> Image.Image:
+    def _image(muted: bool = False, disabled: bool = False) -> Image.Image:
         img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
         draw = ImageDraw.Draw(img)
-        # Muted is drawn grey with a slash through it: the icon itself is the indicator,
-        # so a glance at the tray answers "is it going to talk over my call?".
+        # Three distinguishable states, because "the daemon is running" and "speech works"
+        # are different claims and conflating them cost an afternoon: a healthy icon sat
+        # there while the feature was switched off and no hooks existed.
+        #   on       solid peach ring
+        #   muted    grey ring with a slash: deliberately silenced, still armed
+        #   disabled hollow outline, no slash: present but inert
+        if disabled:
+            draw.ellipse((8, 8, 56, 56), outline=(108, 112, 134, 255), width=5)
+            return img
         body = (108, 112, 134, 255) if muted else (214, 138, 89, 255)  # overlay0 / peach
         draw.ellipse((8, 8, 56, 56), fill=body)
         draw.ellipse((24, 24, 40, 40), fill=(30, 30, 46, 255))
@@ -36,11 +58,14 @@ def build_icon(app, log_path, on_quit):
             draw.line((14, 50, 50, 14), fill=(243, 139, 168, 255), width=7)  # red slash
         return img
 
+    def _tray_state() -> tuple[bool, bool]:
+        return state_for(bool(app.cfg.get("enabled", False)), mute.is_muted())
+
     def _refresh(icon) -> None:
-        muted = mute.is_muted()
+        muted, disabled = _tray_state()
         try:
-            icon.icon = _image(muted)
-            icon.title = "terminal-stack TTS — MUTED" if muted else "terminal-stack TTS"
+            icon.icon = _image(muted, disabled)
+            icon.title = title_for(muted, disabled)
         except Exception as exc:  # noqa: BLE001 — chrome; never take the daemon down
             log.debug("tray refresh failed: %s", exc)
 
@@ -91,6 +116,7 @@ def build_icon(app, log_path, on_quit):
 
     def _reload(icon, item) -> None:
         app.cfg.reload()
+        _refresh(icon)  # `enabled` may have changed, which changes the icon
 
     def _open_log(icon, item) -> None:
         try:
@@ -120,10 +146,10 @@ def build_icon(app, log_path, on_quit):
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Quit", lambda icon, item: on_quit(icon)),
     )
-    muted_now = mute.is_muted()
+    muted_now, disabled_now = _tray_state()
     icon = pystray.Icon(
-        "terminal-stack-ttsd", _image(muted_now),
-        "terminal-stack TTS — MUTED" if muted_now else "terminal-stack TTS", menu)
+        "terminal-stack-ttsd", _image(muted_now, disabled_now),
+        title_for(muted_now, disabled_now), menu)
     # The hotkey toggles the same sentinel from another thread; this lets it repaint the
     # icon, so the two surfaces never disagree about what the tray is showing.
     icon.ts_refresh = lambda: _refresh(icon)

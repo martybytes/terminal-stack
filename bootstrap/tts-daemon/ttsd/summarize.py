@@ -13,6 +13,7 @@ import os
 import re
 import urllib.request
 
+from . import keystore
 from .events import P0_INTERACTIVE, P2_DONE, Event
 from .registry import Registry
 
@@ -41,6 +42,25 @@ class Summarizer:
     def __init__(self, cfg, degraded_counter=None) -> None:
         self.cfg = cfg
         self.degraded = 0
+        # Why the last degrade happened, surfaced on /v1/status and by the mode test.
+        # Before this, a haiku mode with no API key returned "" and fell through to the
+        # template with no exception, no log line and no counter, so the feature was
+        # byte-for-byte indistinguishable from being switched off while every status
+        # endpoint still reported "haiku". That was the most misleading state in the
+        # daemon.
+        self.last_degrade = ""
+        self._warned: set[str] = set()
+
+    def _degrade(self, reason: str, detail: str = "") -> str:
+        """Record a fall-back-to-template and return "" for the caller to propagate."""
+        self.degraded += 1
+        self.last_degrade = f"{reason}: {detail}" if detail else reason
+        # Warn once per reason per process: a broken key would otherwise write a line on
+        # every single announcement.
+        if reason not in self._warned:
+            self._warned.add(reason)
+            log.warning("summarizer degraded to template (%s)", self.last_degrade)
+        return ""
 
     # ── public ────────────────────────────────────────────────────────────
 
@@ -150,13 +170,19 @@ class Summarizer:
 
     # ── LLM modes (best-effort; empty string on any failure) ─────────────
 
+    last_key_source = ""
+
     def _llm_haiku(self, text: str) -> str:
         if not text:
-            return ""
-        key = os.environ.get(str(self.cfg.get("summarize.haiku.keyEnv",
-                                              "ANTHROPIC_API_KEY")), "")
+            return self._degrade("no text to summarize")
+        # The keystore wins over the environment because an autostarted daemon inherits
+        # only the logon environment: a key exported in a shell never reaches it. The env
+        # var stays supported so anything that worked before still works.
+        env_var = str(self.cfg.get("summarize.haiku.keyEnv", "ANTHROPIC_API_KEY"))
+        key, source = keystore.resolve(keystore.ANTHROPIC_API_KEY, env_var)
         if not key:
-            return ""
+            return self._degrade("no API key", f"not in the secret store or ${env_var}")
+        self.last_key_source = source
         payload = {
             "model": str(self.cfg.get("summarize.haiku.model", "claude-haiku-4-5")),
             "max_tokens": 60,
@@ -180,13 +206,13 @@ class Summarizer:
                      if b.get("type") == "text"]
             return _speakable(" ".join(parts))
         except Exception as exc:  # noqa: BLE001 — any failure degrades to template
-            self.degraded += 1
-            log.warning("haiku summarizer failed: %s", exc)
-            return ""
+            # A timeout, a 401 and a rate limit are indistinguishable here, so the class
+            # name is the most useful thing available to a reader.
+            return self._degrade("haiku request failed", f"{type(exc).__name__}: {exc}")
 
     def _llm_ollama(self, text: str) -> str:
         if not text:
-            return ""
+            return self._degrade("no text to summarize")
         url = str(self.cfg.get("summarize.ollama.url", "http://127.0.0.1:11434"))
         payload = {
             "model": str(self.cfg.get("summarize.ollama.model", "llama3.2:3b")),
@@ -207,9 +233,9 @@ class Summarizer:
                 data = json.loads(resp.read())
             return _speakable(data.get("message", {}).get("content", ""))
         except Exception as exc:  # noqa: BLE001
-            self.degraded += 1
-            log.warning("ollama summarizer failed: %s", exc)
-            return ""
+            # A stopped Ollama costs the full timeout on every "done" before falling back,
+            # so this is worth naming rather than swallowing.
+            return self._degrade("ollama request failed", f"{type(exc).__name__}: {exc}")
 
     # ── helpers ───────────────────────────────────────────────────────────
 
