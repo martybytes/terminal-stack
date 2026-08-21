@@ -142,15 +142,31 @@ ts_toml() { echo "${HOME}/.config/chezmoi/chezmoi.toml"; }
 # The canonical runtime clone location (see docs/decisions.md § "Runtime clone
 # location"). WSL shares ONE clone with Windows inside the app-data dir the
 # stack already owns; native Linux/macOS use the XDG data home. Pins
+# The Windows username for /mnt/c paths: chezmoi [data] first, then cmd.exe interop.
+# The interop half is not optional. A clone installed before the bootstrap started
+# recording windowsUsername has only that answer, and ts_mirror_windows_config used to
+# resolve from [data] alone and `return 0` when it came back empty -- writing no mirror
+# while reporting success. That is how the two config stores silently diverged: every
+# WSL-side save updated chezmoi [data] and skipped the mirror, so the next pwsh sync
+# rendered Windows-side files from stale values and, for ccTtsEnabled=false, removed every
+# TTS hook. Same order as run_after_90-sync-windows.sh resolve_win_user and ts-mux.sh
+# win_user.
+ts_win_user() {
+    local wu; wu="$(ts_data_get windowsUsername 2>/dev/null || true)"
+    [ -n "$wu" ] && { printf '%s' "$wu"; return 0; }
+    if [ -x /mnt/c/Windows/System32/cmd.exe ]; then
+        wu="$(/mnt/c/Windows/System32/cmd.exe /c 'echo %USERNAME%' 2>/dev/null | tr -d '\r\n' || true)"
+        [ -n "$wu" ] && { printf '%s' "$wu"; return 0; }
+    fi
+    return 1
+}
+
 # (TERMINAL_STACK_DIR) are only for NON-canonical locations. Twins:
 # dot_zshrc _ts_canonical_clone, profile/_cleanup.ps1 Get-TsCanonicalCloneDir.
 ts_canonical_clone_dir() {
     if [ -r /proc/version ] && grep -qi microsoft /proc/version 2>/dev/null; then
         local wu=""
-        wu="$(ts_data_get windowsUsername 2>/dev/null || true)"
-        if [ -z "$wu" ] && [ -x /mnt/c/Windows/System32/cmd.exe ]; then
-            wu="$(/mnt/c/Windows/System32/cmd.exe /c 'echo %USERNAME%' 2>/dev/null | tr -d '\r\n' || true)"
-        fi
+        wu="$(ts_win_user 2>/dev/null || true)"
         if [ -n "$wu" ]; then
             echo "/mnt/c/Users/$wu/AppData/Local/terminal-stack/stack"
             return 0
@@ -243,7 +259,60 @@ ts_data_set_apps() {
 }
 
 # Read a derived/raw value through chezmoi (authoritative; reflects the template).
+# Batched [data] read: one `chezmoi execute-template` for every key the Windows mirror
+# needs. Writing that mirror made 49 separate spawns, which measured **229 seconds** on a
+# combined host, because chezmoi re-reads its source state per invocation and the source
+# dir lives on /mnt/c. Nobody noticed until the mirror actually started being written: the
+# writer used to bail out early, so the cost was hidden behind a silent no-op.
+#
+# Values are framed as key=<<value>> so a value containing "=" survives. A key that is not
+# prefetched still resolves, because ts_data_get falls back to its own spawn -- a missing
+# entry here is only slow, never wrong. Values containing a newline are the one shape this
+# cannot carry; every key below is a scalar.
+TS_MIRROR_DATA_KEYS="
+    ccTtsChatterboxCfgWeight ccTtsChatterboxEnergy ccTtsChatterboxTemperature 
+    ccTtsChatterboxTimeout ccTtsChatterboxUrl ccTtsChatterboxVoice ccTtsDaemon 
+    ccTtsDaemonPort ccTtsDebounceSec ccTtsDuckPercent ccTtsEdgeEnabled ccTtsEdgeVoice 
+    ccTtsEnabled ccTtsEngine ccTtsEvents ccTtsExcitement ccTtsHaikuModel 
+    ccTtsIncludeProject ccTtsKokoroFormat ccTtsKokoroSpeed ccTtsKokoroTimeout 
+    ccTtsKokoroUrl ccTtsKokoroVoice ccTtsMaxChars ccTtsMessageMode ccTtsMusicMode 
+    ccTtsOllamaModel ccTtsOllamaUrl ccTtsPlayer ccTtsPrefixClaude ccTtsPrefixClaudeEnabled 
+    ccTtsPrefixCodex ccTtsPrefixCodexEnabled ccTtsPrefixCursor ccTtsPrefixCursorEnabled 
+    ccTtsSummarizer ccTtsTemplateError ccTtsTemplatePermission ccTtsTemplateQuestion 
+    ccTtsTemplateWaiting ccTtsVoicePool leaderChord tmuxPrefix windowsUsername
+    weztermMux weztermRestore
+"
+
+ts_data_prefetch() {
+    local cz tmpl="" k v line out
+    cz="$(ts_chezmoi_bin)" || return 0
+    for k in "$@"; do
+        tmpl="${tmpl}${k}=<<{{ if hasKey . \"${k}\" }}{{ index . \"${k}\" }}{{ end }}>>
+"
+    done
+    [ -n "$tmpl" ] || return 0
+    out="$("$cz" execute-template "$tmpl" 2>/dev/null)" || return 0
+    while IFS= read -r line; do
+        case "$line" in *"=<<"*">>") ;; *) continue ;; esac
+        k="${line%%=<<*}"
+        case "$k" in ''|*[!A-Za-z0-9_]*) continue ;; esac
+        v="${line#*=<<}"; v="${v%>>}"
+        eval "TS_DATA_CACHE_${k}=\$v"
+        eval "TS_DATA_CACHE_SET_${k}=1"
+    done <<EOF
+$out
+EOF
+}
+
 ts_data_get() {
+    # Prefetched value if there is one; the marker variable distinguishes "cached empty"
+    # from "never fetched", which matters because plenty of these keys are legitimately "".
+    local _hit=""
+    eval "_hit=\${TS_DATA_CACHE_SET_${1}:-}"
+    if [ -n "$_hit" ]; then
+        eval "printf '%s' \"\$TS_DATA_CACHE_${1}\""
+        return 0
+    fi
     local cz; cz="$(ts_chezmoi_bin)" || return 1
     "$cz" execute-template "{{ if hasKey . \"$1\" }}{{ index . \"$1\" }}{{ end }}" 2>/dev/null
 }
@@ -351,18 +420,46 @@ ts_refresh_resolved_theme() {
 # Windows-standalone ts-config agree with the WSL source of truth.
 ts_mirror_windows_config() {
     [ -d /mnt/c/Users ] || return 0
+    # One render up front, so the ~49 reads below cost one chezmoi spawn between them.
+    # shellcheck disable=SC2086
+    ts_data_prefetch $TS_MIRROR_DATA_KEYS
     local cz; cz="$(ts_chezmoi_bin)" || return 0
-    local winuser; winuser="$("$cz" execute-template '{{ if hasKey . "windowsUsername" }}{{ .windowsUsername }}{{ end }}' 2>/dev/null)"
-    [ -n "$winuser" ] && [ -d "/mnt/c/Users/$winuser" ] || return 0
+    local winuser; winuser="$(ts_win_user 2>/dev/null || true)"
+    if [ -z "$winuser" ] || [ ! -d "/mnt/c/Users/$winuser" ]; then
+        # Loud on purpose. A silent skip leaves the Windows mirror stale while the save
+        # reports success, and the next pwsh sync renders from those old values.
+        echo "warning: could not resolve the Windows username - the Windows config mirror was NOT updated." >&2
+        echo "  Windows-side settings keep their previous values; ts-doctor reports the divergence." >&2
+        return 0
+    fi
     local dst="/mnt/c/Users/$winuser/AppData/Local/terminal-stack"
     mkdir -p "$dst" 2>/dev/null || return 0
-    local lk lm tm rt tr appscsv jsonapps=""
-    lk="$("$cz" execute-template '{{ .leaderKey }}' 2>/dev/null)"
-    lm="$("$cz" execute-template '{{ .leaderMods }}' 2>/dev/null)"
-    tm="$("$cz" execute-template '{{ .themeMode }}' 2>/dev/null)"
-    rt="$("$cz" execute-template '{{ .resolvedTheme }}' 2>/dev/null)"
-    tr="$("$cz" execute-template '{{ .tmuxPrefixResolved }}' 2>/dev/null)"
-    appscsv="$("$cz" execute-template '{{ if hasKey . "apps" }}{{ range $i,$a := .apps }}{{ if $i }},{{ end }}{{ $a }}{{ end }}{{ end }}' 2>/dev/null)"
+    local lk="" lm="" tm="" rt="" tr="" appscsv="" jsonapps=""
+    # These six are derived expressions rather than plain [data] keys, so they cannot go
+    # through ts_data_prefetch's hasKey form -- but they can still share one spawn. Six
+    # separate renders cost about thirty seconds of the mirror write on a combined host.
+    local _derived _dline _dk _dv
+    _derived="$("$cz" execute-template 'lk=<<{{ .leaderKey }}>>
+lm=<<{{ .leaderMods }}>>
+tm=<<{{ .themeMode }}>>
+rt=<<{{ .resolvedTheme }}>>
+tr=<<{{ .tmuxPrefixResolved }}>>
+appscsv=<<{{ if hasKey . "apps" }}{{ range $i,$a := .apps }}{{ if $i }},{{ end }}{{ $a }}{{ end }}{{ end }}>>' 2>/dev/null)"
+    while IFS= read -r _dline; do
+        case "$_dline" in *"=<<"*">>") ;; *) continue ;; esac
+        _dk="${_dline%%=<<*}"
+        _dv="${_dline#*=<<}"; _dv="${_dv%>>}"
+        case "$_dk" in
+            lk) lk="$_dv" ;;
+            lm) lm="$_dv" ;;
+            tm) tm="$_dv" ;;
+            rt) rt="$_dv" ;;
+            tr) tr="$_dv" ;;
+            appscsv) appscsv="$_dv" ;;
+        esac
+    done <<EOF
+$_derived
+EOF
     local a IFS=,
     for a in $appscsv; do [ -n "$a" ] && jsonapps="$jsonapps${jsonapps:+, }\"$a\""; done
     unset IFS
