@@ -10,6 +10,28 @@ cc_tts_log() {
     [ -n "${CC_TTS_VERBOSE:-}" ] && echo "cc-tts: $*" >&2
 }
 
+# WSL hooks use the same console-free Windows executable as native Windows.
+# Resolve it with shell globbing so a hook never launches cmd.exe/PowerShell
+# merely to discover the Windows username.
+cc_tts_windows_exe() {
+    local candidate
+    [ -d /mnt/c/Users ] || return 1
+    for candidate in /mnt/c/Users/*/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe; do
+        [ -f "$candidate" ] || continue
+        printf '%s' "$candidate"
+        return 0
+    done
+    return 1
+}
+
+cc_tts_windows_hook() {
+    # cc_tts_windows_hook <source> <event> <state> <raw-json>
+    local source="$1" event="$2" state="$3" input="$4" exe
+    exe="$(cc_tts_windows_exe)" || return 1
+    printf '%s' "$input" | "$exe" hook --source "$source" --event "$event" \
+        --state "$state"
+}
+
 cc_tts_init_config() {
     [ -n "$CONFIG" ] && [ -f "$CONFIG" ] && return 0
 

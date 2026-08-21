@@ -330,7 +330,7 @@ which is unreliable from non-interactive / WSL-interop contexts (the process
 may simply never start, with no error). Launch batch files through an explicit
 host instead: `Start-Process $env:ComSpec -ArgumentList '/c', $launcher`.
 
-## ttsd daemon: pythonw autostart, HKCU Run, and interop timeouts
+## TTS EXE: GUI subsystem, inherited pipes, and HKCU Run
 
 Assorted Windows-side facts baked into `bootstrap/install-tts-daemon.ps1` and the
 TTS hook senders, recorded so they don't get "simplified" away:
@@ -339,19 +339,19 @@ TTS hook senders, recorded so they don't get "simplified" away:
   shortcut or a scheduled task: no admin, trivially idempotent
   (`New-ItemProperty -Force` / `Remove-ItemProperty`), and crash-restart
   semantics are unnecessary because the hooks fall back to direct playback when
-  the daemon is dead. The value points at `run-daemon.cmd`, which resolves the
-  clone at **launch** time (canonical path, then `TERMINAL_STACK_DIR`) so a
-  `ts-doctor --repair` relocation doesn't strand it.
-- **`pythonw.exe -m ttsd` needs the package on `sys.path`** — the launcher
-  `cd /d`'s into `…\bootstrap\tts-daemon` first. `python -m` puts the cwd at
-  `sys.path[0]`; there is no installed package.
-- **`Invoke-WebRequest -TimeoutSec` is too coarse for a hook budget** — its
-  granularity is whole seconds and DNS/connect phases can overshoot. The pwsh
-  sender uses `System.Net.Http.HttpClient` with a millisecond `Timeout`; on
-  loopback a dead daemon refuses instantly either way.
+  the daemon is dead. The value points directly at the installed GUI-subsystem
+  `terminal-stack-tts.exe daemon`; there is no `.cmd` or shell host.
+- **A windowed PyInstaller build sets `sys.stdin/stdout/stderr` to `None`.**
+  Hook hosts still provide JSON through inherited pipes, so the EXE reads and
+  writes those handles with `GetStdHandle` + `ReadFile` / `WriteFile`. Cursor's
+  required `{}` response is covered by a packaged-EXE pipe test.
+- **GUI subsystem is necessary but not sufficient.** Any console-subsystem
+  child can still flash a window, so media probing/playback and SAPI run
+  in-process (mutagen, WinRT MediaPlayer, COM). Optional children use
+  `CREATE_NO_WINDOW` through one helper.
 - **The WSL-facing listener needs a firewall rule** (inbound TCP on the daemon
   port from `172.16.0.0/12`) and creating one needs elevation — the installer
-  tries, and on failure prints the elevated one-liner instead of failing the
+  tries, and on failure reports the need for elevation instead of failing the
   install. Mirrored-networking WSL (Win11) never needs it: loopback works.
 - **Per-app mixer volume persists across app restarts.** Anything that lowers a
   session volume must write its restore data to disk *first* — see

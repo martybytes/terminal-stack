@@ -68,7 +68,7 @@ class Summarizer:
         mode = str(self.cfg.get("summarize.mode", "template"))
         summary = ""
         if mode == "self":
-            summary = self._extract_marker(ev.text)
+            summary = self._self_summary(ev.text)
         elif mode == "haiku":
             summary = self._llm_haiku(ev.text)
             if summary == "" and self.cfg.get("summarize.emptyMeansSilent", False):
@@ -117,6 +117,36 @@ class Summarizer:
     def _extract_marker(text: str) -> str:
         matches = SPEAK_MARKER.findall(text or "")
         return _speakable(matches[-1]) if matches else ""
+
+    @classmethod
+    def _self_summary(cls, text: str) -> str:
+        """Prefer the model marker; otherwise derive one local prose sentence.
+
+        Cursor user rules are GUI-managed, and already-running Codex sessions do
+        not reload AGENTS.md. Their hook payloads still contain the final answer,
+        so self mode can remain useful without another model call or a fixed
+        template. Empty/non-prose payloads continue to degrade to the template.
+        """
+        marked = cls._extract_marker(text)
+        if marked:
+            return marked
+
+        clean = re.sub(r"```.*?```", " ", text or "", flags=re.DOTALL)
+        clean = SPEAK_MARKER.sub(" ", clean)
+        for raw_line in clean.splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            line = re.sub(r"^(?:[-*+]\s+|\d+[.)]\s+)", "", line)
+            spoken = _speakable(line)
+            if not spoken:
+                continue
+            sentence = re.split(r"(?<=[.!?])\s+", spoken, maxsplit=1)[0]
+            words = sentence.split()
+            if len(words) > 15:
+                sentence = " ".join(words[:15]).rstrip(",;:-") + "."
+            return sentence
+        return ""
 
     # ── LLM modes (best-effort; empty string on any failure) ─────────────
 

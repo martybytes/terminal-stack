@@ -1,4 +1,4 @@
-# cursor-tts.ps1 — Cursor Agent stop hook → local Kokoro TTS.
+# cursor-tts.ps1 — Cursor Agent stop hook → error TTS.
 $inputJson = ''
 try {
     if ([Console]::IsInputRedirected) {
@@ -6,14 +6,14 @@ try {
     }
 } catch {}
 
-$state = 'waiting'
+$state = 'error'
 if ($inputJson) {
     try {
         $data = $inputJson | ConvertFrom-Json
         switch ($data.status) {
             'error'   { $state = 'error'; break }
             'aborted' { Write-Output '{}'; return }
-            default   { $state = 'waiting' }
+            default   { Write-Output '{}'; return }
         }
         if ($data.workspace_roots -and $data.workspace_roots.Count -gt 0) {
             $env:CURSOR_PROJECT_DIR = $data.workspace_roots[0]

@@ -60,6 +60,12 @@ source explicitly:
 ts-config tts test --source codex
 ```
 
+`ts-config tts summarizer self` installs the spoken-summary marker in Codex's
+active global `$CODEX_HOME/AGENTS.md` (or `AGENTS.override.md`). Start a new
+Codex session to load that instruction. Existing sessions still get a locally
+derived sentence from their final-response hook text instead of repeating the
+fixed waiting template.
+
 Use `ts-config tts prefix codex on|off|<label>` to control the spoken `Codex.`
 prefix. If the tray daemon predates this feature, run
 `ts-config tts daemon restart` after updating.

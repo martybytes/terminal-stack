@@ -53,7 +53,8 @@ def build_icon(app, log_path, on_quit):
             if result and result.media is not None:
                 app.audio.hold(None)
                 try:
-                    app.dispatcher.playback.play(result.media)
+                    if not app.dispatcher.playback.play(result.media):
+                        app.dispatcher.playback.speak_sapi("Terminal stack voice check.")
                 finally:
                     app.audio.release()
             elif result:

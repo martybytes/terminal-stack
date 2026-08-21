@@ -1,5 +1,5 @@
-# ttsd runtime deps — installed into %LOCALAPPDATA%\terminal-stack\tts-daemon\venv
-# by bootstrap/install-tts-daemon.ps1. Windows-only.
+# Bundled TTS runtime deps — installed only in a temporary build venv, then
+# frozen into terminal-stack-tts.exe by bootstrap/install-tts-daemon.ps1.
 pycaw>=20240210
 comtypes>=1.2
 winrt-runtime>=2.0
@@ -8,3 +8,8 @@ winrt-Windows.Foundation>=2.0
 pystray>=0.19
 Pillow>=10
 edge-tts>=6.1
+mutagen>=1.47
+psutil>=7.0
+winrt-Windows.Media.Core>=3.2
+winrt-Windows.Media.Playback>=3.2
+winrt-Windows.Storage>=3.2

@@ -102,12 +102,12 @@ if [ "$CC_TTS_ENABLED" = true ]; then
   CC_TTS_STOP_HOOK=$',
           {
             "type": "command",
-            "command": "pwsh -NoLogo -NonInteractive -ExecutionPolicy Bypass -File C:/Users/'"$WIN_USER"'/.claude/hooks/cc-speak.ps1 -State waiting"
+            "command": "C:/Users/'"$WIN_USER"'/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe hook --source claude --event stop --state waiting"
           }'
   CC_TTS_STOPFAILURE_HOOK=$',
           {
             "type": "command",
-            "command": "pwsh -NoLogo -NonInteractive -ExecutionPolicy Bypass -File C:/Users/'"$WIN_USER"'/.claude/hooks/cc-speak.ps1 -State error"
+            "command": "C:/Users/'"$WIN_USER"'/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe hook --source claude --event stop_failure --state error"
           }'
   CC_TTS_CURSOR_HOOKS='{
     "afterFileEdit": [
@@ -116,16 +116,22 @@ if [ "$CC_TTS_ENABLED" = true ]; then
         "timeout": 1
       }
     ],
+    "afterAgentResponse": [
+      {
+        "command": "C:/Users/'"$WIN_USER"'/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe hook --source cursor --event cursor_response --state waiting",
+        "timeout": 15
+      }
+    ],
     "stop": [
       {
-        "command": "pwsh -NoLogo -NonInteractive -ExecutionPolicy Bypass -File C:/Users/'"$WIN_USER"'/.cursor/hooks/cursor-tts.ps1",
+        "command": "C:/Users/'"$WIN_USER"'/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe hook --source cursor --event cursor_stop --state waiting",
         "timeout": 15
       }
     ],
     "postToolUse": [
       {
         "matcher": "AskQuestion|AskUserQuestion",
-        "command": "pwsh -NoLogo -NonInteractive -ExecutionPolicy Bypass -File C:/Users/'"$WIN_USER"'/.cursor/hooks/cursor-tts-input.ps1",
+        "command": "C:/Users/'"$WIN_USER"'/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe hook --source cursor --event cursor_question --state question",
         "timeout": 15
       }
     ]
@@ -136,7 +142,7 @@ if [ "$CC_TTS_ENABLED" = true ]; then
         "hooks": [
           {
             "type": "command",
-            "command": "pwsh -NoLogo -NonInteractive -ExecutionPolicy Bypass -File C:/Users/'"$WIN_USER"'/.claude/hooks/cc-speak-input.ps1 -Event question"
+            "command": "C:/Users/'"$WIN_USER"'/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe hook --source claude --event question --state question"
           }
         ]
       }'
@@ -147,7 +153,7 @@ if [ "$CC_TTS_ENABLED" = true ]; then
         "hooks": [
           {
             "type": "command",
-            "command": "pwsh -NoLogo -NonInteractive -ExecutionPolicy Bypass -File C:/Users/'"$WIN_USER"'/.claude/hooks/cc-speak-input.ps1 -Event notification"
+            "command": "C:/Users/'"$WIN_USER"'/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe hook --source claude --event notification --state question"
           }
         ]
       }
@@ -158,7 +164,7 @@ if [ "$CC_TTS_ENABLED" = true ]; then
         "hooks": [
           {
             "type": "command",
-            "command": "pwsh -NoLogo -NonInteractive -ExecutionPolicy Bypass -File C:/Users/'"$WIN_USER"'/.claude/hooks/cc-speak-input.ps1 -Event permission"
+            "command": "C:/Users/'"$WIN_USER"'/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe hook --source claude --event permission --state permission"
           }
         ]
       }
@@ -176,6 +182,25 @@ if [ ! -d "$dst_home" ]; then
   exit 0
 fi
 
+if [ "$CC_TTS_ENABLED" = true ]; then
+  tts_exe="$dst_home/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe"
+  if [ ! -f "$tts_exe" ]; then
+    installer="$stack_root/bootstrap/install-tts-daemon.ps1"
+    pwsh_exe="/mnt/c/Program Files/PowerShell/7/pwsh.exe"
+    [ -f "$installer" ] && [ -x "$pwsh_exe" ] || {
+      echo "sync-windows: TTS is enabled but its EXE installer is unavailable." >&2
+      exit 1
+    }
+    installer_win="$(wslpath -w "$installer")"
+    if [ "$(cfg ccTtsDaemon off)" = on ]; then
+      "$pwsh_exe" -NoLogo -NonInteractive -ExecutionPolicy Bypass -File "$installer_win"
+    else
+      "$pwsh_exe" -NoLogo -NonInteractive -ExecutionPolicy Bypass -File "$installer_win" -NoStart -NoAutostart
+    fi
+    [ -f "$tts_exe" ] || { echo "sync-windows: TTS EXE install failed." >&2; exit 1; }
+  fi
+fi
+
 today="$(date +%Y%m%d)"
 created=0
 updated=0
@@ -184,6 +209,56 @@ wezterm_cfg_changed=0
 
 rendered="$(mktemp)"
 trap 'rm -f "$rendered"' EXIT
+
+resolve_pwsh() {
+  local p
+  for p in /mnt/c/Program\ Files/PowerShell/7/pwsh.exe \
+           /mnt/c/Program\ Files/PowerShell/7-preview/pwsh.exe; do
+    if [ -x "$p" ]; then printf '%s' "$p"; return 0; fi
+  done
+  return 1
+}
+
+claude_merge_helper="$stack_root/bootstrap/_merge_claude_settings.ps1"
+
+# merge_claude_settings <rendered-src> <dst>
+# Claude Code writes ~/.claude/settings.json too: `model`, `enabledPlugins`,
+# `permissions`, `env` and `extraKnownMarketplaces` are its own state, set by
+# /model and /plugin. A whole-file copy deletes all of it — that is how the
+# agentmemory plugin got silently disabled on 2026-08-20 (`enabledPlugins` went
+# missing, so its hooks and MCP server stopped loading). Splice the keys the
+# template renders into the live file and leave every other byte alone.
+merge_claude_settings() {
+  local src="$1" dst="$2" pwsh_bin stage
+  if [ ! -f "$claude_merge_helper" ]; then
+    echo "sync-windows: $claude_merge_helper missing; leaving $dst alone." >&2
+    return 0
+  fi
+  if ! pwsh_bin="$(resolve_pwsh)"; then
+    if [ -e "$dst" ]; then
+      echo "sync-windows: pwsh not found; leaving $dst alone — a whole-file copy would delete Claude Code's own keys." >&2
+      return 0
+    fi
+    # Nothing there yet, so nothing to preserve: the plain copy is correct.
+    mkdir -p -- "$(dirname -- "$dst")"
+    cp -- "$src" "$dst"
+    printf 'created  %s\n' "$dst"
+    return 0
+  fi
+  # Stage the rendered fragment on the Windows side so pwsh.exe reads a real
+  # C:\ path instead of a \\wsl.localhost round trip.
+  stage="$dst_home/AppData/Local/Temp/terminal-stack-claude-settings.json"
+  mkdir -p -- "$(dirname -- "$stage")"
+  cp -- "$src" "$stage"
+  if ! "$pwsh_bin" -NoLogo -NonInteractive -ExecutionPolicy Bypass \
+       -File "$(wslpath -w "$claude_merge_helper")" \
+       -FragmentPath "$(wslpath -w "$stage")" \
+       -LivePath "$(wslpath -w "$dst")"; then
+    echo "sync-windows: Claude settings merge failed (non-fatal); $dst left as it was." >&2
+  fi
+  rm -f -- "$stage"
+  return 0
+}
 
 # sync_tree <src_root> <dst_root> <render_tmpl:0|1>
 sync_tree() {
@@ -241,6 +316,11 @@ PY
 
     dst="$dst_root/$rel_out"
 
+    if [ "$dst" = "$dst_home/.claude/settings.json" ]; then
+      merge_claude_settings "$effective_src" "$dst"
+      continue
+    fi
+
     if [ -e "$dst" ]; then
       if cmp -s "$effective_src" "$dst"; then
         unchanged=$((unchanged + 1))
@@ -264,7 +344,8 @@ PY
       printf 'created  %s\n' "$dst"
       case "$dst" in "$dst_home/.wezterm"*) wezterm_cfg_changed=1 ;; esac
     fi
-  done < <(find "$src_root" -type f -print0)
+  done < <(find "$src_root" -type d -name __pycache__ -prune -o \
+    -type f ! -name '*.pyc' ! -name '*.pyo' -print0)
 }
 
 sync_tree "$windows_src" "$dst_home" 1
@@ -298,11 +379,7 @@ fi
 
 merge_helper="$stack_root/bootstrap/_merge_cursor_settings.ps1"
 if [ -f "$merge_helper" ]; then
-  pwsh_exe=""
-  for p in /mnt/c/Program\ Files/PowerShell/7/pwsh.exe \
-           /mnt/c/Program\ Files/PowerShell/7-preview/pwsh.exe; do
-    if [ -x "$p" ]; then pwsh_exe="$p"; break; fi
-  done
+  pwsh_exe="$(resolve_pwsh || true)"
   if [ -n "$pwsh_exe" ]; then
     # pwsh.exe is a Windows binary: WSL interop does not translate argument paths, so the
     # POSIX $merge_helper must be converted. -ExecutionPolicy Bypass matches every other

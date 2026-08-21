@@ -163,22 +163,26 @@ cd bootstrap/tts-daemon && python -m pytest tests -q
 Full-pipeline checks (these speak — Windows, Kokoro up):
 
 ```sh
-# one fixture through parse → registry → schedule → summarize → synth → play:
-python -m ttsd --simulate fixtures/stop.json          # from bootstrap/tts-daemon/
+# build the actual GUI-subsystem artifact, then validate its command surface:
+pwsh -File bootstrap/tts-daemon/build.ps1
+bootstrap/tts-daemon/dist/terminal-stack-tts.exe simulate bootstrap/tts-daemon/fixtures/stop.json
 
 # live daemon drills (use a test port so the real one is undisturbed):
-python -m ttsd --no-tray --port 8899 &
+python -m ttsd daemon --no-tray --port 8899 &
 curl -s http://127.0.0.1:8899/healthz                 # version = clone HEAD sha
 # three stops within ~1s → expect ONE coalesced utterance; check /v1/status:
 #   spoken:1, lastLine "Three sessions finished: …"
 curl -s -X POST http://127.0.0.1:8899/v1/shutdown
 ```
 
-The two invariants to drill after touching the hook senders:
+The invariants to drill after touching the hook senders:
 
-- **Fallback (never-silence):** `~/.claude/hooks/cc-tts-test.sh --daemon-fallback`
-  (pwsh `-DaemonFallback`) forces a dead port — the phrase must still play via
-  the direct path.
+- **No console process:** inspect the built PE Optional Header (`Subsystem=2`,
+  Windows GUI), run Claude and Cursor hooks with redirected stdin, and verify
+  no new `cmd`, `conhost`, `pwsh`, `python[w]`, `ffplay`, or `ffprobe` process.
+- **Fallback (never-silence):** set `CC_TTS_DAEMON_PORT_OVERRIDE` to a dead
+  port and invoke `terminal-stack-tts.exe hook …`; its detached `_direct`
+  worker must speak without any console child.
 - **Inert while off:** with `ccTtsDaemon=off` (the default), a `chezmoi apply`
   on an unchanged config must produce **zero** `updated` lines for
   `settings.json` / `hooks.json`, and the hooks must not POST anywhere
@@ -191,13 +195,36 @@ The two invariants to drill after touching the hook senders:
   belong on the WSL side.
 
 Duck-restore drill (music playing): trigger speech, kill the daemon mid-duck
-(`taskkill /f` on its pythonw), confirm music is stuck quiet, then
+(`taskkill /f /im terminal-stack-tts.exe`), confirm music is stuck quiet, then
 `ts-doctor --repair` (or restart the daemon) — volumes must come back and
 `state\duck-snapshot.json` must be gone.
 
 New wizard/menu text (`ts_prompt_cc_tts_daemon` ↔ `Read-TsCcTtsDaemon`,
 `ts-config tts -h` both shells, both TTS submenus) goes through the §3
 byte-diff like everything else.
+
+## 4c. Sync changes — run the whole sync against a throwaway profile
+
+`scripts/sync-windows.ps1` derives every destination from `$env:USERPROFILE` /
+`$env:LOCALAPPDATA`, so a child pwsh with both redirected exercises the real code path —
+template rendering, backups, the Claude settings splice — without writing to your profile:
+
+```powershell
+$sb = (New-Item -ItemType Directory -Force "$env:TEMP\ts-sync-sandbox").FullName
+New-Item -ItemType Directory -Force "$sb\.claude" | Out-Null
+Copy-Item ~\.claude\settings.json "$sb\.claude\settings.json"   # seed a realistic live file
+pwsh -NoLogo -NonInteractive -Command "
+  `$env:USERPROFILE='$sb'; `$env:LOCALAPPDATA='$sb\LocalAppData'; `$env:APPDATA='$sb\AppData\Roaming'
+  & ./scripts/sync-windows.ps1 -SourceDir (Resolve-Path .).Path -WinUser $env:USERNAME"
+```
+
+The sandboxed profile has no `config.json`, so the run uses wizard defaults (TTS off) — the
+rendered `hooks` will legitimately differ from your live ones. What it does prove is which
+keys survive: for `.claude\settings.json`, everything Claude Code owns (`model`,
+`enabledPlugins`, `permissions`, `env`) must come out of the run byte-identical, and a second
+run must report `already up to date`. Same check for the WSL hook by sourcing just its
+functions with `dst_home` pointed at a `/mnt/c/...` sandbox — `resolve_pwsh` and
+`merge_claude_settings` need nothing else from the script.
 
 ## 5. What you cannot verify from a dev clone
 

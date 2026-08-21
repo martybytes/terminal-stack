@@ -12,6 +12,8 @@ import shutil
 import subprocess
 import time
 
+from .process import run_hidden
+
 log = logging.getLogger(__name__)
 
 _CACHE_SEC = 2.0
@@ -46,7 +48,7 @@ class WezInfo:
         self._checked = now
         self._focused_pane = None
         try:
-            out = subprocess.run(
+            out = run_hidden(
                 [self.exe, "cli", "list-clients", "--format", "json"],
                 capture_output=True, text=True, timeout=3, check=True,
             ).stdout

@@ -186,7 +186,8 @@ class _Handler(BaseHTTPRequestHandler):
         app.audio.hold(None)
         try:
             if result.media is not None:
-                app.dispatcher.playback.play(result.media)
+                if not app.dispatcher.playback.play(result.media):
+                    app.dispatcher.playback.speak_sapi(text)
             else:
                 app.dispatcher.playback.speak_sapi(result.sapi_text)
         finally:

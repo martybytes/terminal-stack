@@ -10,6 +10,10 @@ LIB="$(dirname "$0")/cc-tts-lib.sh"
 # shellcheck source=cc-tts-lib.sh
 . "$LIB"
 
+if cc_tts_windows_hook claude "$event" question "$input" >/dev/null 2>&1; then
+    exit 0
+fi
+
 cc_tts_parse_input_state "$input" "$event"
 state="${CC_TTS_PARSED_STATE:-question}"
 override="${CC_TTS_PARSED_OVERRIDE:-}"

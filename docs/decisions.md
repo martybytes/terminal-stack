@@ -306,21 +306,25 @@ Like tab tinting, TTS is stack infrastructure — but unlike `ccnotify` (a senti
 
 The session-aware announcement layer (`ccTtsDaemon`, `bootstrap/tts-daemon/ttsd`) needs two things a container can never have on Windows: an audio path to the host (Docker Desktop's utility VM has no sound device — there is no `/dev/snd` to pass through) and access to the host's per-app audio sessions (`ISimpleAudioVolume` enumerates only the caller's logon session, so a container cannot see or duck `Spotify.exe`'s mixer entry). Kokoro stays in Docker because synthesis is stateless HTTP — the daemon calls the same `:8880` endpoint the direct path always used. Everything that must touch host audio — playback, ducking, media pause/resume — lives in the one native process; anything else can reach it over `127.0.0.1:8890`.
 
-## Why hooks POST to the daemon *and* keep the direct path (never-silence)
+## Why every Windows hook calls one GUI-subsystem EXE
 
-`cc-speak*` / `cursor-tts*` try the daemon first and `exec` the classic `cc-tts-notify` path on any failure — connection refused, timeout, bad token, native Linux, `ccTtsDaemon=off`. The invariant is **degrade to yesterday's behavior, never to silence**: a dead daemon must not eat a "done" announcement. Two consequences worth protecting. First, **no daemon state ever appears in the managed `settings.json`** — routing is a runtime decision inside the hook scripts, so the five `__CC_TTS_*__` tokens and both sync renderers are untouched, and enable/disable/uninstall cannot orphan hook entries. Second, the old machine-global debounce file and play lock still guard the *fallback* path only; the daemon's scheduler replaces them on the daemon path (mixing the two would double-drop). Don't "simplify" the fallback branch away, and don't add daemon knobs to the settings templates.
+The previous Windows path looked backgrounded but still started console-subsystem children: hook → PowerShell → Python → `ffprobe.exe` / `ffplay.exe`. Windows could allocate or flash a command window at any of those boundaries. Hiding only the first process was insufficient. `terminal-stack-tts.exe` therefore owns hook normalization, daemon posting, synthesis fallback, WinRT playback, SAPI, and duration probing in-process. PyInstaller's windowed bootloader marks it as GUI subsystem, and redirected hook JSON is read through inherited Win32 standard handles because `sys.stdin` is intentionally absent in a windowed build. Claude, Cursor, Codex, and WSL interop all call that EXE directly.
 
-## Why the daemon source lives in `bootstrap/tts-daemon/` with the venv outside the clone
+The **never-silence** rule remains, but the fallback is now another mode of the same binary: if the daemon is disabled or unreachable, the short-lived hook process starts a detached `_direct` worker with `CREATE_NO_WINDOW`. No PowerShell, `cmd`, Python runtime, FFmpeg tool, or console host belongs on a successful spoken path. Any unavoidable auxiliary child (currently only optional WezTerm CLI inspection) goes through the centralized hidden-process helper.
 
-Same reasoning as `wso`: chezmoi-ignored (`bootstrap/**`), run from the runtime clone, so `ts-update` ships daemon fixes without a profile re-sync. The venv sits at `%LOCALAPPDATA%\terminal-stack\tts-daemon\venv` — *outside* the clone — so pulls never churn it, and `run-daemon.cmd` resolves the clone at launch time so a `ts-doctor --repair` relocation doesn't strand the autostart entry. The daemon reports the clone's git SHA in `/healthz`; `ts-update` and `ts-doctor` compare it and *nudge* — never auto-restart, for the same reason the WezTerm mux server is never auto-restarted (it may be mid-announcement or holding a duck).
+## Why the TTS source and PyInstaller spec live in `bootstrap/tts-daemon/`
+
+The source, tests, build script, and spec ship with `ts-update`, while the built runtime lives at `%LOCALAPPDATA%\terminal-stack\tts-daemon\terminal-stack-tts.exe`. The installer creates a temporary build venv, freezes one EXE, validates it, atomically swaps it into place, and removes the legacy persistent venv/launcher only after validation. HKCU Run points directly at `"terminal-stack-tts.exe" daemon`, so clone relocation cannot strand autostart. The build embeds the clone Git SHA for `/healthz`; updates nudge rather than auto-restart because the daemon may be speaking or holding a duck.
 
 ## Why ducking snapshots pre-duck volumes to disk before touching anything
 
 Windows persists per-app mixer volume indefinitely. A daemon that dies between ramp-down and restore leaves the music at 30% until the user finds the Volume Mixer — so the duck engine writes `state\duck-snapshot.json` *before* the first volume change, restores any stale snapshot at next startup, runs a 15 s watchdog while holding, and exposes `POST /v1/duck/release` plus a `--restore-volumes` oneshot that `ts-doctor --repair` invokes. Pause mode uses the Windows media-session API (`TryPauseAsync` only on sessions that were Playing, resume exactly those) and never simulates the media key, which is a blind toggle other apps can hijack.
 
-## Why the `self` summarizer instruction is a marker block in the user's CLAUDE.md
+## Why the `self` summarizer instruction uses agent-owned marker blocks
 
-`summarizer self` needs the model to end each turn with a `<!-- speak: … -->` one-liner, which requires an instruction visible to every Claude Code session. The repo deliberately does **not** manage `~/.claude/CLAUDE.md` whole-file (it is the user's global memory — "the repo owns infrastructure; you own preferences", above) and does not force an output style. Instead `ts-config tts summarizer self` edits a `<!-- terminal-stack-tts-start/end -->` marker block into the user's file — the exact discipline `$PROFILE` uses — with `.bak.YYYYMMDD` backups, and switching to any other mode removes exactly that block. Cursor's global User Rules live in a GUI-only settings store, so the Cursor side ships as a copy-paste rule in `docs/kb/windows/tts-daemon.md`; Cursor events without a marker simply fall back to template lines. This asymmetry is deliberate — don't try to manage Cursor's rules DB from a dotfiles repo.
+`summarizer self` needs the model to end each turn with a `<!-- speak: … -->` one-liner, which requires an instruction visible to every session. The repo deliberately does **not** manage Claude's `~/.claude/CLAUDE.md` or Codex's active global `$CODEX_HOME/AGENTS.md` whole-file (they are user-owned agent instructions) and does not force an output style outside this opt-in feature. Instead `ts-config tts summarizer self` edits a `<!-- terminal-stack-tts-start/end -->` marker block into both files, with `.bak.YYYYMMDD` backups, and switching to any other mode removes exactly those blocks. Codex sessions load instructions at startup, so already-running sessions may not emit the marker; the final-response hook text is locally shortened in that case.
+
+Cursor's global User Rules live in a GUI-only settings store, so its optional rule ships as copy-paste text in `docs/kb/windows/tts-daemon.md`. Cursor's `afterAgentResponse` hook supplies the actual final response, which is locally shortened when no marker exists; its separate `stop` hook carries only status and speaks only failures. This asymmetry is deliberate — don't try to manage Cursor's rules database from a dotfiles repo.
 
 ## Why `settings.json` ships only shared infra — no model, prefs, permissions, or plugins
 
@@ -684,3 +688,51 @@ install that looked clean and had no terminal. Nightly is still the default (the
 targets current builds), but a nightly that will not install now falls back to stable
 rather than to nothing, and every package that failed is reprinted at the end with the
 command to retry it.
+
+## Why `~/.claude/settings.json` is spliced, not copied
+
+Every other file under `windows/**` is a whole-file mirror: the stack owns it, so the sync
+renders it and copies it over the top. `~/.claude/settings.json` looks like one of those and
+is not, because **Claude Code writes the same file**. `/model` persists `model` there.
+`/plugin` writes `enabledPlugins` and `extraKnownMarketplaces`. MCP tool allowances land in
+`permissions`. Environment a plugin's hooks and MCP server need — `AGENTMEMORY_URL`, keys
+like it — lives in `env`. None of that is ours, none of it is in the template, and a
+whole-file copy deletes all of it.
+
+That is not hypothetical. On 2026-08-20 a sync overwrote the file at 19:58 and took
+`enabledPlugins` with it, which disabled the agentmemory plugin: its twelve lifecycle hooks
+and its MCP server stopped loading, and nothing said so. Claude Code just stopped recording
+anything, while Codex — whose config lives in `~/.codex/`, which this repo does not
+whole-file-manage — kept working, so the two agents disagreed about whether memory existed.
+The backup chain (`settings.json.bak.20260820.12` has the keys, `.13` does not) is the only
+evidence the sync was responsible.
+
+So the file is now **part-owned**. The sync splices in exactly the top-level keys the
+template renders — `statusLine`, `hooks`, `theme` — and leaves every other byte where it
+was. `bootstrap/_merge_claude_settings.ps1` drives it; the textual splice engine underneath
+is `bootstrap/_merge_json_settings.ps1`, extracted from `_merge_cursor_settings.ps1` (Cursor
+learned this lesson first, for `// comments` rather than app-owned state) and now shared by
+both. Both sync paths route the file through it: `scripts/sync-windows.ps1` dot-sources the
+helper, and `run_after_90-sync-windows.sh` stages the rendered fragment on the Windows side
+and shells to `pwsh.exe`, the same way it already did for Cursor.
+
+Three properties are deliberate:
+
+- **A key the template stops rendering stops being ours.** Ownership is derived from the
+  rendered fragment, not a hard-coded list, so removing a hook from the template removes it
+  from the live file.
+- **The splice refuses rather than guesses.** If the result does not re-parse, or would
+  disturb any key the fragment does not own, nothing is written. A backup still precedes
+  every write that does happen.
+- **No pwsh, no clobber.** If `pwsh.exe` cannot be found from WSL the hook leaves an existing
+  file completely alone and says so; it only falls back to a plain copy when there is no live
+  file yet and therefore nothing to lose.
+
+The tempting shortcut — put `enabledPlugins` and `env.AGENTMEMORY_URL` in the template and
+keep the whole-file copy — is wrong twice over. AgentMemory's client wiring is deliberately
+outside version control (`docker-local/agentmemory/README.md`: user-scoped, global, one
+machine at a time), and it would not save `model` or anything else Claude Code writes next.
+
+The WSL-side `dot_claude/settings.json.tmpl` is still a whole-file chezmoi target. That is
+correct only as long as WSL-side Claude Code has no plugins and no per-machine keys; the day
+it does, it needs a `modify_` script doing the same splice.

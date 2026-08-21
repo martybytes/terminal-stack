@@ -80,23 +80,24 @@ Key knobs: `sources.claude|cursor|codex.prefix`, `announce.includeProject`, `ann
 |---|---|---|
 | Claude Code | `Stop` / `StopFailure` | Agent finished / failed |
 | Claude Code | `Notification` / `PermissionRequest` / `PreToolUse` (`AskUserQuestion`) | Needs attention / permission / clarifying question |
-| Cursor Agent | `stop` | Agent loop ended |
+| Cursor Agent | `afterAgentResponse` | Agent final response completed |
+| Cursor Agent | `stop` | Agent loop failed (`completed` / `aborted` are silent) |
 | Cursor Agent | `postToolUse` (`AskQuestion`) | Plan-mode / clarifying question UI |
 | Codex (`cy` / `cyr`) | `Stop` | Agent turn ended |
 
-All paths call **`cc-tts-notify`** → Kokoro → **`cc-tts-play`** (WSL uses Windows `ffplay`). Prefixes **`Claude.`** / **`Cursor.`** / **`Codex.`** are configurable per source.
+On Windows and WSL, every hook calls the console-free **`terminal-stack-tts.exe`** directly. It uses Kokoro/Chatterbox/edge synthesis and WinRT playback in-process; prefixes **`Claude.`** / **`Cursor.`** / **`Codex.`** are configurable per source. Native Linux/macOS retain the shell `cc-tts-notify` path.
 
 ### Prerequisites
 
 - **Kokoro** (primary): `http://127.0.0.1:8880` — e.g. `remsky/kokoro-fastapi-gpu` in Docker.
 - **Chatterbox** (optional): `http://127.0.0.1:8881`.
-- **edge-tts** (fallback): `pip install edge-tts`.
+- **edge-tts** (fallback): bundled into the Windows EXE; install separately only on native Linux/macOS.
 
 The stack does **not** install Docker containers — only hooks and config.
 
 ### WSL audio
 
-Playback routes through **Windows** (`ffplay`) so you hear the same headphones as Hermes.
+WSL invokes the Windows GUI-subsystem EXE, whose WinRT MediaPlayer uses the same Windows audio device as Hermes. No FFmpeg player or shell host is started.
 
 ### Verification
 
@@ -107,6 +108,6 @@ Playback routes through **Windows** (`ffplay`) so you hear the same headphones a
 5. Trigger AskQuestion in Cursor plan mode — hear **Cursor. I have a question for you.**
 6. Claude permission or AskUserQuestion — hear **Claude.** + template
 
-**Cursor:** confirm `~/.cursor/hooks.json` has `stop` and `postToolUse` entries. Restart Cursor after first deploy. Check **Settings → Hooks** if silent.
+**Cursor:** confirm `~/.cursor/hooks.json` has `afterAgentResponse`, `stop`, and `postToolUse` entries. `afterAgentResponse` carries the spoken completion text; `stop` is retained for failures. Restart Cursor after first deploy. Check **Settings → Hooks** if silent.
 
 Skip at bootstrap: `TS_CC_TTS=off`. Enable: `TS_CC_TTS=on`.
