@@ -86,3 +86,39 @@ def test_codex_response_text_is_preserved():
     assert payload is not None
     assert payload["session_key"] == "codex:t1"
     assert payload["message"]["text"] == "Implemented and tested."
+
+
+# ── never silence: an unusable state root must not take the process down ──────
+#
+# Both of these were unguarded, and a live run with LOCALAPPDATA pointing at a file
+# crashed the EXE with a FileNotFoundError before it said a word. Losing the log or the
+# spawn is a nuisance; dying on the way to speech is a fault.
+
+def _unusable_state_root(tmp_path, monkeypatch):
+    """Point LOCALAPPDATA at a regular file, so every mkdir beneath it fails."""
+    blocker = tmp_path / "not-a-dir"
+    blocker.write_text("file where the state directory should be", encoding="utf-8")
+    monkeypatch.setenv("LOCALAPPDATA", str(blocker))
+    return blocker
+
+
+def test_logging_setup_survives_an_unusable_state_root(tmp_path, monkeypatch):
+    import logging
+
+    from ttsd.__main__ import _setup_logging
+
+    _unusable_state_root(tmp_path, monkeypatch)
+    root = logging.getLogger()
+    saved = root.handlers[:]
+    try:
+        _setup_logging(console=False)  # must not raise
+    finally:
+        root.handlers[:] = saved
+
+
+def test_spawn_direct_reports_failure_instead_of_raising(tmp_path, monkeypatch):
+    """Returning False is what makes submit_hook fall back to speaking in-process."""
+    from ttsd.hooks import _spawn_direct
+
+    _unusable_state_root(tmp_path, monkeypatch)
+    assert _spawn_direct({"v": 1, "source": "claude"}) is False

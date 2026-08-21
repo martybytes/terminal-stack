@@ -5,6 +5,7 @@
     python -m ttsd --no-tray           # run headless (debugging)
     python -m ttsd --simulate f.json   # push one fixture through the pipeline
     python -m ttsd --restore-volumes   # oneshot stale-duck repair (ts-doctor)
+    python -m ttsd history [--dupes]   # what was said, and what was suppressed
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ from pathlib import Path
 from .audio_duck import AudioController, restore_volumes_oneshot
 from .config import Config, load_or_create_token, logs_dir, state_dir
 from .events import parse_event
+from . import history as history_store
 from .hooks import direct_speak, direct_speak_file, submit_hook, test_payload
 from .pipeline import Dispatcher
 from .playback import Playback
@@ -38,12 +40,16 @@ log = logging.getLogger("ttsd")
 
 
 def _setup_logging(console: bool) -> Path:
-    logs_dir().mkdir(parents=True, exist_ok=True)
     path = logs_dir() / "ttsd.log"
-    handlers: list[logging.Handler] = [
-        logging.handlers.RotatingFileHandler(path, maxBytes=1_000_000,
-                                             backupCount=3, encoding="utf-8")
-    ]
+    handlers: list[logging.Handler] = []
+    try:
+        logs_dir().mkdir(parents=True, exist_ok=True)
+        handlers.append(logging.handlers.RotatingFileHandler(
+            path, maxBytes=1_000_000, backupCount=3, encoding="utf-8"))
+    except OSError:
+        # Losing the log is a nuisance; dying here is a fault. This runs before a single
+        # word is spoken, so an unwritable state root must not take the process with it.
+        handlers.append(logging.NullHandler())
     if console:
         handlers.append(logging.StreamHandler())
     logging.basicConfig(
@@ -52,6 +58,51 @@ def _setup_logging(console: bool) -> Path:
         handlers=handlers,
     )
     return path
+
+
+def _print_history(limit: int, dupes: bool, within: float, check: bool = False) -> int:
+    """Render the utterance history for `ts-config tts history`.
+
+    One formatter for both shells: bash calls this through WSL interop and pwsh calls it
+    directly, so there is no parallel implementation to keep in sync.
+    """
+    db = history_store.db_path()
+    if check:
+        # One line, stable keys, ASCII: ts-doctor parses this with shell string ops.
+        s = history_store.summary(dupe_window=within)
+        silent = s["daemon_silent_for"]
+        write_stdout(f"spoken={s['spoken']} deduped={s['deduped']} dupes={s['dupes']} "
+                     f"daemon_silent_for={'-' if silent is None else int(silent)}\n")
+        return 0
+    if dupes:
+        rows = history_store.duplicates(within_sec=within)
+        write_stdout(f"tts history - sessions that spoke twice inside {within:.0f}s "
+                     f"(last 24h)\n")
+        if not rows:
+            write_stdout("  none - no duplicate speech recorded\n")
+            return 0
+        for r in rows:
+            write_stdout(
+                f"  {r['session_key']}  p{r['priority']}  {r['extra']} extra utterance(s), "
+                f"closest {r['closest_sec']:.1f}s\n"
+                f"      first: {(r['first_line'] or '')[:88]}\n"
+                f"      then : {(r['later_line'] or '')[:88]}\n")
+        return 0
+
+    rows = history_store.recent(limit)
+    write_stdout(f"tts history - last {len(rows)} decision(s) of {limit} requested\n")
+    if not rows:
+        write_stdout(f"  nothing recorded yet ({db})\n")
+        return 0
+    for r in reversed(rows):  # oldest first, so a burst reads top to bottom
+        stamp = time.strftime("%H:%M:%S", time.localtime(r["ts"]))
+        played = f"{r['play_ms'] / 1000:.1f}s" if r.get("play_ms") else ""
+        where = "daemon" if r.get("daemon") else "direct"
+        write_stdout(
+            f"  {stamp}  {r['decision']:<12} p{r['priority'] if r['priority'] is not None else '?'}"
+            f" {r['state'] or '-':<10} {where:<6} {r['engine'] or '':<9}{played:<6}"
+            f"  {(r['line'] or '')[:64]}\n")
+    return 0
 
 
 def _build_version() -> str:
@@ -148,7 +199,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="ttsd")
     parser.add_argument("command", nargs="?", default="daemon",
                         choices=("daemon", "hook", "test", "simulate",
-                                 "restore-volumes", "version", "_direct"))
+                                 "restore-volumes", "version", "history", "_direct"))
     parser.add_argument("command_arg", nargs="?")
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--no-tray", action="store_true")
@@ -157,11 +208,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--source", default="claude")
     parser.add_argument("--event", default="stop")
     parser.add_argument("--state", default="waiting")
+    parser.add_argument("--limit", type=int, default=25)
+    parser.add_argument("--dupes", action="store_true")
+    parser.add_argument("--check", action="store_true")
+    parser.add_argument("--within", type=float, default=8.0)
     args = parser.parse_args(argv)
 
     if args.command == "version":
         write_stdout(_build_version() + "\n")
         return 0
+    if args.command == "history":
+        # Reads the database directly rather than asking the daemon, because the times you
+        # most want this are exactly the times the daemon is not running.
+        return _print_history(args.limit, args.dupes, args.within, args.check)
     if args.command == "hook":
         result = submit_hook(args.source, args.event, args.state, read_stdin_bytes())
         if args.source.lower() == "cursor":

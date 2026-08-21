@@ -80,9 +80,11 @@ repeat the fixed waiting template unless the hook supplied no response text.
 | installed runtime | `%LOCALAPPDATA%\terminal-stack\tts-daemon\terminal-stack-tts.exe` |
 | log | `%LOCALAPPDATA%\terminal-stack\tts-daemon\logs\ttsd.log` |
 | duck snapshot (crash safety) | `…\tts-daemon\state\duck-snapshot.json` |
+| utterance history (SQLite) | `…\tts-daemon\state\history.db` |
+| play lock (direct path only) | `…\tts-daemon\state\speak.lock` |
 | runtime knobs | `~/.claude/tts/config.json` + untracked `local.json` |
 | autostart | HKCU `…\CurrentVersion\Run` → `"…\terminal-stack-tts.exe" daemon` |
-| HTTP API | `http://127.0.0.1:8890` — `/healthz`, `/v1/status`, `/v1/dnd`, `/v1/duck/release` |
+| HTTP API | `http://127.0.0.1:8890` — `/healthz`, `/v1/status`, `/v1/dnd`, `/v1/duck/release`, `/v1/history` |
 
 Music stuck quiet after a crash? `ts-doctor --repair` (or just start the
 daemon — it restores the stale snapshot at startup). Emergency by hand:
@@ -106,6 +108,46 @@ argument — `test_payload()` builds a fixed `stop`/`waiting` event with an empt
 the positional argument is never read. It exercises the pipeline, not a phrase of your
 choosing. To have the voice say something specific, use the `self` summarizer: end the
 turn with a `<!-- speak: … -->` marker, which is what the Stop hook reads.
+
+## It said the same thing twice (or two voices at once)
+
+Ask it what happened — every decision is recorded, including the ones where it stayed quiet:
+
+```powershell
+ts-config tts history            # last 25 decisions, oldest first
+ts-config tts history 60         # more of them
+ts-config tts history --dupes    # anything that spoke twice inside 8s, last 24h
+```
+
+```
+13:49:10  spoken       p0 question   direct kokoro   5.8s    Claude. alpha: I have a question…
+13:49:10  deduped      p0 question   direct                  Claude. alpha: I have a question…
+13:49:11  deduped      p0 permission direct                  Claude. Permission needed in alpha.
+```
+
+That is the healthy shape. **One `AskUserQuestion` fires three hooks** — `Notification`,
+`PermissionRequest`, and the `AskUserQuestion` `PreToolUse` matcher — so seeing three rows
+per question is normal; seeing three `spoken` rows is not. `--dupes` reporting nothing over
+a day of work is the check that matters.
+
+If duplicates *are* showing up:
+
+- **`ts-config tts daemon status` first.** While the daemon is down each hook speaks from
+  its own detached process. They still take turns (a lock file serialises them) and still
+  deduplicate through the shared history, but the daemon is the path that also coalesces —
+  "Two sessions finished: …" — so its absence is worth knowing about. It now restarts
+  itself on the next hook; `ts-doctor` says how long it has been silent.
+- **The window is `debounceSec`** in `~/.claude/tts/config.json` (5 seconds). Raise it in
+  the untracked `local.json` if two genuinely different announcements are landing on top of
+  each other; set it to `0` to turn deduplication off entirely and hear everything.
+- **A missing `history.db` is not an error.** Every read and write there fails open, so
+  broken storage degrades to "might repeat itself", never to silence.
+
+Overlapping *audio* specifically — two voices talking at once rather than one line said
+twice — should be impossible now on both paths: the daemon speaks from a single dispatcher
+thread, and direct workers hold `state\speak.lock` across synth and playback. If you hear
+it anyway, get the timestamps from `ts-config tts history` and check whether the `pid`
+column shows two different processes overlapping.
 
 ## Voice went silent after an apply
 

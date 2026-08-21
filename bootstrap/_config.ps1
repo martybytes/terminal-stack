@@ -986,6 +986,24 @@ function Invoke-TsConfigTts {
             }
             return
         }
+        'history' {
+            # Same reasoning as the bash twin: read it from the executable, so a dead
+            # daemon is still able to explain itself.
+            $exe = Join-Path $env:LOCALAPPDATA 'terminal-stack\tts-daemon\terminal-stack-tts.exe'
+            if (-not (Test-Path -LiteralPath $exe)) {
+                Write-Warning "terminal-stack-tts.exe not found at $exe (run ts-config tts daemon install)"
+                return
+            }
+            $hargs = @('history')
+            if ($Arg -in '--dupes', 'dupes') {
+                $hargs += '--dupes'
+                if ($Arg2 -match '^[\d.]+$') { $hargs += @('--within', $Arg2) }
+            } elseif ($Arg -match '^\d+$') {
+                $hargs += @('--limit', $Arg)
+            }
+            & $exe @hargs | Out-Host
+            return
+        }
         'reset' { $tts = Get-CcTtsDefaults }
         default {
             Write-Warning "ts-config tts: unknown subcommand '$Sub' (show, on, off, test, reset, ...)"
