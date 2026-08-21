@@ -299,6 +299,37 @@ array and pass `-Value`. Never pipe a `Where-Object` straight into `Set-Content`
 `-replace` pipeline is safe (it emits one line per input line and cannot go empty), and
 `Set-TsSourceDirPersisted` in the profile already uses the `-Value ($kept + $line)` form.
 
+## `& child.exe` inside a function: stdout becomes the return value
+
+Calling a native executable from a PowerShell function without redirecting it
+sends the child's **entire stdout to the function's output stream** — i.e. into
+whatever the caller assigns or tests, not to the console:
+
+```powershell
+function Invoke-Thing {
+    & pwsh -File .\does-stuff.ps1      # every line the child prints goes HERE
+    return ($LASTEXITCODE -eq 0)       # ...appended after all those lines
+}
+if (-not (Invoke-Thing)) { ... }       # non-empty array is ALWAYS truthy
+```
+
+Three failures at once, observed live when `ts-config tts daemon on` shipped:
+the child's output (including its error text) never reaches the user, the
+boolean is buried as the last element of an array, and `-not (array)` reads
+any failure as success. Only the child's *stderr* leaks to the console, which
+is why the user saw pip warnings and nothing else.
+
+**Rule for this repo:** a pwsh function that both runs a child process and
+returns a status must stream the output explicitly — `& child.exe … | Out-Host`
+— and return only the boolean/exit code. This is the output-stream sibling of
+the `Where-Object | Set-Content` trap above. Reference fix:
+`Invoke-TsCcTtsDaemonInstaller` in `bootstrap/_config.ps1`.
+
+Related: `Start-Process -FilePath some.cmd` resolves through **ShellExecute**,
+which is unreliable from non-interactive / WSL-interop contexts (the process
+may simply never start, with no error). Launch batch files through an explicit
+host instead: `Start-Process $env:ComSpec -ArgumentList '/c', $launcher`.
+
 ## ttsd daemon: pythonw autostart, HKCU Run, and interop timeouts
 
 Assorted Windows-side facts baked into `bootstrap/install-tts-daemon.ps1` and the

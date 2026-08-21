@@ -5,6 +5,13 @@ Session-aware voice notifications for Claude Code and Cursor. Opt-in twice:
 daemon). When the daemon is off or dead, hooks fall back to classic direct
 playback — never silence.
 
+**Combined Windows+WSL setup: run the `ts-config tts …` verbs from WSL.**
+pwsh `ts-config` saves only the Windows `config.json`, and the next WSL
+`chezmoi apply` re-renders that file from chezmoi `[data]` — silently
+reverting a pwsh-only change. From WSL the setting lands in `[data]` and both
+sides render from it. (pwsh `daemon on` still installs/starts the daemon fine;
+it prints a reminder about the WSL half.)
+
 | Command | What it does |
 |---|---|
 | `ts-config tts daemon on` | install (venv + autostart), start, and route hooks through the daemon |
@@ -67,3 +74,16 @@ Without the rule, Cursor announcements just use the template lines.
 Music stuck quiet after a crash? `ts-doctor --repair` (or just start the
 daemon — it restores the stale snapshot at startup). Emergency by hand:
 NirSoft `svcl.exe /SetVolume Spotify.exe 100`.
+
+## WSL reachability
+
+NAT-mode WSL can't reach the daemon on `127.0.0.1`; the hook sender walks a
+ladder (config `daemon.hostOverride` → loopback → default gateway → resolv.conf
+nameserver) and authenticates against the gateway listener with the shared
+token at `…\tts-daemon\state\token`. The installer tries to add an inbound
+firewall rule for that listener and prints an elevated one-liner when it can't
+— but check before bothering: on at least one machine the gateway path worked
+with **no** rule (the `vEthernet (WSL)` interface profile already allowed it).
+Verify with `ts-config tts daemon status` from WSL; if it reports unreachable
+there while healthy on Windows, the firewall rule is the thing to add. Either
+way, unreachable only ever means WSL hooks fall back to direct playback.
