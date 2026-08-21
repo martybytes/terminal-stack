@@ -420,6 +420,32 @@ The wrinkle: a **Windows-standalone** install (no WSL) never runs chezmoi, so it
 
 A single dedicated config file (one TOML/JSON on every platform) was the alternative. Rejected: it would duplicate the cross-side plumbing that chezmoi `[data]` + the sync hook already provide for `windowsUsername`, and chezmoi templates can't cleanly read an arbitrary external file on every apply. Reusing the existing bridge keeps the mapping in one Go template and the I/O in `bootstrap/_config.{sh,ps1}`.
 
+**The failure mode that asymmetry buys, and what it looks like.** The bridge is one-way: a
+bash save writes chezmoi `[data]` *and* mirrors to `config.json`, but a **pwsh save writes only
+the mirror**. On a combined machine that is a silent divergence — the two stores disagree about a
+key and nothing says so, because each apply path reads only its own store and renders a perfectly
+valid file from it. Whichever path runs last wins, so the setting appears to work until the *other*
+side applies and takes it away.
+
+Observed 2026-08-21: `ccTtsEnabled` was `false` in chezmoi `[data]` and `true` in the mirror. Every
+`ts-update` from pwsh rendered the five Claude TTS hooks; the next `chezmoi apply` from WSL rendered
+none and removed them. Nothing failed, nothing warned, the diff looked intentional, and the only
+symptom was that voice notifications quietly stopped. It had presumably been flip-flopping for some
+time.
+
+Two things follow. `ts-config` from WSL is not a style preference — it is the only path that writes
+both stores, which is why CLAUDE.md states it as a rule. And when a setting mysteriously reverts
+after an apply, compare the stores before debugging the templates:
+
+```sh
+chezmoi execute-template '{{ .ccTtsEnabled }}'                     # WSL, authoritative
+python -c "import json;print(json.load(open('/mnt/c/Users/<you>/AppData/Local/terminal-stack/config.json'))['ccTts']['enabled'])"
+```
+
+They must agree. Repair by re-saving from WSL (`ts-config tts on`), which writes both. Nothing
+currently *detects* the divergence — `ts-doctor` would be the natural home for a check that walks
+the shared keys and reports any that disagree.
+
 ## Why WezTerm follows the OS theme live, but Starship/tmux bake at apply time
 
 `follow` mode means "track the OS light/dark setting." WezTerm can do this *live*: `wezterm.gui.get_appearance()` returns `Dark`/`Light`, and WezTerm re-evaluates the config when the OS appearance changes — so `.wezterm.lua` carries both palettes (Catppuccin Mocha dark + VS Code Light Modern light) and a `pick_palette(mode)` that flips the whole UI (scheme, tab bar, status line, Claude tints) with no re-apply. Only the *mode* (`themeMode`) is injected.
