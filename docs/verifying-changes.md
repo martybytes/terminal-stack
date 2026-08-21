@@ -183,6 +183,12 @@ The two invariants to drill after touching the hook senders:
   on an unchanged config must produce **zero** `updated` lines for
   `settings.json` / `hooks.json`, and the hooks must not POST anywhere
   (`cc_tts_daemon_ready` gates on `.daemon.enabled`).
+- **Both entry shells:** drill the pwsh verbs (`ts-config tts daemon on` in
+  pwsh, `Update-TerminalStack`) as well as the bash ones — day-to-day driving
+  happens from PowerShell, and the daemon's first activation failed only on
+  that path (`& pwsh` output capture; see `powershell-quirks.md`). Remember
+  pwsh `ts-config tts` saves don't survive a WSL apply — persistence checks
+  belong on the WSL side.
 
 Duck-restore drill (music playing): trigger speech, kill the daemon mid-duck
 (`taskkill /f` on its pythonw), confirm music is stuck quiet, then
