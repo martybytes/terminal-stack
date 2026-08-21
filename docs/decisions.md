@@ -803,3 +803,60 @@ agentmemory ones, with a second identical run reporting no change at all.
 The WSL-side `dot_cursor/hooks.json.tmpl` is still a whole-file chezmoi target, for the same
 reason as its Claude counterpart: nothing else writes the WSL copy today. The day Cursor is
 wired to agentmemory inside WSL, it needs a `modify_` script.
+
+
+## Why the agentmemory harness wiring lives here
+
+It used to live in `docker-local/agentmemory/`, next to the compose file, because that is where
+the server's scripts already were. That was proximity, not design, and it put four installers
+that rewrite `~/.claude/settings.json`, `~/.codex/hooks.json` and `~/.cursor/hooks.json` in a
+repo whose subject is a Docker stack.
+
+This repo already owned that surface. It manages those exact files, ships the TTS hooks for all
+three agents, and `bootstrap/_merge_claude_settings.ps1` and `bootstrap/_merge_cursor_hooks.ps1`
+exist **specifically** to stop agentmemory's hook entries being clobbered by a sync. The seam is
+one line: *which hooks are registered, what they run, and what environment they carry* is
+terminal-stack; *the server image, the compose file, the in-container bundle patches and the data
+migrations* are docker-local.
+
+Three consequences worth writing down.
+
+**The sync applies it, so a plugin upgrade repairs itself.** The hook scripts are vendor files
+inside plugin caches. An upgrade replaces the cache and reverts every edit, which silently turns
+retrieval off — no error, nothing in any log, and capture keeps working so nothing looks wrong.
+Previously the fix was re-running an installer nobody remembered. Now both sync paths run
+`ts-agentmemory.ps1 -Check` and only `-Apply` when something is missing, so `ts-update` and
+`chezmoi apply` restore it. `ts-doctor` reports the same condition for when you want to know
+rather than have it fixed.
+
+**The duplicate is suppressed client-side, before the request.** Codex loads two hook
+registrations — `~/.codex/hooks.json` for Desktop and the plugin's own `hooks.codex.json` for the
+CLI — so one event fired both. Every observation was stored twice and, worse, every retrieval was
+*requested* twice: Codex received the same ~5.7 KB context block twice per prompt. There is no
+registration-level fix. `codex plugin` has no enable/disable subcommand, the binary contains no
+hooks-toggle key, and Codex **silently accepts unknown plugin config keys** — a deliberately
+bogus field was ignored without error, so inventing `plugins."x".hooks.enabled = false` would
+look like it worked and do nothing. Dropping either registration costs Desktop or CLI capture.
+
+So the guard sits in the hook scripts. Two details are load-bearing:
+
+- **The mutex is `fs.openSync(marker, "wx")`** — an atomic exclusive create. A read-then-write
+  check would let two processes 1 ms apart both pass, which is precisely the race being fixed.
+  The observed duplicates were 1–4 ms apart.
+- **The key excludes every timestamp.** Each hook process stamps its own, and that is the only
+  field that differs between the two registrations. Equal request byte counts prove equal
+  *length*, not equal content.
+
+It fails open: any error proceeds with the request, so a broken guard degrades to
+duplicate-but-working rather than silently dropping capture. An earlier version of this lived
+server-side in `docker-local`'s bundle patch; it only ever covered `/observe`, and absorbed the
+duplicate instead of preventing it.
+
+**Auto-detected, with no saved setting.** Convention here is that new behaviour becomes an opt-in
+`[data]` key asked at install, but a new key costs the documented 7-step blast radius across
+`_wizard.sh`, `_config.{sh,ps1}`, `.chezmoi.toml.tmpl`, `ts-config.sh` and both sync scripts —
+and one more key that can silently diverge between chezmoi `[data]` and the Windows mirror, which
+is exactly how `ccTtsEnabled` removed five TTS hooks. Detection is unambiguous (the plugin cache
+either exists or it does not) and costs nothing, so a host is wired when agentmemory is installed
+for it and skipped silently otherwise. Gating on the cache rather than on server reachability
+means stopping the container does not unwire anything.
