@@ -196,8 +196,54 @@ function ccr   { Set-WezTabTitle "$(Split-Path -Leaf $PWD)"; try { claude --resu
 function ccdr  { Set-WezTabTitle "$(Split-Path -Leaf $PWD)"; try { claude --dangerously-skip-permissions --resume @args } finally { Set-WezTabTitle "" } }
 function cca   { Set-WezTabTitle "agents"; try { claude agents } finally { Set-WezTabTitle "" } }
 
-# Codex: resume a saved session with approvals and sandboxing bypassed.
-function cyr   { codex --yolo resume @args }
+# Codex yolo wrappers. A three-row WezTerm dashboard runs in a short bottom
+# split; the terminal-stack profile adds exact rollout mapping and Stop TTS.
+function Invoke-TsCodex {
+    $helper = Join-Path $HOME '.codex\hooks\terminal_stack.py'
+    $profile = Join-Path $HOME '.codex\terminal-stack.config.toml'
+    $python = Get-Command py.exe -ErrorAction SilentlyContinue
+    $parent = $env:WEZTERM_PANE
+    $sidecar = $null
+    $launched = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    $codexArgs = @('--yolo')
+
+    if ($python -and (Test-Path -LiteralPath $helper) -and (Test-Path -LiteralPath $profile)) {
+        $codexArgs += @('-p', 'terminal-stack')
+    } else {
+        Write-Warning 'terminal-stack: Codex dashboard/profile unavailable; running yolo without enhancements.'
+    }
+
+    if ($parent -and $python -and (Test-Path -LiteralPath $helper) -and
+        (Get-Command wezterm.exe -ErrorAction SilentlyContinue)) {
+        $sidecarArgs = @(
+            'cli', 'split-pane', '--pane-id', $parent, '--bottom', '--cells', '3', '--',
+            'py.exe', '-3', $helper, 'dashboard', '--pane', $parent,
+            '--cwd', $PWD.Path, '--launched-at', [string]$launched
+        )
+        $paneOutput = & wezterm.exe @sidecarArgs 2>$null
+        if ($paneOutput -match '^\d+$') { $sidecar = $paneOutput.Trim() }
+        & wezterm.exe cli activate-pane --pane-id $parent 2>$null | Out-Null
+    }
+
+    $previousParent = $env:TS_CODEX_PARENT_PANE
+    $env:TS_CODEX_PARENT_PANE = $parent
+    $exitCode = 0
+    try {
+        & codex @codexArgs @args
+        $exitCode = $LASTEXITCODE
+    } finally {
+        if ($sidecar -and $sidecar -match '^\d+$') {
+            & wezterm.exe cli kill-pane --pane-id $sidecar 2>$null | Out-Null
+        }
+        if ($python -and $parent -and (Test-Path -LiteralPath $helper)) {
+            & py.exe -3 $helper cleanup --pane $parent 2>$null | Out-Null
+        }
+        $env:TS_CODEX_PARENT_PANE = $previousParent
+    }
+    $global:LASTEXITCODE = $exitCode
+}
+function cy  { Invoke-TsCodex @args }
+function cyr { $resumeArgs = @('resume') + $args; Invoke-TsCodex @resumeArgs }
 
 # Escape hatch: vanilla pwsh, no profile (no starship/zoxide/aliases).
 # Nested — `exit` drops back to the customized shell.

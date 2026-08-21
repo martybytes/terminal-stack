@@ -1,6 +1,7 @@
 # sync-windows.ps1 — PowerShell port of run_after_90-sync-windows.sh.
 # Mirrors:
 #   <SourceDir>\windows\**  → %USERPROFILE%\<relative path>
+#   <SourceDir>\dot_codex\** → %USERPROFILE%\.codex\<relative path>
 #   <SourceDir>\docs\kb\**  → %LOCALAPPDATA%\terminal-stack\docs\kb\<relative path>
 # with the same .tmpl __WIN_USER__ substitution and .bak.yyyyMMdd[.N] backup
 # convention as the bash hook. Lets Windows-only users (no WSL) update the stack
@@ -220,6 +221,7 @@ function Sync-MirrorTree {
 }
 
 Sync-MirrorTree -SrcRoot (Join-Path $SourceDir 'windows') -DstRoot $dstHome -RenderTmpl
+Sync-MirrorTree -SrcRoot (Join-Path $SourceDir 'dot_codex') -DstRoot (Join-Path $dstHome '.codex') -RenderTmpl
 Sync-MirrorTree -SrcRoot (Join-Path $SourceDir 'docs\kb') -DstRoot (Join-Path $localApp 'terminal-stack\docs\kb')
 
 if (Get-Command Export-CcTtsJson -ErrorAction SilentlyContinue) {

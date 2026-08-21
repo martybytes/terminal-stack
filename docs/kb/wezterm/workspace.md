@@ -46,7 +46,7 @@ mode). There is no permanent badge in the normal state.
 
 **Always on the right:** the **Claude fleet** — working/done/error counts across
 every pane in every tab — the workspace name whenever it isn't the implicit
-`default`, and a date + clock.
+`default`. The title bar never shows a date or clock.
 
 **`Ctrl+Space` `s`** adds `user@host │ path` for the **active pane** (the kind of
 thing you usually already know; the tab titles carry the per-pane context). Press

@@ -28,6 +28,7 @@ DEFAULTS: dict[str, Any] = {
     "sources": {
         "claude": {"prefixEnabled": True, "prefix": "Claude"},
         "cursor": {"prefixEnabled": True, "prefix": "Cursor"},
+        "codex": {"prefixEnabled": True, "prefix": "Codex"},
     },
     "announce": {
         "includeProject": True,

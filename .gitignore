@@ -13,5 +13,9 @@ desktop.ini
 .vscode/
 .idea/
 
+# Python test/runtime caches
+__pycache__/
+*.py[cod]
+
 # chezmoi local-only artifacts that should never be committed
 .chezmoiscripts/

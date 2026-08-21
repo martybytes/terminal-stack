@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from ttsd.events import Event
+from ttsd.events import Event, EventError, parse_event
 from ttsd.registry import Registry
 from ttsd.summarize import Summarizer
 
@@ -93,3 +93,23 @@ def test_clamp_max_chars():
     line = s.line_for_batch(
         [ev(text="<!-- speak: " + "word " * 40 + "-->")], Registry())
     assert len(line) <= 50
+
+
+def test_codex_source_parses_and_uses_prefix():
+    parsed = parse_event({
+        "source": "codex", "event": "stop", "state": "waiting",
+        "session_key": "codex:s1", "project": {"name": "terminal-stack"},
+    })
+    line = Summarizer(DictCfg({"sources": {"codex": {
+        "prefixEnabled": True, "prefix": "Codex"}}})).line_for_batch(
+            [parsed], Registry())
+    assert line.startswith("Codex.")
+
+
+def test_unknown_source_is_rejected():
+    try:
+        parse_event({"source": "mystery", "event": "stop", "state": "waiting",
+                     "session_key": "mystery:s1"})
+    except EventError:
+        return
+    raise AssertionError("unknown TTS source was accepted")

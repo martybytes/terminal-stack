@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # cc-tts-test.sh — end-to-end TTS test (synth + play).
-# Usage: cc-tts-test.sh [--source claude|cursor|test] [--daemon | --daemon-fallback] ["optional phrase"]
+# Usage: cc-tts-test.sh [--source claude|cursor|codex|test] [--daemon | --daemon-fallback] ["optional phrase"]
 #   --daemon           POST a synthetic event to the ttsd daemon; expect it spoken.
 #   --daemon-fallback  point the sender at a dead port; the direct path must still speak.
 set -euo pipefail

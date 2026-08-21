@@ -284,9 +284,10 @@ sudo curl -sS https://starship.rs/install.sh | sh -s -- -y -b /usr/local/bin
 
 ### Phase 6 — Shell helpers
 
-Lands via `chezmoi apply`: zsh `ccs` / `ssht`, plus `cyr` in both shells for
-`codex --yolo resume`. See `doc codex` for the richer Codex footer recipe and
-the security trade-off of `--yolo`.
+Lands via `chezmoi apply`: zsh `ccs` / `ssht`, plus `cy` (`codex --yolo`) and
+`cyr` (`codex --yolo resume`) in both shells. In WezTerm the Codex wrappers add
+a three-line dashboard and Stop TTS. See `doc codex` for the dashboard, one-time
+hook trust, and the security trade-off of `--yolo`.
 
 ### Phase 7 — Modern CLI tools
 

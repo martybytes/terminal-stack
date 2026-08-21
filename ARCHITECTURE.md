@@ -21,6 +21,7 @@ terminal-stack/
 ├── dot_config/starship.toml        → ~/.config/starship.toml (WSL)
 ├── dot_claude/settings.json.tmpl   → ~/.claude/settings.json (chezmoi template)
 ├── dot_claude/hooks/...            → ~/.claude/hooks/... (WSL)
+├── dot_codex/...                   → ~/.codex/... (WSL; also mirrored to Windows)
 └── windows/                        ← NOT applied by chezmoi
     ├── .wezterm.lua.tmpl           → /mnt/c/Users/<you>/.wezterm.lua (sync-hook template)
     ├── .wezterm/pane_nav.lua       → /mnt/c/Users/<you>/.wezterm/pane_nav.lua
@@ -46,7 +47,7 @@ The WSL bootstrap (`bootstrap/wsl-bootstrap.sh`) prompts for the Windows usernam
 
 ### The run_after hook
 
-`run_after_90-sync-windows.sh` runs after every successful `chezmoi apply`. It walks `$CHEZMOI_SOURCE_DIR/windows/`, mirrors every file to `/mnt/c/Users/<you>/<same relative path>` (substituting `__WIN_USER__` and the config tokens in `.tmpl` files — via python3, which the hook requires — and stripping the `.tmpl` suffix), and:
+`run_after_90-sync-windows.sh` runs after every successful `chezmoi apply`. It mirrors `$CHEZMOI_SOURCE_DIR/windows/` to `/mnt/c/Users/<you>/`, `dot_codex/` to `/mnt/c/Users/<you>/.codex/`, and `docs/kb/` to the Windows documentation cache (substituting `__WIN_USER__` and the config tokens in `.tmpl` files — via python3, which the hook requires — and stripping the `.tmpl` suffix), and:
 
 - **Idempotent**: only touches files whose content differs from what's already at the destination. If the rendered source is byte-identical to the destination, it's skipped.
 - **Backup-first**: any pre-existing file that gets overwritten is first copied to `<path>.bak.YYYYMMDD`. If that backup name is already taken (you applied twice in one day), the new backup gets a `.N` suffix (`.bak.YYYYMMDD.1`, `.2`, …). The original-day backup is never clobbered.

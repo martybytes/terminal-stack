@@ -35,5 +35,5 @@ tab with unseen output gets an accent dot.
 Quiet by default: the left side is empty until the leader is pending or a repeat
 mode is live (then a coloured badge names it). The right side always shows the
 **Claude fleet** (working/done/error counts across every pane), the workspace name
-when it isn't `default`, and a clock; **`Ctrl+Space` `s`** adds `user@host │ path`
+when it isn't `default` — never a date or clock. **`Ctrl+Space` `s`** adds `user@host │ path`
 for the active pane. See `doc wezterm/workspace`.

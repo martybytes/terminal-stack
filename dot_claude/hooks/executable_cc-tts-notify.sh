@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # cc-tts-notify.sh — synthesize + play (shared by Claude Code and Cursor hooks).
 # Usage: cc-tts-notify.sh <waiting|error|question|permission> [override-text]
-# Env: CC_TTS_SOURCE=claude|cursor|test; CC_TTS_FOREGROUND=1; CC_TTS_HOOK_JSON=…
+# Env: CC_TTS_SOURCE=claude|cursor|codex|test; CC_TTS_FOREGROUND=1; CC_TTS_HOOK_JSON=…
 set -euo pipefail
 LIB="$(dirname "$0")/cc-tts-lib.sh"
 # shellcheck source=cc-tts-lib.sh

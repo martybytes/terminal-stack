@@ -1,0 +1,19 @@
+# terminal-stack additions used only by the cy/cyr wrappers.
+# Run /hooks once in Codex to review and trust these local hook commands.
+
+[[hooks.SessionStart]]
+
+[[hooks.SessionStart.hooks]]
+type = "command"
+command = "python3 ~/.codex/hooks/terminal_stack.py hook"
+commandWindows = "py -3 C:/Users/__WIN_USER__/.codex/hooks/terminal_stack.py hook"
+timeout = 5
+
+[[hooks.Stop]]
+
+[[hooks.Stop.hooks]]
+type = "command"
+command = "python3 ~/.codex/hooks/terminal_stack.py hook"
+commandWindows = "py -3 C:/Users/__WIN_USER__/.codex/hooks/terminal_stack.py hook"
+timeout = 10
+async = true

@@ -10,6 +10,10 @@
     "cursor": {
       "prefixEnabled": {{ if eq (index . "ccTtsPrefixCursorEnabled" | default "true") "true" }}true{{ else }}false{{ end }},
       "prefix": {{ index . "ccTtsPrefixCursor" | default "Cursor" | quote }}
+    },
+    "codex": {
+      "prefixEnabled": {{ if eq (index . "ccTtsPrefixCodexEnabled" | default "true") "true" }}true{{ else }}false{{ end }},
+      "prefix": {{ index . "ccTtsPrefixCodex" | default "Codex" | quote }}
     }
   },
   "announce": {
