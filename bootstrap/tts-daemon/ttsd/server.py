@@ -116,6 +116,12 @@ class _Handler(BaseHTTPRequestHandler):
                 "audio": app.audio.state,
                 "dnd": app.dispatcher.dnd_active(),
                 "summarizerMode": app.cfg.get("summarize.mode", "template"),
+                # Durable answer to "I selected haiku, why does it sound like template".
+                # Before these two, a missing API key produced no exception, no log line
+                # and no counter, so the only honest report was silence.
+                "summarizerDegraded": getattr(app.dispatcher.summarizer, "degraded", 0),
+                "summarizerLastDegrade": getattr(
+                    app.dispatcher.summarizer, "last_degrade", ""),
                 "musicMode": app.cfg.get("music.mode", "duck"),
             })
         elif self.path == "/v1/sessions":

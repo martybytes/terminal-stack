@@ -253,3 +253,30 @@ def test_hotkey_rejects_specs_that_would_hijack_the_keyboard():
     assert hotkey.parse("ctrl+shift") is None, "modifiers with no key"
     assert hotkey.parse("ctrl+nosuchkey") is None
     assert hotkey.parse("ctrl+a+b") is None, "two keys is a typo, not a chord"
+
+
+# ── tray state: three distinguishable claims ─────────────────────────────────
+#
+# "the daemon is running" and "speech works" are different claims, and conflating them is
+# what let a healthy tray icon sit above a feature that was switched off with no hooks
+# installed. state_for/title_for are module level and pure precisely so this is testable
+# without pystray or PIL, neither of which exists outside the frozen build.
+
+def test_tray_state_precedence():
+    from ttsd.tray import state_for
+
+    assert state_for(enabled=True, muted=False) == (False, False), "armed"
+    assert state_for(enabled=True, muted=True) == (True, False), "silenced but armed"
+    # Disabled outranks muted: if it cannot speak at all, the mute is not the story.
+    assert state_for(enabled=False, muted=True) == (False, True)
+    assert state_for(enabled=False, muted=False) == (False, True)
+
+
+def test_tray_titles_name_the_actual_problem():
+    from ttsd.tray import state_for, title_for
+
+    assert title_for(*state_for(True, False)) == "terminal-stack TTS"
+    assert "MUTED" in title_for(*state_for(True, True))
+    disabled = title_for(*state_for(False, True))
+    assert "disabled" in disabled and "no hooks" in disabled, (
+        "the tooltip has to say why it is silent, not just that it is")

@@ -331,6 +331,77 @@ Two constraints shaped the mechanism:
 
 The availability half is smaller but mattered more in practice: autostart is logon-only with no watchdog, so a daemon that died at 22:17 was still dead at 13:30 the next day, with no error and nothing in the log. Every hook in between took the unserialized direct path and exited 0, which is how genuinely overlapping voices went unnoticed for fifteen hours. A hook that cannot reach an enabled daemon now starts it and retries once. That is safe to race: two hooks both spawning means the loser fails to bind the port and exits 0 (`_already_running`), so the check only ever asks whether the port answers, never which process won it. `ts-doctor` reports how long the daemon has been silent and flags any session that spoke twice, because neither is visible otherwise — every hook exits 0 either way.
 
+## Why a summarizer that cannot work says so
+
+Selecting `haiku` with no API key produced *no* observable difference from `template`. The
+lookup returned `""`, there was no exception, no log line and no counter, and `/v1/status`
+went on reporting `summarizerMode: haiku`. `Summarizer.degraded` was incremented in exactly
+one place and read nowhere; `__init__` accepted a `degraded_counter` and discarded it. That
+is the most misleading state the daemon had: the feature was off, every indicator said it
+was on, and the only way to find out was to read the source.
+
+Every fall-back-to-template now goes through one `_degrade(reason, detail)` that counts it,
+records the reason, and warns **once per reason per process** (a broken key would otherwise
+write a line on every announcement). `/v1/status` carries `summarizerDegraded` and
+`summarizerLastDegrade`, so "why does it sound like template mode" is answerable without a
+log dive. The reason strings name the thing that failed, including the exception class for a
+request failure, because a timeout, a 401 and a rate limit are otherwise indistinguishable
+at that layer.
+
+Two structural facts came out of the same investigation and are worth writing down, because
+both look like bugs and are not:
+
+- **Non-template modes only apply to `waiting` events.** `_line_for_one` returns before the
+  mode dispatch unless the event is `P2_DONE`, so questions, permission prompts and errors
+  are always the template, whatever mode is selected.
+- **A coalesced batch bypasses every mode**, since the multi-session line is assembled
+  locally.
+
+Both are pinned by tests now, so nobody "fixes" them by accident, and any UI that offers a
+mode has to say so rather than implying the mode applies everywhere.
+
+`self` has a third surprise: without a `<!-- speak: -->` marker it does not fall back to the
+template, it speaks the first sentence of the answer. That is what every Cursor session and
+every pre-install Codex session gets.
+
+## Why the API key lives in the daemon state dir, not in config
+
+An environment variable cannot do this job. The daemon is autostarted from
+`HKCU\...\CurrentVersion\Run`, so it inherits the logon environment and nothing after it.
+A key exported in a shell, or `setx` without a logoff, never reaches the running process.
+That is the same shape as the stale `AGENTMEMORY_SECRET` that silently destroyed 56 captures
+the same day: it worked in a new shell and not in the process that mattered.
+
+Neither config store is an acceptable home either. `config.json` is rendered from chezmoi
+`[data]`, which is tracked in git. `local.json` is untracked, but it is part of the config
+merge, it sits beside the rendered file, and it is what people paste into a bug report. A
+secret that appears in an effective-config dump is a leaked secret.
+
+So `state/secrets.json`, alongside `token` and `history.db`, following the pattern
+`load_or_create_token` already set for the WSL listener's shared secret: machine-local, never
+merged into `Config`, read at use time. `ttsd/keystore.py` (named to avoid any confusion with
+the standard library `secrets` module) writes atomically, refuses any name outside a fixed
+allow-list so a settings endpoint cannot become "write anything anywhere", and **never
+rewrites a file it cannot parse** so a hand-edited typo stays fixable by hand. `describe()`
+returns whether a key is set and where it came from, plus the last four characters, and never
+the value. The environment variable remains a fallback, so nothing that worked before stops.
+
+## Why `local.json` writes are atomic, locked, and refuse to destroy
+
+`write_local` was a read-modify-write with three faults that a settings form turns from
+theoretical into likely. It wrote in place, so a crash mid-write left truncated JSON, which
+`Config.reload` then discards wholesale, presenting as every local setting reverting at
+once. It took no lock, so a tray toggle and another writer interleaving lost one of them.
+And `except ValueError: data = {}` meant a single bad byte caused the next write to replace
+**every other override** with a one-key document.
+
+Now: one temp file plus `os.replace`, an exclusive-create lock with a stale reclaim (the same
+idiom and reasoning as `speaklock.py`, including proceeding after the wait rather than
+refusing, because a save that silently does nothing is worse than an interleaved one), and an
+unparseable overlay is moved to `local.json.bad.YYYYMMDD` under the repo's usual dated-backup
+rule instead of being overwritten. `write_local_many` exists so an N-field form is one
+read-modify-write rather than N, which is precisely the workload that hit the old bug.
+
 ## Why the Windows mirror is written from a resolved username, loudly
 
 `ts_mirror_windows_config` resolved the Windows username from chezmoi `[data].windowsUsername`
