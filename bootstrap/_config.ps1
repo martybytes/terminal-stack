@@ -652,7 +652,12 @@ function Invoke-TsCcTtsDaemonInstaller {
         Write-Warning "tts daemon: install-tts-daemon.ps1 not found at $script"
         return $false
     }
-    & pwsh -NoLogo -NonInteractive -ExecutionPolicy Bypass -File $script @Arguments
+    # Out-Host, not the pipeline: a bare `& pwsh` here would capture the child's
+    # stdout into this function's RETURN VALUE — the installer's output (and its
+    # error text) vanishes, and callers coercing the array to bool read any
+    # failure as success. That exact bug shipped once; keep the stream on the
+    # console and return only the boolean.
+    & pwsh -NoLogo -NonInteractive -ExecutionPolicy Bypass -File $script @Arguments | Out-Host
     return ($LASTEXITCODE -eq 0)
 }
 
@@ -854,6 +859,7 @@ function Invoke-TsConfigTts {
                 'on' {
                     if (-not (Invoke-TsCcTtsDaemonInstaller)) { return }
                     $tts.daemon.enabled = $true
+                    Write-Host "note: this enables the daemon for Windows-side hooks; if you also run Claude in WSL, run 'ts-config tts daemon on' from WSL so those hooks route to it too."
                 }
                 'off' {
                     Invoke-TsCcTtsDaemonInstaller @('-Uninstall') | Out-Null
