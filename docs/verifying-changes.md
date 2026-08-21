@@ -189,6 +189,13 @@ curl -s http://127.0.0.1:8899/healthz                 # version = clone HEAD sha
 curl -s -X POST http://127.0.0.1:8899/v1/shutdown
 ```
 
+**Assert on the log, never the exit code.** The EXE is GUI-subsystem and exits 0 whether or
+not it spoke, so a drill that checks `$LASTEXITCODE` passes on a silent build. The only
+proof is a `ttsd.pipeline: spoke [engine]: …` line in `logs/ttsd.log`. (A
+`ttsd.registry: session …` line proves receipt, not speech.) Note `test` ignores any text
+argument — it sends a fixed empty-message stop event — so it cannot be used to check what
+gets said, only that the pipeline runs.
+
 The invariants to drill after touching the hook senders:
 
 - **No console process:** inspect the built PE Optional Header (`Subsystem=2`,

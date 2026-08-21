@@ -88,6 +88,25 @@ Music stuck quiet after a crash? `ts-doctor --repair` (or just start the
 daemon — it restores the stale snapshot at startup). Emergency by hand:
 NirSoft `svcl.exe /SetVolume Spotify.exe 100`.
 
+## Did it actually speak?
+
+`terminal-stack-tts.exe` is a GUI-subsystem binary: it writes nothing to the console and
+**exits 0 whether or not anything was spoken**. The exit code is not evidence. The
+authoritative signal is a line in the daemon log (`logs/ttsd.log`, path in the table above):
+
+```
+I ttsd.pipeline: spoke [kokoro]: Claude. Done in terminal-stack two. I'm waiting for you.
+```
+
+No `spoke` line means no audio, however healthy everything looked. A `ttsd.registry:
+session … voice=…` line only proves the daemon *received* the event.
+
+**`test` takes no text.** `terminal-stack-tts.exe test "say this"` silently ignores the
+argument — `test_payload()` builds a fixed `stop`/`waiting` event with an empty message and
+the positional argument is never read. It exercises the pipeline, not a phrase of your
+choosing. To have the voice say something specific, use the `self` summarizer: end the
+turn with a `<!-- speak: … -->` marker, which is what the Stop hook reads.
+
 ## Voice went silent after an apply
 
 Almost always the two config stores disagreeing, not the daemon. A save from
