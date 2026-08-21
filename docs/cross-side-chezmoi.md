@@ -31,12 +31,14 @@ Files under `windows/` use absolute-path-mirror naming (with `$WIN_USER` resolve
 | `windows/.wezterm.lua.tmpl` | `/mnt/c/Users/$WIN_USER/.wezterm.lua` (rendered) |
 | `windows/.config/starship.toml` | `/mnt/c/Users/$WIN_USER/.config/starship.toml` |
 | `windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1` | `/mnt/c/Users/$WIN_USER/Documents/PowerShell/Microsoft.PowerShell_profile.ps1` |
-| `windows/.claude/settings.json.tmpl` | `/mnt/c/Users/$WIN_USER/.claude/settings.json` (rendered) |
+| `windows/.claude/settings.json.tmpl` | `/mnt/c/Users/$WIN_USER/.claude/settings.json` (rendered, then **key-spliced** — see below) |
 | `windows/.claude/hooks/wez-tab-status.ps1` | `/mnt/c/Users/$WIN_USER/.claude/hooks/wez-tab-status.ps1` |
 | `dot_codex/**` | `/mnt/c/Users/$WIN_USER/.codex/**` (also applied normally to WSL `~/.codex/**`) |
 | `docs/kb/**` | `/mnt/c/Users/$WIN_USER/AppData/Local/terminal-stack/docs/kb/**` (plain copy; `doc` read fallback) |
 
 The destination is computed from the source relative path by joining onto `$dst_dir` (`/mnt/c/Users/$WIN_USER`) for `windows/**`, `$dst_dir/.codex` for `dot_codex/**`, or `$dst_dir/AppData/Local/terminal-stack/docs/kb` for the kb mirror. Files ending in `.tmpl` under either rendered mirror are passed through a small **python3** substitution (python3 is required — a sed fallback was removed because it could not render the multi-line `__CC_TTS_*__` tokens and broke on two-modifier leader values) that replaces `__WIN_USER__` and the saved-config tokens (`__LEADER_KEY__`, `__LEADER_MODS__`, `__THEME_MODE__`, `__THEME_RESOLVED__`, `__TMUX_PREFIX__`, `__CC_TTS_*__`) with their resolved values, then the `.tmpl` suffix is stripped from the destination path.
+
+**One destination is not a whole-file copy.** `.claude/settings.json` is *part-owned*: Claude Code writes its own state into the same file (`model`, `enabledPlugins`, `permissions`, `env`), so the rendered fragment is handed to `bootstrap/_merge_claude_settings.ps1`, which splices in only the top-level keys the template renders and leaves every other byte untouched. Copying it whole silently deleted that state and, in one case, disabled an installed Claude Code plugin — `docs/decisions.md` § "Why `~/.claude/settings.json` is spliced, not copied".
 
 ## Username resolution
 

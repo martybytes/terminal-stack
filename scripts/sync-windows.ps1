@@ -214,6 +214,13 @@ function Sync-MirrorTree {
         $dstDir = Split-Path -Parent $dst
 
         try {
+            # Claude Code writes this file too (model, enabledPlugins, permissions,
+            # env, …). Splice our keys in rather than copy the whole file over the
+            # top of its state — see bootstrap\_merge_claude_settings.ps1.
+            if ($relOut -eq '.claude\settings.json') {
+                Merge-TsClaudeSettings -FragmentPath $effectiveSrc -LivePath $dst
+                return
+            }
             if (Test-Path -LiteralPath $dst -PathType Leaf) {
                 $srcHash = (Get-FileHash -LiteralPath $effectiveSrc -Algorithm SHA256).Hash
                 $dstHash = (Get-FileHash -LiteralPath $dst -Algorithm SHA256).Hash
@@ -243,6 +250,14 @@ function Sync-MirrorTree {
         }
     }
 }
+
+# Loaded before the mirror runs: Sync-MirrorTree routes .claude\settings.json
+# through Merge-TsClaudeSettings instead of overwriting it.
+$claudeMergeHelper = Join-Path $SourceDir 'bootstrap\_merge_claude_settings.ps1'
+if (-not (Test-Path -LiteralPath $claudeMergeHelper)) {
+    throw "sync-windows: missing $claudeMergeHelper"
+}
+. $claudeMergeHelper
 
 Sync-MirrorTree -SrcRoot (Join-Path $SourceDir 'windows') -DstRoot $dstHome -RenderTmpl
 Sync-MirrorTree -SrcRoot (Join-Path $SourceDir 'dot_codex') -DstRoot (Join-Path $dstHome '.codex') -RenderTmpl

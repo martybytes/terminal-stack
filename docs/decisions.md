@@ -688,3 +688,51 @@ install that looked clean and had no terminal. Nightly is still the default (the
 targets current builds), but a nightly that will not install now falls back to stable
 rather than to nothing, and every package that failed is reprinted at the end with the
 command to retry it.
+
+## Why `~/.claude/settings.json` is spliced, not copied
+
+Every other file under `windows/**` is a whole-file mirror: the stack owns it, so the sync
+renders it and copies it over the top. `~/.claude/settings.json` looks like one of those and
+is not, because **Claude Code writes the same file**. `/model` persists `model` there.
+`/plugin` writes `enabledPlugins` and `extraKnownMarketplaces`. MCP tool allowances land in
+`permissions`. Environment a plugin's hooks and MCP server need — `AGENTMEMORY_URL`, keys
+like it — lives in `env`. None of that is ours, none of it is in the template, and a
+whole-file copy deletes all of it.
+
+That is not hypothetical. On 2026-08-20 a sync overwrote the file at 19:58 and took
+`enabledPlugins` with it, which disabled the agentmemory plugin: its twelve lifecycle hooks
+and its MCP server stopped loading, and nothing said so. Claude Code just stopped recording
+anything, while Codex — whose config lives in `~/.codex/`, which this repo does not
+whole-file-manage — kept working, so the two agents disagreed about whether memory existed.
+The backup chain (`settings.json.bak.20260820.12` has the keys, `.13` does not) is the only
+evidence the sync was responsible.
+
+So the file is now **part-owned**. The sync splices in exactly the top-level keys the
+template renders — `statusLine`, `hooks`, `theme` — and leaves every other byte where it
+was. `bootstrap/_merge_claude_settings.ps1` drives it; the textual splice engine underneath
+is `bootstrap/_merge_json_settings.ps1`, extracted from `_merge_cursor_settings.ps1` (Cursor
+learned this lesson first, for `// comments` rather than app-owned state) and now shared by
+both. Both sync paths route the file through it: `scripts/sync-windows.ps1` dot-sources the
+helper, and `run_after_90-sync-windows.sh` stages the rendered fragment on the Windows side
+and shells to `pwsh.exe`, the same way it already did for Cursor.
+
+Three properties are deliberate:
+
+- **A key the template stops rendering stops being ours.** Ownership is derived from the
+  rendered fragment, not a hard-coded list, so removing a hook from the template removes it
+  from the live file.
+- **The splice refuses rather than guesses.** If the result does not re-parse, or would
+  disturb any key the fragment does not own, nothing is written. A backup still precedes
+  every write that does happen.
+- **No pwsh, no clobber.** If `pwsh.exe` cannot be found from WSL the hook leaves an existing
+  file completely alone and says so; it only falls back to a plain copy when there is no live
+  file yet and therefore nothing to lose.
+
+The tempting shortcut — put `enabledPlugins` and `env.AGENTMEMORY_URL` in the template and
+keep the whole-file copy — is wrong twice over. AgentMemory's client wiring is deliberately
+outside version control (`docker-local/agentmemory/README.md`: user-scoped, global, one
+machine at a time), and it would not save `model` or anything else Claude Code writes next.
+
+The WSL-side `dot_claude/settings.json.tmpl` is still a whole-file chezmoi target. That is
+correct only as long as WSL-side Claude Code has no plugins and no per-machine keys; the day
+it does, it needs a `modify_` script doing the same splice.

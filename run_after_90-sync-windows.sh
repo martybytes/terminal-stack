@@ -210,6 +210,56 @@ wezterm_cfg_changed=0
 rendered="$(mktemp)"
 trap 'rm -f "$rendered"' EXIT
 
+resolve_pwsh() {
+  local p
+  for p in /mnt/c/Program\ Files/PowerShell/7/pwsh.exe \
+           /mnt/c/Program\ Files/PowerShell/7-preview/pwsh.exe; do
+    if [ -x "$p" ]; then printf '%s' "$p"; return 0; fi
+  done
+  return 1
+}
+
+claude_merge_helper="$stack_root/bootstrap/_merge_claude_settings.ps1"
+
+# merge_claude_settings <rendered-src> <dst>
+# Claude Code writes ~/.claude/settings.json too: `model`, `enabledPlugins`,
+# `permissions`, `env` and `extraKnownMarketplaces` are its own state, set by
+# /model and /plugin. A whole-file copy deletes all of it — that is how the
+# agentmemory plugin got silently disabled on 2026-08-20 (`enabledPlugins` went
+# missing, so its hooks and MCP server stopped loading). Splice the keys the
+# template renders into the live file and leave every other byte alone.
+merge_claude_settings() {
+  local src="$1" dst="$2" pwsh_bin stage
+  if [ ! -f "$claude_merge_helper" ]; then
+    echo "sync-windows: $claude_merge_helper missing; leaving $dst alone." >&2
+    return 0
+  fi
+  if ! pwsh_bin="$(resolve_pwsh)"; then
+    if [ -e "$dst" ]; then
+      echo "sync-windows: pwsh not found; leaving $dst alone — a whole-file copy would delete Claude Code's own keys." >&2
+      return 0
+    fi
+    # Nothing there yet, so nothing to preserve: the plain copy is correct.
+    mkdir -p -- "$(dirname -- "$dst")"
+    cp -- "$src" "$dst"
+    printf 'created  %s\n' "$dst"
+    return 0
+  fi
+  # Stage the rendered fragment on the Windows side so pwsh.exe reads a real
+  # C:\ path instead of a \\wsl.localhost round trip.
+  stage="$dst_home/AppData/Local/Temp/terminal-stack-claude-settings.json"
+  mkdir -p -- "$(dirname -- "$stage")"
+  cp -- "$src" "$stage"
+  if ! "$pwsh_bin" -NoLogo -NonInteractive -ExecutionPolicy Bypass \
+       -File "$(wslpath -w "$claude_merge_helper")" \
+       -FragmentPath "$(wslpath -w "$stage")" \
+       -LivePath "$(wslpath -w "$dst")"; then
+    echo "sync-windows: Claude settings merge failed (non-fatal); $dst left as it was." >&2
+  fi
+  rm -f -- "$stage"
+  return 0
+}
+
 # sync_tree <src_root> <dst_root> <render_tmpl:0|1>
 sync_tree() {
   local src_root="$1" dst_root="$2" render_tmpl="${3:-0}"
@@ -265,6 +315,11 @@ PY
     fi
 
     dst="$dst_root/$rel_out"
+
+    if [ "$dst" = "$dst_home/.claude/settings.json" ]; then
+      merge_claude_settings "$effective_src" "$dst"
+      continue
+    fi
 
     if [ -e "$dst" ]; then
       if cmp -s "$effective_src" "$dst"; then
@@ -324,11 +379,7 @@ fi
 
 merge_helper="$stack_root/bootstrap/_merge_cursor_settings.ps1"
 if [ -f "$merge_helper" ]; then
-  pwsh_exe=""
-  for p in /mnt/c/Program\ Files/PowerShell/7/pwsh.exe \
-           /mnt/c/Program\ Files/PowerShell/7-preview/pwsh.exe; do
-    if [ -x "$p" ]; then pwsh_exe="$p"; break; fi
-  done
+  pwsh_exe="$(resolve_pwsh || true)"
   if [ -n "$pwsh_exe" ]; then
     # pwsh.exe is a Windows binary: WSL interop does not translate argument paths, so the
     # POSIX $merge_helper must be converted. -ExecutionPolicy Bypass matches every other

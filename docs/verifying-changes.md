@@ -203,6 +203,29 @@ New wizard/menu text (`ts_prompt_cc_tts_daemon` ↔ `Read-TsCcTtsDaemon`,
 `ts-config tts -h` both shells, both TTS submenus) goes through the §3
 byte-diff like everything else.
 
+## 4c. Sync changes — run the whole sync against a throwaway profile
+
+`scripts/sync-windows.ps1` derives every destination from `$env:USERPROFILE` /
+`$env:LOCALAPPDATA`, so a child pwsh with both redirected exercises the real code path —
+template rendering, backups, the Claude settings splice — without writing to your profile:
+
+```powershell
+$sb = (New-Item -ItemType Directory -Force "$env:TEMP\ts-sync-sandbox").FullName
+New-Item -ItemType Directory -Force "$sb\.claude" | Out-Null
+Copy-Item ~\.claude\settings.json "$sb\.claude\settings.json"   # seed a realistic live file
+pwsh -NoLogo -NonInteractive -Command "
+  `$env:USERPROFILE='$sb'; `$env:LOCALAPPDATA='$sb\LocalAppData'; `$env:APPDATA='$sb\AppData\Roaming'
+  & ./scripts/sync-windows.ps1 -SourceDir (Resolve-Path .).Path -WinUser $env:USERNAME"
+```
+
+The sandboxed profile has no `config.json`, so the run uses wizard defaults (TTS off) — the
+rendered `hooks` will legitimately differ from your live ones. What it does prove is which
+keys survive: for `.claude\settings.json`, everything Claude Code owns (`model`,
+`enabledPlugins`, `permissions`, `env`) must come out of the run byte-identical, and a second
+run must report `already up to date`. Same check for the WSL hook by sourcing just its
+functions with `dst_home` pointed at a `/mnt/c/...` sandbox — `resolve_pwsh` and
+`merge_claude_settings` need nothing else from the script.
+
 ## 5. What you cannot verify from a dev clone
 
 `chezmoi source-path` points at the **runtime** clone
