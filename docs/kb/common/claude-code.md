@@ -98,6 +98,7 @@ Optional voice when an agent **finishes**, **errors**, **asks a question**, or *
 | `ts-config tts …` | Full control (prefix, project, excitement, templates, events) |
 | `ts-config tts daemon on` | Windows: session-aware announcements via the ttsd tray daemon (names the project, coalesces, ducks music) — `doc windows/tts-daemon` |
 | `/test-voice` | Slash command in Claude Code or Cursor (user home) |
+| `ts-config tts history [--dupes]` | Windows: what was spoken and what was suppressed — the answer to "why did it say that twice" (`doc windows/tts-daemon`) |
 
 ### Config layout
 
@@ -117,6 +118,8 @@ Key knobs: `sources.claude|cursor|codex.prefix`, `announce.includeProject`, `ann
 |---|---|---|
 | Claude Code | `Stop` / `StopFailure` | Agent finished / failed |
 | Claude Code | `Notification` / `PermissionRequest` / `PreToolUse` (`AskUserQuestion`) | Needs attention / permission / clarifying question |
+
+One `AskUserQuestion` trips **all three** of those Claude hooks, ~2.5s apart. You hear it once: the daemon and every fallback worker check a shared utterance history before speaking, so the later two are recorded as `deduped` rather than said. `ts-config tts history` shows both.
 | Cursor Agent | `afterAgentResponse` | Agent final response completed |
 | Cursor Agent | `stop` | Agent loop failed (`completed` / `aborted` are silent) |
 | Cursor Agent | `postToolUse` (`AskQuestion`) | Plan-mode / clarifying question UI |

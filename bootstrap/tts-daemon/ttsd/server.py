@@ -11,10 +11,26 @@ from __future__ import annotations
 import json
 import logging
 import threading
+import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlsplit
 
-from . import PROTOCOL_VERSION
+from . import PROTOCOL_VERSION, history
 from .events import EventError, parse_event
+
+
+def _qs_int(query: dict, key: str, default):
+    try:
+        return int(query.get(key, [default])[0])
+    except (TypeError, ValueError):
+        return default
+
+
+def _qs_float(query: dict, key: str, default):
+    try:
+        return float(query.get(key, [default])[0])
+    except (TypeError, ValueError):
+        return default
 
 log = logging.getLogger(__name__)
 
@@ -118,6 +134,16 @@ class _Handler(BaseHTTPRequestHandler):
             ]})
         elif self.path == "/v1/dnd":
             self._send(200, {"enabled": app.dispatcher.dnd_active()})
+        elif self.path.split("?", 1)[0] == "/v1/history":
+            # Durable counterpart to /v1/status: those counters die with the process.
+            query = urllib.parse.parse_qs(urlsplit(self.path).query)
+            limit = _qs_int(query, "limit", 50)
+            since = _qs_float(query, "since", None)
+            if _qs_int(query, "dupes", 0):
+                self._send(200, {"duplicates": history.duplicates(
+                    within_sec=float(app.cfg.get("debounceSec", 5) or 5), since=since)})
+            else:
+                self._send(200, {"rows": history.recent(limit=limit, since=since)})
         else:
             self._send(404, {"error": "not found"})
 

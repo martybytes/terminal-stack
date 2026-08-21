@@ -142,6 +142,22 @@ ts_doctor() {
         else
             echo "  note: kokoro TTS engine not reachable (edge-tts fallback will be used)"
         fi
+        # One line of forensics from the utterance history. Both numbers below are
+        # invisible otherwise: every hook exits 0 whether it spoke once, three times, or
+        # fell back to the direct path for fifteen hours.
+        local _hexe _hchk _hage _hdup
+        _hexe="$(ts_cc_tts_exe_path 2>/dev/null || true)"
+        if [ -n "$_hexe" ] && [ -f "$_hexe" ]; then
+            _hchk="$("$_hexe" history --check 2>/dev/null | tr -d "\015")"
+            case "$_hchk" in
+                *daemon_silent_for=*)
+                    _hage="${_hchk##*daemon_silent_for=}"; _hage="${_hage%% *}"
+                    _hdup="${_hchk##*dupes=}"; _hdup="${_hdup%% *}" ;;
+            esac
+        fi
+        if [ -n "${_hdup:-}" ] && [ "$_hdup" != 0 ]; then
+            echo "  note: $_hdup session(s) spoke twice within 8s in the last day - inspect: ts-config tts history --dupes"
+        fi
         if [ "$(ts_cc_tts_get ccTtsDaemon 2>/dev/null)" = on ]; then
             local _dout _snap
             if _dout="$(ts_cc_tts_daemon_status 2>/dev/null)"; then
@@ -149,6 +165,9 @@ ts_doctor() {
                 printf '%s\n' "$_dout" | grep 'older build' | sed 's/^/  note: /' || true
             else
                 _bad "tts daemon enabled (ccTtsDaemon=on) but not reachable — hooks fall back to direct playback; start: ts-config tts daemon on"
+                if [ -n "${_hage:-}" ] && [ "$_hage" != - ] && [ "$_hage" -gt 900 ] 2>/dev/null; then
+                    echo "  note: nothing has spoken through the daemon for $((_hage / 60)) minutes - that long on the direct path is how overlapping voices go unnoticed"
+                fi
                 _snap="$(ts_cc_tts_daemon_snapshot_path 2>/dev/null || true)"
                 if [ -n "$_snap" ] && [ -f "$_snap" ]; then
                     echo "  note: stale duck snapshot present — music may be stuck quiet; the daemon's next start restores it (ts-config tts daemon on)"

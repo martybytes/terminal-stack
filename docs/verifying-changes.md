@@ -196,6 +196,26 @@ proof is a `ttsd.pipeline: spoke [engine]: …` line in `logs/ttsd.log`. (A
 argument — it sends a fixed empty-message stop event — so it cannot be used to check what
 gets said, only that the pipeline runs.
 
+Duplicate-speech drills need a **throwaway home**, because the dedupe state and the
+config both live under it. Redirecting three variables gives a full sandbox — the live
+`~/.claude/tts/config.json`, `history.db` and `speak.lock` are never touched:
+
+```sh
+S=/tmp/ttshome && mkdir -p $S/.claude/tts   # copy config.json in, set enabled=true
+# three payloads for ONE event (notification / permission / question), then fire together:
+for i in 0 1 2; do
+  HOME=$S USERPROFILE=$S LOCALAPPDATA=$S dist/terminal-stack-tts.exe _direct $S/p$i.json &
+done; wait
+HOME=$S USERPROFILE=$S LOCALAPPDATA=$S dist/terminal-stack-tts.exe history
+# expect exactly one `spoken` and two `deduped`, and audio that never overlaps
+```
+
+Use the **EXE, not bare `python -m ttsd`**, for anything that reaches playback: `winrt`,
+`comtypes` and `mutagen` are bundled only in the frozen build, so from source `play()`
+fails instantly and `probe_duration` raises — you get `play_failed` rows, or no rows at
+all, and conclude the wrong thing. Source mode is fine for `history`, `--check` and the
+pytest suite.
+
 The invariants to drill after touching the hook senders:
 
 - **No console process:** inspect the built PE Optional Header (`Subsystem=2`,
@@ -203,7 +223,16 @@ The invariants to drill after touching the hook senders:
   no new `cmd`, `conhost`, `pwsh`, `python[w]`, `ffplay`, or `ffprobe` process.
 - **Fallback (never-silence):** set `CC_TTS_DAEMON_PORT_OVERRIDE` to a dead
   port and invoke `terminal-stack-tts.exe hook …`; its detached `_direct`
-  worker must speak without any console child.
+  worker must speak without any console child. Then the harder version: point
+  `LOCALAPPDATA` at a **regular file** so the history DB, play lock and log
+  directory are all unusable, and confirm it still speaks. That drill is what
+  found two unguarded `mkdir` calls that crashed the process before a word came
+  out.
+- **Self-start:** with `daemon.enabled` true and nothing listening, one
+  `terminal-stack-tts.exe hook …` must leave a daemon on the port and a
+  `spoken` row with `daemon=1` — not a direct-path fallback. Kill any test
+  daemon before rebuilding; a running one holds `dist\terminal-stack-tts.exe`
+  open and PyInstaller fails with `Access is denied`.
 - **Inert while off:** with `ccTtsDaemon=off` (the default), a `chezmoi apply`
   on an unchanged config must produce **zero** `updated` lines for
   `settings.json` / `hooks.json`, and the hooks must not POST anywhere

@@ -1,7 +1,11 @@
 """Dispatcher: drains the scheduler and turns batches into ducked speech.
 
-Single thread — speech is naturally serialized, which replaces the old
-machine-global play lock.
+Single thread, so speech here is naturally serialized. That is only true of the daemon:
+`hooks.direct_speak` spawns a detached process per hook and needs `speaklock.py` to get the
+same guarantee, which is why the machine-global play lock came back for that path alone.
+
+Serializing is not deduplicating. Several hooks can describe one user-facing event, and
+`_suppress` collapses those through `history.recently_spoken`.
 """
 
 from __future__ import annotations
@@ -11,6 +15,7 @@ import logging
 import threading
 import time
 
+from . import history
 from .events import P0_INTERACTIVE, P1_ERROR, P2_DONE, Event
 
 log = logging.getLogger(__name__)
@@ -88,6 +93,11 @@ class Dispatcher(threading.Thread):
                 self._speak_batch(batch)
             except Exception as exc:  # noqa: BLE001 — one bad batch must not kill the loop
                 log.exception("speak failed: %s", exc)
+                # Record the crash too. A batch that died mid-speak is the most
+                # interesting thing history can tell you, and without this the row
+                # simply never appears -- which reads as "nothing was ever queued".
+                for ev in batch:
+                    history.record("failed", event=ev, line=str(exc)[:200], daemon=True)
             if self.scheduler.pending_count() == 0:
                 self.audio.release()
 
@@ -107,14 +117,19 @@ class Dispatcher(threading.Thread):
                 voice = self.registry.voice_for(
                     sess, str(self.cfg.get("kokoro.voice", "am_adam")))
 
+        synth_started = time.monotonic()
         result = self.synth.synthesize(line, voice)
+        synth_ms = int((time.monotonic() - synth_started) * 1000)
         if result is None:
+            for ev in batch:
+                history.record("synth_failed", event=ev, line=line, daemon=True)
             return
         duration = None
         if result.media is not None:
             duration = self.playback.probe_duration(result.media)
 
         self.audio.hold(duration)
+        play_started = time.monotonic()
         try:
             if result.media is not None:
                 if not self.playback.play(result.media):
@@ -130,6 +145,17 @@ class Dispatcher(threading.Thread):
         self.spoken += 1
         self.last_line = line
         log.info("spoke [%s]: %s", result.engine, line)
+        # One row per session in the batch, not per utterance: a coalesced line announces
+        # several sessions, and each needs its own dedupe memory so a straggling hook for
+        # any of them is recognised as a duplicate.
+        play_ms = int((time.monotonic() - play_started) * 1000)
+        for ev in batch:
+            history.record(history.SPOKEN, event=ev, line=line, daemon=True,
+                           engine=str(getattr(result, "engine", "") or ""),
+                           synth_ms=synth_ms, play_ms=play_ms)
+        if len(batch) > 1:
+            log.info("coalesced %d sessions into one line", len(batch))
+        history.prune(float(self.cfg.get("history.days", 14)))
 
     def _suppress(self, ev: Event) -> bool:
         # Same .events gate the direct cc-tts-notify path applies.
@@ -137,9 +163,22 @@ class Dispatcher(threading.Thread):
         if ev.state and isinstance(events, list) and ev.state not in events:
             self.suppressed += 1
             return True
+        # One user-facing event can arrive as several hooks: a Claude AskUserQuestion trips
+        # Notification, PermissionRequest and PreToolUse. They are all P0, and P0 is drained
+        # immediately, so the scheduler's (session, class) slot never holds two at once --
+        # the first is spoken and gone before the next arrives. This is the check that
+        # collapses them, and it works across processes so a direct worker sees it too.
+        dedupe_sec = float(self.cfg.get("debounceSec", 5) or 0)
+        if history.recently_spoken(ev.session_key, ev.priority, dedupe_sec):
+            history.record(history.DEDUPED, event=ev, daemon=True)
+            self.suppressed += 1
+            log.info("duplicate suppressed: %s p%s within %.0fs",
+                     ev.session_key, ev.priority, dedupe_sec)
+            return True
         interactive = ev.priority in (P0_INTERACTIVE, P1_ERROR)
         if self.dnd_active() or self._quiet_hours():
             if not (interactive and self.cfg.get("quietHours.allowInteractive", True)):
+                history.record(history.SUPPRESSED_DND, event=ev, daemon=True)
                 self.suppressed += 1
                 return True
         if (ev.priority == P2_DONE

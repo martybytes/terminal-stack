@@ -302,6 +302,15 @@ ts_cc_tts_daemon_installer() {
     "$pwsh_exe" -NoLogo -NonInteractive -ExecutionPolicy Bypass -File "$win" "$@"
 }
 
+ts_cc_tts_exe_path() {
+    # The Windows-side daemon executable, as seen from WSL.
+    local winuser
+    [ -d /mnt/c/Users ] || return 1
+    winuser="$(cmd.exe /c 'echo %USERNAME%' 2>/dev/null | tr -d '\r\n')"
+    [ -n "$winuser" ] || return 1
+    printf '/mnt/c/Users/%s/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe' "$winuser"
+}
+
 ts_cc_tts_daemon_snapshot_path() {
     # The daemon's crash-safe pre-duck volume snapshot (Windows side, via /mnt/c).
     local winuser
@@ -535,7 +544,7 @@ ts_config_tts() {
         on)
             if ts_cc_tts_daemon_supported; then
                 local exe
-                exe="/mnt/c/Users/$(cmd.exe /c 'echo %USERNAME%' 2>/dev/null | tr -d '\r\n')/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe"
+                exe="$(ts_cc_tts_exe_path)"
                 [ -f "$exe" ] || ts_cc_tts_daemon_installer -NoStart -NoAutostart || return 1
             fi
             ts_cc_tts_set ccTtsEnabled true
@@ -748,6 +757,20 @@ ts_config_tts() {
                 return 1
             fi
             ;;
+        history)
+            # Deliberately the executable, not the daemon API: the interesting cases are
+            # the ones where the daemon is not answering.
+            ts_cc_tts_daemon_supported || { echo "tts history: Windows-only; this host uses direct playback." >&2; return 1; }
+            local hexe
+            hexe="$(ts_cc_tts_exe_path)" || { echo "tts history: not a WSL host" >&2; return 1; }
+            [ -f "$hexe" ] || { echo "tts history: terminal-stack-tts.exe not found (run ts-config tts daemon install)" >&2; return 1; }
+            case "$arg" in
+                --dupes|dupes)
+                    if [ -n "$arg2" ]; then "$hexe" history --dupes --within "$arg2"; else "$hexe" history --dupes; fi ;;
+                '') "$hexe" history ;;
+                *) "$hexe" history --limit "$arg" ;;
+            esac
+            ;;
         reset)
             ts_cc_tts_reset_defaults
             ts_cc_tts_finish
@@ -771,10 +794,11 @@ ts-config tts — agent local TTS (Kokoro / Chatterbox / edge-tts)
   haiku-model <model> | ollama <url> [<model>]
   music duck|smart|pause|off | duck-level <0-100>
   voices show|<v1,v2,...> | port <n>
+  history [<n>] | history --dupes [<sec>]  (what was said, and what was suppressed)
 EOF
             ;;
         *)
-            echo "ts-config tts: unknown subcommand '$sub' (try: show, on, off, test)" >&2
+            echo "ts-config tts: unknown subcommand '$sub' (try: show, on, off, test, history)" >&2
             return 2
             ;;
     esac
