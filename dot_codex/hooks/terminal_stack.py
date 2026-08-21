@@ -2,24 +2,23 @@
 """Codex hook bridge and compact three-line WezTerm dashboard.
 
 The SessionStart hook maps the launching WezTerm pane to Codex's exact rollout.
-The Stop hook uses the existing terminal-stack TTS pipeline.  Dashboard mode is
-started in a three-row split by the cy/cyr shell wrappers.
+The Stop hook uses the existing terminal-stack TTS pipeline. Dashboard mode is
+started in a three-row split for enhanced interactive Codex launches.
 """
 
 from __future__ import annotations
 
 import argparse
-import getpass
 import json
 import os
 import re
 import shutil
-import socket
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, field
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +30,8 @@ YELLOW = f"{ESC}38;5;220m"
 RED = f"{ESC}38;5;203m"
 CYAN = f"{ESC}38;5;81m"
 MAGENTA = f"{ESC}38;5;176m"
+BLUE = f"{ESC}38;5;117m"
+ORANGE = f"{ESC}38;5;208m"
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 
@@ -98,15 +99,23 @@ def run_tts(payload: dict[str, Any]) -> None:
     raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     try:
         if os.name == "nt":
-            script = Path.home() / ".claude/hooks/cc-speak.ps1"
-            if not script.exists():
-                return
-            command = [
-                "pwsh.exe", "-NoLogo", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-                "-File", str(script), "-State", "waiting", "-Source", "codex",
-            ]
-            subprocess.run(command, input=raw, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                           timeout=8, check=False)
+            local_app = os.environ.get("LOCALAPPDATA")
+            exe = Path(local_app) / "terminal-stack/tts-daemon/terminal-stack-tts.exe" if local_app else None
+            if exe and exe.is_file():
+                command = [str(exe), "hook", "--source", "codex", "--event", "stop",
+                           "--state", "waiting"]
+            else:
+                script = Path.home() / ".claude/hooks/cc-speak.ps1"
+                if not script.is_file():
+                    return
+                command = [
+                    "pwsh.exe", "-NoLogo", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+                    "-File", str(script), "-State", "waiting", "-Source", "codex",
+                ]
+            subprocess.run(
+                command, input=raw, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                timeout=8, check=False, creationflags=subprocess.CREATE_NO_WINDOW,
+            )
         else:
             script = Path.home() / ".claude/hooks/cc-speak.sh"
             if not script.exists():
@@ -163,9 +172,32 @@ def compact_int(value: int | float | None) -> str:
     return str(int(number))
 
 
+def duration_label(seconds: float | int | None) -> str:
+    if seconds is None:
+        return "?"
+    value = max(0, int(seconds))
+    if value < 60:
+        return f"{value}s"
+    if value < 3600:
+        return f"{value // 60}m{value % 60:02d}s"
+    if value < 86400:
+        return f"{value // 3600}h{(value % 3600) // 60:02d}m"
+    return f"{value // 86400}d{(value % 86400) // 3600}h"
+
+
 def as_int(value: Any, fallback: int = 0) -> int:
     try:
         return int(value) if not isinstance(value, (dict, list, tuple)) else fallback
+    except (TypeError, ValueError):
+        return fallback
+
+
+def as_epoch(value: Any, fallback: float = 0.0) -> float:
+    try:
+        number = float(value)
+        if number > 10_000_000_000:
+            number /= 1000
+        return number
     except (TypeError, ValueError):
         return fallback
 
@@ -190,7 +222,7 @@ def rate_name(minutes: Any) -> str:
     if value == 300:
         return "5h"
     if value == 10080:
-        return "7d"
+        return "weekly"
     if value % 1440 == 0:
         return f"{value // 1440}d"
     if value % 60 == 0:
@@ -250,10 +282,63 @@ class RolloutState:
     context_tokens: int = 0
     context_window: int = 0
     total_tokens: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cached_tokens: int = 0
+    reasoning_tokens: int = 0
     added: int = 0
     removed: int = 0
+    activity: str = "WAIT"
+    current_action: str = "waiting"
+    turn_started: float = 0.0
+    last_turn_seconds: float = 0.0
+    turn_active: bool = False
+    tool_failures: int = 0
+    plan_type: str = ""
+    credit_balance: str = ""
+    credit_unlimited: bool = False
     rates: list[dict[str, Any]] = field(default_factory=list)
     patch_calls: set[str] = field(default_factory=set)
+
+    def _set_tool_action(self, item: dict[str, Any]) -> None:
+        item_type = str(item.get("type") or "")
+        lowered = item_type.lower()
+        status = str(item.get("status") or "").lower()
+        exit_code = item.get("exit_code")
+        if status in {"failed", "error"} or (isinstance(exit_code, int) and exit_code != 0):
+            self.tool_failures += 1
+        if lowered == "commandexecution":
+            command = item.get("command") or item.get("parsed_cmd") or "shell"
+            if isinstance(command, list):
+                command = " ".join(str(part) for part in command[:3])
+            command = re.sub(r"\s+", " ", str(command)).strip()
+            self.activity = "TOOL"
+            self.current_action = f"shell {command[:42]}" if command else "shell"
+        elif lowered == "filechange":
+            changes = item.get("changes") or {}
+            count = len(changes) if isinstance(changes, (dict, list)) else 1
+            self.activity = "TOOL"
+            self.current_action = f"edit {count} file{'s' if count != 1 else ''}"
+        elif lowered == "mcptoolcall":
+            name = item.get("tool") or item.get("name") or item.get("server") or "MCP tool"
+            self.activity = "TOOL"
+            self.current_action = str(name).replace("_", " ")[:48]
+        elif lowered == "imageview":
+            self.activity = "TOOL"
+            self.current_action = "viewing image"
+        elif lowered == "extension":
+            action = item.get("action") or item.get("kind") or "extension"
+            self.activity = "TOOL"
+            self.current_action = str(action).replace("_", " ")[:48]
+        elif lowered == "contextcompaction":
+            self.activity = "THINK"
+            self.current_action = "compacting context"
+        elif lowered == "plan":
+            self.activity = "THINK"
+            self.current_action = "updating plan"
+        elif lowered == "reasoning":
+            self.activity = "THINK"
+            self.current_action = "reasoning"
 
     def consume(self, record: dict[str, Any]) -> None:
         kind = record.get("type")
@@ -268,19 +353,64 @@ class RolloutState:
             self.approval = str(payload.get("approval_policy") or self.approval)
             policy = payload.get("sandbox_policy") or payload.get("permission_profile") or {}
             self.sandbox = str(policy.get("type") if isinstance(policy, dict) else policy or self.sandbox)
+        elif kind == "response_item":
+            response_type = str(payload.get("type") or "").lower()
+            if response_type in {"function_call", "custom_tool_call"}:
+                name = str(payload.get("name") or "tool").replace("_", " ")
+                if name in {"request user input", "yield control"}:
+                    self.activity = "WAIT"
+                    self.current_action = "awaiting input"
+                else:
+                    self.activity = "TOOL"
+                    self.current_action = name[:48]
+            elif response_type == "reasoning":
+                self.activity = "THINK"
+                self.current_action = "reasoning"
+        elif kind == "event_msg" and payload.get("type") == "task_started":
+            self.turn_active = True
+            self.turn_started = as_epoch(payload.get("started_at"), time.time())
+            self.activity = "THINK"
+            self.current_action = "starting turn"
+        elif kind == "event_msg" and payload.get("type") == "task_complete":
+            self.turn_active = False
+            duration_ms = as_int(payload.get("duration_ms"))
+            if duration_ms:
+                self.last_turn_seconds = duration_ms / 1000
+            elif self.turn_started:
+                self.last_turn_seconds = max(0, time.time() - self.turn_started)
+            self.activity = "DONE"
+            self.current_action = "complete"
+        elif kind == "event_msg" and str(payload.get("type") or "").lower() in {"error", "stream_error"}:
+            self.activity = "ERROR"
+            self.current_action = "agent error"
+        elif kind == "event_msg" and payload.get("type") == "turn_aborted":
+            self.turn_active = False
+            self.activity = "ERROR"
+            self.current_action = "turn aborted"
         elif kind == "event_msg" and payload.get("type") == "token_count":
             info = payload.get("info") or {}
             last = info.get("last_token_usage") or {}
             total = info.get("total_token_usage") or {}
             self.context_tokens = as_int(last.get("total_tokens"))
             self.total_tokens = as_int(total.get("total_tokens"), self.total_tokens)
+            self.input_tokens = as_int(total.get("input_tokens"), self.input_tokens)
+            self.output_tokens = as_int(total.get("output_tokens"), self.output_tokens)
+            self.cached_tokens = as_int(total.get("cached_input_tokens"), self.cached_tokens)
+            self.reasoning_tokens = as_int(total.get("reasoning_output_tokens"), self.reasoning_tokens)
             self.context_window = as_int(info.get("model_context_window"), self.context_window)
             limits = payload.get("rate_limits") or {}
             self.rates = [x for x in (limits.get("primary"), limits.get("secondary")) if isinstance(x, dict)]
             self.rates.sort(key=lambda value: as_int(value.get("window_minutes"), 999999))
+            self.plan_type = str(limits.get("plan_type") or self.plan_type or "")
+            credits = limits.get("credits") or {}
+            if isinstance(credits, dict):
+                self.credit_balance = str(credits.get("balance") or self.credit_balance or "")
+                self.credit_unlimited = bool(credits.get("unlimited", self.credit_unlimited))
         elif kind == "event_msg" and payload.get("type") in {"patch_apply_end", "item_completed"}:
             item = payload.get("item") if payload.get("type") == "item_completed" else payload
             item_type = str(item.get("type") or "").lower().replace("_", "") if isinstance(item, dict) else ""
+            if isinstance(item, dict):
+                self._set_tool_action(item)
             if not isinstance(item, dict) or item_type not in {"", "patchapplyend", "filechange"}:
                 return
             if item.get("success") is False or item.get("status") in {"failed", "error"}:
@@ -395,36 +525,188 @@ def git_status(cwd: str) -> dict[str, Any]:
             if match:
                 ahead, behind = map(int, match.groups())
         elif line.startswith("?"):
+            dirty += 1
             untracked += 1
         elif line.startswith("u "):
+            dirty += 1
             conflicts += 1
         elif line[:2] in {"1 ", "2 "}:
+            dirty += 1
             fields = line.split()
             xy = fields[1] if len(fields) > 1 else ".."
             staged += int(xy[0] not in {".", " "})
             modified += int(xy[1] not in {".", " ", "D"})
             deleted += int("D" in xy)
-    dirty = staged + modified + deleted + untracked + conflicts
     remote = git_output(cwd, "remote", "get-url", "origin")
     repo = ""
     if remote:
         match = re.search(r"(?:[:/])([^/:]+/[^/]+?)(?:\.git)?$", remote)
         repo = match.group(1) if match else remote
+    root = git_output(cwd, "rev-parse", "--show-toplevel")
+    upstream = git_output(cwd, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")
+    stash_output = git_output(cwd, "stash", "list", "--format=%gd")
+    stash_count = len(stash_output.splitlines()) if stash_output else 0
+    commit_epoch = as_epoch(git_output(cwd, "log", "-1", "--format=%ct"))
+    commit_age = max(0, time.time() - commit_epoch) if commit_epoch else None
+    git_dir = git_output(cwd, "rev-parse", "--absolute-git-dir")
+    common_dir = git_output(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    linked_worktree = bool(git_dir and common_dir and os.path.normcase(git_dir) != os.path.normcase(common_dir))
     return {"branch": branch, "dirty": dirty, "staged": staged, "modified": modified,
             "deleted": deleted, "untracked": untracked, "conflicts": conflicts,
-            "ahead": ahead, "behind": behind, "repo": repo}
+            "ahead": ahead, "behind": behind, "repo": repo, "root": root,
+            "upstream": upstream, "stash": stash_count, "commit_age": commit_age,
+            "worktree": linked_worktree}
 
 
-def join_fit(parts: list[str], width: int) -> str:
-    active = [part for part in parts if part]
+def gh_pr(cwd: str) -> dict[str, Any]:
+    if not shutil.which("gh"):
+        return {}
+    fields = "number,isDraft,reviewDecision,mergeStateStatus,statusCheckRollup"
+    try:
+        result = subprocess.run(
+            ["gh", "pr", "view", "--json", fields], cwd=cwd, text=True,
+            encoding="utf-8", errors="replace", stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, timeout=6, check=False,
+        )
+        if result.returncode != 0:
+            return {}
+        value = json.loads(result.stdout)
+        return value if isinstance(value, dict) else {}
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return {}
+
+
+def pr_health(pr: dict[str, Any]) -> dict[str, str]:
+    if not pr or not pr.get("number"):
+        return {}
+    review = "draft" if pr.get("isDraft") else str(pr.get("reviewDecision") or "review").lower()
+    if review == "approved":
+        review = "approved"
+    elif review == "changes_requested":
+        review = "changes"
+    elif review == "review_required":
+        review = "review"
+    checks = pr.get("statusCheckRollup") or []
+    failing = {"FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE"}
+    ci = "none"
+    if checks:
+        conclusions = {str(item.get("conclusion") or "").upper() for item in checks if isinstance(item, dict)}
+        statuses = {str(item.get("status") or "").upper() for item in checks if isinstance(item, dict)}
+        if conclusions & failing:
+            ci = "fail"
+        elif any(status and status != "COMPLETED" for status in statuses) or "" in conclusions:
+            ci = "pending"
+        else:
+            ci = "pass"
+    merge_raw = str(pr.get("mergeStateStatus") or "").upper()
+    if merge_raw == "DIRTY":
+        merge = "conflict"
+    elif merge_raw in {"CLEAN", "HAS_HOOKS", "UNSTABLE"}:
+        merge = "ready" if merge_raw != "UNSTABLE" else "blocked"
+    elif merge_raw in {"BLOCKED", "BEHIND"}:
+        merge = "blocked"
+    else:
+        merge = "unknown"
+    return {"number": str(pr["number"]), "review": review, "ci": ci, "merge": merge}
+
+
+def tts_fault() -> str:
+    config_path = Path.home() / ".claude/tts/config.json"
+    config = read_json(config_path)
+    if not config or not config.get("enabled"):
+        return ""
+    sources = config.get("sources") or {}
+    if not isinstance(sources, dict) or "codex" not in sources:
+        return "TTS codex source missing"
+    if os.name == "nt":
+        local_app = os.environ.get("LOCALAPPDATA")
+        exe = Path(local_app) / "terminal-stack/tts-daemon/terminal-stack-tts.exe" if local_app else None
+        hook_exists = bool(exe and exe.is_file()) or (Path.home() / ".claude/hooks/cc-speak.ps1").is_file()
+    else:
+        hook_exists = (Path.home() / ".claude/hooks/cc-speak.sh").is_file()
+    if not hook_exists:
+        return "TTS hook missing"
+    daemon = config.get("daemon") or {}
+    if not isinstance(daemon, dict) or not daemon.get("enabled"):
+        return ""
+    port = as_int(daemon.get("port"), 8890)
+    host = str(daemon.get("hostOverride") or "127.0.0.1")
+    try:
+        with urllib.request.urlopen(f"http://{host}:{port}/healthz", timeout=0.7) as response:
+            health = json.loads(response.read(4096))
+        if not isinstance(health, dict) or not health.get("ok"):
+            return "TTS daemon unhealthy"
+    except (OSError, ValueError, urllib.error.URLError):
+        return "TTS daemon offline"
+    return ""
+
+
+def smart_path(cwd: str, root: str = "") -> tuple[str, str]:
+    absolute = os.path.abspath(cwd)
+    if root:
+        try:
+            relative = os.path.relpath(absolute, root)
+            root_name = Path(root).name
+            full = root_name if relative == "." else f"{root_name}/{relative.replace(os.sep, '/')}"
+            compact = root_name if relative == "." else f"{root_name}/…/{Path(relative).name}"
+            return full, compact
+        except ValueError:
+            pass
+    home = os.path.abspath(str(Path.home()))
+    if os.path.normcase(absolute).startswith(os.path.normcase(home)):
+        relative = os.path.relpath(absolute, home)
+        full = "~" if relative == "." else f"~/{relative.replace(os.sep, '/')}"
+    else:
+        full = absolute.replace(os.sep, "/")
+    return full, Path(absolute).name or full
+
+
+@dataclass
+class Segment:
+    full: str
+    compact: str = ""
+    priority: int = 50
+    required: bool = False
+
+    def short(self) -> str:
+        return self.compact or self.full
+
+
+def fit_segments(segments: list[Segment], width: int) -> str:
     separator = f" {DIM}│{RESET} "
-    while len(active) > 1 and visible_len(separator.join(active)) > width:
-        active.pop()
-    line = separator.join(active)
+    active = [segment for segment in segments if segment.full]
+    values = [segment.full for segment in active]
+
+    def render() -> str:
+        return separator.join(values)
+
+    if visible_len(render()) <= width:
+        return render()
+
+    for index in sorted(range(len(active)), key=lambda idx: active[idx].priority):
+        compact = active[index].short()
+        if compact != values[index] and visible_len(compact) < visible_len(values[index]):
+            values[index] = compact
+            if visible_len(render()) <= width:
+                return render()
+    while visible_len(render()) > width:
+        removable = [index for index, segment in enumerate(active) if not segment.required and values[index]]
+        if not removable:
+            break
+        index = min(removable, key=lambda idx: active[idx].priority)
+        values[index] = ""
+        kept = [(segment, value) for segment, value in zip(active, values) if value]
+        active = [item[0] for item in kept]
+        values = [item[1] for item in kept]
+    line = render()
     if visible_len(line) <= width:
         return line
     plain = strip_ansi(line)
     return plain[: max(1, width - 1)] + "…"
+
+
+def join_fit(parts: list[str], width: int) -> str:
+    return fit_segments([Segment(part) for part in parts if part], width)
 
 
 def permission_label(state: RolloutState) -> str:
@@ -435,38 +717,143 @@ def permission_label(state: RolloutState) -> str:
     return f"{YELLOW}{approval}/{sandbox}{RESET}"
 
 
-def dashboard_lines(cwd: str, state: RolloutState, git: dict[str, Any], width: int) -> list[str]:
-    leaf = Path(cwd).name or cwd
-    dirty = f" Δ{git['dirty']}" if git.get("dirty") else " ✓"
-    sync = ""
+def change_segment(git: dict[str, Any]) -> Segment:
+    if not git.get("dirty"):
+        return Segment(f"{GREEN}✓ clean{RESET}", f"{GREEN}✓{RESET}", 100, True)
+    full: list[str] = []
+    specs = [
+        ("staged", "+", GREEN), ("modified", "~", YELLOW),
+        ("deleted", "-", RED), ("untracked", "?", CYAN), ("conflicts", "!", RED),
+    ]
+    for key, glyph, color in specs:
+        if git.get(key):
+            full.append(f"{color}{glyph}{git[key]}{RESET}")
+    return Segment("changes " + " ".join(full), f"Δ{git.get('dirty', 0)}", 100, True)
+
+
+def pr_segment(pr: dict[str, str]) -> Segment:
+    if not pr:
+        return Segment("")
+    review = pr.get("review", "review")
+    ci = pr.get("ci", "none")
+    merge = pr.get("merge", "unknown")
+    review_color = GREEN if review == "approved" else RED if review == "changes" else YELLOW
+    ci_color = GREEN if ci == "pass" else RED if ci == "fail" else YELLOW if ci == "pending" else DIM
+    merge_color = GREEN if merge == "ready" else RED if merge == "conflict" else YELLOW
+    review_glyph = {"approved": "✓", "changes": "✗", "draft": "D", "review": "…"}.get(review, "…")
+    ci_glyph = {"pass": "✓", "fail": "✗", "pending": "…", "none": "–"}.get(ci, "?")
+    merge_glyph = {"ready": "✓", "conflict": "✗", "blocked": "!", "unknown": "?"}.get(merge, "?")
+    full = (
+        f" PR #{pr['number']} "
+        f"{review_color}{review}{RESET} "
+        f"CI {ci_color}{ci}{RESET} "
+        f"merge {merge_color}{merge}{RESET}"
+    )
+    compact = (
+        f"#{pr['number']} "
+        f"{review_color}R{review_glyph}{RESET} "
+        f"{ci_color}C{ci_glyph}{RESET} "
+        f"{merge_color}M{merge_glyph}{RESET}"
+    )
+    return Segment(full, compact, 75)
+
+
+def activity_segment(state: RolloutState, launched_at: float, now: float) -> Segment:
+    colors = {"WAIT": DIM, "THINK": CYAN, "TOOL": MAGENTA, "DONE": GREEN, "ERROR": RED}
+    color = colors.get(state.activity, DIM)
+    turn_seconds = max(0, now - state.turn_started) if state.turn_active and state.turn_started else state.last_turn_seconds
+    timer_color = ORANGE if turn_seconds >= 300 else YELLOW if turn_seconds >= 120 else BLUE
+    session_seconds = max(0, now - launched_at) if launched_at else 0
+    full = (
+        f"{color}[{state.activity}]{RESET} {state.current_action} "
+        f"{timer_color}turn {duration_label(turn_seconds)}{RESET} "
+        f"{DIM}sess {duration_label(session_seconds)}{RESET}"
+    )
+    compact = f"{color}[{state.activity}]{RESET} {timer_color}{duration_label(turn_seconds)}{RESET}"
+    return Segment(full, compact, 100, True)
+
+
+def dashboard_lines(
+    cwd: str,
+    state: RolloutState,
+    git: dict[str, Any],
+    width: int,
+    pr: dict[str, str] | None = None,
+    launched_at: float = 0.0,
+    now: float | None = None,
+    audio_fault: str = "",
+) -> list[str]:
+    current_time = now if now is not None else time.time()
+    path_full, path_compact = smart_path(cwd, str(git.get("root") or ""))
+    branch = str(git.get("branch") or "?")
+    upstream = str(git.get("upstream") or "")
+    branch_full = f" {MAGENTA}{branch}{RESET}" + (f" → {upstream}" if upstream else "")
+    branch_compact = f" {MAGENTA}{branch}{RESET}"
+    line1 = fit_segments([
+        Segment(f"󰉋 {CYAN}{path_full}{RESET}", f"󰉋 {CYAN}{path_compact}{RESET}", 100, True),
+        Segment(f"󰊢 {git.get('repo', '')}", str(git.get("repo", "")).split("/", 1)[-1], 80),
+        Segment(branch_full, branch_compact, 95, True),
+        Segment(f"󰙅 linked worktree", "󰙅 wt", 55) if git.get("worktree") else Segment(""),
+    ], width)
+
+    sync_full: list[str] = []
+    sync_compact = ""
     if git.get("ahead"):
-        sync += f" ↑{git['ahead']}"
+        sync_full.append(f"↑{git['ahead']} ahead")
+        sync_compact += f"↑{git['ahead']}"
     if git.get("behind"):
-        sync += f" ↓{git['behind']}"
-    line1 = join_fit([
-        f"{CYAN}{leaf}{RESET}",
-        f"{MAGENTA}{git.get('branch', '?')}{RESET}{dirty}{sync}",
-        str(git.get("repo") or ""),
+        sync_full.append(f"↓{git['behind']} behind")
+        sync_compact += (" " if sync_compact else "") + f"↓{git['behind']}"
+    patch = f"patch {GREEN}+{state.added}{RESET}/{RED}-{state.removed}{RESET}"
+    patch_short = f"±{GREEN}{state.added}{RESET}/{RED}{state.removed}{RESET}"
+    line2 = fit_segments([
+        change_segment(git),
+        Segment(" ".join(sync_full), sync_compact, 90),
+        Segment(f"≡ {git.get('stash')} stashes", f"≡{git.get('stash')}", 55) if git.get("stash") else Segment(""),
+        Segment(patch, patch_short, 95, True),
+        Segment(f"󱑂 commit {duration_label(git.get('commit_age'))} ago", f"󱑂{duration_label(git.get('commit_age'))}", 40)
+        if git.get("commit_age") is not None else Segment(""),
+        pr_segment(pr or {}),
     ], width)
 
     context_pct = state.context_tokens * 100 / state.context_window if state.context_window else None
-    rates = []
+    context_full = (
+        f"ctx {bar(context_pct)} {context_pct:.0f}% {DIM}{100 - context_pct:.0f}% left{RESET}"
+        if context_pct is not None else f"ctx {bar(None)} ?"
+    )
+    context_short = f"ctx {bar(context_pct)} {context_pct:.0f}%" if context_pct is not None else f"ctx {bar(None)} ?"
+    rate_segments: list[Segment] = []
     for limit in state.rates:
-        pct = limit.get("used_percent")
-        rates.append(f"{rate_name(limit.get('window_minutes'))} {bar(pct)} {float(pct or 0):.0f}%{reset_label(limit.get('resets_at'))}")
-    line2 = join_fit([
-        f"{state.model}/{state.effort}",
-        f"ctx {bar(context_pct)} {context_pct:.0f}%" if context_pct is not None else f"ctx {bar(None)} ?",
-        *rates,
-    ], width)
-
-    host = f"{getpass.getuser()}@{socket.gethostname().split('.')[0]}"
-    line3 = join_fit([
-        host,
-        f"tokens {compact_int(state.total_tokens)}",
-        f"patch {GREEN}+{state.added}{RESET}/{RED}-{state.removed}{RESET}",
-        permission_label(state),
-        f"codex {state.version}",
+        pct = float(limit.get("used_percent") or 0)
+        label = rate_name(limit.get("window_minutes"))
+        rate_segments.append(Segment(
+            f"{label} {bar(pct)} {pct:.0f}%{reset_label(limit.get('resets_at'))}",
+            f"{label} {bar(pct)} {pct:.0f}%", 100, True,
+        ))
+    token_full = (
+        f"tok {compact_int(state.total_tokens)} "
+        f"i{compact_int(state.input_tokens)}/o{compact_int(state.output_tokens)}/c{compact_int(state.cached_tokens)}"
+    )
+    account = ""
+    if state.credit_balance and not state.credit_unlimited:
+        try:
+            account = f"credits {compact_int(float(state.credit_balance))}"
+        except ValueError:
+            account = f"credits {state.credit_balance}"
+    elif state.plan_type and state.plan_type.lower() not in {"pro", ""}:
+        account = state.plan_type
+    line3 = fit_segments([
+        activity_segment(state, launched_at, current_time),
+        Segment(f"model {state.model} · {state.effort}", f"{state.model}/{state.effort}", 90, True),
+        Segment(context_full, context_short, 100, True),
+        *rate_segments,
+        Segment(token_full, f"tok {compact_int(state.total_tokens)}", 55),
+        Segment(account, account, 25),
+        Segment(f"{RED}!{state.tool_failures} failed tools{RESET}", f"{RED}!{state.tool_failures}{RESET}", 85)
+        if state.tool_failures else Segment(""),
+        Segment(permission_label(state), permission_label(state), 80),
+        Segment(f"codex {state.version}", f"v{state.version}", 15),
+        Segment(f"{RED}󰕾 {audio_fault}{RESET}", f"{RED}󰕾 TTS!{RESET}", 100, True) if audio_fault else Segment(""),
     ], width)
     return [line1, line2, line3]
 
@@ -477,7 +864,12 @@ def dashboard_main(args: argparse.Namespace) -> int:
     launched_at = float(args.launched_at)
     reader = RolloutReader()
     git = git_status(cwd)
-    last_git = 0.0
+    pr = pr_health(gh_pr(cwd))
+    audio_fault = tts_fault()
+    initial_refresh = time.monotonic()
+    last_git = initial_refresh
+    last_pr = initial_refresh
+    last_tts = initial_refresh
     try:
         sys.stdout.write(f"{ESC}?25l")
         while True:
@@ -488,8 +880,17 @@ def dashboard_main(args: argparse.Namespace) -> int:
             if now - last_git >= 2:
                 git = git_status(cwd)
                 last_git = now
+            if now - last_pr >= 45:
+                pr = pr_health(gh_pr(cwd))
+                last_pr = now
+            if now - last_tts >= 30:
+                audio_fault = tts_fault()
+                last_tts = now
             width = max(20, shutil.get_terminal_size((120, 3)).columns)
-            lines = dashboard_lines(cwd, reader.state, git, width)
+            lines = dashboard_lines(
+                cwd, reader.state, git, width, pr=pr, launched_at=launched_at,
+                now=time.time(), audio_fault=audio_fault,
+            )
             sys.stdout.write(f"{ESC}H" + "\n".join(f"{ESC}2K{line}" for line in lines))
             sys.stdout.flush()
             time.sleep(0.75)

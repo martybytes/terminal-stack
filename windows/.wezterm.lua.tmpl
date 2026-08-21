@@ -2,7 +2,8 @@
 -- Structure: theme palettes → base options → QoL (quick select, hyperlinks) →
 -- keys/key_tables → plugins (sessionizer, resurrect; each pcall-guarded) →
 -- tab titles + Claude cc_state rendering → pane background tint → status bar
--- (mode badge, Claude fleet, clock) → pane_nav (F1..F6 directional nav-or-split).
+-- (mode badge, Claude fleet, workspace/detail; never a clock) → pane_nav
+-- (F1..F6 directional nav-or-split).
 -- Keep visual settings + keys in sync with dot_wezterm.lua.tmpl (macOS).
 --
 -- This file is a template: the leader chord and theme mode are injected from the
@@ -326,7 +327,7 @@ end
 -- Status-bar detail toggle (Leader+s): show/hide the user@host + path segment
 -- for the active pane. OFF by default — "you@host │ ~/some/path" is noise you
 -- already know; the tab titles carry the per-pane context and the always-on
--- segments (Claude fleet, workspace, clock) don't need it. Press Leader+s when
+-- segments (Claude fleet and workspace; deliberately no clock) don't need it. Press Leader+s when
 -- you actually need to see where a pane is.
 -- wezterm.GLOBAL survives config reloads (a plain local would reset); it does
 -- not survive a GUI restart, so every launch starts quiet.
@@ -891,14 +892,14 @@ wezterm.on('window-config-reloaded', function(window)
   sync_pane_backgrounds(window, true)
 end)
 
--- ── Status bar: mode badge (left) · fleet / workspace / detail / clock (right) ─
+-- ── Status bar: mode badge (left) · fleet / workspace / detail (right) ────────
 -- Hand-rolled (tabline.wez was dropped — its permanent 'NORMAL' mode badge is
 -- exactly what this bar must not show). The left badge appears ONLY while
 -- something is pending — leader held, or a repeatable mode live — and names
 -- itself in the mode's colour; the normal state renders nothing there. The right
 -- side is segments: the Claude fleet (every cc pane in the mux, counted by
--- state), the non-default workspace, the Leader+s identity/path detail, and a
--- clock. Pane tints ride the same cadence.
+-- state), the non-default workspace, and the Leader+s identity/path detail.
+-- Time is intentionally never rendered. Pane tints ride the same cadence.
 local MODE_BADGE = {
   move_mode   = { label = '✛ MOVE ↑↓←→',   color = P.accent },
   resize_mode = { label = '⤢ RESIZE ↑↓←→', color = P.peach },

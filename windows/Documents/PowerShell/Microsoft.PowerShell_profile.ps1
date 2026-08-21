@@ -196,21 +196,65 @@ function ccr   { Set-WezTabTitle "$(Split-Path -Leaf $PWD)"; try { claude --resu
 function ccdr  { Set-WezTabTitle "$(Split-Path -Leaf $PWD)"; try { claude --dangerously-skip-permissions --resume @args } finally { Set-WezTabTitle "" } }
 function cca   { Set-WezTabTitle "agents"; try { claude agents } finally { Set-WezTabTitle "" } }
 
-# Codex yolo wrappers. A three-row WezTerm dashboard runs in a short bottom
-# split; the terminal-stack profile adds exact rollout mapping and Stop TTS.
+# Interactive Codex sessions get a three-row WezTerm dashboard. Utility commands
+# remain stock, and codex-stock is an explicit no-enhancements escape hatch.
+$script:TsCodexCommand = @('codex.exe', 'codex.cmd') |
+    ForEach-Object { Get-Command $_ -CommandType Application -ErrorAction SilentlyContinue } |
+    Select-Object -First 1 -ExpandProperty Source
+if (-not $script:TsCodexCommand) {
+    $script:TsCodexCommand = (Get-Command codex -CommandType Application -ErrorAction SilentlyContinue).Source
+}
+
+function Test-TsCodexInteractive {
+    param([object[]]$CliArgs)
+    if ($CliArgs -contains '-h' -or $CliArgs -contains '--help' -or
+        $CliArgs -contains '-V' -or $CliArgs -contains '--version') { return $false }
+
+    $valueOptions = @(
+        '-c', '--config', '--enable', '--disable', '-i', '--image', '-m', '--model', '--local-provider',
+        '-p', '--profile', '-s', '--sandbox', '-C', '--cd', '--add-dir',
+        '-a', '--ask-for-approval', '--remote', '--remote-auth-token-env'
+    )
+    $utilityCommands = @(
+        'exec', 'e', 'review', 'login', 'logout', 'mcp', 'plugin', 'mcp-server',
+        'app-server', 'remote-control', 'app', 'completion', 'update', 'doctor',
+        'sandbox', 'debug', 'apply', 'a', 'archive', 'delete', 'migrate-rollouts',
+        'unarchive', 'cloud', 'exec-server', 'features', 'help'
+    )
+    $skipValue = $false
+    foreach ($argValue in $CliArgs) {
+        $argText = [string]$argValue
+        if ($skipValue) { $skipValue = $false; continue }
+        if ($argText -eq '--') { return $true }
+        if ($argText -match '^--[^=]+=') { continue }
+        if ($valueOptions -contains $argText) { $skipValue = $true; continue }
+        if ($argText.StartsWith('-')) { continue }
+        if ($argText -in @('resume', 'fork')) { return $true }
+        return ($utilityCommands -notcontains $argText)
+    }
+    return $true
+}
+
+function codex-stock {
+    if (-not $script:TsCodexCommand) { throw 'codex executable was not found on PATH when this profile loaded' }
+    & $script:TsCodexCommand @args
+}
+
 function Invoke-TsCodex {
+    param([switch]$Yolo, [object[]]$CliArgs)
     $helper = Join-Path $HOME '.codex\hooks\terminal_stack.py'
     $profile = Join-Path $HOME '.codex\terminal-stack.config.toml'
     $python = Get-Command py.exe -ErrorAction SilentlyContinue
     $parent = $env:WEZTERM_PANE
     $sidecar = $null
     $launched = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
-    $codexArgs = @('--yolo')
+    $codexArgs = @()
+    if ($Yolo) { $codexArgs += '--yolo' }
 
     if ($python -and (Test-Path -LiteralPath $helper) -and (Test-Path -LiteralPath $profile)) {
         $codexArgs += @('-p', 'terminal-stack')
     } else {
-        Write-Warning 'terminal-stack: Codex dashboard/profile unavailable; running yolo without enhancements.'
+        Write-Warning 'terminal-stack: Codex dashboard/profile unavailable; running without enhancements.'
     }
 
     if ($parent -and $python -and (Test-Path -LiteralPath $helper) -and
@@ -229,7 +273,8 @@ function Invoke-TsCodex {
     $env:TS_CODEX_PARENT_PANE = $parent
     $exitCode = 0
     try {
-        & codex @codexArgs @args
+        if (-not $script:TsCodexCommand) { throw 'codex executable was not found on PATH when this profile loaded' }
+        & $script:TsCodexCommand @codexArgs @CliArgs
         $exitCode = $LASTEXITCODE
     } finally {
         if ($sidecar -and $sidecar -match '^\d+$') {
@@ -242,8 +287,15 @@ function Invoke-TsCodex {
     }
     $global:LASTEXITCODE = $exitCode
 }
-function cy  { Invoke-TsCodex @args }
-function cyr { $resumeArgs = @('resume') + $args; Invoke-TsCodex @resumeArgs }
+function codex {
+    if (Test-TsCodexInteractive -CliArgs $args) {
+        Invoke-TsCodex -CliArgs $args
+    } else {
+        codex-stock @args
+    }
+}
+function cy  { Invoke-TsCodex -Yolo -CliArgs $args }
+function cyr { $resumeArgs = @('resume') + $args; Invoke-TsCodex -Yolo -CliArgs $resumeArgs }
 
 # Escape hatch: vanilla pwsh, no profile (no starship/zoxide/aliases).
 # Nested — `exit` drops back to the customized shell.

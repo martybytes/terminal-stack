@@ -175,21 +175,60 @@ ccr()   { _wez_tab_title "${PWD:t}"; { claude --resume "$@" }                   
 ccdr()  { _wez_tab_title "${PWD:t}"; { claude --dangerously-skip-permissions --resume "$@" }   always { _wez_tab_title "" } }
 cca()   { _wez_tab_title "agents";   { claude agents }                                         always { _wez_tab_title "" } }
 
-# Codex yolo wrappers.  A three-row WezTerm dashboard runs in a short bottom
-# split; the terminal-stack profile adds exact rollout mapping and Stop TTS.
-# Outside WezTerm the profile/TTS still runs and Codex falls back gracefully.
+# Interactive Codex sessions get a three-row WezTerm dashboard. Utility commands
+# remain stock, and codex-stock is an explicit no-enhancements escape hatch.
+typeset -g _TS_CODEX_BIN="${commands[codex]:-$(whence -p codex 2>/dev/null)}"
+
+_ts_codex_is_interactive() {
+  local arg skip_value=0
+  local -a value_options utility_commands
+  value_options=(-c --config --enable --disable -i --image -m --model --local-provider -p --profile
+    -s --sandbox -C --cd --add-dir -a --ask-for-approval --remote --remote-auth-token-env)
+  utility_commands=(exec e review login logout mcp plugin mcp-server app-server
+    remote-control app completion update doctor sandbox debug apply a archive delete
+    migrate-rollouts unarchive cloud exec-server features help)
+
+  for arg in "$@"; do
+    [[ "$arg" == (-h|--help|-V|--version) ]] && return 1
+  done
+  for arg in "$@"; do
+    if (( skip_value )); then skip_value=0; continue; fi
+    [[ "$arg" == -- ]] && return 0
+    [[ "$arg" == --*=* ]] && continue
+    if (( ${value_options[(Ie)$arg]} )); then skip_value=1; continue; fi
+    [[ "$arg" == -* ]] && continue
+    [[ "$arg" == (resume|fork) ]] && return 0
+    (( ${utility_commands[(Ie)$arg]} )) && return 1
+    return 0
+  done
+  return 0
+}
+
+codex-stock() {
+  [[ -n "$_TS_CODEX_BIN" ]] || { print -u2 'codex executable was not found on PATH when this shell loaded'; return 127; }
+  "$_TS_CODEX_BIN" "$@"
+}
+
 _ts_codex() {
+  local launch_mode="$1"
+  shift
   local helper="$HOME/.codex/hooks/terminal_stack.py"
   local profile="$HOME/.codex/terminal-stack.config.toml"
   local parent="${WEZTERM_PANE:-}" sidecar="" launched
   local -a command status_command
-  command=(codex --yolo)
+  command=("$_TS_CODEX_BIN")
+  [[ "$launch_mode" == yolo ]] && command+=(--yolo)
   launched="$(date +%s)"
+
+  if [[ -z "$_TS_CODEX_BIN" ]]; then
+    print -u2 'codex executable was not found on PATH when this shell loaded'
+    return 127
+  fi
 
   if command -v python3 >/dev/null 2>&1 && [[ -f "$helper" && -f "$profile" ]]; then
     command+=(-p terminal-stack)
   else
-    print -u2 'terminal-stack: Codex dashboard/profile unavailable; running yolo without enhancements.'
+    print -u2 'terminal-stack: Codex dashboard/profile unavailable; running without enhancements.'
   fi
 
   if [[ -n "$parent" ]] && command -v wezterm >/dev/null 2>&1 \
@@ -218,8 +257,9 @@ _ts_codex() {
   }
   return "$rc"
 }
-cy()    { _ts_codex "$@" }
-cyr()   { _ts_codex resume "$@" }
+codex() { if _ts_codex_is_interactive "$@"; then _ts_codex safe "$@"; else codex-stock "$@"; fi }
+cy()    { _ts_codex yolo "$@" }
+cyr()   { _ts_codex yolo resume "$@" }
 
 # Escape hatch: vanilla zsh, no rc files (no oh-my-zsh/starship/aliases).
 # Nested — `exit` drops back to the customized shell.
