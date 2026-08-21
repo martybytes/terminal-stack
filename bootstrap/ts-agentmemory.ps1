@@ -184,7 +184,8 @@ function Invoke-AmClaude {
     }
 
     $edits = Get-AmHookEdits -Agent claude
-    $paths = Get-AmScriptPaths $ver.FullName @('session-start.mjs', 'pre-tool-use.mjs')
+    $paths = Get-AmScriptPaths $ver.FullName @('session-start.mjs', 'prompt-submit.mjs',
+                                                 'pre-tool-use.mjs')
     if ($Check) {
         $missing = Test-AmHookEdits -ScriptPaths $paths -Edits $edits
         if ($missing.Count -eq 0) { Pass 'Claude hook edits present' }

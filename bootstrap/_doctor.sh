@@ -209,6 +209,27 @@ ts_doctor() {
                 _bad "agentmemory hook wiring is incomplete (a plugin upgrade reverts it) — repair: ts-update, or bootstrap/ts-agentmemory.ps1 -Apply"
             fi
         fi
+        # The secret, which is a different failure. The hooks now recover a stale *process*
+        # copy by re-reading it from the user environment on a 401, but nothing can recover
+        # when the user environment is itself the stale one: every request 401s and both
+        # capture and retrieval swallow it, so a whole session's observations vanish with
+        # nothing in any log. Compare the two stores when Docker is reachable; skip quietly
+        # when it is not, since the container is not this repo's concern.
+        local _am_cid _am_csec _am_usec
+        if command -v docker >/dev/null 2>&1; then
+            _am_cid="$(timeout 5 docker ps --filter name=agentmemory --format '{{.Names}}' 2>/dev/null \
+                | grep -v console | head -1)"
+            if [ -n "$_am_cid" ]; then
+                _am_csec="$(timeout 5 docker exec "$_am_cid" cat /data/.hmac 2>/dev/null | tr -d '\r\n')"
+                # A freshly spawned cmd.exe reads the current user environment, which is the
+                # value a hook would recover to -- not this shell's possibly stale copy.
+                _am_usec="$(timeout 5 cmd.exe /c 'echo %AGENTMEMORY_SECRET%' 2>/dev/null | tr -d '\r\n')"
+                case "$_am_usec" in *'%AGENTMEMORY_SECRET%'*) _am_usec="" ;; esac
+                if [ -n "$_am_csec" ] && [ -n "$_am_usec" ] && [ "$_am_csec" != "$_am_usec" ]; then
+                    _bad "agentmemory secret mismatch: the container's differs from AGENTMEMORY_SECRET in your user environment — every request 401s and is swallowed; refresh it with the plugin's setup"
+                fi
+            fi
+        fi
     fi
 
     # Location advisories (not health failures): a legacy-path runtime clone can

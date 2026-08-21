@@ -114,55 +114,113 @@ function Get-AmHookEdits {
         ('@Tconst project = typeof data.project === "string" && data.project.trim().length > 0 ? data.project.trim() : void 0;') `
         ('@Tconst project = typeof data.project === "string" && data.project.trim().length > 0 ? data.project.trim() : resolveProject(hookCwd(data) || process.cwd());')
 
-    # Codex and Cursor both drive a shell tool and a prompt hook, so both need the
-    # denylist and prompt-level retrieval. Claude already retrieves on file tools and
-    # at session start, so it keeps the smaller set.
+    # Prompt-level retrieval, for every agent. This used to be Codex/Cursor-only on the
+    # theory that Claude "already retrieves on file tools and at session start". It does
+    # not, in the way that matters: /enrich fires only for the vendor allow-list
+    # (edit/write/create/read/view/glob/grep), is excluded for Bash by both the hooks.json
+    # matcher and the allow-list, and drops a Grep/Glob with no path argument. A
+    # shell-heavy session therefore retrieved almost nothing -- measured live at 1041
+    # captures against 250 /enrich and one /context (a compaction) over 5.7 hours, while
+    # Codex, which has this edit, retrieved on every prompt. /agentmemory/context needs
+    # only { sessionId, project }, so it is the one channel that works regardless of what
+    # tools the turn happens to use.
+    # 3. prompt-submit.mjs has no INJECT_CONTEXT of its own because upstream never
+    #    retrieves from it.
+    $edits += New-AmEdit 'prompt-submit learns the injection gate' @('prompt-submit.mjs') `
+        'const SECRET = process.env["AGENTMEMORY_SECRET"] || "";' `
+        ('const SECRET = process.env["AGENTMEMORY_SECRET"] || "";@N' +
+         'const INJECT_CONTEXT = process.env["AGENTMEMORY_INJECT_CONTEXT"] !== "false";')
+
+    # 4. Session/prompt-level retrieval. Upstream prompt-submit.mjs is write-only — it
+    #    POSTs /observe and nothing else — despite the hook advertising "recalling
+    #    relevant memories". /agentmemory/context needs only { sessionId, project }, no
+    #    file paths, so this is the one retrieval channel that works for a Bash-heavy
+    #    agent with no trustworthy structured path, and it reads nothing from the
+    #    command. Same short timeout and swallow-and-exit-0 discipline as the other
+    #    hooks, so a slow or absent server can never block a turn.
+    $edits += New-AmEdit 'prompt-level context retrieval' @('prompt-submit.mjs') `
+        ('@Tconst cwd = hookCwd(data) || process.cwd();@N' +
+         '@Tfetch(`${REST_URL}/agentmemory/observe`, {') `
+        ('@Tconst cwd = hookCwd(data) || process.cwd();@N' +
+         '@Tif (INJECT_CONTEXT) try {@N' +
+         '@T@Tconst amRes = await fetch(`${REST_URL}/agentmemory/context`, {@N' +
+         '@T@T@Tmethod: "POST",@N' +
+         '@T@T@Theaders: authHeaders(),@N' +
+         '@T@T@Tbody: JSON.stringify({ sessionId, project: resolveProject(cwd) }),@N' +
+         '@T@T@Tsignal: AbortSignal.timeout(2e3)@N' +
+         '@T@T});@N' +
+         '@T@Tif (amRes.ok) {@N' +
+         '@T@T@Tconst amCtx = await amRes.json();@N' +
+         '@T@T@Tif (amCtx.context) process.stdout.write(amCtx.context);@N' +
+         '@T@T}@N' +
+         '@T} catch {}@N' +
+         '@Tfetch(`${REST_URL}/agentmemory/observe`, {')
+
+    # Codex and Cursor drive a shell tool whose name the vendor allow-list does not
+    # recognise, so they alone need the denylist inversion below. Claude's PreToolUse
+    # uses that allow-list plus a hooks.json matcher -- a different mechanism, which this
+    # edit does not fit.
     if ($Agent -ne 'claude') {
-        # 3. Codex emits mostly "Bash", which the vendor allow-list
+        # 5. Codex emits mostly "Bash", which the vendor allow-list
         #    (edit/write/create/read/view/glob/grep) excluded, so pre-tool-use retrieval
         #    never fired for Codex at all. Inverting to a shell denylist supports whatever
         #    file-tool names Codex actually emits without having to enumerate them, and
         #    without ever inspecting a command string: the existing "no structured path
         #    field, no request" rule below is untouched, so a tool that carries no path
         #    still costs nothing. Shell-family tools are served by prompt-level retrieval
-        #    (edits 4 and 5) instead, where the prompt is trustworthy input and no command
+        #    (edits 3 and 4) instead, where the prompt is trustworthy input and no command
         #    parsing is required.
         $edits += New-AmEdit 'shell denylist replaces file-tool allow-list' @('pre-tool-use.mjs') `
             ('if (![@N@T@T"edit",@N@T@T"write",@N@T@T"create",@N@T@T"read",@N@T@T"view",@N@T@T"glob",@N@T@T"grep"@N@T].includes(normalizedToolName)) return;') `
             ('if ([@N@T@T"bash",@N@T@T"shell",@N@T@T"sh",@N@T@T"cmd",@N@T@T"powershell",@N@T@T"pwsh",@N@T@T"exec",@N@T@T"local_shell",@N@T@T"run_command",@N@T@T"terminal"@N@T].includes(normalizedToolName)) return;')
-
-        # 4. prompt-submit.mjs has no INJECT_CONTEXT of its own because upstream never
-        #    retrieves from it.
-        $edits += New-AmEdit 'prompt-submit learns the injection gate' @('prompt-submit.mjs') `
-            'const SECRET = process.env["AGENTMEMORY_SECRET"] || "";' `
-            ('const SECRET = process.env["AGENTMEMORY_SECRET"] || "";@N' +
-             'const INJECT_CONTEXT = process.env["AGENTMEMORY_INJECT_CONTEXT"] !== "false";')
-
-        # 5. Session/prompt-level retrieval. Upstream prompt-submit.mjs is write-only — it
-        #    POSTs /observe and nothing else — despite the hook advertising "recalling
-        #    relevant memories". /agentmemory/context needs only { sessionId, project }, no
-        #    file paths, so this is the one retrieval channel that works for a Bash-heavy
-        #    agent with no trustworthy structured path, and it reads nothing from the
-        #    command. Same short timeout and swallow-and-exit-0 discipline as the other
-        #    hooks, so a slow or absent server can never block a turn.
-        $edits += New-AmEdit 'prompt-level context retrieval' @('prompt-submit.mjs') `
-            ('@Tconst cwd = hookCwd(data) || process.cwd();@N' +
-             '@Tfetch(`${REST_URL}/agentmemory/observe`, {') `
-            ('@Tconst cwd = hookCwd(data) || process.cwd();@N' +
-             '@Tif (INJECT_CONTEXT) try {@N' +
-             '@T@Tconst amRes = await fetch(`${REST_URL}/agentmemory/context`, {@N' +
-             '@T@T@Tmethod: "POST",@N' +
-             '@T@T@Theaders: authHeaders(),@N' +
-             '@T@T@Tbody: JSON.stringify({ sessionId, project: resolveProject(cwd) }),@N' +
-             '@T@T@Tsignal: AbortSignal.timeout(2e3)@N' +
-             '@T@T});@N' +
-             '@T@Tif (amRes.ok) {@N' +
-             '@T@T@Tconst amCtx = await amRes.json();@N' +
-             '@T@T@Tif (amCtx.context) process.stdout.write(amCtx.context);@N' +
-             '@T@T}@N' +
-             '@T} catch {}@N' +
-             '@Tfetch(`${REST_URL}/agentmemory/observe`, {')
     }
+
+    # 6. Stale-secret recovery, every script. See the JS comment for the incident.
+    $edits += New-AmEdit 'stale secret recovery' @('*') `
+        'function authHeaders() {' `
+        ('// terminal-stack: recover from a stale AGENTMEMORY_SECRET.@N' +
+         '// A User environment variable only reaches processes started after it was set, so a@N' +
+         '// long-lived shell keeps the pre-rotation secret and every request from that session@N' +
+         '// 401s -- silently, because /observe swallows errors in .catch() and retrieval@N' +
+         '// discards non-2xx behind if (res.ok). That cost 56 consecutive captures on@N' +
+         '// 2026-08-21, with nothing in any log. On a 401 the authoritative value is re-read@N' +
+         '// from the registry and the request retried once, then cached for this process.@N' +
+         '// Wrapping fetch rather than every call site keeps this to one edit across six@N' +
+         '// scripts, and it fails open: any error here returns the original response.@N' +
+         'let amFreshSecret = null;@N' +
+         'async function amRegistrySecret() {@N' +
+         '@Tif (amFreshSecret !== null) return amFreshSecret;@N' +
+         '@TamFreshSecret = "";@N' +
+         '@Ttry {@N' +
+         '@T@Tconst { execSync } = await import("node:child_process");@N' +
+         '@T@Tconst out = execSync(''reg query "HKCU\\Environment" /v AGENTMEMORY_SECRET'', {@N' +
+         '@T@T@Tstdio: ["ignore", "pipe", "ignore"],@N' +
+         '@T@T@Ttimeout: 2e3@N' +
+         '@T@T}).toString();@N' +
+         '@T@Tfor (const line of out.split("\n")) {@N' +
+         '@T@T@Tif (!line.includes("AGENTMEMORY_SECRET")) continue;@N' +
+         '@T@T@Tconst cells = line.split(String.fromCharCode(9)).join(" ").trim().split(" ").filter(Boolean);@N' +
+         '@T@T@Tif (cells.length) amFreshSecret = cells[cells.length - 1].trim();@N' +
+         '@T@T@Tbreak;@N' +
+         '@T@T}@N' +
+         '@T} catch {}@N' +
+         '@Treturn amFreshSecret;@N' +
+         '}@N' +
+         'const amBaseFetch = globalThis.fetch;@N' +
+         'globalThis.fetch = async function (input, init) {@N' +
+         '@Tconst res = await amBaseFetch(input, init);@N' +
+         '@Ttry {@N' +
+         '@T@Tif (res.status !== 401) return res;@N' +
+         '@T@Tconst headers = init && init.headers;@N' +
+         '@T@Tif (!headers || typeof headers !== "object") return res;@N' +
+         '@T@Tconst fresh = await amRegistrySecret();@N' +
+         '@T@T// Also covers a secret missing from the process entirely, not just a stale one.@N' +
+         '@T@Tif (!fresh || headers["Authorization"] === "Bearer " + fresh) return res;@N' +
+         '@T@Treturn await amBaseFetch(input, { ...init, headers: { ...headers, Authorization: "Bearer " + fresh } });@N' +
+         '@T} catch {}@N' +
+         '@Treturn res;@N' +
+         '};@N' +
+         'function authHeaders() {@N')
 
     # LAST, deliberately: the pre-tool-use project-helper edit above anchors on the
     # shebang line too, and must consume its anchor before this one widens it.
