@@ -331,6 +331,37 @@ Two constraints shaped the mechanism:
 
 The availability half is smaller but mattered more in practice: autostart is logon-only with no watchdog, so a daemon that died at 22:17 was still dead at 13:30 the next day, with no error and nothing in the log. Every hook in between took the unserialized direct path and exited 0, which is how genuinely overlapping voices went unnoticed for fifteen hours. A hook that cannot reach an enabled daemon now starts it and retries once. That is safe to race: two hooks both spawning means the loser fails to bind the port and exits 0 (`_already_running`), so the check only ever asks whether the port answers, never which process won it. `ts-doctor` reports how long the daemon has been silent and flags any session that spoke twice, because neither is visible otherwise — every hook exits 0 either way.
 
+## Why the Windows mirror is written from a resolved username, loudly
+
+`ts_mirror_windows_config` resolved the Windows username from chezmoi `[data].windowsUsername`
+alone and did `return 0` when it came back empty. On a machine whose clone predates the
+bootstrap recording that key, the mirror was therefore **never written by any WSL-side save**,
+and every save reported success. The two config stores drifted apart for as long as the
+machine had been running.
+
+The consequence is not cosmetic. `scripts/sync-windows.ps1` gates the TTS hook tokens on the
+mirror's `ccTts.enabled`, so a stale `false` there makes the next pwsh sync delete every TTS
+hook entry from `~/.claude/settings.json`, while `ccTtsDaemon` is a separate key and keeps the
+tray daemon running. The result is a healthy, unmuted tray icon attached to nothing, which is
+exactly how it presented.
+
+Three copies of the correct resolution order already existed (`resolve_win_user` in the sync
+hook, `win_user` in `ts-mux.sh`, and inline in `ts_canonical_clone_dir`): chezmoi `[data]`
+first, then `cmd.exe /c echo %USERNAME%` over interop. The mirror writer was the one place
+that lacked the interop half. It now shares `ts_win_user`, and when the username genuinely
+cannot be resolved it **warns instead of returning success**, because a silent skip is what
+made this survive so long.
+
+Fixing it exposed the cost that the no-op had been hiding: writing the mirror makes 49 reads
+of chezmoi `[data]`, and each `chezmoi execute-template` re-reads the source state, which on a
+combined host lives on `/mnt/c`. The first honest run took **229 seconds**. Two batching
+passes brought it to **14**, with byte-identical output: `ts_data_prefetch` renders every
+plain key in one call and caches the values (a marker variable distinguishes "cached empty"
+from "never fetched", since several keys are legitimately empty), and the six derived
+expressions, which cannot use the `hasKey` form, share a second call. `ts_data_get` still
+falls back to its own spawn for anything not prefetched, so a key missing from the list is
+only slow, never wrong.
+
 ## Why every agent gets prompt-level retrieval
 
 The wiring originally gave `/agentmemory/context` at prompt-submit time to Codex and Cursor only, on the reasoning that Claude "already retrieves on file tools and at session start". Measured against the console feed over 5.7 hours, that assumption failed badly: Claude made **1041** captures, **250** `/enrich` calls and exactly **one** `/context` — and that one was a compaction, since `pre-compact.mjs` is Claude's only `/context` caller. Codex, with the edit, retrieved on essentially every prompt.
