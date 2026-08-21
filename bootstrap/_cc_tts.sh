@@ -13,8 +13,10 @@ ts_cc_tts_default() {
         ccTtsEvents)               echo waiting,error,question,permission ;;
         ccTtsPrefixClaude)         echo Claude ;;
         ccTtsPrefixCursor)         echo Cursor ;;
+        ccTtsPrefixCodex)          echo Codex ;;
         ccTtsPrefixClaudeEnabled)  echo true ;;
         ccTtsPrefixCursorEnabled)  echo true ;;
+        ccTtsPrefixCodexEnabled)   echo true ;;
         ccTtsIncludeProject)       echo true ;;
         ccTtsExcitement)           echo 0.25 ;;
         ccTtsKokoroUrl)            echo http://127.0.0.1:8880 ;;
@@ -53,7 +55,8 @@ ts_cc_tts_default() {
 ts_cc_tts_keys() {
     printf '%s\n' \
         ccTtsEnabled ccTtsEngine ccTtsMessageMode ccTtsEvents \
-        ccTtsPrefixClaude ccTtsPrefixCursor ccTtsPrefixClaudeEnabled ccTtsPrefixCursorEnabled \
+        ccTtsPrefixClaude ccTtsPrefixCursor ccTtsPrefixCodex \
+        ccTtsPrefixClaudeEnabled ccTtsPrefixCursorEnabled ccTtsPrefixCodexEnabled \
         ccTtsIncludeProject ccTtsExcitement \
         ccTtsKokoroUrl ccTtsKokoroVoice ccTtsKokoroSpeed ccTtsKokoroFormat ccTtsKokoroTimeout \
         ccTtsChatterboxUrl ccTtsChatterboxVoice ccTtsChatterboxEnergy \
@@ -192,8 +195,10 @@ ts_cc_tts_json_for_mirror() {
     "events": [$evjson],
     "prefixClaude": "$(ts_cc_tts_get ccTtsPrefixClaude)",
     "prefixCursor": "$(ts_cc_tts_get ccTtsPrefixCursor)",
+    "prefixCodex": "$(ts_cc_tts_get ccTtsPrefixCodex)",
     "prefixClaudeEnabled": $([ "$(ts_cc_tts_get ccTtsPrefixClaudeEnabled)" = true ] && echo true || echo false),
     "prefixCursorEnabled": $([ "$(ts_cc_tts_get ccTtsPrefixCursorEnabled)" = true ] && echo true || echo false),
+    "prefixCodexEnabled": $([ "$(ts_cc_tts_get ccTtsPrefixCodexEnabled)" = true ] && echo true || echo false),
     "includeProject": $([ "$(ts_cc_tts_get ccTtsIncludeProject)" = true ] && echo true || echo false),
     "excitement": $(ts_cc_tts_get ccTtsExcitement),
     "kokoro": {
@@ -511,7 +516,7 @@ ts_config_tts() {
             finish
             ;;
         prefix)
-            [ -n "$arg" ] && [ -n "$arg2" ] || { echo "usage: ts-config tts prefix claude|cursor on|off|<label>" >&2; return 2; }
+            [ -n "$arg" ] && [ -n "$arg2" ] || { echo "usage: ts-config tts prefix claude|cursor|codex on|off|<label>" >&2; return 2; }
             case "$arg" in
                 claude)
                     case "$arg2" in
@@ -525,7 +530,13 @@ ts_config_tts() {
                         off) ts_cc_tts_set ccTtsPrefixCursorEnabled false ;;
                         *)   ts_cc_tts_set ccTtsPrefixCursor "$arg2"; ts_cc_tts_set ccTtsPrefixCursorEnabled true ;;
                     esac ;;
-                *) echo "ts-config tts prefix: expected claude or cursor" >&2; return 2 ;;
+                codex)
+                    case "$arg2" in
+                        on)  ts_cc_tts_set ccTtsPrefixCodexEnabled true ;;
+                        off) ts_cc_tts_set ccTtsPrefixCodexEnabled false ;;
+                        *)   ts_cc_tts_set ccTtsPrefixCodex "$arg2"; ts_cc_tts_set ccTtsPrefixCodexEnabled true ;;
+                    esac ;;
+                *) echo "ts-config tts prefix: expected claude, cursor, or codex" >&2; return 2 ;;
             esac
             ts_cc_tts_finish
             finish
@@ -662,15 +673,15 @@ ts_config_tts() {
             ;;
         -h|--help|help)
             cat <<'EOF'
-ts-config tts — Claude Code local TTS (Kokoro / Chatterbox / edge-tts)
-  show | on | off | test [--source claude|cursor|test] | reset
+ts-config tts — agent local TTS (Kokoro / Chatterbox / edge-tts)
+  show | on | off | test [--source claude|cursor|codex|test] | reset
   engine kokoro|chatterbox|auto
   message template|hook
   voice <kokoro-voice> | voice-chatter <name>
   energy <0-1> | excitement <0-1>
   url kokoro|chatterbox <url>
   events waiting,error,question,permission
-  prefix claude|cursor on|off|<label>
+  prefix claude|cursor|codex on|off|<label>
   project on|off
   template waiting|error|question|permission "…"
   daemon on|off|status|restart|install    (Windows tray daemon: queue/coalesce/duck)

@@ -175,8 +175,51 @@ ccr()   { _wez_tab_title "${PWD:t}"; { claude --resume "$@" }                   
 ccdr()  { _wez_tab_title "${PWD:t}"; { claude --dangerously-skip-permissions --resume "$@" }   always { _wez_tab_title "" } }
 cca()   { _wez_tab_title "agents";   { claude agents }                                         always { _wez_tab_title "" } }
 
-# Codex: resume a saved session with approvals and sandboxing bypassed.
-cyr()   { codex --yolo resume "$@" }
+# Codex yolo wrappers.  A three-row WezTerm dashboard runs in a short bottom
+# split; the terminal-stack profile adds exact rollout mapping and Stop TTS.
+# Outside WezTerm the profile/TTS still runs and Codex falls back gracefully.
+_ts_codex() {
+  local helper="$HOME/.codex/hooks/terminal_stack.py"
+  local profile="$HOME/.codex/terminal-stack.config.toml"
+  local parent="${WEZTERM_PANE:-}" sidecar="" launched
+  local -a command status_command
+  command=(codex --yolo)
+  launched="$(date +%s)"
+
+  if command -v python3 >/dev/null 2>&1 && [[ -f "$helper" && -f "$profile" ]]; then
+    command+=(-p terminal-stack)
+  else
+    print -u2 'terminal-stack: Codex dashboard/profile unavailable; running yolo without enhancements.'
+  fi
+
+  if [[ -n "$parent" ]] && command -v wezterm >/dev/null 2>&1 \
+      && command -v python3 >/dev/null 2>&1 && [[ -f "$helper" ]]; then
+    if [[ -n "${WSL_DISTRO_NAME:-}" ]] && command -v wsl.exe >/dev/null 2>&1; then
+      status_command=(wsl.exe --distribution "$WSL_DISTRO_NAME" --cd "$PWD" --exec
+        python3 "$helper" dashboard --pane "$parent" --cwd "$PWD" --launched-at "$launched")
+    else
+      status_command=(python3 "$helper" dashboard --pane "$parent" --cwd "$PWD" --launched-at "$launched")
+    fi
+    sidecar="$(wezterm cli split-pane --pane-id "$parent" --bottom --cells 3 -- "${status_command[@]}" 2>/dev/null || true)"
+    [[ "$sidecar" == <-> ]] || sidecar=""
+    wezterm cli activate-pane --pane-id "$parent" >/dev/null 2>&1 || true
+  fi
+
+  local TS_CODEX_PARENT_PANE="$parent"
+  export TS_CODEX_PARENT_PANE
+  local rc=0
+  { "${command[@]}" "$@"; rc=$? } always {
+    if [[ -n "$sidecar" ]]; then
+      wezterm cli kill-pane --pane-id "$sidecar" >/dev/null 2>&1 || true
+    fi
+    if command -v python3 >/dev/null 2>&1 && [[ -f "$helper" && -n "$parent" ]]; then
+      python3 "$helper" cleanup --pane "$parent" >/dev/null 2>&1 || true
+    fi
+  }
+  return "$rc"
+}
+cy()    { _ts_codex "$@" }
+cyr()   { _ts_codex resume "$@" }
 
 # Escape hatch: vanilla zsh, no rc files (no oh-my-zsh/starship/aliases).
 # Nested — `exit` drops back to the customized shell.

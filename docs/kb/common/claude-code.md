@@ -57,6 +57,7 @@ Optional voice when an agent **finishes**, **errors**, **asks a question**, or *
 | `cctts test` | Generic end-to-end synth + play test |
 | `ts-config tts test --source claude` | Test with Claude prefix + template |
 | `ts-config tts test --source cursor` | Test with Cursor prefix + template |
+| `ts-config tts test --source codex` | Test with Codex prefix + template |
 | `ts-config tts …` | Full control (prefix, project, excitement, templates, events) |
 | `ts-config tts daemon on` | Windows: session-aware announcements via the ttsd tray daemon (names the project, coalesces, ducks music) — `doc windows/tts-daemon` |
 | `/test-voice` | Slash command in Claude Code or Cursor (user home) |
@@ -71,7 +72,7 @@ Optional voice when an agent **finishes**, **errors**, **asks a question**, or *
 
 `ts-config tts show` prints chezmoi `[data]`; after apply, hooks read **merged** `config.json` + `local.json`.
 
-Key knobs: `sources.claude|cursor.prefix`, `announce.includeProject`, `announce.templates.{waiting,error,question,permission}`, `excitement` (0–1, drives Kokoro speed / Chatterbox energy).
+Key knobs: `sources.claude|cursor|codex.prefix`, `announce.includeProject`, `announce.templates.{waiting,error,question,permission}`, `excitement` (0–1, drives Kokoro speed / Chatterbox energy).
 
 ### Hook wiring
 
@@ -81,8 +82,9 @@ Key knobs: `sources.claude|cursor.prefix`, `announce.includeProject`, `announce.
 | Claude Code | `Notification` / `PermissionRequest` / `PreToolUse` (`AskUserQuestion`) | Needs attention / permission / clarifying question |
 | Cursor Agent | `stop` | Agent loop ended |
 | Cursor Agent | `postToolUse` (`AskQuestion`) | Plan-mode / clarifying question UI |
+| Codex (`cy` / `cyr`) | `Stop` | Agent turn ended |
 
-All paths call **`cc-tts-notify`** → Kokoro → **`cc-tts-play`** (WSL uses Windows `ffplay`). Prefixes **`Claude.`** / **`Cursor.`** are configurable per source.
+All paths call **`cc-tts-notify`** → Kokoro → **`cc-tts-play`** (WSL uses Windows `ffplay`). Prefixes **`Claude.`** / **`Cursor.`** / **`Codex.`** are configurable per source.
 
 ### Prerequisites
 

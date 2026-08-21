@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Sync from the chezmoi source tree to the Windows user profile:
 #   $CHEZMOI_SOURCE_DIR/windows/**  → /mnt/c/Users/<windowsUsername>/
+#   $CHEZMOI_SOURCE_DIR/dot_codex/** → /mnt/c/Users/<windowsUsername>/.codex/
 #   $CHEZMOI_SOURCE_DIR/docs/kb/**  → /mnt/c/Users/<windowsUsername>/AppData/Local/terminal-stack/docs/kb/
 #
 # Username resolution order:
@@ -26,6 +27,7 @@ set -euo pipefail
 
 stack_root="${CHEZMOI_SOURCE_DIR:-$HOME/.local/share/chezmoi}"
 windows_src="$stack_root/windows"
+codex_src="$stack_root/dot_codex"
 kb_src="$stack_root/docs/kb"
 
 # Non-WSL / no Windows mount available — no destination to sync to. Bail before
@@ -35,7 +37,7 @@ if [ ! -d /mnt/c/Users ]; then
   exit 0
 fi
 
-if [ ! -d "$windows_src" ] && [ ! -d "$kb_src" ]; then
+if [ ! -d "$windows_src" ] && [ ! -d "$codex_src" ] && [ ! -d "$kb_src" ]; then
   exit 0
 fi
 
@@ -266,6 +268,7 @@ PY
 }
 
 sync_tree "$windows_src" "$dst_home" 1
+sync_tree "$codex_src" "$dst_home/.codex" 1
 sync_tree "$kb_src" "$dst_home/AppData/Local/terminal-stack/docs/kb" 0
 
 # Render ~/.claude/tts/config.json on the Windows side from chezmoi [data] (same as WSL apply).

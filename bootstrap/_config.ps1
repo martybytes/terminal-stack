@@ -465,8 +465,10 @@ function Get-CcTtsDefaults {
         events      = @('waiting', 'error', 'question', 'permission')
         prefixClaude = 'Claude'
         prefixCursor = 'Cursor'
+        prefixCodex = 'Codex'
         prefixClaudeEnabled = $true
         prefixCursorEnabled = $true
+        prefixCodexEnabled = $true
         includeProject = $true
         excitement  = 0.25
         kokoro      = [ordered]@{
@@ -511,6 +513,10 @@ function ConvertTo-CcTtsRuntimeJson {
             cursor = [ordered]@{
                 prefixEnabled = [bool]$Tts.prefixCursorEnabled
                 prefix = $Tts.prefixCursor
+            }
+            codex = [ordered]@{
+                prefixEnabled = [bool]$Tts.prefixCodexEnabled
+                prefix = $Tts.prefixCodex
             }
         }
         announce = [ordered]@{
@@ -570,7 +576,8 @@ function Get-CcTtsConfig {
     # Fill members added after the config was first stored (pre-daemon upgrades).
     $tts = $c.ccTts
     $defaults = Get-CcTtsDefaults
-    foreach ($key in @('daemon', 'summarize', 'music', 'voicePool')) {
+    foreach ($key in @('daemon', 'summarize', 'music', 'voicePool',
+                       'prefixCodex', 'prefixCodexEnabled')) {
         if ($null -eq $tts.$key) {
             $tts | Add-Member -NotePropertyName $key -NotePropertyValue $defaults[$key] -Force
         }
@@ -808,7 +815,7 @@ function Invoke-TsConfigTts {
             $tts.chatterbox.energy = [double]$Arg
         }
         'prefix' {
-            if (-not $Arg -or -not $Arg2) { Write-Warning 'usage: ts-config tts prefix claude|cursor on|off|<label>'; return }
+            if (-not $Arg -or -not $Arg2) { Write-Warning 'usage: ts-config tts prefix claude|cursor|codex on|off|<label>'; return }
             switch ($Arg) {
                 'claude' {
                     switch ($Arg2) {
@@ -824,7 +831,14 @@ function Invoke-TsConfigTts {
                         default { $tts.prefixCursor = $Arg2; $tts.prefixCursorEnabled = $true }
                     }
                 }
-                default { Write-Warning 'expected claude or cursor'; return }
+                'codex' {
+                    switch ($Arg2) {
+                        'on'  { $tts.prefixCodexEnabled = $true }
+                        'off' { $tts.prefixCodexEnabled = $false }
+                        default { $tts.prefixCodex = $Arg2; $tts.prefixCodexEnabled = $true }
+                    }
+                }
+                default { Write-Warning 'expected claude, cursor, or codex'; return }
             }
         }
         'project' {

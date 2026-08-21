@@ -35,7 +35,7 @@ class EventError(ValueError):
 
 @dataclass
 class Event:
-    source: str  # claude | cursor | test
+    source: str  # claude | cursor | codex | test
     event: str  # stop, notification, cursor_stop, prompt_submit, ...
     state: str  # waiting | error | question | permission | "" (activity)
     session_key: str
@@ -76,7 +76,7 @@ def parse_event(body: dict) -> Event:
     if not isinstance(body, dict):
         raise EventError("body must be a JSON object")
     source = _text(body.get("source")).lower()
-    if source not in ("claude", "cursor", "test"):
+    if source not in ("claude", "cursor", "codex", "test"):
         raise EventError(f"unknown source {source!r}")
     session_key = _text(body.get("session_key"), 256)
     if not session_key:

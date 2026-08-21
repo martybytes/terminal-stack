@@ -13,12 +13,13 @@ LIB="$(dirname "$0")/cc-tts-lib.sh"
 . "$LIB"
 
 notify="$(dirname "$0")/cc-tts-notify.sh"
-export CC_TTS_SOURCE=claude
+source="${CC_TTS_SOURCE:-claude}"
+export CC_TTS_SOURCE="$source"
 if cc_tts_daemon_ready; then
     event=stop
     [ "$state" = error ] && event=stop_failure
     (
-        cc_tts_daemon_send claude "$event" "$state" "$input" "${2:-}" \
+        cc_tts_daemon_send "$source" "$event" "$state" "$input" "${2:-}" \
             || CC_TTS_HOOK_JSON="$input" "$notify" "$state" "${2:-}"
     ) >/dev/null 2>&1 &
     exit 0
