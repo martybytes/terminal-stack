@@ -6,6 +6,7 @@
     python -m ttsd --simulate f.json   # push one fixture through the pipeline
     python -m ttsd --restore-volumes   # oneshot stale-duck repair (ts-doctor)
     python -m ttsd history [--dupes]   # what was said, and what was suppressed
+    python -m ttsd mute [on|off]       # absolute mute, honoured by every path
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ from .audio_duck import AudioController, restore_volumes_oneshot
 from .config import Config, load_or_create_token, logs_dir, state_dir
 from .events import parse_event
 from . import history as history_store
+from . import hotkey, mute
 from .hooks import direct_speak, direct_speak_file, submit_hook, test_payload
 from .pipeline import Dispatcher
 from .playback import Playback
@@ -58,6 +60,52 @@ def _setup_logging(console: bool) -> Path:
         handlers=handlers,
     )
     return path
+
+
+def _nudge_daemon_stop() -> None:
+    """Ask a running daemon to cut off the utterance in flight.
+
+    The sentinel is already written by the time this runs, so the mute holds whether or not
+    anyone answers -- this only buys the barge-in, which needs the process that owns the
+    audio.
+    """
+    try:
+        port = int(Config().get("daemon.port", 8890))
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{port}/v1/mute", method="POST",
+            data=json.dumps({"enabled": True, "by": "cli"}).encode("utf-8"),
+            headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(request, timeout=0.4):
+            pass
+    except (OSError, ValueError):
+        pass  # no daemon, or it is busy; the mute itself is already in effect
+
+
+def _cli_mute(arg: str) -> int:
+    """`mute` toggles; `mute on|off|status` is explicit. One line of output, always."""
+    want = arg.strip().lower()
+    if want in ("status", "show"):
+        write_stdout(mute.describe() + "\n")
+        return 0
+    if want in ("on", "mute"):
+        target = True
+    elif want in ("off", "unmute"):
+        target = False
+    elif want in ("", "toggle"):
+        target = not mute.is_muted()
+    else:
+        write_stdout("usage: mute [on|off|status]\n")
+        return 2
+
+    ok = mute.mute(by="cli") if target else mute.unmute()
+    if target:
+        _nudge_daemon_stop()
+    if not ok:
+        write_stdout(f"tts: could not {'mute' if target else 'unmute'} "
+                     f"({mute.mute_path()})\n")
+        return 1
+    write_stdout(mute.describe() + "\n")
+    return 0
 
 
 def _print_history(limit: int, dupes: bool, within: float, check: bool = False) -> int:
@@ -199,7 +247,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="ttsd")
     parser.add_argument("command", nargs="?", default="daemon",
                         choices=("daemon", "hook", "test", "simulate",
-                                 "restore-volumes", "version", "history", "_direct"))
+                                 "restore-volumes", "version", "history", "mute",
+                                 "_direct"))
     parser.add_argument("command_arg", nargs="?")
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--no-tray", action="store_true")
@@ -217,6 +266,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "version":
         write_stdout(_build_version() + "\n")
         return 0
+    if args.command == "mute":
+        return _cli_mute(args.command_arg or "")
     if args.command == "history":
         # Reads the database directly rather than asking the daemon, because the times you
         # most want this are exactly the times the daemon is not running.
@@ -294,6 +345,21 @@ def main(argv: list[str] | None = None) -> int:
             live_icon.stop()
 
     app.on_shutdown = _shutdown
+
+    def _toggle_mute_from_hotkey() -> None:
+        if mute.is_muted():
+            mute.unmute()
+        else:
+            mute.mute(by="hotkey")
+            app.dispatcher.playback.stop()  # silence means now
+        live = tray_holder.get("icon")
+        refresh = getattr(live, "ts_refresh", None)
+        if refresh is not None:
+            refresh()
+
+    # Only while the daemon runs, which is why it is a convenience over the sentinel and
+    # not the mute itself. A chord another app already owns logs once and is dropped.
+    hotkey.start(str(cfg.get("hotkey", "") or ""), _toggle_mute_from_hotkey)
 
     if args.no_tray:
         try:

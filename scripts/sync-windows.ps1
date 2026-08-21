@@ -133,17 +133,6 @@ $ccTtsInputHooks = if ($ccTtsEnabled) {
           }
         ]
       }
-    ],
-    `"PermissionRequest`": [
-      {
-        `"matcher`": `"*`",
-        `"hooks`": [
-          {
-            `"type`": `"command`",
-            `"command`": `"C:/Users/$WinUser/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe hook --source claude --event permission --state permission`"
-          }
-        ]
-      }
     ]
 "@
 } else { '' }

@@ -59,6 +59,10 @@ DEFAULTS: dict[str, Any] = {
     "edge": {"enabled": True, "voice": "en-US-AndrewMultilingualNeural"},
     "maxChars": 120,
     "debounceSec": 5,
+    # Global mute chord, handled by ttsd/hotkey.py while the daemon runs. Empty
+    # disables it. Code-level default on purpose: overriding it belongs in the
+    # untracked local.json, not in a new chezmoi [data] key.
+    "hotkey": "ctrl+alt+shift+m",
     "player": "auto",
     "daemon": {
         "enabled": False,

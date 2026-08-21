@@ -15,6 +15,12 @@ log = logging.getLogger(__name__)
 class Playback:
     def __init__(self) -> None:
         self.current_pid: int | None = None  # retained for AudioController API
+        # The in-flight utterance, so `stop()` can end it. Before this nothing could
+        # interrupt speech already playing: the player was a local and the caller simply
+        # blocked until the audio finished.
+        self._lock = threading.Lock()
+        self._active: tuple[object, threading.Event] | None = None
+        self._stopped = threading.Event()  # set by stop(), cleared per utterance
 
     def probe_duration(self, media: Path) -> float | None:
         try:
@@ -35,6 +41,8 @@ class Playback:
 
             ended = threading.Event()
             failed = threading.Event()
+            self._stopped.clear()  # per utterance, so a past stop cannot mask this one
+            stopped = self._stopped
             player = MediaPlayer()
             try:
                 player.command_manager.is_enabled = False
@@ -45,16 +53,43 @@ class Playback:
             source = MediaSource.create_from_uri(Uri(media.resolve().as_uri()))
             player.source = source
             player.play()
+            with self._lock:
+                self._active = (player, ended)
             completed = ended.wait(timeout=timeout)
+            if stopped.is_set():
+                return True  # cut off on purpose; not a playback failure
             return completed and not failed.is_set()
         except Exception as exc:  # noqa: BLE001 — playback failure falls to SAPI upstream
             log.warning("Windows MediaPlayer failed: %s", exc)
             return False
         finally:
+            with self._lock:
+                self._active = None
             try:
                 player.close()
             except (NameError, AttributeError, RuntimeError):
                 pass
+
+    def stop(self) -> bool:
+        """Cut off the utterance in flight. True if there was one to cut off.
+
+        Called when a mute lands, from a different thread than `play`. Everything here is
+        best-effort: if the cross-thread WinRT call fails, the sentence merely finishes,
+        which is what happened before this existed.
+        """
+        with self._lock:
+            active = self._active
+        if active is None:
+            return False
+        player, ended = active
+        self._stopped.set()
+        try:
+            player.pause()
+        except Exception as exc:  # noqa: BLE001 -- COM across threads; degrade, never raise
+            log.debug("pausing the active player failed: %s", exc)
+        ended.set()  # unblock play()'s wait; its finally does the close
+        log.info("stopped speech in flight")
+        return True
 
     @staticmethod
     def speak_sapi(text: str) -> bool:

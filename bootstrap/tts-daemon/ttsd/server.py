@@ -15,7 +15,7 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
-from . import PROTOCOL_VERSION, history
+from . import PROTOCOL_VERSION, history, mute
 from .events import EventError, parse_event
 
 
@@ -132,8 +132,9 @@ class _Handler(BaseHTTPRequestHandler):
                 }
                 for s in app.registry.all()
             ]})
-        elif self.path == "/v1/dnd":
-            self._send(200, {"enabled": app.dispatcher.dnd_active()})
+        elif self.path in ("/v1/mute", "/v1/dnd"):
+            self._send(200, dict(mute.state(), enabled=mute.is_muted(),
+                                 muted=mute.is_muted()))
         elif self.path.split("?", 1)[0] == "/v1/history":
             # Durable counterpart to /v1/status: those counters die with the process.
             query = urllib.parse.parse_qs(urlsplit(self.path).query)
@@ -178,6 +179,9 @@ class _Handler(BaseHTTPRequestHandler):
             if not text:
                 self._send(400, {"error": "text required"})
                 return
+            if mute.is_muted():
+                self._send(200, {"muted": True})
+                return
             threading.Thread(
                 target=self._speak_raw, args=(text, str(body.get("voice") or "")),
                 daemon=True, name="ttsd-speak-raw",
@@ -194,12 +198,18 @@ class _Handler(BaseHTTPRequestHandler):
             if app.on_shutdown is not None:
                 threading.Thread(target=app.on_shutdown, daemon=True,
                                  name="ttsd-shutdown").start()
-        elif self.path == "/v1/dnd":
+        elif self.path in ("/v1/mute", "/v1/dnd"):
+            # /v1/dnd is kept as an alias: it was the documented route, and callers of it
+            # now get a mute that persists and that the direct path also honours. The
+            # `minutes` field is accepted and ignored -- the mute is sticky by design, so
+            # that a mute cannot expire back into a call.
             body = self._read_json() or {}
-            enabled = bool(body.get("enabled", True))
-            minutes = body.get("minutes")
-            app.dispatcher.set_dnd(enabled, float(minutes) if minutes else None)
-            self._send(200, {"enabled": app.dispatcher.dnd_active()})
+            if bool(body.get("enabled", True)):
+                mute.mute(by=str(body.get("by") or "api"))
+                app.dispatcher.playback.stop()
+            else:
+                mute.unmute()
+            self._send(200, {"enabled": mute.is_muted(), "muted": mute.is_muted()})
         else:
             self._send(404, {"error": "not found"})
 

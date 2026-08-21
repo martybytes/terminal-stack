@@ -1236,6 +1236,43 @@ ccnotify() {
     esac
 }
 
+# The instant mute. Shared with the tray icon and the global hotkey through one
+# sentinel file the Windows EXE owns, so it works even when the daemon is not running --
+# and unlike `cctts off` it writes no config store and triggers no apply.
+_cc_tts_exe() {
+    local winuser
+    [ -d /mnt/c/Users ] || return 1
+    winuser="$(cmd.exe /c 'echo %USERNAME%' 2>/dev/null | tr -d '\r\n')"
+    [ -n "$winuser" ] || return 1
+    printf '/mnt/c/Users/%s/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe' "$winuser"
+}
+
+ccmute() {
+    local exe
+    exe="$(_cc_tts_exe)" || {
+        echo "ccmute: Windows-only (no /mnt/c); this host uses direct playback." >&2
+        return 1
+    }
+    [ -x "$exe" ] || {
+        echo "ccmute: terminal-stack-tts.exe not found — ts-config tts daemon install" >&2
+        return 1
+    }
+    "$exe" mute "$@"
+}
+
+# `enabled` as the hooks actually see it: local.json is deep-merged over config.json and
+# wins, so reading only the rendered file reports "on" while a stale override keeps the
+# machine silent. That exact divergence wasted an afternoon.
+_cc_tts_effective_enabled() {
+    local f v
+    for f in "$HOME/.claude/tts/local.json" "$HOME/.claude/tts/config.json"; do
+        [ -f "$f" ] || continue
+        v="$(grep -m1 '"enabled"' "$f" 2>/dev/null | grep -o 'true\|false')"
+        [ -n "$v" ] && { printf '%s' "$v"; return 0; }
+    done
+    printf 'false'
+}
+
 cctts() {
     case "${1:-}" in
         on)   ts-config tts on ;;
@@ -1243,14 +1280,16 @@ cctts() {
         test) ts-config tts test ;;
         show) ts-config tts show ;;
         *)
-            # Read the rendered config (first "enabled" is the top-level one;
-            # engines.edge.enabled comes later). ts_data_get is bash-only and
+            # Effective value, not just the rendered one: local.json is merged over
+            # config.json and wins, so reading config.json alone reports ON while a
+            # stale override keeps the machine silent. ts_data_get is bash-only and
             # not sourced here — calling it always reported OFF.
-            if grep -m1 '"enabled"' "$HOME/.claude/tts/config.json" 2>/dev/null | grep -q true; then
+            if [ "$(_cc_tts_effective_enabled)" = true ]; then
                 echo 'CC TTS: ON  (cctts off to disable; ts-config tts for settings)'
             else
                 echo 'CC TTS: OFF (cctts on to enable)'
-            fi ;;
+            fi
+            ccmute status 2>/dev/null || true ;;
     esac
 }
 # ---- claude-code-end ----
