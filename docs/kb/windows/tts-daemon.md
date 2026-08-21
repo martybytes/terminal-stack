@@ -88,6 +88,30 @@ Music stuck quiet after a crash? `ts-doctor --repair` (or just start the
 daemon — it restores the stale snapshot at startup). Emergency by hand:
 NirSoft `svcl.exe /SetVolume Spotify.exe 100`.
 
+## Voice went silent after an apply
+
+Almost always the two config stores disagreeing, not the daemon. A save from
+pwsh writes only `%LOCALAPPDATA%\terminal-stack\config.json`; chezmoi `[data]`
+in WSL is what a `chezmoi apply` reads. When they differ, each side renders a
+valid `~/.claude/settings.json` from its own store and whichever applied last
+wins — so TTS works, then quietly stops, then works again.
+
+Check them against each other:
+
+```sh
+chezmoi execute-template '{{ .ccTtsEnabled }}'      # from WSL — authoritative
+```
+
+```powershell
+(Get-Content "$env:LOCALAPPDATA\terminal-stack\config.json" | ConvertFrom-Json).ccTts.enabled
+```
+
+Disagree? Re-save **from WSL** — `ts-config tts on` — which is the only path
+that writes both stores, then confirm `~/.claude/settings.json` has TTS entries
+under `Stop`, `StopFailure`, `Notification`, `PermissionRequest` and the
+`AskUserQuestion` `PreToolUse` matcher. Same rule for every `ts-config`
+setting on a combined Windows+WSL machine, not just TTS.
+
 ## WSL reachability
 
 WSL hooks invoke the installed Windows EXE through interop, so hook execution

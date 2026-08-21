@@ -151,6 +151,20 @@ Update-TsResolvedTheme
 Get-Ts<Key>                                   # must still be 'on'
 ```
 
+**Then check both stores agree.** A bash save writes chezmoi `[data]` and mirrors to
+`config.json`; a pwsh save writes only the mirror. A new key that is read by one apply
+path and written by the other diverges silently — each side renders a valid file from its
+own store, and the setting flips depending on which applied last:
+
+```sh
+chezmoi execute-template '{{ .<key> }}'      # WSL, authoritative
+python -c "import json;print(json.load(open('/mnt/c/Users/<you>/AppData/Local/terminal-stack/config.json')))"
+```
+
+Then apply from *both* sides in sequence and confirm the rendered target is byte-identical
+after each. If the second apply changes what the first wrote, the two paths disagree about
+the key and will keep overwriting each other. See `docs/decisions.md` for the incident.
+
 ## 4b. TTS daemon changes (`bootstrap/tts-daemon/`)
 
 The daemon's pure logic (scheduler, registry, summarizer, event parsing) has a
