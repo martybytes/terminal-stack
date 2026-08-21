@@ -157,6 +157,27 @@ ts_doctor() {
         fi
     fi
 
+    # agentmemory hook wiring (only when agentmemory is actually installed). The hook
+    # scripts live in vendor plugin caches, so a plugin upgrade reverts every edit and
+    # retrieval silently stops - the one failure worth a check, because nothing else
+    # reports it. The sync repairs it automatically; this is for when you want to know.
+    if [ -d /mnt/c/Users ] && [ -n "${src:-}" ] && [ -f "$src/bootstrap/ts-agentmemory.ps1" ]; then
+        local _am_pwsh _am_win
+        _am_pwsh=""
+        for _p in "/mnt/c/Program Files/PowerShell/7/pwsh.exe" \
+                  "/mnt/c/Program Files/PowerShell/7-preview/pwsh.exe"; do
+            [ -x "$_p" ] && { _am_pwsh="$_p"; break; }
+        done
+        if [ -n "$_am_pwsh" ]; then
+            _am_win="$(wslpath -w "$src/bootstrap/ts-agentmemory.ps1" 2>/dev/null || printf '%s' "$src/bootstrap/ts-agentmemory.ps1")"
+            if "$_am_pwsh" -NoLogo -NonInteractive -ExecutionPolicy Bypass -File "$_am_win" -Check >/dev/null 2>&1; then
+                _ok "agentmemory hook wiring intact"
+            else
+                _bad "agentmemory hook wiring is incomplete (a plugin upgrade reverts it) — repair: ts-update, or bootstrap/ts-agentmemory.ps1 -Apply"
+            fi
+        fi
+    fi
+
     # Location advisories (not health failures): a legacy-path runtime clone can
     # be moved to the canonical location; a dev-clone pin is deliberate.
     local canon=""

@@ -409,6 +409,26 @@ if [ -f "$merge_helper" ]; then
   fi
 fi
 
+# agentmemory harness wiring. The hook scripts live in vendor plugin caches, so a plugin
+# upgrade silently reverts every edit and retrieval stops with nothing to show for it.
+# Re-applying here is what makes that self-repairing rather than a manual step nobody
+# remembers. -Check first, so a correctly-wired machine stays silent; the script also
+# no-ops per host when agentmemory is not installed there.
+am_script="$stack_root/bootstrap/ts-agentmemory.ps1"
+if [ -f "$am_script" ]; then
+  am_pwsh="$(resolve_pwsh || true)"
+  if [ -n "$am_pwsh" ]; then
+    am_script_win="$(wslpath -w "$am_script" 2>/dev/null || printf '%s' "$am_script")"
+    if ! "$am_pwsh" -NoLogo -NonInteractive -ExecutionPolicy Bypass -File "$am_script_win" -Check >/dev/null 2>&1; then
+      echo "sync-windows: repairing agentmemory hook wiring"
+      "$am_pwsh" -NoLogo -NonInteractive -ExecutionPolicy Bypass -File "$am_script_win" -Apply \
+        || echo "sync-windows: agentmemory hook wiring failed (non-fatal)." >&2
+    fi
+  else
+    echo "sync-windows: pwsh not found; skipping agentmemory hook wiring." >&2
+  fi
+fi
+
 printf 'sync-windows: user=%s, %d created, %d updated, %d unchanged\n' "$WIN_USER" "$created" "$updated" "$unchanged"
 
 # The mux server (unix domain 'main') loads its own copy of .wezterm.lua and is

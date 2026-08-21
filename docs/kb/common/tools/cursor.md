@@ -25,6 +25,11 @@ yourself and enable its shell command.
   so tools that register their own hooks — agentmemory shares the `stop` and
   `postToolUse` arrays with ours — survive an apply. Add your own hooks straight to
   the file; the stack will not remove them. Never let anything copy that file whole.
+- agentmemory, if installed, is wired by `bootstrap\ts-agentmemory.ps1` from every sync: its
+  seven capture hooks in `~/.cursor/hooks.json`, its MCP server in `~/.cursor/mcp.json`, and its
+  scripts under `~/.cursor/hooks/agentmemory/`. Cursor ships no agentmemory package, so those
+  scripts are copied from the Claude plugin cache and re-tagged for Cursor. Your own hooks in the
+  same event arrays are never touched.
 
 | Command | What it does |
 |---|---|
@@ -35,3 +40,4 @@ yourself and enable its shell command.
 | `cursor -n .` | force a new window |
 | `cursor -r file` | reuse the current window |
 | `cursor --add dir` | add a folder to the open workspace |
+

@@ -41,6 +41,22 @@ Two things follow:
   loading — no error, nothing in `chezmoi diff`. The `.bak.yyyyMMdd[.N]` chain beside
   the file shows what a write removed.
 
+## agentmemory
+
+If a local agentmemory server is running, `bootstrap\ts-agentmemory.ps1` wires this agent to it:
+the tagged URL and `AGENTMEMORY_INJECT_CONTEXT` in `~/.claude/settings.json`'s `env`, plus edits
+to the plugin's own hook scripts. It runs from every sync, so nothing needs doing by hand.
+
+Two things worth knowing:
+
+- **A plugin upgrade reverts the hook-script edits** and retrieval silently stops (capture keeps
+  working, so nothing looks broken). The next `ts-update` repairs it; `ts-doctor` reports it.
+- **Retrieval is on by default.** Set `AGENTMEMORY_INJECT_CONTEXT=false` to turn it off
+  deliberately. Nothing is wired at all when the plugin is not installed.
+
+Not retrieving? Check `ts-doctor` first, then that the agent was started *after* any environment
+change — hooks read their environment at process start.
+
 ## Statusline
 
 The three-line footer under the prompt is `~/.claude/statusline-command.sh`

@@ -283,6 +283,24 @@ if (Test-Path -LiteralPath $mergeHelper) {
     Merge-TsCursorSettings
 }
 
+# agentmemory harness wiring. The hook scripts live in vendor plugin caches, so a plugin
+# upgrade silently reverts every edit and turns retrieval back off with nothing to show
+# for it. Re-applying from the sync is what makes that self-repairing instead of a manual
+# step nobody remembers. -Check first so a correctly-wired machine stays silent, and the
+# script no-ops per host when agentmemory is not installed.
+# Forward slash on purpose: PowerShell accepts it and it cannot be mangled by a
+# generator that treats backslash-t as a tab -- which is exactly how this line was
+# first written, and Test-Path then turned the mistake into a silent no-op.
+$amScript = Join-Path $SourceDir 'bootstrap/ts-agentmemory.ps1'
+if (-not (Test-Path -LiteralPath $amScript)) { throw "sync-windows: missing $amScript" }
+if ($true) {
+    & $amScript -Check *> $null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host 'sync-windows: repairing agentmemory hook wiring'
+        & $amScript -Apply | Out-Host
+    }
+}
+
 Write-Host "sync-windows: user=$WinUser, $created created, $updated updated, $unchanged unchanged"
 
 # The mux server (unix domain 'main') loads its own copy of .wezterm.lua and is

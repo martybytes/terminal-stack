@@ -49,6 +49,20 @@ hooks: launch an interactive session, run `/hooks`, review the two terminal-stac
 trust them once. Until then, the dashboard uses recent-rollout discovery, but
 the exact pane mapping and Stop TTS wait for hook trust.
 
+## agentmemory
+
+Wired by `bootstrap\ts-agentmemory.ps1` from every sync when the agentmemory plugin is installed.
+Codex is the awkward host, for two reasons:
+
+- **It retrieves on the prompt, not the tool call.** Codex emits `Bash` for most tool calls, and a
+  shell command is not a safe source of file paths — guessing what `rg foo src/` will read means
+  inspecting arbitrary command text. So shell tools are excluded from the path-based lookup and
+  Codex asks once per prompt instead, which needs no paths at all.
+- **Two hook registrations are live** — `~/.codex/hooks.json` (Desktop) and the plugin's
+  `hooks.codex.json` (CLI) — so one event fires both. Codex offers no way to disable just one, so
+  the duplicate is dropped inside the hook before any request. Without it, Codex received the same
+  context block twice per prompt.
+
 ## Voice notification
 
 The profile's asynchronous Stop hook sends a `codex` event through the same
