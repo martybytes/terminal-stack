@@ -221,6 +221,13 @@ function Sync-MirrorTree {
                 Merge-TsClaudeSettings -FragmentPath $effectiveSrc -LivePath $dst
                 return
             }
+            # Same problem one level deeper: agentmemory's Cursor hooks share the
+            # `stop` and `postToolUse` event arrays with our TTS hooks, so ownership
+            # is per entry — see bootstrap\_merge_cursor_hooks.ps1.
+            if ($relOut -eq '.cursor\hooks.json') {
+                Merge-TsCursorHooks -FragmentPath $effectiveSrc -LivePath $dst
+                return
+            }
             if (Test-Path -LiteralPath $dst -PathType Leaf) {
                 $srcHash = (Get-FileHash -LiteralPath $effectiveSrc -Algorithm SHA256).Hash
                 $dstHash = (Get-FileHash -LiteralPath $dst -Algorithm SHA256).Hash
@@ -251,13 +258,15 @@ function Sync-MirrorTree {
     }
 }
 
-# Loaded before the mirror runs: Sync-MirrorTree routes .claude\settings.json
-# through Merge-TsClaudeSettings instead of overwriting it.
-$claudeMergeHelper = Join-Path $SourceDir 'bootstrap\_merge_claude_settings.ps1'
-if (-not (Test-Path -LiteralPath $claudeMergeHelper)) {
-    throw "sync-windows: missing $claudeMergeHelper"
+# Loaded before the mirror runs: Sync-MirrorTree routes .claude\settings.json and
+# .cursor\hooks.json through these instead of overwriting them.
+foreach ($helper in @('bootstrap\_merge_claude_settings.ps1', 'bootstrap\_merge_cursor_hooks.ps1')) {
+    $helperPath = Join-Path $SourceDir $helper
+    if (-not (Test-Path -LiteralPath $helperPath)) {
+        throw "sync-windows: missing $helperPath"
+    }
+    . $helperPath
 }
-. $claudeMergeHelper
 
 Sync-MirrorTree -SrcRoot (Join-Path $SourceDir 'windows') -DstRoot $dstHome -RenderTmpl
 Sync-MirrorTree -SrcRoot (Join-Path $SourceDir 'dot_codex') -DstRoot (Join-Path $dstHome '.codex') -RenderTmpl

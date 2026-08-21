@@ -224,7 +224,18 @@ keys survive: for `.claude\settings.json`, everything Claude Code owns (`model`,
 `enabledPlugins`, `permissions`, `env`) must come out of the run byte-identical, and a second
 run must report `already up to date`. Same check for the WSL hook by sourcing just its
 functions with `dst_home` pointed at a `/mnt/c/...` sandbox — `resolve_pwsh` and
-`merge_claude_settings` need nothing else from the script.
+`merge_part_owned` need nothing else from the script.
+
+**Seed the sandbox from a real pre-clobber backup, not a hand-written file.** The
+`.bak.yyyyMMdd[.N]` chain next to the live file is the best available fixture: it is what the
+other tool actually wrote, including entries the current code has never seen. That is how the
+Cursor merge got tested against legacy `cursor-tts.ps1` entries it has to *replace* rather
+than duplicate.
+
+For the per-entry merges, TTS off is a distinct case, not a weaker version of TTS on. Run an
+**on → off → on round trip** on one file and count entries by owner at each step: turning TTS
+off must remove every one of ours and keep every one of theirs, and turning it back on must
+return to exactly the starting counts with no duplicates.
 
 ## 5. What you cannot verify from a dev clone
 

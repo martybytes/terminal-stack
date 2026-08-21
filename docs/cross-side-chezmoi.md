@@ -38,7 +38,14 @@ Files under `windows/` use absolute-path-mirror naming (with `$WIN_USER` resolve
 
 The destination is computed from the source relative path by joining onto `$dst_dir` (`/mnt/c/Users/$WIN_USER`) for `windows/**`, `$dst_dir/.codex` for `dot_codex/**`, or `$dst_dir/AppData/Local/terminal-stack/docs/kb` for the kb mirror. Files ending in `.tmpl` under either rendered mirror are passed through a small **python3** substitution (python3 is required — a sed fallback was removed because it could not render the multi-line `__CC_TTS_*__` tokens and broke on two-modifier leader values) that replaces `__WIN_USER__` and the saved-config tokens (`__LEADER_KEY__`, `__LEADER_MODS__`, `__THEME_MODE__`, `__THEME_RESOLVED__`, `__TMUX_PREFIX__`, `__CC_TTS_*__`) with their resolved values, then the `.tmpl` suffix is stripped from the destination path.
 
-**One destination is not a whole-file copy.** `.claude/settings.json` is *part-owned*: Claude Code writes its own state into the same file (`model`, `enabledPlugins`, `permissions`, `env`), so the rendered fragment is handed to `bootstrap/_merge_claude_settings.ps1`, which splices in only the top-level keys the template renders and leaves every other byte untouched. Copying it whole silently deleted that state and, in one case, disabled an installed Claude Code plugin — `docs/decisions.md` § "Why `~/.claude/settings.json` is spliced, not copied".
+**Two destinations are not whole-file copies.** Both are *part-owned* — another tool writes the same file, so copying it whole silently deletes that tool's state. The rendered fragment goes to a merge helper instead:
+
+| Destination | Helper | Ownership |
+|---|---|---|
+| `.claude/settings.json` | `bootstrap/_merge_claude_settings.ps1` | per top-level key. Claude Code owns `model`, `enabledPlugins`, `permissions`, `env`, `extraKnownMarketplaces` |
+| `.cursor/hooks.json` | `bootstrap/_merge_cursor_hooks.ps1` | per *entry* — everything is under one `hooks` key and agentmemory's Cursor hooks share the `stop` and `postToolUse` event arrays with ours |
+
+Both back up before writing and refuse to write a result that does not re-parse. One sync in 2026-08 disabled an installed Claude Code plugin and emptied Cursor of seven capture hooks this way — `docs/decisions.md` §§ "Why `~/.claude/settings.json` is spliced, not copied" / "Why `~/.cursor/hooks.json` needs per-entry ownership".
 
 ## Username resolution
 
