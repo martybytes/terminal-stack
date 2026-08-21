@@ -331,6 +331,32 @@ Two constraints shaped the mechanism:
 
 The availability half is smaller but mattered more in practice: autostart is logon-only with no watchdog, so a daemon that died at 22:17 was still dead at 13:30 the next day, with no error and nothing in the log. Every hook in between took the unserialized direct path and exited 0, which is how genuinely overlapping voices went unnoticed for fifteen hours. A hook that cannot reach an enabled daemon now starts it and retries once. That is safe to race: two hooks both spawning means the loser fails to bind the port and exits 0 (`_already_running`), so the check only ever asks whether the port answers, never which process won it. `ts-doctor` reports how long the daemon has been silent and flags any session that spoke twice, because neither is visible otherwise — every hook exits 0 either way.
 
+## Why every agent gets prompt-level retrieval
+
+The wiring originally gave `/agentmemory/context` at prompt-submit time to Codex and Cursor only, on the reasoning that Claude "already retrieves on file tools and at session start". Measured against the console feed over 5.7 hours, that assumption failed badly: Claude made **1041** captures, **250** `/enrich` calls and exactly **one** `/context` — and that one was a compaction, since `pre-compact.mjs` is Claude's only `/context` caller. Codex, with the edit, retrieved on essentially every prompt.
+
+The gap is in what `/enrich` can see. It fires only for the vendor allow-list (`edit/write/create/read/view/glob/grep`), `Bash` is excluded both by the `hooks.json` matcher and by that list, and a `Grep`/`Glob` carrying no `path` argument is dropped. A session that is mostly shell work — which is most real work — therefore retrieves nothing at all between session start and the first file edit. `/agentmemory/context` needs only `{ sessionId, project }`, so it is the one channel that does not depend on what tools a turn happens to use.
+
+Two things made this cheap to fix rather than a redesign: the edit already existed and was merely withheld, and the vendor `prompt-submit.mjs` is byte-identical across hosts, so the same anchors applied to Claude untouched. The only real change was adding `prompt-submit.mjs` to Claude's patch set — the installer had never opened that file, which is why the edit could not have landed even if the guard had allowed it.
+
+What stays host-specific is the shell denylist (edit 5). Claude's `PreToolUse` uses the vendor allow-list plus a `hooks.json` matcher; inverting the list there would widen a mechanism that already works rather than fix one that does not.
+
+Cost, accepted deliberately: one request and a context block on every prompt. `AGENTMEMORY_INJECT_CONTEXT=false` turns it off without unpatching anything, which is what the gate edit exists for.
+
+## Why a 401 refreshes the secret from the user environment
+
+`AGENTMEMORY_SECRET` reaches a hook through the process environment, and a User environment variable only reaches processes started *after* it was set. Rotate the secret and every long-lived shell keeps the old one — so every request from any session launched by that shell fails with 401. On 2026-08-21 that ran for thirteen minutes and cost **56 consecutive requests**: `session/start`, `observe`, `enrich`, `session/end`, all rejected, with **nothing in any log**. Capture swallows errors in `.catch(() => {})` and retrieval discards non-2xx behind `if (res.ok)`, which is correct behaviour for a hook that must never block a turn, and exactly what made this invisible.
+
+The recovery re-reads the value from the user environment on a 401 and retries once, caching it for the process. Three choices worth keeping:
+
+- **It wraps `fetch` once per script** instead of each call site. There are six scripts with one or two fetches each; wrapping the global keeps this to a single edit with a single anchor (`function authHeaders() {`, which exists exactly once in all six) rather than a dozen fragile ones.
+- **It reads the user environment, not the container.** The container is the Docker stack's concern, and a hook has no business running `docker exec`. The user environment is where the authoritative value already lives and is what the plugin's own `.mcp.json` reads.
+- **It fails open in every direction.** A non-Windows host, a missing value, an unreadable registry, or a retry that also 401s all return the original response. The recovery can only ever turn a silent failure into a success, never a success into a failure.
+
+It also covers the case where the secret is missing from the process entirely, since "no `Authorization` header" and "wrong `Authorization` header" produce the same 401.
+
+What it cannot fix is a user environment that is *itself* stale relative to the container — nothing local can recover from that, so `ts-doctor` reports it instead, comparing the two when Docker is reachable and staying quiet when it is not.
+
 ## Why the mute is a sentinel file, not the tray's DND
 
 The tray already had `Do not disturb` and `Mute for 1 hour`, and neither silenced the things worth silencing. Both routed to `Dispatcher.set_dnd`, and the single enforcement point exempted `P0_INTERACTIVE` and `P1_ERROR` whenever `quietHours.allowInteractive` was true — the default. So DND muted "done" announcements and spoke every question, permission prompt and error: exactly backwards for someone who just answered a phone call. The flag's name gave no hint that it governed the DND toggle at all.
