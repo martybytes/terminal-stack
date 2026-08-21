@@ -736,3 +736,44 @@ machine at a time), and it would not save `model` or anything else Claude Code w
 The WSL-side `dot_claude/settings.json.tmpl` is still a whole-file chezmoi target. That is
 correct only as long as WSL-side Claude Code has no plugins and no per-machine keys; the day
 it does, it needs a `modify_` script doing the same splice.
+
+## Why `~/.cursor/hooks.json` needs per-entry ownership
+
+Same 19:58 sync, same cause, one level deeper. `~/.cursor/hooks.json` was a whole-file
+mirror of `windows/.cursor/hooks.json.tmpl`, and the copy took agentmemory's seven Cursor
+capture hooks with it — `hooks.json.bak.20260820.5` (1910 bytes) has them,
+`.bak.20260820.6` (578 bytes) is what the sync left.
+
+The key splice that fixed `~/.claude/settings.json` does not work here. That file divides
+cleanly: we own whole top-level keys, Claude Code owns the others. This one has a single
+top-level `hooks` key holding one array per event, and two of the events we write —
+`stop` and `postToolUse` — are events **agentmemory also writes**. Splicing the `hooks`
+value wholesale would delete its entries just as effectively as copying the file did.
+
+So ownership is per entry. `bootstrap/_merge_cursor_hooks.ps1` rebuilds each event array
+as *our rendered entries, then every foreign entry that was already there*, and hands the
+result to the shared splice engine as a synthetic fragment — so only the `hooks` value is
+re-serialised and any other top-level key survives byte-for-byte.
+
+An entry is ours if its command references `terminal-stack` (the TTS EXE) or `cursor-tts`
+(the legacy per-hook scripts, Windows `.ps1` and WSL `.sh`), or is the `cat > /dev/null`
+`afterFileEdit` no-op. The marker list matters more than it looks:
+
+- **Legacy markers are why an upgrade replaces rather than duplicates.** The machine that
+  motivated this had `pwsh … cursor-tts.ps1` entries from before the EXE existed; without
+  that marker the merge would have kept them *and* added the EXE, double-speaking every
+  event.
+- **`cat > /dev/null` has to be a marker, not just an exact match against the render.**
+  With TTS off we render no hooks at all, so there is nothing to match it against — and it
+  still has to go. Turning TTS off must remove our entries and leave everyone else's, which
+  the whole-file copy achieved by brute force and a merge has to do deliberately.
+
+Ordering is ours-then-theirs, which is also what `setup-cursor-integration.ps1` produces
+(it appends itself after everything it does not own). Both tools therefore converge on the
+same array order instead of rewriting the file on each other's account every run — verified
+by an on → off → on round trip that returns to exactly four stack entries and seven
+agentmemory ones, with a second identical run reporting no change at all.
+
+The WSL-side `dot_cursor/hooks.json.tmpl` is still a whole-file chezmoi target, for the same
+reason as its Claude counterpart: nothing else writes the WSL copy today. The day Cursor is
+wired to agentmemory inside WSL, it needs a `modify_` script.

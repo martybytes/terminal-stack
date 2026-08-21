@@ -219,24 +219,31 @@ resolve_pwsh() {
   return 1
 }
 
-claude_merge_helper="$stack_root/bootstrap/_merge_claude_settings.ps1"
-
-# merge_claude_settings <rendered-src> <dst>
-# Claude Code writes ~/.claude/settings.json too: `model`, `enabledPlugins`,
-# `permissions`, `env` and `extraKnownMarketplaces` are its own state, set by
-# /model and /plugin. A whole-file copy deletes all of it — that is how the
-# agentmemory plugin got silently disabled on 2026-08-20 (`enabledPlugins` went
-# missing, so its hooks and MCP server stopped loading). Splice the keys the
-# template renders into the live file and leave every other byte alone.
-merge_claude_settings() {
-  local src="$1" dst="$2" pwsh_bin stage
-  if [ ! -f "$claude_merge_helper" ]; then
-    echo "sync-windows: $claude_merge_helper missing; leaving $dst alone." >&2
+# merge_part_owned <helper-basename> <stage-name> <rendered-src> <dst>
+# Two Windows destinations are part-owned: another tool writes the same file, so a
+# whole-file copy deletes its state. On 2026-08-20 one sync did exactly that to both.
+#
+#   .claude/settings.json  Claude Code owns `model`, `enabledPlugins`, `permissions`,
+#                          `env`, `extraKnownMarketplaces` (set by /model, /plugin).
+#                          Losing `enabledPlugins` silently disabled the agentmemory
+#                          plugin: twelve lifecycle hooks and its MCP server stopped
+#                          loading, with nothing to say why.
+#   .cursor/hooks.json     agentmemory's seven Cursor hooks live in the same `hooks`
+#                          object as our TTS hooks — two of them in the very same
+#                          event arrays — so ownership there is per entry.
+#
+# Both merges are pwsh: the splice engine and the entry-level ownership rules are
+# already written there, and the destination is a Windows path either way.
+merge_part_owned() {
+  local helper_name="$1" stage_name="$2" src="$3" dst="$4"
+  local helper="$stack_root/bootstrap/$helper_name" pwsh_bin stage
+  if [ ! -f "$helper" ]; then
+    echo "sync-windows: $helper missing; leaving $dst alone." >&2
     return 0
   fi
   if ! pwsh_bin="$(resolve_pwsh)"; then
     if [ -e "$dst" ]; then
-      echo "sync-windows: pwsh not found; leaving $dst alone — a whole-file copy would delete Claude Code's own keys." >&2
+      echo "sync-windows: pwsh not found; leaving $dst alone — a whole-file copy would delete another tool's own entries." >&2
       return 0
     fi
     # Nothing there yet, so nothing to preserve: the plain copy is correct.
@@ -247,14 +254,14 @@ merge_claude_settings() {
   fi
   # Stage the rendered fragment on the Windows side so pwsh.exe reads a real
   # C:\ path instead of a \\wsl.localhost round trip.
-  stage="$dst_home/AppData/Local/Temp/terminal-stack-claude-settings.json"
+  stage="$dst_home/AppData/Local/Temp/$stage_name"
   mkdir -p -- "$(dirname -- "$stage")"
   cp -- "$src" "$stage"
   if ! "$pwsh_bin" -NoLogo -NonInteractive -ExecutionPolicy Bypass \
-       -File "$(wslpath -w "$claude_merge_helper")" \
+       -File "$(wslpath -w "$helper")" \
        -FragmentPath "$(wslpath -w "$stage")" \
        -LivePath "$(wslpath -w "$dst")"; then
-    echo "sync-windows: Claude settings merge failed (non-fatal); $dst left as it was." >&2
+    echo "sync-windows: merge via $helper_name failed (non-fatal); $dst left as it was." >&2
   fi
   rm -f -- "$stage"
   return 0
@@ -316,10 +323,18 @@ PY
 
     dst="$dst_root/$rel_out"
 
-    if [ "$dst" = "$dst_home/.claude/settings.json" ]; then
-      merge_claude_settings "$effective_src" "$dst"
-      continue
-    fi
+    case "$dst" in
+      "$dst_home/.claude/settings.json")
+        merge_part_owned _merge_claude_settings.ps1 \
+          terminal-stack-claude-settings.json "$effective_src" "$dst"
+        continue
+        ;;
+      "$dst_home/.cursor/hooks.json")
+        merge_part_owned _merge_cursor_hooks.ps1 \
+          terminal-stack-cursor-hooks.json "$effective_src" "$dst"
+        continue
+        ;;
+    esac
 
     if [ -e "$dst" ]; then
       if cmp -s "$effective_src" "$dst"; then
