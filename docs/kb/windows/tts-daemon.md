@@ -38,12 +38,19 @@ speak, unduck now.
   (rate-limited vs billing error, which tool wants permission, …).
 - `self` — the model itself ends each turn with `<!-- speak: one sentence -->`
   and the daemon reads only that (zero added latency). Installing this mode
-  adds a marker block to `~/.claude/CLAUDE.md`; switching away removes it.
+  adds removable marker blocks to Claude's `~/.claude/CLAUDE.md` and Codex's
+  active global `$CODEX_HOME/AGENTS.md` (or `AGENTS.override.md` when present).
+  Cursor User Rules are GUI-managed, and an existing Codex session loads its
+  instructions only once, so a missing marker derives a short sentence locally
+  from the final-response hook text. Only an empty response falls back to the
+  waiting template. Switching away removes every stack-owned marker block.
 - `haiku` — Claude Haiku rewrites the final message into one spoken sentence
   (~1 s, needs `ANTHROPIC_API_KEY` in the daemon's environment).
 - `ollama` — same against a local Ollama (`ts-config tts ollama <url> <model>`).
 
-Every mode degrades rightward to `template` on any failure.
+Every mode degrades rightward to `template` on any failure. `ts-config` also
+reloads a reachable running daemon after saving, so changing modes does not
+require `ts-config tts daemon restart`.
 
 ## Cursor
 
@@ -57,7 +64,8 @@ the stack cannot manage it):
 > what you did or what you need. Plain words only — no code, no paths. Omit it
 > for trivial turns.
 
-Without the rule, Cursor announcements just use the template lines.
+Without the rule, Cursor still speaks the locally derived summary; it does not
+repeat the fixed waiting template unless the hook supplied no response text.
 
 ## Where things live
 

@@ -747,33 +747,78 @@ function Get-CcTtsSelfStripped {
     return $out
 }
 
-function Install-CcTtsSelfBlock {
-    $target = Join-Path $env:USERPROFILE '.claude\CLAUDE.md'
+function Get-CcTtsCodexInstructionPath {
+    $codexHome = if ($env:CODEX_HOME) {
+        $env:CODEX_HOME
+    } else {
+        Join-Path $env:USERPROFILE '.codex'
+    }
+    $override = Join-Path $codexHome 'AGENTS.override.md'
+    if ((Test-Path -LiteralPath $override) -and (Get-Item -LiteralPath $override).Length -gt 0) {
+        return $override
+    }
+    return (Join-Path $codexHome 'AGENTS.md')
+}
+
+function Install-CcTtsSelfBlockAtPath {
+    param([string]$Target, [string]$Agent)
     $asset = Join-Path $PSScriptRoot 'tts-daemon\assets\speak-summary.md'
     if (-not (Test-Path -LiteralPath $asset)) {
         Write-Warning 'tts: speak-summary.md asset not found (run ts-update?)'
-        return
+        return $false
     }
-    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $target) | Out-Null
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Target) | Out-Null
     $lines = @()
-    if (Test-Path -LiteralPath $target) {
-        Backup-CcTtsUserFile $target
-        $lines = @(Get-CcTtsSelfStripped $target) + @('')
+    if (Test-Path -LiteralPath $Target) {
+        Backup-CcTtsUserFile $Target
+        $lines = @(Get-CcTtsSelfStripped $Target) + @('')
     }
     $lines += @(Get-Content -LiteralPath $asset)
-    Set-Content -LiteralPath $target -Value $lines -Encoding UTF8
-    Write-Host "tts: spoken-summary instruction installed in $target"
+    Set-Content -LiteralPath $Target -Value $lines -Encoding UTF8
+    Write-Host "tts: spoken-summary instruction installed for $Agent in $Target"
+    return $true
+}
+
+function Install-CcTtsSelfBlock {
+    $targets = @(
+        @{ Agent = 'Claude'; Path = (Join-Path $env:USERPROFILE '.claude\CLAUDE.md') }
+        @{ Agent = 'Codex';  Path = (Get-CcTtsCodexInstructionPath) }
+    )
+    foreach ($item in $targets) {
+        Install-CcTtsSelfBlockAtPath -Target $item.Path -Agent $item.Agent | Out-Null
+    }
+    Write-Host 'tts: Cursor uses its final-response hook text when no GUI-managed User Rule marker is present'
 }
 
 function Remove-CcTtsSelfBlock {
-    $target = Join-Path $env:USERPROFILE '.claude\CLAUDE.md'
-    if (-not (Test-Path -LiteralPath $target)) { return }
-    $raw = Get-Content -LiteralPath $target -Raw
-    if (-not $raw.Contains($script:CcTtsSelfStart)) { return }
-    Backup-CcTtsUserFile $target
-    $lines = @(Get-CcTtsSelfStripped $target)
-    Set-Content -LiteralPath $target -Value $lines -Encoding UTF8
-    Write-Host "tts: spoken-summary instruction removed from $target"
+    $codexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE '.codex' }
+    $targets = @(
+        (Join-Path $env:USERPROFILE '.claude\CLAUDE.md')
+        (Join-Path $codexHome 'AGENTS.md')
+        (Join-Path $codexHome 'AGENTS.override.md')
+    ) | Select-Object -Unique
+    foreach ($target in $targets) {
+        if (-not (Test-Path -LiteralPath $target)) { continue }
+        $raw = Get-Content -LiteralPath $target -Raw
+        if (-not $raw.Contains($script:CcTtsSelfStart)) { continue }
+        Backup-CcTtsUserFile $target
+        $lines = @(Get-CcTtsSelfStripped $target)
+        Set-Content -LiteralPath $target -Value $lines -Encoding UTF8
+        Write-Host "tts: spoken-summary instruction removed from $target"
+    }
+}
+
+function Invoke-CcTtsDaemonConfigReload {
+    param($Tts)
+    if (-not $Tts.daemon -or -not $Tts.daemon.enabled) { return }
+    $port = if ($Tts.daemon.port) { [int]$Tts.daemon.port } else { 8890 }
+    try {
+        Invoke-WebRequest -Uri "http://127.0.0.1:$port/v1/config/reload" `
+            -Method Post -TimeoutSec 1 -UseBasicParsing | Out-Null
+        Write-Host 'tts: running daemon reloaded the new configuration'
+    } catch {
+        # Never-silence fallback remains active; a stopped/older daemon is not an error here.
+    }
 }
 
 function Invoke-TsConfigTts {
@@ -945,5 +990,6 @@ function Invoke-TsConfigTts {
     }
     if ($Sub -in 'on','off','engine','message','voice','voice-chatter','energy','excitement','url','events','prefix','project','template','reset','daemon','summarizer','haiku-model','ollama','music','duck-level','voices','port') {
         & $Apply $tts
+        Invoke-CcTtsDaemonConfigReload $tts
     }
 }

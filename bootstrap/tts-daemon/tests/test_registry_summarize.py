@@ -61,10 +61,28 @@ def test_self_marker_extraction():
     assert line.startswith("Claude.")
 
 
-def test_self_without_marker_falls_back_to_template():
+def test_self_without_marker_derives_short_local_summary():
     s = Summarizer(DictCfg({"summarize": {"mode": "self"}}))
-    line = s.line_for_batch([ev(text="no marker here")], Registry())
+    line = s.line_for_batch(
+        [ev(text="Implemented Cursor summaries without another model call. More detail follows.")],
+        Registry())
+    assert "Implemented Cursor summaries without another model call." in line
+    assert "Done in alpha" not in line
+
+
+def test_self_without_text_falls_back_to_template():
+    s = Summarizer(DictCfg({"summarize": {"mode": "self"}}))
+    line = s.line_for_batch([ev(text="")], Registry())
     assert "Done in alpha" in line
+
+
+def test_self_local_summary_is_limited_to_fifteen_words():
+    s = Summarizer(DictCfg({"summarize": {"mode": "self"}}))
+    text = "One two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen"
+    line = s.line_for_batch([ev(text=text)], Registry())
+    summary = line.split("finished. ", 1)[1]
+    assert len(summary.split()) == 15
+    assert "sixteen" not in line
 
 
 def test_error_type_enrichment():

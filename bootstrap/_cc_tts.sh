@@ -165,6 +165,31 @@ ts_cc_tts_finish() {
     local cz
     if cz="$(ts_chezmoi_bin)"; then "$cz" init >/dev/null 2>&1 || true; fi
     ts_mirror_windows_config
+    ts_cc_tts_reload_daemon_config || true
+}
+
+ts_cc_tts_reload_daemon_config() {
+    [ "$(ts_cc_tts_get ccTtsDaemon)" = on ] || return 0
+    command -v curl >/dev/null 2>&1 || return 0
+    local port hostline host token
+    port="$(ts_cc_tts_get ccTtsDaemonPort)"
+    if curl -sf --max-time 1 -X POST "http://127.0.0.1:${port}/v1/config/reload" >/dev/null 2>&1; then
+        echo 'tts: running daemon reloaded the new configuration'
+        return 0
+    fi
+    [ -f "${HOME}/.claude/hooks/cc-tts-lib.sh" ] || return 0
+    # shellcheck source=/dev/null
+    . "${HOME}/.claude/hooks/cc-tts-lib.sh"
+    hostline="$(cc_tts_daemon_host "$port" 2>/dev/null)" || return 0
+    host="${hostline%% *}"; token="${hostline#* }"
+    if [ "$token" != "$hostline" ] && [ -n "$token" ]; then
+        curl -sf --max-time 1 -X POST -H "X-TS-Token: $token" \
+            "http://${host}:${port}/v1/config/reload" >/dev/null 2>&1 || return 0
+    else
+        curl -sf --max-time 1 -X POST \
+            "http://${host}:${port}/v1/config/reload" >/dev/null 2>&1 || return 0
+    fi
+    echo 'tts: running daemon reloaded the new configuration'
 }
 
 # Emit ccTts JSON object for config.json mirror (single line, no external jq).
@@ -317,7 +342,7 @@ ts_cc_tts_daemon_status() {
     fi
 }
 
-# ── `summarizer self` marker block in the user's ~/.claude/CLAUDE.md ───────────
+# ── `summarizer self` marker blocks for Claude and Codex ──────────────────────
 # Marker-block edit, same discipline as \$PROFILE regions: install appends the
 # block from bootstrap/tts-daemon/assets/speak-summary.md (which carries its own
 # start/end markers); switching modes removes exactly that block. Backups follow
@@ -342,12 +367,20 @@ ts_cc_tts_self_strip() {
         skip && index($0, e) { skip = 0 }' "$1"
 }
 
-ts_cc_tts_self_install() {
-    local target="${HOME}/.claude/CLAUDE.md"
-    local asset
+ts_cc_tts_codex_instruction_path() {
+    local codex_home="$1"
+    if [ -s "${codex_home}/AGENTS.override.md" ]; then
+        printf '%s/AGENTS.override.md\n' "$codex_home"
+    else
+        printf '%s/AGENTS.md\n' "$codex_home"
+    fi
+}
+
+ts_cc_tts_self_install_one() {
+    local target="$1" agent="$2" asset
     asset="$(ts_cc_tts_bootstrap_dir)/tts-daemon/assets/speak-summary.md"
     [ -f "$asset" ] || { echo "tts: speak-summary.md asset not found (run ts-update?)" >&2; return 1; }
-    mkdir -p "${HOME}/.claude" 2>/dev/null || true
+    mkdir -p "$(dirname "$target")" 2>/dev/null || true
     if [ -f "$target" ]; then
         ts_cc_tts_backup_file "$target"
         { ts_cc_tts_self_strip "$target"; echo; cat "$asset"; } > "$target.tmp" \
@@ -355,16 +388,50 @@ ts_cc_tts_self_install() {
     else
         cat "$asset" > "$target"
     fi
-    echo "tts: spoken-summary instruction installed in $target"
+    echo "tts: spoken-summary instruction installed for $agent in $target"
+}
+
+ts_cc_tts_windows_home() {
+    [ -d /mnt/c/Users ] || return 1
+    local winuser
+    winuser="$(cmd.exe /c 'echo %USERNAME%' 2>/dev/null | tr -d '\r\n')"
+    [ -n "$winuser" ] || return 1
+    printf '/mnt/c/Users/%s\n' "$winuser"
+}
+
+ts_cc_tts_self_install() {
+    local codex_home="${CODEX_HOME:-${HOME}/.codex}" win_home win_codex
+    ts_cc_tts_self_install_one "${HOME}/.claude/CLAUDE.md" Claude || return 1
+    ts_cc_tts_self_install_one "$(ts_cc_tts_codex_instruction_path "$codex_home")" Codex || return 1
+    if win_home="$(ts_cc_tts_windows_home)"; then
+        ts_cc_tts_self_install_one "${win_home}/.claude/CLAUDE.md" 'Claude (Windows)' || return 1
+        win_codex="${win_home}/.codex"
+        ts_cc_tts_self_install_one "$(ts_cc_tts_codex_instruction_path "$win_codex")" 'Codex (Windows)' || return 1
+    fi
+    echo 'tts: Cursor uses its final-response hook text when no GUI-managed User Rule marker is present'
 }
 
 ts_cc_tts_self_remove() {
-    local target="${HOME}/.claude/CLAUDE.md"
-    [ -f "$target" ] || return 0
-    grep -qF "$TS_CC_TTS_SELF_START" "$target" || return 0
-    ts_cc_tts_backup_file "$target"
-    ts_cc_tts_self_strip "$target" > "$target.tmp" && mv "$target.tmp" "$target"
-    echo "tts: spoken-summary instruction removed from $target"
+    local target codex_home="${CODEX_HOME:-${HOME}/.codex}" win_home
+    local -a targets=(
+        "${HOME}/.claude/CLAUDE.md"
+        "${codex_home}/AGENTS.md"
+        "${codex_home}/AGENTS.override.md"
+    )
+    if win_home="$(ts_cc_tts_windows_home)"; then
+        targets+=(
+            "${win_home}/.claude/CLAUDE.md"
+            "${win_home}/.codex/AGENTS.md"
+            "${win_home}/.codex/AGENTS.override.md"
+        )
+    fi
+    for target in "${targets[@]}"; do
+        [ -f "$target" ] || continue
+        grep -qF "$TS_CC_TTS_SELF_START" "$target" || continue
+        ts_cc_tts_backup_file "$target"
+        ts_cc_tts_self_strip "$target" > "$target.tmp" && mv "$target.tmp" "$target"
+        echo "tts: spoken-summary instruction removed from $target"
+    done
 }
 
 # Wizard: probe Kokoro; echo on|off|skip recommendation.
