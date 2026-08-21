@@ -503,6 +503,10 @@ function Get-TsClones {
 # otherwise brick ts-update / wso / doc machine-wide with no way out — it degrades
 # to the normal candidate search instead.
 function Resolve-TsSourceDir([string]$SourceDir) {
+    # Initialized up front: it is only assigned in the stale-pin branch below, and reading
+    # an unset variable is a terminating error under Set-StrictMode -- which a caller's
+    # session can have on for reasons that have nothing to do with this repo.
+    $stalePin = $false
     if ($SourceDir) {
         if (-not (Test-Path (Join-Path $SourceDir '.git'))) {
             Write-Warning "terminal-stack clone not found at $SourceDir. Pass -SourceDir <path> or re-run install.ps1."
@@ -711,12 +715,14 @@ function Set-TerminalStackConfig {
     if (-not (Test-Path $helper)) { Write-Warning "$helper not found; cannot configure."; return }
     . $helper
 
+    # Get-TsProp rather than dot access, for the strictness reason above: a config.json
+    # written before a key existed makes every one of these a terminating error.
     $c = Get-TsConfig
-    $leader = if ($c.leaderChord) { $c.leaderChord } else { 'ctrl-space' }
-    $theme  = if ($c.themeMode)   { $c.themeMode }   else { 'dark' }
-    $tmux   = if ($c.tmuxPrefix)  { $c.tmuxPrefix }  else { 'ctrl-b' }
-    $apps   = @($c.apps)
-    $ccTts  = if ($c.ccTts) { $c.ccTts } else { Get-CcTtsDefaults }
+    $leader = Get-TsProp $c leaderChord 'ctrl-space'
+    $theme  = Get-TsProp $c themeMode   'dark'
+    $tmux   = Get-TsProp $c tmuxPrefix  'ctrl-b'
+    $apps   = @(Get-TsProp $c apps @())
+    $ccTts  = Get-TsProp $c ccTts (Get-CcTtsDefaults)
 
     $save = {
         param($Tts = $ccTts)
