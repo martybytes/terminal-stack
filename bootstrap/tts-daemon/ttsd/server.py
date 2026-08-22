@@ -11,11 +11,15 @@ from __future__ import annotations
 import json
 import logging
 import threading
+import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
 from . import PROTOCOL_VERSION, history, mute
+from .config import logs_dir
+from .logtail import LogTail, parse_line
+from .webui import PAGE
 from .events import EventError, parse_event
 
 
@@ -52,6 +56,10 @@ class App:
         self.token = token
         self.received = 0
         self.on_shutdown = None  # wired by __main__; POST /v1/shutdown
+        # Set on shutdown so a long-lived log stream stops promptly instead of being left
+        # for the interpreter to reap. listener.shutdown() stops the accept loop but says
+        # nothing to a response already in progress.
+        self.stopping = threading.Event()
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -69,6 +77,34 @@ class _Handler(BaseHTTPRequestHandler):
         if not getattr(self.server, "requires_token", False):
             return True
         return self.headers.get("X-TS-Token", "") == self.app.token
+
+    def _send_raw(self, code: int, body: bytes, ctype: str) -> None:
+        """Non-JSON response. Everything here spoke only JSON before the dashboard."""
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _host_ok(self) -> bool:
+        """Reject a Host header we do not recognise.
+
+        Loopback needs no token, which is safe against other machines and not at all safe
+        against a browser: any page can reach 127.0.0.1, and with no Host validation a DNS
+        rebinding attack could read this daemon's history and status. The bound address is
+        always acceptable, so the WSL-facing listener keeps working for hooks that address
+        it by gateway IP.
+
+        A missing Host is allowed: HTTP/1.1 clients must send one and every browser does,
+        so the only callers without it are local scripts, and refusing them would break
+        working paths to no security benefit.
+        """
+        host = self.headers.get("Host")
+        if not host:
+            return True
+        name = host.rsplit(":", 1)[0].strip("[]").lower()
+        bound = str(self.server.server_address[0])
+        return name in {"127.0.0.1", "localhost", "::1", bound.lower()}
 
     def _send(self, code: int, payload: dict) -> None:
         body = json.dumps(payload).encode()
@@ -93,7 +129,23 @@ class _Handler(BaseHTTPRequestHandler):
         if not self._authorized():
             self._send(401, {"error": "bad token"})
             return
+        if not self._host_ok():
+            self._send(403, {"error": "unexpected Host header"})
+            return
         app = self.app
+        route = self.path.split("?", 1)[0]
+        if route in ("/ui", "/ui/", "/dashboard"):
+            self._send_raw(200, PAGE.encode("utf-8"), "text/html; charset=utf-8")
+            return
+        if route == "/v1/history/summary":
+            # history.summary() was CLI-only. daemon_silent_for is the number that let a
+            # fifteen-hour outage pass unnoticed, so a status panel needs it.
+            self._send(200, history.summary(
+                dupe_window=float(app.cfg.get("debounceSec", 5) or 5)))
+            return
+        if route == "/v1/logs/stream":
+            self._stream_logs()
+            return
         if self.path == "/healthz":
             self._send(200, {
                 "ok": True,
@@ -140,7 +192,8 @@ class _Handler(BaseHTTPRequestHandler):
             ]})
         elif self.path in ("/v1/mute", "/v1/dnd"):
             self._send(200, dict(mute.state(), enabled=mute.is_muted(),
-                                 muted=mute.is_muted()))
+                                 muted=mute.is_muted(),
+                                 describe=mute.describe()))
         elif self.path.split("?", 1)[0] == "/v1/history":
             # Durable counterpart to /v1/status: those counters die with the process.
             query = urllib.parse.parse_qs(urlsplit(self.path).query)
@@ -159,6 +212,9 @@ class _Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         if not self._authorized():
             self._send(401, {"error": "bad token"})
+            return
+        if not self._host_ok():
+            self._send(403, {"error": "unexpected Host header"})
             return
         app = self.app
         if self.path == "/v1/event":
@@ -218,6 +274,60 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(200, {"enabled": mute.is_muted(), "muted": mute.is_muted()})
         else:
             self._send(404, {"error": "not found"})
+
+    def _stream_logs(self) -> None:
+        """Server-sent events, one per log line, until the client or the daemon goes away.
+
+        Hand-rolled because `BaseHTTPRequestHandler` has no notion of streaming. Two
+        details are load-bearing: `protocol_version = "HTTP/1.1"` means a response without
+        a Content-Length would leave the browser waiting forever, so the connection is
+        explicitly closed rather than kept alive; and every write can raise once the tab
+        closes, which is a normal end of stream rather than an error worth logging.
+        """
+        app = self.app
+        tail = LogTail(logs_dir() / "ttsd.log")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("X-Accel-Buffering", "no")
+        self.close_connection = True
+        self.end_headers()
+
+        def emit(event: str, payload: dict) -> None:
+            self.wfile.write(
+                f"event: {event}\ndata: {json.dumps(payload)}\n\n".encode("utf-8"))
+
+        def as_payload(line: str) -> dict:
+            parsed = parse_line(line)
+            # A line that does not parse is a continuation (a traceback, say). Send it as
+            # raw so the page can attach it to the record above instead of dropping it.
+            return parsed if parsed is not None else {"raw": line}
+
+        try:
+            if not tail.exists():
+                emit("meta", {"note": "no log file yet"})
+            for line in tail.snapshot(200):
+                emit("line", as_payload(line))
+            emit("meta", {"note": "streaming"})
+            idle = 0.0
+            while not app.stopping.is_set():
+                lines = tail.read_new()
+                for line in lines:
+                    emit("line", as_payload(line))
+                if lines:
+                    idle = 0.0
+                else:
+                    idle += 0.5
+                    if idle >= 15:
+                        # A comment keeps the connection warm and, more usefully, fails
+                        # here when the peer has gone so the thread does not linger.
+                        self.wfile.write(b": ping\n\n")
+                        idle = 0.0
+                time.sleep(0.5)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            pass  # the tab closed; not an error
+        except OSError as exc:
+            log.debug("log stream ended: %s", exc)
 
     def _speak_raw(self, text: str, voice: str) -> None:
         """Test path: bypasses queue rules, still ducks."""

@@ -331,6 +331,51 @@ Two constraints shaped the mechanism:
 
 The availability half is smaller but mattered more in practice: autostart is logon-only with no watchdog, so a daemon that died at 22:17 was still dead at 13:30 the next day, with no error and nothing in the log. Every hook in between took the unserialized direct path and exited 0, which is how genuinely overlapping voices went unnoticed for fifteen hours. A hook that cannot reach an enabled daemon now starts it and retries once. That is safe to race: two hooks both spawning means the loser fails to bind the port and exits 0 (`_already_running`), so the check only ever asks whether the port answers, never which process won it. `ts-doctor` reports how long the daemon has been silent and flags any session that spoke twice, because neither is visible otherwise — every hook exits 0 either way.
 
+## Why the dashboard is a page served by the daemon
+
+The daemon already runs an HTTP server on loopback, so a browser page costs no new bundled
+dependency, no console window, and no second GUI toolkit. The alternative worth taking
+seriously was a native always-on-top window, and it loses on a specific mechanical point:
+pystray owns the main thread for the life of the process, so Tk would have to run its own
+loop on a worker thread, which is unsupported and prone to hanging, and it would add roughly
+10MB plus DLLs to a binary this repo is deliberately careful about.
+
+**The page is a Python string literal, not a bundled asset.** The spec's only `datas` entry
+is a 41-byte build artifact, and the repo's one real source asset is clone-resident by
+design, which cannot work for a frozen EXE in `%LOCALAPPDATA%` with no reliable path back to
+the clone. The `_MEIPASS` lookup that would be required degrades silently to a default on
+`OSError`, and the same silent degrade here would serve a blank page from a healthy daemon.
+A literal cannot be forgotten in a spec edit.
+
+**Two panels, because they answer different questions.** The raw log says what the daemon is
+doing, including engine errors that never reach a decision. The decision timeline, from the
+history database, says what it chose and why: `spoken`, `deduped`, `muted`, `suppressed_dnd`,
+`synth_failed`. The log cannot answer "why was it silent" cleanly, and that has been the
+recurring question. The timeline also survives log rotation and daemon restarts.
+
+The streaming is hand-rolled inside `BaseHTTPRequestHandler`, and three details are
+load-bearing. `protocol_version = "HTTP/1.1"` means a response without a `Content-Length`
+would leave the browser waiting forever, so the connection is explicitly closed rather than
+kept alive. Every write can raise once the tab closes, which is a normal end of stream and
+not worth logging. And the loop polls `app.stopping`, because `listener.shutdown()` stops the
+accept loop but says nothing to a response already in progress.
+
+Following the log never holds the file open. `RotatingFileHandler` renames `ttsd.log` on
+rotation, and on Windows a reader with the handle open can make that rename *fail inside the
+handler*, which would break the daemon's own logging in order to display it. So: stat, open,
+read, close, every poll; detect rotation by the file shrinking; decode with
+`errors="replace"` because a byte offset can land mid-codepoint in a line containing smart
+quotes; hold back anything after the last newline so no half record is rendered; and treat a
+line that fails the timestamp pattern as a continuation rather than dropping it, since a
+future `log.exception` would emit those.
+
+**A Host allowlist, before any write endpoint exists.** Loopback needs no token, which is
+safe against other machines and not at all safe against a browser: any page can reach
+127.0.0.1. With no `Host` validation, DNS rebinding would let a remote page read this
+daemon's history and status. The bound address is always accepted, so the WSL-facing listener
+keeps working for hooks that address it by gateway IP, and a missing `Host` is allowed because
+only local scripts omit it while every browser sends one.
+
 ## Why a summarizer that cannot work says so
 
 Selecting `haiku` with no API key produced *no* observable difference from `template`. The

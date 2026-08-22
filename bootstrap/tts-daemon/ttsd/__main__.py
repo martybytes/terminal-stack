@@ -335,6 +335,8 @@ def main(argv: list[str] | None = None) -> int:
 
     def _shutdown(icon=None) -> None:
         log.info("shutting down")
+        # Before the listeners: a log stream is sitting in a sleep loop and polls this.
+        app.stopping.set()
         for listener in listeners:
             listener.shutdown()
         app.dispatcher.stop()

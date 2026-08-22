@@ -118,6 +118,17 @@ def build_icon(app, log_path, on_quit):
         app.cfg.reload()
         _refresh(icon)  # `enabled` may have changed, which changes the icon
 
+    def _open_dashboard(icon, item) -> None:
+        # os.startfile, not webbrowser: startfile is already proven in this frozen
+        # GUI-subsystem binary by _open_log, needs no new import, and hands the URL to
+        # ShellExecute. webbrowser's fallbacks shell out to console programs, which is
+        # exactly what this EXE exists to avoid.
+        port = int(app.cfg.get("daemon.port", 8890))
+        try:
+            os.startfile(f"http://127.0.0.1:{port}/ui")  # noqa: S606 - fixed loopback URL
+        except OSError as exc:
+            log.warning("open dashboard failed: %s", exc)
+
     def _open_log(icon, item) -> None:
         try:
             os.startfile(log_path)  # noqa: S606 — user-invoked, fixed path
@@ -140,6 +151,7 @@ def build_icon(app, log_path, on_quit):
         ])),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Test speak", _test_speak),
+        pystray.MenuItem("Open dashboard", _open_dashboard),
         pystray.MenuItem("Unduck now", _unduck),
         pystray.MenuItem("Reload config", _reload),
         pystray.MenuItem("Open log", _open_log),
