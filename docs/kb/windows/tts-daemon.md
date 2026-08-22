@@ -83,6 +83,7 @@ repeat the fixed waiting template unless the hook supplied no response text.
 | duck snapshot (crash safety) | `…\tts-daemon\state\duck-snapshot.json` |
 | utterance history (SQLite) | `…\tts-daemon\state\history.db` |
 | mute sentinel (existence = muted) | `…\tts-daemon\state\muted` |
+| secrets (the haiku API key) | `…\tts-daemon\state\secrets.json` |
 | play lock (direct path only) | `…\tts-daemon\state\speak.lock` |
 | runtime knobs | `~/.claude/tts/config.json` + untracked `local.json` |
 | autostart | HKCU `…\CurrentVersion\Run` → `"…\terminal-stack-tts.exe" daemon` |

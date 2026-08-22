@@ -104,6 +104,8 @@ repair offers the same canonical move and re-syncs (a pin is written to
 | `ts-config tmux <chord>` | tmux prefix, e.g. `ctrl-a` — see `doc common/tmux` |
 | `ts-config apps [recommended\|all\|none\|id,…]` | app catalog; no arg → picker; installs, never uninstalls |
 | `ts-config tts <show\|on\|off\|test\|…>` | Claude/Cursor voice — see `doc common/claude-code` |
+| `ccmute` | silence the voice instantly, until you unmute. Also the tray icon, `Ctrl+Alt+Shift+M`, `Leader+m` |
+| (tray) | the tray's **Open dashboard** gives live activity, the daemon log and a settings editor: see `doc windows/tts-daemon` |
 | `ts-config mux [on\|off\|…]` | hand-off to `ts-mux` (WezTerm multiplexer domain) |
 | `ts-config restore <on\|off>` | reopen the last WezTerm session at startup (default off) |
 
