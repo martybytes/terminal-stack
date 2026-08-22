@@ -280,7 +280,8 @@ TS_MIRROR_DATA_KEYS="
     ccTtsPrefixCodex ccTtsPrefixCodexEnabled ccTtsPrefixCursor ccTtsPrefixCursorEnabled 
     ccTtsSummarizer ccTtsTemplateError ccTtsTemplatePermission ccTtsTemplateQuestion 
     ccTtsTemplateWaiting ccTtsVoicePool leaderChord tmuxPrefix windowsUsername
-    weztermMux weztermRestore
+    weztermMux weztermRestore headroomEnabled headroomCursorMode cavemanEnabled
+    agentmemoryEnabled
 "
 
 ts_data_prefetch() {
@@ -321,6 +322,61 @@ ts_data_get() {
 ts_data_get_apps() {
     local cz; cz="$(ts_chezmoi_bin)" || return 1
     "$cz" execute-template '{{ if hasKey . "apps" }}{{ range $i,$a := .apps }}{{ if $i }} {{ end }}{{ $a }}{{ end }}{{ end }}' 2>/dev/null
+}
+
+# Per-machine, user-global coding-agent integrations. Fresh machines default to
+# off. AgentMemory alone migrates to on when its pre-toggle plugin wiring already
+# exists, so an upgrade does not silently disable an established installation.
+ts_agent_get() {
+    local key="$1" env_name="" v=""
+    case "$key" in
+        headroomEnabled) env_name=TS_HEADROOM ;;
+        headroomCursorMode) env_name=TS_HEADROOM_CURSOR ;;
+        cavemanEnabled) env_name=TS_CAVEMAN ;;
+        agentmemoryEnabled) env_name=TS_AGENTMEMORY ;;
+        *) echo "ts_agent_get: unknown key '$key'" >&2; return 2 ;;
+    esac
+    eval "v=\${$env_name:-}"
+    [ -n "$v" ] || v="$(ts_data_get "$key" 2>/dev/null || true)"
+    if [ -z "$v" ] && [ "$key" = headroomCursorMode ]; then v=mcp; fi
+    if [ -z "$v" ] && [ "$key" = agentmemoryEnabled ]; then
+        if [ -d "$HOME/.claude/plugins/cache/agentmemory/agentmemory" ] \
+            || [ -d "$HOME/.codex/plugins/cache/agentmemory/agentmemory" ]; then v=on; fi
+        if [ -z "$v" ] && [ -d /mnt/c/Users ]; then
+            local winuser=""; winuser="$(ts_win_user 2>/dev/null || true)"
+            if [ -n "$winuser" ] && { [ -d "/mnt/c/Users/$winuser/.claude/plugins/cache/agentmemory/agentmemory" ] \
+                || [ -d "/mnt/c/Users/$winuser/.codex/plugins/cache/agentmemory/agentmemory" ]; }; then v=on; fi
+        fi
+    fi
+    [ -n "$v" ] || v=off
+    printf '%s\n' "$(printf '%s' "$v" | tr 'A-Z' 'a-z')"
+}
+
+ts_agent_set() {
+    local key="$1" value="$2"
+    case "$key:$value" in
+        headroomEnabled:on|headroomEnabled:off|cavemanEnabled:on|cavemanEnabled:off|agentmemoryEnabled:on|agentmemoryEnabled:off|headroomCursorMode:mcp|headroomCursorMode:byok|headroomCursorMode:off) ;;
+        *) echo "ts_agent_set: invalid $key=$value" >&2; return 2 ;;
+    esac
+    ts_data_set "$key" "$value"
+    ts_mirror_windows_config
+}
+
+ts_agents_save_config() {
+    local headroom="${1:-off}" cursor="${2:-mcp}" caveman="${3:-off}" agentmemory="${4:-off}"
+    ts_data_set headroomEnabled "$headroom"
+    ts_data_set headroomCursorMode "$cursor"
+    ts_data_set cavemanEnabled "$caveman"
+    ts_data_set agentmemoryEnabled "$agentmemory"
+    ts_mirror_windows_config
+}
+
+ts_agents_apply_wizard() {
+    local script="${1:-}"
+    [ -f "$script" ] || return 0
+    [ "${TS_WIZ_HEADROOM:-off}" = on ] && bash "$script" headroom on "${TS_WIZ_HEADROOM_CURSOR:-mcp}" || [ "${TS_WIZ_HEADROOM:-off}" != on ] || echo "$WARN Headroom client setup failed; retry: ts-config agents headroom repair" >&2
+    [ "${TS_WIZ_CAVEMAN:-off}" = on ] && bash "$script" caveman on || [ "${TS_WIZ_CAVEMAN:-off}" != on ] || echo "$WARN Caveman setup failed; retry: ts-config agents caveman repair" >&2
+    [ "${TS_WIZ_AGENTMEMORY:-off}" = on ] && bash "$script" agentmemory on || [ "${TS_WIZ_AGENTMEMORY:-off}" != on ] || echo "$WARN AgentMemory setup failed; retry: ts-config agents agentmemory repair" >&2
 }
 
 # ── WezTerm multiplexer domain ──────────────────────────────────────────────────
@@ -474,6 +530,10 @@ EOF
   "tmuxPrefixResolved": "$tr",
   "weztermMux": "$(ts_wez_mux_get)",
   "weztermRestore": "$(ts_wez_restore_get)",
+  "headroomEnabled": "$(ts_agent_get headroomEnabled)",
+  "headroomCursorMode": "$(ts_agent_get headroomCursorMode)",
+  "cavemanEnabled": "$(ts_agent_get cavemanEnabled)",
+  "agentmemoryEnabled": "$(ts_agent_get agentmemoryEnabled)",
   "apps": [$jsonapps],
 $(ts_cc_tts_json_for_mirror)
 }

@@ -1119,11 +1119,42 @@ duplicate-but-working rather than silently dropping capture. An earlier version 
 server-side in `docker-local`'s bundle patch; it only ever covered `/observe`, and absorbed the
 duplicate instead of preventing it.
 
-**Auto-detected, with no saved setting.** Convention here is that new behaviour becomes an opt-in
-`[data]` key asked at install, but a new key costs the documented 7-step blast radius across
-`_wizard.sh`, `_config.{sh,ps1}`, `.chezmoi.toml.tmpl`, `ts-config.sh` and both sync scripts —
-and one more key that can silently diverge between chezmoi `[data]` and the Windows mirror, which
-is exactly how `ccTtsEnabled` removed five TTS hooks. Detection is unambiguous (the plugin cache
-either exists or it does not) and costs nothing, so a host is wired when agentmemory is installed
-for it and skipped silently otherwise. Gating on the cache rather than on server reachability
-means stopping the container does not unwire anything.
+**Originally auto-detected; now explicitly machine-local.** The first harness version avoided a
+saved key because the plugin cache was an unambiguous signal and another mirrored value enlarged
+the config-store blast radius. Once Headroom and Caveman joined the same lifecycle, that stopped
+being a sufficient model: service availability and desired behavior differ by computer. The
+explicit `agentmemoryEnabled` key now travels through every config/mirror test, while a missing key
+migrates to on when an existing plugin cache proves the pre-toggle machine was already wired.
+Runtime wiring remains gated on the plugin cache rather than server reachability, so stopping the
+container does not unwire anything.
+
+## Why agent tools are user-global but machine-local
+
+Headroom, Caveman, and AgentMemory should affect every project without adding a
+file to every repository, but they cannot be one roaming yes/no choice. Headroom
+and AgentMemory depend on loopback Docker services that intentionally do not exist
+on every computer, and Cursor's subscription traffic cannot be treated like a
+provider API key. The four settings therefore live in terminal-stack's existing
+per-machine stores: chezmoi `[data]` on Unix/WSL and its Windows
+`%LOCALAPPDATA%\terminal-stack\config.json` mirror. WSL remains authoritative on a
+combined machine. Fresh values are off; an existing AgentMemory plugin is the one
+migration signal, so introducing the toggle cannot silently disable working hooks.
+
+Docker-local owns service lifecycle, images, secrets, feature flags, volumes, and
+data. Terminal-stack owns only the client seam: user-scope plugins/skills/MCP,
+shell wrappers, and merge-safe hook entries. That boundary is why `off` and
+`uninstall` never issue a Docker command.
+
+Headroom model routing stays out of permanent Claude/Codex provider config. The
+shell wrapper probes the proxy briefly, injects the base URL into only the child
+process, restores the previous environment in `finally`/function scope, and goes
+direct when the proxy is down. This preserves Codex provider identity/history and
+avoids turning a Docker outage into an agent outage. Cursor has no supported
+equivalent launch override, so its choice is explicit: MCP-only (subscription
+models direct), BYOK (manual global provider URL and separate billing), or off.
+
+Pins live together in `bootstrap/agent-tools.json`; upgrades change there through
+review rather than following `latest` service images. `ts-update` checks only tools
+enabled on the current machine and repairs their user-global client wiring. JSON
+files shared with the agents are edited by named entry, with a backup, so unrelated
+MCP servers and hooks survive.

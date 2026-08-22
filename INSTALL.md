@@ -291,6 +291,42 @@ Lands via `chezmoi apply`: zsh `ccs` / `ssht`, enhanced interactive `codex`,
 three-line dashboard and Stop TTS. See `doc codex` for the dashboard, one-time
 hook trust, and the security trade-off of `--yolo`.
 
+### Phase 6b — Per-computer coding-agent tools
+
+The wizard optionally enables Headroom, Caveman, and AgentMemory at user scope.
+Fresh machines default off; the same account can therefore use a Docker-backed
+desktop setup on one computer and no local services on another. Scripted answers:
+
+```text
+TS_HEADROOM=on|off
+TS_HEADROOM_CURSOR=mcp|byok|off
+TS_CAVEMAN=on|off
+TS_AGENTMEMORY=on|off
+```
+
+Terminal-stack never manages the containers. Headroom expects the docker-local
+proxy/dashboard on `127.0.0.1:8787` and its HTTP MCP sidecar on `8788`; AgentMemory
+expects its REST service on `3111` and viewer on `3113`. Cursor `mcp` keeps
+subscription-model traffic direct. `byok` requires a provider API key, separate
+provider billing, and a one-time global Cursor provider base URL. Change anything
+later with `ts-config agents`; `off` removes active client wiring while preserving
+service data, and `uninstall` also removes terminal-stack-owned client packages.
+
+Verify the client seam after the Docker services are running:
+
+```powershell
+ts-config agents headroom status
+ts-config agents caveman status
+ts-config agents agentmemory status
+ts-config agents headroom dashboard
+```
+
+Headroom's dashboard labels traffic by the client/provider that made it. A
+`claude -p ...` smoke test therefore appears as Claude/Anthropic; a routed Codex
+session appears as OpenAI and records Codex WebSocket frames. Start a new agent
+session after changing these settings because an already-running process keeps
+the environment and instructions it started with.
+
 ### Phase 7 — Modern CLI tools
 
 ```powershell

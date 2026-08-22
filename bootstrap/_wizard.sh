@@ -14,6 +14,8 @@
 #   TS_WEZ_RESTORE=on|off                    reopen the last session at startup
 #   TS_CC_TTS=on|off|skip   Claude Code Kokoro TTS at install
 #   TS_CC_TTS_DAEMON=on|off route TTS through the Windows tray daemon (WSL only)
+#   TS_HEADROOM=on|off TS_HEADROOM_CURSOR=mcp|byok|off
+#   TS_CAVEMAN=on|off TS_AGENTMEMORY=on|off
 #   TS_ASSUME_YES=1         skip the review prompt (answers still come from the above)
 #
 # This file is sourced, not executed. Do not `exit`; return non-zero instead.
@@ -236,6 +238,23 @@ ts_prompt_apps() {
     esac
 }
 
+ts_prompt_agent_toggle() {
+    local env_name="$1" title="$2" note="$3" value=""
+    eval "value=\${$env_name:-}"
+    if [ -n "$value" ]; then case "$value" in on) echo on ;; *) echo off ;; esac; return; fi
+    ts_prompt_choice off "$title" "$note" 'off|off|configure later with ts-config agents' 'on|on|user-global on this computer'
+}
+
+ts_prompt_headroom_cursor() {
+    [ -n "${TS_HEADROOM_CURSOR:-}" ] && { case "$TS_HEADROOM_CURSOR" in mcp|byok|off) echo "$TS_HEADROOM_CURSOR";; *) echo mcp;; esac; return; }
+    ts_prompt_choice mcp 'Cursor Headroom mode:' \
+'  MCP keeps Cursor subscription model traffic direct. BYOK routes model traffic
+  through Headroom but requires a provider API key and separate provider billing.' \
+        'mcp|MCP only|recommended for Cursor subscriptions' \
+        'byok|BYOK proxy|provider API key required' \
+        'off|off'
+}
+
 # Render the collected answers for review before anything is installed.
 ts_wizard_review() {
     local theme_label
@@ -255,6 +274,9 @@ ts_wizard_review() {
     printf '    Apps             %s\n' "${TS_WIZ_APPS:-<none>}"
     printf '    Claude TTS       %s\n' "${TS_WIZ_CC_TTS:-off}"
     [ "${TS_WIZ_CC_TTS:-off}" = on ] && printf '    TTS daemon       %s\n' "${TS_WIZ_CC_TTS_DAEMON:-off}"
+    printf '    Headroom         %s (Cursor: %s)\n' "${TS_WIZ_HEADROOM:-off}" "${TS_WIZ_HEADROOM_CURSOR:-mcp}"
+    printf '    Caveman          %s\n' "${TS_WIZ_CAVEMAN:-off}"
+    printf '    AgentMemory      %s\n' "${TS_WIZ_AGENTMEMORY:-off}"
 }
 
 # Ask each question once. Env vars skip their prompt individually.
@@ -323,6 +345,21 @@ ts_wizard_ask() {
     else
         TS_WIZ_CC_TTS_DAEMON=off
     fi
+
+    if command -v ts_is_headless >/dev/null 2>&1 && ts_is_headless; then
+        TS_WIZ_HEADROOM="${TS_HEADROOM:-off}"; TS_WIZ_CAVEMAN="${TS_CAVEMAN:-off}"; TS_WIZ_AGENTMEMORY="${TS_AGENTMEMORY:-off}"
+    else
+        TS_WIZ_HEADROOM="$(ts_prompt_agent_toggle TS_HEADROOM 'Headroom prompt compression and monitoring?' '  Expects the docker-local proxy on 127.0.0.1:8787 and MCP sidecar on 8788. This installer never manages those containers.')"
+        [ -n "${TS_HEADROOM:-}" ] || TS_WIZ_ASKED=$((TS_WIZ_ASKED + 1))
+        TS_WIZ_CAVEMAN="$(ts_prompt_agent_toggle TS_CAVEMAN 'Caveman terse output for all projects?' '  Installs the pinned user-scope plugin/skill; no project files are changed.')"
+        [ -n "${TS_CAVEMAN:-}" ] || TS_WIZ_ASKED=$((TS_WIZ_ASKED + 1))
+        TS_WIZ_AGENTMEMORY="$(ts_prompt_agent_toggle TS_AGENTMEMORY 'AgentMemory for all projects?' '  Expects the docker-local service on 127.0.0.1:3111; terminal-stack owns only agent wiring.')"
+        [ -n "${TS_AGENTMEMORY:-}" ] || TS_WIZ_ASKED=$((TS_WIZ_ASKED + 1))
+    fi
+    if [ "$TS_WIZ_HEADROOM" = on ]; then
+        TS_WIZ_HEADROOM_CURSOR="$(ts_prompt_headroom_cursor)"
+        [ -n "${TS_HEADROOM_CURSOR:-}" ] || TS_WIZ_ASKED=$((TS_WIZ_ASKED + 1))
+    else TS_WIZ_HEADROOM_CURSOR="${TS_HEADROOM_CURSOR:-mcp}"; fi
 }
 
 # Gather choices into TS_WIZ_* (no chezmoi writes here), then show them for
@@ -344,7 +381,7 @@ ts_wizard_collect() {
         esac
     done
 
-    export TS_WIZ_LEADER TS_WIZ_THEME TS_WIZ_APPS TS_WIZ_TMUX TS_WIZ_CC_TTS TS_WIZ_CC_TTS_DAEMON TS_WIZ_WEZTERM TS_WIZ_WEZ_MUX TS_WIZ_WEZ_RESTORE
-    echo "$INFO Config: leader=$TS_WIZ_LEADER theme=$TS_WIZ_THEME tmux-prefix=$TS_WIZ_TMUX wez-mux=${TS_WIZ_WEZ_MUX:-off} wez-restore=${TS_WIZ_WEZ_RESTORE:-off} cc-tts=${TS_WIZ_CC_TTS:-off} tts-daemon=${TS_WIZ_CC_TTS_DAEMON:-off}"
+    export TS_WIZ_LEADER TS_WIZ_THEME TS_WIZ_APPS TS_WIZ_TMUX TS_WIZ_CC_TTS TS_WIZ_CC_TTS_DAEMON TS_WIZ_WEZTERM TS_WIZ_WEZ_MUX TS_WIZ_WEZ_RESTORE TS_WIZ_HEADROOM TS_WIZ_HEADROOM_CURSOR TS_WIZ_CAVEMAN TS_WIZ_AGENTMEMORY
+    echo "$INFO Config: leader=$TS_WIZ_LEADER theme=$TS_WIZ_THEME tmux-prefix=$TS_WIZ_TMUX wez-mux=${TS_WIZ_WEZ_MUX:-off} wez-restore=${TS_WIZ_WEZ_RESTORE:-off} cc-tts=${TS_WIZ_CC_TTS:-off} headroom=${TS_WIZ_HEADROOM:-off} caveman=${TS_WIZ_CAVEMAN:-off} agentmemory=${TS_WIZ_AGENTMEMORY:-off}"
     echo "$INFO Apps: ${TS_WIZ_APPS:-<none>}"
 }

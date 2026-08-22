@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "headroom": {
+    "version": "0.36.3",
+    "proxyUrl": "http://127.0.0.1:8787",
+    "mcpUrl": "http://127.0.0.1:8788/mcp",
+    "dashboardUrl": "http://127.0.0.1:8787/dashboard",
+    "healthPaths": ["/readyz", "/health"],
+    "dockerImage": "ghcr.io/chopratejas/headroom:0.36.3"
+  },
+  "caveman": {
+    "version": "2.2.0",
+    "source": "JuliusBrussee/caveman#v2.2.0",
+    "claudeMarketplace": "JuliusBrussee/caveman@v2.2.0",
+    "skill": "caveman"
+  },
+  "agentmemory": {
+    "version": "0.9.29",
+    "source": "rohitg00/agentmemory",
+    "ref": "v0.9.29",
+    "restUrl": "http://127.0.0.1:3111",
+    "viewerUrl": "http://127.0.0.1:3113"
+  }
+}

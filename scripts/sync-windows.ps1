@@ -272,17 +272,32 @@ if (Test-Path -LiteralPath $mergeHelper) {
     Merge-TsCursorSettings
 }
 
-# agentmemory harness wiring. The hook scripts live in vendor plugin caches, so a plugin
-# upgrade silently reverts every edit and turns retrieval back off with nothing to show
-# for it. Re-applying from the sync is what makes that self-repairing instead of a manual
-# step nobody remembers. -Check first so a correctly-wired machine stays silent, and the
-# script no-ops per host when agentmemory is not installed.
+# Enabled user-global coding-agent integrations are reconciled on update. Disabled
+# tools are not installed or contacted, which is what lets each computer differ.
+$agentsScript = Join-Path $SourceDir 'bootstrap/ts-agents.ps1'
+$headroomEnabled = if (Get-Command Get-TsAgentSetting -ErrorAction SilentlyContinue) { (Get-TsAgentSetting headroomEnabled) -eq 'on' } else { $false }
+$cavemanEnabled = if (Get-Command Get-TsAgentSetting -ErrorAction SilentlyContinue) { (Get-TsAgentSetting cavemanEnabled) -eq 'on' } else { $false }
+$agentmemoryEnabled = if (Get-Command Get-TsAgentSetting -ErrorAction SilentlyContinue) { (Get-TsAgentSetting agentmemoryEnabled) -eq 'on' } else { $false }
+if (Test-Path -LiteralPath $agentsScript) {
+    if ($headroomEnabled) {
+        & $agentsScript -Tool headroom -Action status -CursorMode (Get-TsAgentSetting headroomCursorMode) *> $null
+        if ($LASTEXITCODE -ne 0) { & $agentsScript -Tool headroom -Action repair -CursorMode (Get-TsAgentSetting headroomCursorMode) | Out-Host }
+    }
+    if ($cavemanEnabled) {
+        & $agentsScript -Tool caveman -Action status *> $null
+        if ($LASTEXITCODE -ne 0) { & $agentsScript -Tool caveman -Action repair | Out-Host }
+    }
+}
+
+# AgentMemory's hook scripts live in vendor plugin caches, so an upgrade silently
+# reverts terminal-stack's retrieval edits. The low-level check avoids network work
+# when the pinned plugin is already installed and healthy.
 # Forward slash on purpose: PowerShell accepts it and it cannot be mangled by a
 # generator that treats backslash-t as a tab -- which is exactly how this line was
 # first written, and Test-Path then turned the mistake into a silent no-op.
 $amScript = Join-Path $SourceDir 'bootstrap/ts-agentmemory.ps1'
 if (-not (Test-Path -LiteralPath $amScript)) { throw "sync-windows: missing $amScript" }
-if ($true) {
+if ($agentmemoryEnabled) {
     & $amScript -Check *> $null
     if ($LASTEXITCODE -ne 0) {
         Write-Host 'sync-windows: repairing agentmemory hook wiring'
@@ -299,3 +314,7 @@ if ($weztermChanged -and $tok['__WEZ_MUX__'] -eq 'on') {
     Write-Warning 'WezTerm config changed. The GUI reloads live, but wezterm-mux-server keeps the old config for spawning panes.'
     Write-Warning "When convenient (closes all panes!): 'ts-mux restart'."
 }
+
+# A failed -Check followed by a successful repair leaves PowerShell's process-wide
+# LASTEXITCODE at 1. The sync itself succeeded; do not make ts-update report failure.
+$global:LASTEXITCODE = 0

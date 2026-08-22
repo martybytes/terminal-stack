@@ -43,7 +43,8 @@ Two things follow:
 
 ## agentmemory
 
-If a local agentmemory server is running, `bootstrap\ts-agentmemory.ps1` wires this agent to it:
+When `ts-config agents agentmemory on` is saved for this computer,
+`bootstrap\ts-agentmemory.ps1` wires this agent to a local server:
 the tagged URL and `AGENTMEMORY_INJECT_CONTEXT` in `~/.claude/settings.json`'s `env`, plus edits
 to the plugin's own hook scripts. It runs from every sync, so nothing needs doing by hand.
 
@@ -52,10 +53,25 @@ Two things worth knowing:
 - **A plugin upgrade reverts the hook-script edits** and retrieval silently stops (capture keeps
   working, so nothing looks broken). The next `ts-update` repairs it; `ts-doctor` reports it.
 - **Retrieval is on by default.** Set `AGENTMEMORY_INJECT_CONTEXT=false` to turn it off
-  deliberately. Nothing is wired at all when the plugin is not installed.
+  deliberately. `ts-config agents agentmemory off` removes the active client wiring
+  without touching the Docker service, secret, or data.
 
 Not retrieving? Check `ts-doctor` first, then that the agent was started *after* any environment
 change — hooks read their environment at process start.
+
+## Headroom and Caveman
+
+`ts-config agents headroom on` registers the user-scope HTTP MCP server and makes
+the shell's `claude` wrapper use `http://127.0.0.1:8787` only when the proxy is
+healthy. A stopped proxy produces one warning and a direct launch; `claude-stock`
+always bypasses Headroom. The monitor is `ts-config agents headroom dashboard`.
+
+`ts-config agents caveman on` installs the pinned user-scope Claude plugin. Its
+hooks make terse output always-on without replacing this stack's status line.
+Confirm both layers with `ts-config agents headroom status` and
+`ts-config agents caveman status`. A Headroom dashboard row created by Claude is
+expected to identify itself as Claude/Anthropic; that label describes the client
+that sent the request, not the terminal where the command was launched.
 
 ## Statusline
 

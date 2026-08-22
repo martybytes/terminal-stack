@@ -191,7 +191,11 @@ ts_doctor() {
                             themeMode:themeMode \
                             tmuxPrefix:tmuxPrefix \
                             weztermMux:weztermMux \
-                            weztermRestore:weztermRestore; do
+                            weztermRestore:weztermRestore \
+                            headroomEnabled:headroomEnabled \
+                            headroomCursorMode:headroomCursorMode \
+                            cavemanEnabled:cavemanEnabled \
+                            agentmemoryEnabled:agentmemoryEnabled; do
                 _dv_key="${_dv_pair%%:*}"
                 _dv_path="${_dv_pair#*:}"
                 _dv_mine="$(ts_data_get "$_dv_key" 2>/dev/null || true)"
@@ -292,7 +296,8 @@ ts_doctor() {
     # scripts live in vendor plugin caches, so a plugin upgrade reverts every edit and
     # retrieval silently stops - the one failure worth a check, because nothing else
     # reports it. The sync repairs it automatically; this is for when you want to know.
-    if [ -d /mnt/c/Users ] && [ -n "${src:-}" ] && [ -f "$src/bootstrap/ts-agentmemory.ps1" ]; then
+    if [ "$(ts_agent_get agentmemoryEnabled 2>/dev/null || echo off)" = on ] \
+        && [ -d /mnt/c/Users ] && [ -n "${src:-}" ] && [ -f "$src/bootstrap/ts-agentmemory.ps1" ]; then
         local _am_pwsh _am_win
         _am_pwsh=""
         for _p in "/mnt/c/Program Files/PowerShell/7/pwsh.exe" \

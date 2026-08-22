@@ -186,6 +186,82 @@ function Set-WezTabTitle([string]$title) {
     }
 }
 
+# Agent-tool settings are read at launch, so `ts-config agents ...` takes effect
+# in already-open shells. Headroom routing is process-local and restored in a
+# finally block; no provider URL leaks into later commands or child shells.
+function Get-TsAgentRuntimeSetting([string]$Name, [string]$Default = 'off') {
+    $envName = switch ($Name) {
+        'headroomEnabled' { 'TS_HEADROOM' }
+        'headroomCursorMode' { 'TS_HEADROOM_CURSOR' }
+        'cavemanEnabled' { 'TS_CAVEMAN' }
+        'agentmemoryEnabled' { 'TS_AGENTMEMORY' }
+    }
+    if ($envName) {
+        $override = [Environment]::GetEnvironmentVariable($envName, 'Process')
+        if ($override) { return $override.ToLowerInvariant() }
+    }
+    $path = Join-Path $env:LOCALAPPDATA 'terminal-stack\config.json'
+    try {
+        $cfg = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+        $prop = $cfg.PSObject.Properties[$Name]
+        if ($prop -and $prop.Value) { return "$($prop.Value)".ToLowerInvariant() }
+    } catch {}
+    return $Default
+}
+
+$script:TsHeadroomProbeAt = [datetime]::MinValue
+$script:TsHeadroomProbeOk = $false
+$script:TsHeadroomWarned = $false
+function Test-TsHeadroomRuntime {
+    if ((Get-TsAgentRuntimeSetting headroomEnabled) -ne 'on') { return $false }
+    if (((Get-Date) - $script:TsHeadroomProbeAt).TotalSeconds -lt 5) { return $script:TsHeadroomProbeOk }
+    $script:TsHeadroomProbeAt = Get-Date
+    $script:TsHeadroomProbeOk = $false
+    foreach ($path in @('readyz','health')) {
+        try {
+            $r = Invoke-WebRequest -Uri "http://127.0.0.1:8787/$path" -TimeoutSec 1 -UseBasicParsing
+            if ($r.StatusCode -ge 200 -and $r.StatusCode -lt 500) { $script:TsHeadroomProbeOk = $true; break }
+        } catch {}
+    }
+    return $script:TsHeadroomProbeOk
+}
+
+$script:TsClaudeCommand = @('claude.exe', 'claude.cmd') |
+    ForEach-Object { Get-Command $_ -CommandType Application -ErrorAction SilentlyContinue } |
+    Select-Object -First 1 -ExpandProperty Source
+if (-not $script:TsClaudeCommand) {
+    $script:TsClaudeCommand = (Get-Command claude -CommandType Application -ErrorAction SilentlyContinue).Source
+}
+function claude-stock {
+    if (-not $script:TsClaudeCommand) { throw 'claude executable was not found on PATH when this profile loaded' }
+    & $script:TsClaudeCommand @args
+}
+function claude {
+    if (-not $script:TsClaudeCommand) { throw 'claude executable was not found on PATH when this profile loaded' }
+    if ((Get-TsAgentRuntimeSetting headroomEnabled) -ne 'on') { & $script:TsClaudeCommand @args; return }
+    if (-not (Test-TsHeadroomRuntime)) {
+        if (-not $script:TsHeadroomWarned) {
+            Write-Warning 'Headroom is enabled but unavailable on 127.0.0.1:8787; this Claude launch is going direct.'
+            $script:TsHeadroomWarned = $true
+        }
+        & $script:TsClaudeCommand @args
+        return
+    }
+    $savedBase = $env:ANTHROPIC_BASE_URL
+    $savedSearch = $env:ENABLE_TOOL_SEARCH
+    $savedProject = $env:HEADROOM_PROJECT
+    try {
+        $env:ANTHROPIC_BASE_URL = 'http://127.0.0.1:8787'
+        if (-not $env:ENABLE_TOOL_SEARCH) { $env:ENABLE_TOOL_SEARCH = 'true' }
+        $env:HEADROOM_PROJECT = Split-Path -Leaf $PWD
+        & $script:TsClaudeCommand @args
+    } finally {
+        $env:ANTHROPIC_BASE_URL = $savedBase
+        $env:ENABLE_TOOL_SEARCH = $savedSearch
+        $env:HEADROOM_PROJECT = $savedProject
+    }
+}
+
 # Bare project leaf as the tab title — no 'cc' prefix: the WezTerm tab bar's
 # Claude icon and state dots already say Claude, and the prefix wasted tab width.
 function cc    { Set-WezTabTitle "$(Split-Path -Leaf $PWD)"; try { claude @args } finally { Set-WezTabTitle "" } }
@@ -270,10 +346,22 @@ function Invoke-TsCodex {
     }
 
     $previousParent = $env:TS_CODEX_PARENT_PANE
+    $previousOpenAiBase = $env:OPENAI_BASE_URL
+    $previousHeadroomProject = $env:HEADROOM_PROJECT
     $env:TS_CODEX_PARENT_PANE = $parent
     $exitCode = 0
     try {
         if (-not $script:TsCodexCommand) { throw 'codex executable was not found on PATH when this profile loaded' }
+        if ((Get-TsAgentRuntimeSetting headroomEnabled) -eq 'on') {
+            if (Test-TsHeadroomRuntime) {
+                $env:OPENAI_BASE_URL = 'http://127.0.0.1:8787/v1'
+                $env:HEADROOM_PROJECT = Split-Path -Leaf $PWD
+                $codexArgs += @('--config', 'openai_base_url="http://127.0.0.1:8787/v1"')
+            } elseif (-not $script:TsHeadroomWarned) {
+                Write-Warning 'Headroom is enabled but unavailable on 127.0.0.1:8787; this Codex launch is going direct.'
+                $script:TsHeadroomWarned = $true
+            }
+        }
         & $script:TsCodexCommand @codexArgs @CliArgs
         $exitCode = $LASTEXITCODE
     } finally {
@@ -284,6 +372,8 @@ function Invoke-TsCodex {
             & py.exe -3 $helper cleanup --pane $parent 2>$null | Out-Null
         }
         $env:TS_CODEX_PARENT_PANE = $previousParent
+        $env:OPENAI_BASE_URL = $previousOpenAiBase
+        $env:HEADROOM_PROJECT = $previousHeadroomProject
     }
     $global:LASTEXITCODE = $exitCode
 }
@@ -723,13 +813,33 @@ function Set-TerminalStackConfig {
     $tmux   = Get-TsProp $c tmuxPrefix  'ctrl-b'
     $apps   = @(Get-TsProp $c apps @())
     $ccTts  = Get-TsProp $c ccTts (Get-CcTtsDefaults)
+    $headroom = Get-TsAgentSetting headroomEnabled
+    $headroomCursor = Get-TsAgentSetting headroomCursorMode
+    $caveman = Get-TsAgentSetting cavemanEnabled
+    $agentmemory = Get-TsAgentSetting agentmemoryEnabled
 
     $save = {
         param($Tts = $ccTts)
-        Save-TsConfig -LeaderChord $leader -ThemeMode $theme -TmuxPrefix $tmux -Apps $apps -CcTts $Tts | Out-Null
+        Save-TsConfig -LeaderChord $leader -ThemeMode $theme -TmuxPrefix $tmux -Apps $apps -CcTts $Tts `
+            -HeadroomEnabled $headroom -HeadroomCursorMode $headroomCursor `
+            -CavemanEnabled $caveman -AgentmemoryEnabled $agentmemory | Out-Null
         Export-CcTtsJson
         Invoke-TsSync $src
         Write-Host '==> done.'
+    }
+
+    $agentsShow = {
+        Write-Host 'coding agents (user-global on this computer):'
+        Write-Host "  headroom   : $headroom   (Cursor: $headroomCursor)"
+        Write-Host "  caveman    : $caveman"
+        Write-Host "  agentmemory: $agentmemory"
+    }
+    $agentsRun = {
+        param([string]$Tool, [string]$Verb, [string]$CursorMode = $headroomCursor)
+        $scriptPath = Join-Path $src 'bootstrap\ts-agents.ps1'
+        & pwsh -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $scriptPath `
+            -Tool $Tool -Action $Verb -CursorMode $CursorMode | Out-Host
+        return ($LASTEXITCODE -eq 0)
     }
 
     switch ($Action) {
@@ -744,8 +854,11 @@ function Set-TerminalStackConfig {
                 Write-Host "  cc-tts     : $(if ($ccTts.enabled) { 'on' } else { 'off' })"
                 Write-Host "  wezmux     : $(Get-TsWeztermMux)"
                 Write-Host "  wezrestore : $(Get-TsWeztermRestore)"
+                Write-Host "  headroom   : $headroom   (Cursor: $headroomCursor)"
+                Write-Host "  caveman    : $caveman"
+                Write-Host "  agentmemory: $agentmemory"
                 Write-Host ''
-                Write-Host '  1) leader  2) theme  3) tmux prefix  4) apps  5) re-apply  6) Claude TTS  7) WezTerm mux  8) session restore  q) quit'
+                Write-Host '  1) leader  2) theme  3) tmux prefix  4) apps  5) re-apply  6) Claude TTS  7) WezTerm mux  8) session restore  9) coding agents  q) quit'
                 switch (Read-Host 'Choose') {
                     '1' { $leader = Read-TsLeader; & $save }
                     '2' { $theme  = Read-TsTheme;  & $save }
@@ -763,6 +876,24 @@ function Set-TerminalStackConfig {
                     }
                     '7' { Invoke-TsMux status }
                     '8' { $restore = Read-TsWeztermRestore; Save-TsConfig -WeztermRestore $restore | Out-Null; Invoke-TsSync $src; Write-Host '==> done.' }
+                    '9' {
+                        & $agentsShow
+                        $which = Read-Host 'Agent: headroom, caveman, agentmemory, or Enter to go back'
+                        if (-not $which) { continue }
+                        if ($which -notin 'headroom','caveman','agentmemory') { Write-Warning "unknown agent tool '$which'"; continue }
+                        $verb = Read-Host 'Action: status, on, off, repair, uninstall [status]'
+                        if (-not $verb) { $verb = 'status' }
+                        $Value = $which; $Rest = @($verb)
+                        # Run through the same branch as the noninteractive command below.
+                        if (& $agentsRun $which $verb) {
+                            if ($verb -eq 'on') { Set-Variable -Name $which -Value 'on' }
+                            if ($verb -in 'off','uninstall') { Set-Variable -Name $which -Value 'off' }
+                            if ($which -eq 'agentmemory') { $agentmemory = (Get-Variable $which).Value }
+                            elseif ($which -eq 'headroom') { $headroom = (Get-Variable $which).Value }
+                            elseif ($which -eq 'caveman') { $caveman = (Get-Variable $which).Value }
+                            if ($verb -in 'on','off','uninstall') { & $save }
+                        }
+                    }
                     default { return }
                 }
             }
@@ -774,6 +905,9 @@ function Set-TerminalStackConfig {
             Write-Host "apps       : $($apps -join ', ')"
             Write-Host "wezmux     : $(Get-TsWeztermMux)   (ts-mux on|off|status)"
             Write-Host "wezrestore : $(Get-TsWeztermRestore)   (ts-config restore on|off)"
+            Write-Host "headroom   : $headroom   (Cursor: $headroomCursor)"
+            Write-Host "caveman    : $caveman"
+            Write-Host "agentmemory: $agentmemory"
         }
         'leader' { if (-not $Value) { Write-Warning 'usage: ts-config leader <chord>'; return }; $leader = $Value; & $save }
         'theme'  { if (-not $Value) { Write-Warning 'usage: ts-config theme <dark|light|follow>'; return }; $theme = $Value; & $save }
@@ -796,6 +930,46 @@ function Set-TerminalStackConfig {
                 & $save $Tts
             }
         }
+        'agents' {
+            $agentTool = $Value
+            $verb = if ($Rest.Count) { $Rest[0] } else { '' }
+            if (-not $agentTool -or $agentTool -eq 'show') { & $agentsShow; return }
+            if ($agentTool -notin 'headroom','caveman','agentmemory') {
+                Write-Warning 'usage: ts-config agents <headroom|caveman|agentmemory> on|off|status|repair|uninstall'
+                return
+            }
+            if ($agentTool -eq 'headroom' -and $verb -eq 'dashboard') {
+                & $agentsRun headroom dashboard | Out-Null
+                return
+            }
+            if ($agentTool -eq 'headroom' -and $verb -eq 'cursor') {
+                $mode = if ($Rest.Count -gt 1) { $Rest[1] } else { '' }
+                if ($mode -notin 'mcp','byok','off') { Write-Warning 'usage: ts-config agents headroom cursor <mcp|byok|off>'; return }
+                $headroomCursor = $mode
+                & $save
+                if ($headroom -eq 'on') { & $agentsRun headroom repair $mode | Out-Null }
+                & $agentsShow
+                return
+            }
+            if (-not $verb) { $verb = 'status' }
+            if ($verb -notin 'on','off','status','repair','uninstall') {
+                Write-Warning "usage: ts-config agents $agentTool on|off|status|repair|uninstall"
+                return
+            }
+            $ok = & $agentsRun $agentTool $verb
+            if (-not $ok -and $verb -notin 'off','uninstall') { return }
+            if ($verb -eq 'on') {
+                if ($agentTool -eq 'headroom') { $headroom = 'on' }
+                elseif ($agentTool -eq 'caveman') { $caveman = 'on' }
+                else { $agentmemory = 'on' }
+                & $save
+            } elseif ($verb -in 'off','uninstall') {
+                if ($agentTool -eq 'headroom') { $headroom = 'off' }
+                elseif ($agentTool -eq 'caveman') { $caveman = 'off' }
+                else { $agentmemory = 'off' }
+                & $save
+            }
+        }
         # Reopening the last WezTerm session at startup. Stored on its own like the
         # mux key, so flipping it need not re-state every other choice.
         'restore' {
@@ -809,7 +983,7 @@ function Set-TerminalStackConfig {
             $muxArgs = @(@($Value) + @($Rest) | Where-Object { $_ })
             Invoke-TsMux @muxArgs
         }
-        default { Write-Warning "ts-config: unknown command '$Action' (show, leader, theme, tmux, apps, tts, mux, restore)" }
+        default { Write-Warning "ts-config: unknown command '$Action' (show, leader, theme, tmux, apps, tts, mux, restore, agents)" }
     }
 }
 Set-Alias -Name ts-config -Value Set-TerminalStackConfig
@@ -1107,6 +1281,17 @@ function Invoke-TsDoctor {
             }
             if ((Test-Path (Get-CcTtsDuckSnapshotPath)) -and -not (Test-CcTtsDaemonHealthy)) {
                 Write-Host "note: stale duck snapshot — music may be stuck quiet; 'ts-doctor -Repair' restores volumes"
+            }
+        }
+        $agentDoctor = Join-Path $src 'bootstrap\ts-agents.ps1'
+        if (Test-Path -LiteralPath $agentDoctor) {
+            foreach ($entry in @(
+                @{ Name = 'headroom'; Enabled = (Get-TsAgentSetting headroomEnabled); Cursor = (Get-TsAgentSetting headroomCursorMode) },
+                @{ Name = 'caveman'; Enabled = (Get-TsAgentSetting cavemanEnabled); Cursor = 'mcp' },
+                @{ Name = 'agentmemory'; Enabled = (Get-TsAgentSetting agentmemoryEnabled); Cursor = 'mcp' }
+            )) {
+                if ($entry.Enabled -ne 'on') { continue }
+                & $agentDoctor -Tool $entry.Name -Action status -CursorMode $entry.Cursor | Out-Host
             }
         }
         Test-TsInstall -SourceDir $src -Quiet:$Quiet | Out-Null

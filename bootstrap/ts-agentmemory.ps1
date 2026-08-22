@@ -16,11 +16,10 @@
              file and in-container patches stay in docker-local. Which hooks exist and what they
              run is a terminal-stack concern; what the server does with the request is not.
 
-             Auto-detected, with no saved setting: a host is wired only when its agentmemory
-             plugin cache is present, and skipped silently otherwise. Gating on the cache rather
-             than on server reachability means the wiring survives the container being stopped.
-             A new [data] key would cost the documented 7-step blast radius and could drift
-             between chezmoi [data] and the Windows mirror the way ccTtsEnabled did.
+             `ts-config agents agentmemory on|off` owns the saved per-machine setting and
+             calls this low-level adapter. This script still gates each host on its plugin
+             cache and never gates on server reachability, so the wiring survives a stopped
+             container. Direct invocation remains useful for preview/check/repair.
 
              The HMAC secret is never read or written here. The plugin's own .mcp.json reads
              ${AGENTMEMORY_SECRET:-} from the User environment.

@@ -98,6 +98,10 @@ TMUX_PREFIX="$(cfg tmuxPrefixResolved 'C-b')"
 WEZ_MUX="$(cfg weztermMux 'off')"
 WEZ_RESTORE="$(cfg weztermRestore 'off')"
 CC_TTS_ENABLED="$(cfg ccTtsEnabled false)"
+HEADROOM_ENABLED="$(cfg headroomEnabled off)"
+HEADROOM_CURSOR_MODE="$(cfg headroomCursorMode mcp)"
+CAVEMAN_ENABLED="$(cfg cavemanEnabled off)"
+AGENTMEMORY_ENABLED="$(cfg agentmemoryEnabled off)"
 if [ "$CC_TTS_ENABLED" = true ]; then
   CC_TTS_STOP_HOOK=$',
           {
@@ -398,13 +402,30 @@ if [ -f "$merge_helper" ]; then
   fi
 fi
 
+# Enabled user-global coding-agent integrations are reconciled on update. The
+# adapter runs on Windows because that is where the GUI agents and their user
+# configuration live on a combined host.
+agents_script="$stack_root/bootstrap/ts-agents.ps1"
+agents_pwsh="$(resolve_pwsh || true)"
+if [ -f "$agents_script" ] && [ -n "$agents_pwsh" ]; then
+  agents_script_win="$(wslpath -w "$agents_script" 2>/dev/null || printf '%s' "$agents_script")"
+  if [ "$HEADROOM_ENABLED" = on ] && ! "$agents_pwsh" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$agents_script_win" -Tool headroom -Action status -CursorMode "$HEADROOM_CURSOR_MODE" >/dev/null 2>&1; then
+    "$agents_pwsh" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$agents_script_win" -Tool headroom -Action repair -CursorMode "$HEADROOM_CURSOR_MODE" \
+      || echo "sync-windows: Headroom reconciliation failed (non-fatal)." >&2
+  fi
+  if [ "$CAVEMAN_ENABLED" = on ] && ! "$agents_pwsh" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$agents_script_win" -Tool caveman -Action status >/dev/null 2>&1; then
+    "$agents_pwsh" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$agents_script_win" -Tool caveman -Action repair \
+      || echo "sync-windows: Caveman reconciliation failed (non-fatal)." >&2
+  fi
+fi
+
 # agentmemory harness wiring. The hook scripts live in vendor plugin caches, so a plugin
 # upgrade silently reverts every edit and retrieval stops with nothing to show for it.
 # Re-applying here is what makes that self-repairing rather than a manual step nobody
 # remembers. -Check first, so a correctly-wired machine stays silent; the script also
 # no-ops per host when agentmemory is not installed there.
 am_script="$stack_root/bootstrap/ts-agentmemory.ps1"
-if [ -f "$am_script" ]; then
+if [ "$AGENTMEMORY_ENABLED" = on ] && [ -f "$am_script" ]; then
   am_pwsh="$(resolve_pwsh || true)"
   if [ -n "$am_pwsh" ]; then
     am_script_win="$(wslpath -w "$am_script" 2>/dev/null || printf '%s' "$am_script")"

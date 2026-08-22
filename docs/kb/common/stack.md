@@ -7,7 +7,7 @@
 | `ts-update` | pull the latest stack and re-apply — see below |
 | `ts-rollback` | undo the last `ts-update` — see below |
 | `ts-doctor [--repair]` | health-check / fix the install — see below |
-| `ts-config` | change leader, theme, tmux prefix, apps, TTS, WezTerm mux/restore — see below |
+| `ts-config` | change leader, theme, tmux prefix, apps, TTS, agent tools, WezTerm mux/restore — see below |
 | `ts-mux` | WezTerm multiplexer domain: on/off, status, kill/restart/reset — see below |
 | `plain` | vanilla shell, no rc/profile (no oh-my-zsh/starship/aliases) — `exit` to return |
 | `chezmoi diff` / `chezmoi apply -v` | preview / apply configs (run from inside WSL on Windows) |
@@ -96,7 +96,7 @@ repair offers the same canonical move and re-syncs (a pin is written to
 ## `ts-config`
 | Command | What it does |
 |---|---|
-| `ts-config` | interactive menu (leader / theme / tmux / apps / re-apply / TTS / WezTerm mux / session restore) |
+| `ts-config` | interactive menu (leader / theme / tmux / apps / TTS / coding agents / WezTerm mux / restore) |
 | — | WezTerm itself is an **install-time** choice, not a `ts-config` entry; change it with `winget install wez.wezterm` / `brew install --cask wezterm@nightly` |
 | `ts-config show` | print the saved config + the derived bindings |
 | `ts-config leader <chord>` | WezTerm leader, e.g. `ctrl-space`, `ctrl-a`, `alt-x` |
@@ -108,10 +108,27 @@ repair offers the same canonical move and re-syncs (a pin is written to
 | (tray) | the tray's **Open dashboard** gives live activity, the daemon log and a settings editor: see `doc windows/tts-daemon` |
 | `ts-config mux [on\|off\|…]` | hand-off to `ts-mux` (WezTerm multiplexer domain) |
 | `ts-config restore <on\|off>` | reopen the last WezTerm session at startup (default off) |
+| `ts-config agents [show]` | saved Headroom, Caveman, AgentMemory state for this computer |
+| `ts-config agents <tool> on\|off\|status\|repair\|uninstall` | manage one tool at user scope; never edits a project or Docker |
+| `ts-config agents headroom dashboard` | open the Headroom GUI monitor |
+| `ts-config agents headroom cursor <mcp\|byok\|off>` | Cursor-only mode; `mcp` keeps subscription traffic direct |
 
 Every change persists (chezmoi `[data]` on WSL/Linux, `config.json` on Windows) and
 re-applies. In a combined WSL+Windows setup run it from **WSL** — its apply is
 authoritative for the Windows-side files too.
+
+Agent-tool pins live in `bootstrap/agent-tools.json`. `ts-update` reconciles only
+tools enabled on this machine. Headroom routing is process-local to the Claude and
+enhanced Codex wrappers, restored on exit, and bypassed with a warning when the
+proxy is unavailable; `claude-stock` and `codex-stock` always go direct. Docker
+Compose, API secrets, AgentMemory feature flags, containers, volumes, and service
+data remain owned by docker-local.
+
+For a live check, run the three `ts-config agents <tool> status` commands and
+open the Headroom dashboard. Dashboard attribution follows the originating
+client: Claude requests appear as Claude/Anthropic; Codex requests appear as
+OpenAI and increment Codex WebSocket counters. Setting changes apply to newly
+started agent sessions, not a process that was already running.
 
 ## `ts-mux`
 The WezTerm **multiplexer domain**: with it on, your shells run inside

@@ -51,7 +51,8 @@ the exact pane mapping and Stop TTS wait for hook trust.
 
 ## agentmemory
 
-Wired by `bootstrap\ts-agentmemory.ps1` from every sync when the agentmemory plugin is installed.
+Wired by `bootstrap\ts-agentmemory.ps1` from every sync when
+`ts-config agents agentmemory on` is saved for this computer.
 Codex is the awkward host, for two reasons:
 
 - **It retrieves on the prompt, not the tool call.** Codex emits `Bash` for most tool calls, and a
@@ -62,6 +63,24 @@ Codex is the awkward host, for two reasons:
   `hooks.codex.json` (CLI) — so one event fires both. Codex offers no way to disable just one, so
   the duplicate is dropped inside the hook before any request. Without it, Codex received the same
   context block twice per prompt.
+
+## Headroom and Caveman
+
+With `ts-config agents headroom on`, enhanced interactive launches get a
+session-local `OPENAI_BASE_URL` plus matching `openai_base_url` CLI override. Both
+are scoped to the wrapper and disappear when Codex exits; no provider is written
+to `~/.codex/config.toml`, preserving provider identity and history. An unavailable
+proxy fails open to the direct provider. `codex-stock` always bypasses Headroom.
+
+Caveman installs only the pinned global `caveman` skill and a marked block in the
+active global `~/.codex/AGENTS.md`. The rest of Caveman's skill collection is not
+installed, and existing global instructions are preserved with a dated backup.
+Confirm both layers with `ts-config agents headroom status` and
+`ts-config agents caveman status`. Only enhanced interactive Codex launches are
+wrapped automatically; utility commands such as `codex exec` remain stock. In
+Headroom's dashboard, routed Codex traffic is identified as OpenAI/Codex
+WebSocket traffic, while a separate Claude smoke test is labeled
+Claude/Anthropic.
 
 ## Voice notification
 

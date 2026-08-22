@@ -92,6 +92,12 @@ weztermMux = {{ index . "weztermMux" | default "off" | quote }}
 {{- /* Reopen the last session at WezTerm start: "on" registers resurrect's
        gui-startup restore, "off" (default) starts clean. `ts-config restore`. */}}
 weztermRestore = {{ index . "weztermRestore" | default "off" | quote }}
+{{- /* Per-computer agent integrations. These are deliberately user-global but
+       machine-local: a laptop without the Docker services stays off. */}}
+headroomEnabled = {{ index . "headroomEnabled" | default "off" | quote }}
+headroomCursorMode = {{ index . "headroomCursorMode" | default "mcp" | quote }}
+cavemanEnabled = {{ index . "cavemanEnabled" | default "off" | quote }}
+agentmemoryEnabled = {{ index . "agentmemoryEnabled" | default "off" | quote }}
 {{- if hasKey . "apps" }}
 apps = [{{ range $i, $a := .apps }}{{ if $i }}, {{ end }}{{ $a | quote }}{{ end }}]
 {{- end }}

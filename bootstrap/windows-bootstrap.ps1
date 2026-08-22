@@ -115,10 +115,21 @@ function Read-TsWizard {
         WezRestore = (Read-TsWeztermRestore)
         Apps      = @(Read-TsApps)
         CcTts     = (Read-TsCcTts)
+        Headroom  = (Read-TsAgentToggle TS_HEADROOM 'Headroom prompt compression and monitoring?' @(
+            '  Expects docker-local on 127.0.0.1:8787 and its MCP sidecar on 8788.',
+            '  This installer never manages those containers.'
+        ))
+        Caveman   = (Read-TsAgentToggle TS_CAVEMAN 'Caveman terse output for all projects?' @(
+            '  Installs the pinned user-scope plugin/skill; no project files are changed.'
+        ))
+        Agentmemory = (Read-TsAgentToggle TS_AGENTMEMORY 'AgentMemory for all projects?' @(
+            '  Expects docker-local on 127.0.0.1:3111; terminal-stack owns only agent wiring.'
+        ))
         Workspace = (Read-TsWorkspaceDir)
     }
     # Tray daemon follow-up only makes sense when TTS itself was enabled.
     $w.CcTtsDaemon = if ($w.CcTts -eq 'on') { Read-TsCcTtsDaemon } else { 'off' }
+    $w.HeadroomCursor = if ($w.Headroom -eq 'on') { Read-TsHeadroomCursorMode } else { 'mcp' }
     return $w
 }
 
@@ -139,6 +150,9 @@ function Show-TsWizardReview($w) {
     Write-Host ("    Apps             {0}" -f $(if ($w.Apps.Count) { $w.Apps -join ', ' } else { '<none>' }))
     Write-Host ("    Claude TTS       {0}" -f $w.CcTts)
     if ($w.CcTts -eq 'on') { Write-Host ("    TTS daemon       {0}" -f $w.CcTtsDaemon) }
+    Write-Host ("    Headroom         {0} (Cursor: {1})" -f $w.Headroom, $w.HeadroomCursor)
+    Write-Host ("    Caveman          {0}" -f $w.Caveman)
+    Write-Host ("    AgentMemory      {0}" -f $w.Agentmemory)
     Write-Host ("    Workspace        {0}" -f $(if ($w.Workspace) { $w.Workspace } else { '<none detected>' }))
 }
 
@@ -162,7 +176,7 @@ $selectedApps = @($wizard.Apps)
 $ccTtsChoice  = $wizard.CcTts
 $ccTts        = Set-CcTtsWizardChoice $ccTtsChoice
 Write-Host ''
-Write-Host "==> Config: leader=$leaderChord theme=$themeMode wezterm=$($wizard.Wezterm) wez-mux=$($wizard.WezMux) wez-restore=$($wizard.WezRestore) cc-tts=$ccTtsChoice"
+Write-Host "==> Config: leader=$leaderChord theme=$themeMode wezterm=$($wizard.Wezterm) wez-mux=$($wizard.WezMux) wez-restore=$($wizard.WezRestore) cc-tts=$ccTtsChoice headroom=$($wizard.Headroom) caveman=$($wizard.Caveman) agentmemory=$($wizard.Agentmemory)"
 
 # Required packages (always installed; not part of the picker). WezTerm is NOT
 # here — it is a wizard choice, see Read-TsWezterm.
@@ -185,7 +199,7 @@ foreach ($id in $selectedApps) {
 # Save the chosen config to %LOCALAPPDATA%\terminal-stack\config.json — read by
 # sync-windows.ps1 (and the WSL hook's mirror) to render the Windows .tmpl files.
 if ($PSCmdlet.ShouldProcess('terminal-stack config.json', 'save config')) {
-    Save-TsConfig -LeaderChord $leaderChord -ThemeMode $themeMode -Apps $selectedApps -WeztermMux $wizard.WezMux -WeztermRestore $wizard.WezRestore -CcTts $ccTts | Out-Null
+    Save-TsConfig -LeaderChord $leaderChord -ThemeMode $themeMode -Apps $selectedApps -WeztermMux $wizard.WezMux -WeztermRestore $wizard.WezRestore -CcTts $ccTts -HeadroomEnabled $wizard.Headroom -HeadroomCursorMode $wizard.HeadroomCursor -CavemanEnabled $wizard.Caveman -AgentmemoryEnabled $wizard.Agentmemory | Out-Null
     Export-CcTtsJson
     Write-Host "==> Saved config to $(Get-TsConfigPath)"
     if ($wizard.CcTts -eq 'on') {
@@ -193,16 +207,23 @@ if ($PSCmdlet.ShouldProcess('terminal-stack config.json', 'save config')) {
             else { @('-NoStart', '-NoAutostart') }
         if (Invoke-TsCcTtsDaemonInstaller $installerArgs) {
             $ccTts.daemon.enabled = ($wizard.CcTtsDaemon -eq 'on')
-            Save-TsConfig -LeaderChord $leaderChord -ThemeMode $themeMode -Apps $selectedApps -WeztermMux $wizard.WezMux -WeztermRestore $wizard.WezRestore -CcTts $ccTts | Out-Null
+            Save-TsConfig -LeaderChord $leaderChord -ThemeMode $themeMode -Apps $selectedApps -WeztermMux $wizard.WezMux -WeztermRestore $wizard.WezRestore -CcTts $ccTts -HeadroomEnabled $wizard.Headroom -HeadroomCursorMode $wizard.HeadroomCursor -CavemanEnabled $wizard.Caveman -AgentmemoryEnabled $wizard.Agentmemory | Out-Null
             Export-CcTtsJson
         } else {
             Write-Warning 'TTS executable build failed; voice hooks were not enabled.'
             $ccTts.enabled = $false
             $ccTts.daemon.enabled = $false
-            Save-TsConfig -LeaderChord $leaderChord -ThemeMode $themeMode -Apps $selectedApps -WeztermMux $wizard.WezMux -WeztermRestore $wizard.WezRestore -CcTts $ccTts | Out-Null
+            Save-TsConfig -LeaderChord $leaderChord -ThemeMode $themeMode -Apps $selectedApps -WeztermMux $wizard.WezMux -WeztermRestore $wizard.WezRestore -CcTts $ccTts -HeadroomEnabled $wizard.Headroom -HeadroomCursorMode $wizard.HeadroomCursor -CavemanEnabled $wizard.Caveman -AgentmemoryEnabled $wizard.Agentmemory | Out-Null
             Export-CcTtsJson
         }
     }
+}
+
+if (-not $WhatIfPreference) {
+    $agentsInstaller = Join-Path $PSScriptRoot 'ts-agents.ps1'
+    if ($wizard.Headroom -eq 'on') { & $agentsInstaller -Tool headroom -Action on -CursorMode $wizard.HeadroomCursor | Out-Host }
+    if ($wizard.Caveman -eq 'on') { & $agentsInstaller -Tool caveman -Action on | Out-Host }
+    if ($wizard.Agentmemory -eq 'on') { & $agentsInstaller -Tool agentmemory -Action on | Out-Host }
 }
 
 # Git include — stack aliases + delta config. The included file lands at

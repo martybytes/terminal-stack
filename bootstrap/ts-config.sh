@@ -13,6 +13,7 @@
 #   ts-config apps [recommended|all|none|id,id,...]   (no arg → interactive picker)
 #   ts-config mux [on|off|...]  hand-off to ts-mux (WezTerm multiplexer domain)
 #   ts-config restore <on|off>  reopen the last WezTerm session at startup
+#   ts-config agents [show|<tool> on|off|status|repair|uninstall]
 #
 # Config lives in chezmoi [data] (~/.config/chezmoi/chezmoi.toml); changes are
 # persisted with ts_save_config, then `chezmoi apply` re-renders every file.
@@ -77,6 +78,72 @@ run_mux() {
     TERMINAL_STACK_DIR="$SRC" TERMINAL_STACK_CHEZMOI="$CZ" bash "$SRC/bootstrap/ts-mux.sh" "$@"
 }
 
+agents_show() {
+    echo "coding agents (user-global on this computer):"
+    echo "  headroom   : $(ts_agent_get headroomEnabled)   (Cursor: $(ts_agent_get headroomCursorMode))"
+    echo "  caveman    : $(ts_agent_get cavemanEnabled)"
+    echo "  agentmemory: $(ts_agent_get agentmemoryEnabled)"
+}
+
+run_agent_adapter() {
+    local tool="$1" action="$2" cursor_mode="${3:-$(ts_agent_get headroomCursorMode)}"
+    bash "$SRC/bootstrap/ts-agents.sh" "$tool" "$action" "$cursor_mode"
+}
+
+agents_set() {
+    local tool="$1" action="$2" key=""
+    case "$tool" in
+        headroom) key=headroomEnabled ;;
+        caveman) key=cavemanEnabled ;;
+        agentmemory) key=agentmemoryEnabled ;;
+        *) echo "usage: ts-config agents <headroom|caveman|agentmemory> on|off|status|repair|uninstall" >&2; return 2 ;;
+    esac
+    case "$action" in
+        on) run_agent_adapter "$tool" on && ts_agent_set "$key" on ;;
+        off) run_agent_adapter "$tool" off; ts_agent_set "$key" off ;;
+        uninstall) run_agent_adapter "$tool" uninstall; ts_agent_set "$key" off ;;
+        status|repair) run_agent_adapter "$tool" "$action" ;;
+        *) echo "usage: ts-config agents $tool on|off|status|repair|uninstall" >&2; return 2 ;;
+    esac
+}
+
+agents_config() {
+    local sub="${1:-}" action="${2:-}" extra="${3:-}"
+    case "$sub" in
+        ''|show) agents_show ;;
+        headroom)
+            if [ "$action" = dashboard ]; then run_agent_adapter headroom dashboard; return; fi
+            if [ "$action" = cursor ]; then
+                case "$extra" in mcp|byok|off) ;; *) echo "usage: ts-config agents headroom cursor <mcp|byok|off>" >&2; return 2;; esac
+                ts_agent_set headroomCursorMode "$extra"
+                [ "$(ts_agent_get headroomEnabled)" = on ] && run_agent_adapter headroom repair "$extra" || true
+                agents_show
+                return
+            fi
+            agents_set headroom "${action:-status}" ;;
+        caveman|agentmemory) agents_set "$sub" "${action:-status}" ;;
+        *) echo "ts-config agents: unknown tool '$sub'" >&2; return 2 ;;
+    esac
+}
+
+agents_menu() {
+    while true; do
+        echo; agents_show; echo
+        echo '  1) Headroom  2) Caveman  3) AgentMemory  4) Headroom Cursor mode  q) back'
+        local c a tool; c="$(ts_tty_prompt 'Choose: ')"
+        case "$c" in
+            1) tool=headroom ;;
+            2) tool=caveman ;;
+            3) tool=agentmemory ;;
+            4) a="$(ts_prompt_choice mcp 'Cursor Headroom mode:' '' 'mcp|MCP only|subscription models stay direct' 'byok|BYOK proxy|provider API key and separate billing' 'off|off')"; agents_config headroom cursor "$a"; continue ;;
+            q|Q|'') return ;;
+            *) echo '?'; continue ;;
+        esac
+        a="$(ts_prompt_choice status "$tool:" '' 'status|status' 'on|enable / repair' 'off|disable, preserve data' 'uninstall|remove terminal-stack-owned client pieces')"
+        agents_config "$tool" "$a"
+    done
+}
+
 show() {
     echo "terminal-stack config:"
     echo "  leader     : $(cur leaderChord ctrl-space)   (WezTerm: $(cur leaderMods CTRL)+$(cur leaderKey phys:Space))"
@@ -85,6 +152,9 @@ show() {
     echo "  apps       : $(curapps)"
     echo "  wezmux     : $(ts_wez_mux_get)   (ts-mux on|off|status)"
     echo "  wezrestore : $(ts_wez_restore_get)   (ts-config restore on|off)"
+    echo "  headroom   : $(ts_agent_get headroomEnabled)   (Cursor: $(ts_agent_get headroomCursorMode))"
+    echo "  caveman    : $(ts_agent_get cavemanEnabled)"
+    echo "  agentmemory: $(ts_agent_get agentmemoryEnabled)"
 }
 
 menu() {
@@ -92,7 +162,7 @@ menu() {
         echo
         show
         echo
-        echo "  1) leader key   2) theme   3) tmux prefix   4) apps   5) re-apply   6) Claude TTS   7) WezTerm mux   8) session restore   q) quit"
+        echo "  1) leader key   2) theme   3) tmux prefix   4) apps   5) re-apply   6) Claude TTS   7) WezTerm mux   8) session restore   9) coding agents   q) quit"
         local c; c="$(ts_tty_prompt 'Choose: ')"
         case "$c" in
             1) set_leader "$(ts_prompt_leader)" ;;
@@ -103,6 +173,7 @@ menu() {
             6) ts_config_tts show; echo; ts_config_tts_menu ;;
             7) run_mux status ;;
             8) local r; r="$(ts_prompt_wezterm_restore)"; set_restore "$r" ;;
+            9) agents_menu ;;
             q|Q|"") return 0 ;;
             *) echo "?" ;;
         esac
@@ -128,11 +199,16 @@ case "${1:-}" in
         case "${2:-}" in on|off) ;; *)
             echo "usage: ts-config restore <on|off>" >&2; exit 2 ;; esac
         set_restore "$2" ;;
+    agents)
+        shift
+        agents_config "$@" ;;
     -h|--help|help)
         sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'
         echo "  tts show|on|off|test|reset|engine|message|voice|..."
         echo "  mux status|on|off|list|kill|restart|reset  (see: ts-mux -h)"
         echo "  restore on|off   reopen the last WezTerm session at startup"
+        echo "  agents [show|<headroom|caveman|agentmemory> on|off|status|repair|uninstall]"
+        echo "  agents headroom cursor <mcp|byok|off> | dashboard"
         ;;
-    *) echo "ts-config: unknown command '$1' (try: show, leader, theme, tmux, apps, tts, mux, restore)" >&2; exit 2 ;;
+    *) echo "ts-config: unknown command '$1' (try: show, leader, theme, tmux, apps, tts, mux, restore, agents)" >&2; exit 2 ;;
 esac

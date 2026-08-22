@@ -25,11 +25,20 @@ yourself and enable its shell command.
   so tools that register their own hooks — agentmemory shares the `stop` and
   `postToolUse` arrays with ours — survive an apply. Add your own hooks straight to
   the file; the stack will not remove them. Never let anything copy that file whole.
-- agentmemory, if installed, is wired by `bootstrap\ts-agentmemory.ps1` from every sync: its
+- AgentMemory, when enabled with `ts-config agents agentmemory on`, is wired by
+  `bootstrap\ts-agentmemory.ps1` from every sync: its
   seven capture hooks in `~/.cursor/hooks.json`, its MCP server in `~/.cursor/mcp.json`, and its
   scripts under `~/.cursor/hooks/agentmemory/`. Cursor ships no agentmemory package, so those
   scripts are copied from the Claude plugin cache and re-tagged for Cursor. Your own hooks in the
   same event arrays are never touched.
+- Headroom is independently selectable per computer with
+  `ts-config agents headroom cursor mcp|byok|off`. `mcp` is the safe default for a
+  Cursor subscription: it adds Headroom's tools and dashboard but leaves model
+  traffic direct. `byok` needs a provider key and a one-time global provider base
+  URL of `http://127.0.0.1:8787`; it fails closed when the proxy is down.
+- Caveman's global skill is installed automatically, but Cursor has no stable,
+  portable user-rule file. Add this once in **Settings → Rules → User Rules**:
+  `Always apply the global caveman skill; use full mode unless I ask otherwise.`
 
 | Command | What it does |
 |---|---|
@@ -40,4 +49,3 @@ yourself and enable its shell command.
 | `cursor -n .` | force a new window |
 | `cursor -r file` | reuse the current window |
 | `cursor --add dir` | add a folder to the open workspace |
-

@@ -178,7 +178,36 @@ function Get-TsConfig {
     return [pscustomobject]@{
         leaderChord = 'ctrl-space'; themeMode = 'dark'; tmuxPrefix = 'ctrl-b'
         weztermMux = 'off'; weztermRestore = 'off'; apps = @()
+        headroomEnabled = 'off'; headroomCursorMode = 'mcp'
+        cavemanEnabled = 'off'; agentmemoryEnabled = 'off'
     }
+}
+
+# User-global coding-agent integrations. A missing AgentMemory key migrates to on
+# only when this machine is already wired, preserving the behavior of installs
+# created before the explicit per-machine toggle existed. All other fresh defaults
+# are off. TS_* environment values are launch/install-time overrides, not secrets.
+function Get-TsAgentSetting([string]$Name) {
+    $envName = switch ($Name) {
+        'headroomEnabled'   { 'TS_HEADROOM' }
+        'headroomCursorMode'{ 'TS_HEADROOM_CURSOR' }
+        'cavemanEnabled'    { 'TS_CAVEMAN' }
+        'agentmemoryEnabled'{ 'TS_AGENTMEMORY' }
+    }
+    if ($envName) {
+        $override = [Environment]::GetEnvironmentVariable($envName, 'Process')
+        if ($override) { return $override.ToLowerInvariant() }
+    }
+    $cfg = Get-TsConfig
+    $saved = Get-TsProp $cfg $Name $null
+    if ($saved) { return "$saved".ToLowerInvariant() }
+    if ($Name -eq 'headroomCursorMode') { return 'mcp' }
+    if ($Name -eq 'agentmemoryEnabled') {
+        $claudeCache = Join-Path $env:USERPROFILE '.claude\plugins\cache\agentmemory\agentmemory'
+        $codexCache = Join-Path $env:USERPROFILE '.codex\plugins\cache\agentmemory\agentmemory'
+        if ((Test-Path -LiteralPath $claudeCache) -or (Test-Path -LiteralPath $codexCache)) { return 'on' }
+    }
+    return 'off'
 }
 
 # WezTerm multiplexer domain: 'on' hosts panes in wezterm-mux-server (they survive
@@ -208,13 +237,15 @@ function Save-TsConfig {
         [string[]]$Apps      = @(),
         [string]$WeztermMux  = 'off',
         [string]$WeztermRestore = 'off',
-        $CcTts                = $null
+        $CcTts                = $null,
+        [ValidateSet('on','off')][string]$HeadroomEnabled = 'off',
+        [ValidateSet('mcp','byok','off')][string]$HeadroomCursorMode = 'mcp',
+        [ValidateSet('on','off')][string]$CavemanEnabled = 'off',
+        [ValidateSet('on','off')][string]$AgentmemoryEnabled = 'off'
     )
     $l = ConvertTo-TsLeader $LeaderChord
     $existing = Get-TsConfig
-    if (-not $CcTts) {
-        if ($existing.ccTts) { $CcTts = $existing.ccTts } else { $CcTts = Get-CcTtsDefaults }
-    }
+    if (-not $CcTts) { $CcTts = Get-TsProp $existing ccTts (Get-CcTtsDefaults) }
     # Callers that don't pass -TmuxPrefix (e.g. the Windows bootstrap re-run)
     # must not silently reset a prefix the WSL side already configured.
     if (-not $PSBoundParameters.ContainsKey('TmuxPrefix') -and $existing.tmuxPrefix) {
@@ -230,6 +261,16 @@ function Save-TsConfig {
         $WeztermRestore = $existing.weztermRestore
     }
     if ($WeztermRestore -ne 'on') { $WeztermRestore = 'off' }
+    foreach ($pair in @(
+        @{ Param = 'HeadroomEnabled'; Name = 'headroomEnabled'; Default = 'off' },
+        @{ Param = 'HeadroomCursorMode'; Name = 'headroomCursorMode'; Default = 'mcp' },
+        @{ Param = 'CavemanEnabled'; Name = 'cavemanEnabled'; Default = 'off' },
+        @{ Param = 'AgentmemoryEnabled'; Name = 'agentmemoryEnabled'; Default = $(Get-TsAgentSetting agentmemoryEnabled) }
+    )) {
+        if (-not $PSBoundParameters.ContainsKey($pair.Param)) {
+            Set-Variable -Name $pair.Param -Value (Get-TsProp $existing $pair.Name $pair.Default)
+        }
+    }
     $obj = [ordered]@{
         leaderChord        = $LeaderChord
         leaderKey          = $l.key
@@ -242,6 +283,10 @@ function Save-TsConfig {
         weztermRestore     = $WeztermRestore
         apps               = @($Apps)
         ccTts              = $CcTts
+        headroomEnabled    = $HeadroomEnabled
+        headroomCursorMode = $HeadroomCursorMode
+        cavemanEnabled     = $CavemanEnabled
+        agentmemoryEnabled = $AgentmemoryEnabled
     }
     $p = Get-TsConfigPath
     New-Item -ItemType Directory -Force -Path (Split-Path $p) | Out-Null
@@ -392,6 +437,27 @@ function Read-TsWeztermRestore {
     ) -Options @(
         @{ Key = 'off'; Label = 'off'; Note = 'start clean every time' },
         @{ Key = 'on';  Label = 'on';  Note = 'reopen the last session' }
+    )
+}
+
+function Read-TsAgentToggle([string]$EnvName, [string]$Title, [string[]]$Intro) {
+    $override = [Environment]::GetEnvironmentVariable($EnvName, 'Process')
+    if ($override) { return $(if ($override -eq 'on') { 'on' } else { 'off' }) }
+    Read-TsChoice -Title $Title -Default 'off' -Intro $Intro -Options @(
+        @{ Key = 'off'; Label = 'off'; Note = 'configure later with ts-config agents' },
+        @{ Key = 'on'; Label = 'on'; Note = 'user-global on this computer' }
+    )
+}
+
+function Read-TsHeadroomCursorMode {
+    if ($env:TS_HEADROOM_CURSOR -in 'mcp','byok','off') { return $env:TS_HEADROOM_CURSOR }
+    Read-TsChoice -Title 'Cursor Headroom mode:' -Default 'mcp' -Intro @(
+        '  MCP keeps Cursor subscription model traffic direct. BYOK routes model traffic',
+        '  through Headroom but requires a provider API key and separate provider billing.'
+    ) -Options @(
+        @{ Key = 'mcp'; Label = 'MCP only'; Note = 'recommended for Cursor subscriptions' },
+        @{ Key = 'byok'; Label = 'BYOK proxy'; Note = 'provider API key required' },
+        @{ Key = 'off'; Label = 'off' }
     )
 }
 function Read-TsApps {

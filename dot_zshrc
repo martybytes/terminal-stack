@@ -165,6 +165,70 @@ _wez_tab_title() {
     printf '%s' "$uv" > /dev/tty 2>/dev/null
   fi
 }
+
+# Per-machine agent settings are read at launch. WSL uses the Windows mirror
+# because the actual GUI agents live there; native Unix reads chezmoi [data].
+_ts_agent_setting() {
+  local key="$1" def="${2:-off}" env_name="" value="" cfg=""
+  case "$key" in
+    headroomEnabled) env_name=TS_HEADROOM ;;
+    headroomCursorMode) env_name=TS_HEADROOM_CURSOR ;;
+    cavemanEnabled) env_name=TS_CAVEMAN ;;
+    agentmemoryEnabled) env_name=TS_AGENTMEMORY ;;
+  esac
+  [[ -n "$env_name" ]] && value="${(P)env_name:-}"
+  if [[ -z "$value" && -n "${WSL_DISTRO_NAME:-}" ]] && command -v cmd.exe >/dev/null 2>&1; then
+    local winuser="$(cmd.exe /c 'echo %USERNAME%' 2>/dev/null | tr -d '\r\n')"
+    cfg="/mnt/c/Users/$winuser/AppData/Local/terminal-stack/config.json"
+    if [[ -f "$cfg" ]] && command -v python3 >/dev/null 2>&1; then
+      value="$(python3 - "$cfg" "$key" <<'PY' 2>/dev/null
+import json, sys
+try: print(json.load(open(sys.argv[1], encoding='utf-8')).get(sys.argv[2], ''), end='')
+except Exception: pass
+PY
+)"
+    fi
+  fi
+  if [[ -z "$value" ]]; then
+    cfg="$HOME/.config/chezmoi/chezmoi.toml"
+    [[ -f "$cfg" ]] && value="$(sed -nE "s/^${key}[[:space:]]*=[[:space:]]*\"([^\"]*)\".*/\\1/p" "$cfg" | head -1)"
+  fi
+  print -r -- "${value:-$def}" | tr 'A-Z' 'a-z'
+}
+
+typeset -gi _TS_HEADROOM_PROBE_AT=0
+typeset -gi _TS_HEADROOM_PROBE_OK=0
+typeset -gi _TS_HEADROOM_WARNED=0
+_ts_headroom_healthy() {
+  [[ "$(_ts_agent_setting headroomEnabled)" == on ]] || return 1
+  local now="$(date +%s)"
+  if (( now - _TS_HEADROOM_PROBE_AT < 5 )); then (( _TS_HEADROOM_PROBE_OK )); return; fi
+  _TS_HEADROOM_PROBE_AT=$now; _TS_HEADROOM_PROBE_OK=0
+  curl -fsS --max-time 1 http://127.0.0.1:8787/readyz >/dev/null 2>&1 \
+    || curl -fsS --max-time 1 http://127.0.0.1:8787/health >/dev/null 2>&1 \
+    || return 1
+  _TS_HEADROOM_PROBE_OK=1
+}
+
+typeset -g _TS_CLAUDE_BIN="${commands[claude]:-$(whence -p claude 2>/dev/null)}"
+claude-stock() {
+  [[ -n "$_TS_CLAUDE_BIN" ]] || { print -u2 'claude executable was not found on PATH when this shell loaded'; return 127; }
+  "$_TS_CLAUDE_BIN" "$@"
+}
+claude() {
+  [[ -n "$_TS_CLAUDE_BIN" ]] || { print -u2 'claude executable was not found on PATH when this shell loaded'; return 127; }
+  if [[ "$(_ts_agent_setting headroomEnabled)" != on ]]; then "$_TS_CLAUDE_BIN" "$@"; return; fi
+  if ! _ts_headroom_healthy; then
+    if (( ! _TS_HEADROOM_WARNED )); then
+      print -u2 'warning: Headroom is enabled but unavailable on 127.0.0.1:8787; this Claude launch is going direct.'
+      _TS_HEADROOM_WARNED=1
+    fi
+    "$_TS_CLAUDE_BIN" "$@"; return
+  fi
+  ANTHROPIC_BASE_URL=http://127.0.0.1:8787 \
+    ENABLE_TOOL_SEARCH="${ENABLE_TOOL_SEARCH:-true}" HEADROOM_PROJECT="${PWD:t}" \
+    "$_TS_CLAUDE_BIN" "$@"
+}
 # { } always { }: the title clears even when Ctrl+C aborts the function body
 # (matches the pwsh wrappers' try/finally); exit status of the body is preserved.
 cc()    { _wez_tab_title "${PWD:t}"; { claude "$@" }                                           always { _wez_tab_title "" } }
@@ -216,6 +280,7 @@ _ts_codex() {
   local profile="$HOME/.codex/terminal-stack.config.toml"
   local parent="${WEZTERM_PANE:-}" sidecar="" launched
   local -a command status_command
+  local OPENAI_BASE_URL="${OPENAI_BASE_URL:-}" HEADROOM_PROJECT="${HEADROOM_PROJECT:-}"
   command=("$_TS_CODEX_BIN")
   [[ "$launch_mode" == yolo ]] && command+=(--yolo)
   launched="$(date +%s)"
@@ -229,6 +294,18 @@ _ts_codex() {
     command+=(-p terminal-stack)
   else
     print -u2 'terminal-stack: Codex dashboard/profile unavailable; running without enhancements.'
+  fi
+
+  if [[ "$(_ts_agent_setting headroomEnabled)" == on ]]; then
+    if _ts_headroom_healthy; then
+      OPENAI_BASE_URL=http://127.0.0.1:8787/v1
+      HEADROOM_PROJECT="${PWD:t}"
+      export OPENAI_BASE_URL HEADROOM_PROJECT
+      command+=(--config 'openai_base_url="http://127.0.0.1:8787/v1"')
+    elif (( ! _TS_HEADROOM_WARNED )); then
+      print -u2 'warning: Headroom is enabled but unavailable on 127.0.0.1:8787; this Codex launch is going direct.'
+      _TS_HEADROOM_WARNED=1
+    fi
   fi
 
   if [[ -n "$parent" ]] && command -v wezterm >/dev/null 2>&1 \
