@@ -120,12 +120,35 @@ Tray icon, **Open dashboard**, or `http://127.0.0.1:8890/ui`. Three tabs:
 | Status | is it up, is it muted, which summarizer, how long since the daemon last spoke, and whether the summarizer has been quietly falling back to template |
 | Timeline | what it decided and why, from the history database: `spoken`, `deduped`, `muted`, `suppressed_dnd`, `synth_failed`, with engine and play time |
 | Log | the raw `ttsd.log`, streamed live, coloured by level, with a filter and a pause button |
+| Settings | every setting the daemon reads, plus the API key and a summarizer test |
+
+Both streams are **newest first** by default, new rows arrive at the top, and each has a
+sort toggle if you would rather read oldest first.
 
 Loopback only, and it will refuse a request whose `Host` header is not one it recognises, so
 a web page you happen to be visiting cannot read your history.
 
-Read-only for now: it reports, it does not configure. The settings form, the per-mode
-summarizer test and the restart button are the next stage.
+### Settings
+
+Changes are written to `~/.claude/tts/local.json`: **machine-local overrides** that win over
+the saved settings and survive every apply, but do not travel to your other machines. For a
+setting that should propagate, use `ts-config tts …` from WSL. Every field shows which layer
+it came from, and says so when an override is beating the saved value.
+
+Three groups are called out because they are not what they look like:
+
+- **Needs a restart** holds the eleven settings the daemon reads once at startup. A config
+  reload returns success without applying them, so the page marks them and offers the
+  restart rather than pretending.
+- **Shell fallback only** holds four settings the daemon never reads. They are live on the
+  WSL and PowerShell fallback path, which is what speaks when the daemon is down.
+- **Secrets** holds the Anthropic key for `haiku`, stored in the daemon's state directory,
+  never in either config store and never in git. An environment variable still works, but
+  the daemon starts at logon and cannot see one you export afterwards.
+
+**Test the current mode** is the button worth knowing about. A missing API key makes `haiku`
+behave exactly like `template`, with nothing in any log, so the test reports which mode
+actually ran, where the key came from, the latency, and whether it fell back and why.
 
 Two things it deliberately does not claim:
 
