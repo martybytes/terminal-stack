@@ -33,8 +33,9 @@ What you hear: `"Claude. terminal-stack finished. Added the retry logic."` —
 project name (with "two"/"three" when several sessions share one project),
 what happened, and questions/permissions speak immediately while several
 near-simultaneous "done"s coalesce into one line ("Three sessions finished:
-…"). **Left-click the tray icon to mute** (it greys out with a slash); the menu also
-has music mode, summarizer mode, test speak, unduck now.
+…"). **Left-click the tray icon to mute** (it greys out with a slash; a hollow ring
+means the feature is switched off entirely and no hooks are installed). The menu also
+has music mode, summarizer mode, **Open dashboard**, test speak, unduck now.
 
 ## Summarizer modes
 
@@ -85,7 +86,7 @@ repeat the fixed waiting template unless the hook supplied no response text.
 | play lock (direct path only) | `…\tts-daemon\state\speak.lock` |
 | runtime knobs | `~/.claude/tts/config.json` + untracked `local.json` |
 | autostart | HKCU `…\CurrentVersion\Run` → `"…\terminal-stack-tts.exe" daemon` |
-| HTTP API | `http://127.0.0.1:8890` — `/healthz`, `/v1/status`, `/v1/dnd`, `/v1/duck/release`, `/v1/history`, `/v1/mute` |
+| HTTP API | `http://127.0.0.1:8890` — `/healthz`, `/v1/status`, `/v1/dnd`, `/v1/duck/release`, `/v1/history`, `/v1/history/summary`, `/v1/mute`, `/ui`, `/v1/logs/stream` |
 
 Music stuck quiet after a crash? `ts-doctor --repair` (or just start the
 daemon — it restores the stale snapshot at startup). Emergency by hand:
@@ -109,6 +110,30 @@ argument — `test_payload()` builds a fixed `stop`/`waiting` event with an empt
 the positional argument is never read. It exercises the pipeline, not a phrase of your
 choosing. To have the voice say something specific, use the `self` summarizer: end the
 turn with a `<!-- speak: … -->` marker, which is what the Stop hook reads.
+
+## The dashboard
+
+Tray icon, **Open dashboard**, or `http://127.0.0.1:8890/ui`. Three tabs:
+
+| Tab | Answers |
+|---|---|
+| Status | is it up, is it muted, which summarizer, how long since the daemon last spoke, and whether the summarizer has been quietly falling back to template |
+| Timeline | what it decided and why, from the history database: `spoken`, `deduped`, `muted`, `suppressed_dnd`, `synth_failed`, with engine and play time |
+| Log | the raw `ttsd.log`, streamed live, coloured by level, with a filter and a pause button |
+
+Loopback only, and it will refuse a request whose `Host` header is not one it recognises, so
+a web page you happen to be visiting cannot read your history.
+
+Read-only for now: it reports, it does not configure. The settings form, the per-mode
+summarizer test and the restart button are the next stage.
+
+Two things it deliberately does not claim:
+
+- **An empty timeline is not "all quiet".** Every history function fails open and returns
+  nothing when its database is unusable, so the page says so rather than implying silence.
+- **Non-template summarizer modes only apply to `waiting` announcements.** Questions,
+  permission prompts and errors are always the template line, and a coalesced
+  multi-session line bypasses every mode. That is by construction, not a fault.
 
 ## Going quiet for a call
 
