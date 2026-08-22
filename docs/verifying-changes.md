@@ -234,6 +234,35 @@ The three that actually matter, because each covers a way the old DND failed:
 - **An unusable state dir must read as *not* muted.** The mute fails open toward speech, the
   opposite of the history store: a mute you cannot lift looks exactly like broken TTS.
 
+Dashboard and settings changes have their own suite, and it is the one that binds a
+socket:
+
+```sh
+cd bootstrap/tts-daemon && python -m pytest tests/test_daemon_smoke.py -q
+```
+
+That file starts a real daemon on an ephemeral port and talks to it. It exists because a
+startup-path `NameError` slipped past 124 unit tests: nothing else in the suite calls
+`main()`, so anything reached only by the daemon branch was invisible until a live run.
+**Any change to `__main__.py`'s startup, `server.py`'s routing, or the schema needs this
+suite, not just the unit tests.**
+
+Four checks worth doing by hand against the built EXE, because they are about honesty
+rather than mechanics:
+
+- **The mode test must admit a fall-back.** Clear the API key, select `haiku`, and press
+  Test: it has to say it fell back and why. A missing key otherwise produces exactly the
+  template line with no exception and nothing logged, which is indistinguishable from
+  working.
+- **A write with no token must fail.** `POST /v1/config/set` without `X-TS-Token` is a 401,
+  and nothing lands in `local.json`. Same for `/v1/mute`, which a cross-site form could
+  once reach on an empty body.
+- **An override must be visible.** Set something in `local.json` by hand, reload the page,
+  and confirm the field says an override is beating the saved value. That label is the whole
+  defence against the divergence that removed every TTS hook twice in one day.
+- **Restart-required fields must say so.** `/v1/config/reload` returns `ok` for them
+  regardless, so a field in that group that does not carry the warning is a lie.
+
 The invariants to drill after touching the hook senders:
 
 - **No console process:** inspect the built PE Optional Header (`Subsystem=2`,

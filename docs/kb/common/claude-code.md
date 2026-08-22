@@ -99,7 +99,7 @@ Optional voice when an agent **finishes**, **errors**, **asks a question**, or *
 | `ts-config tts daemon on` | Windows: session-aware announcements via the ttsd tray daemon (names the project, coalesces, ducks music) — `doc windows/tts-daemon` |
 | `/test-voice` | Slash command in Claude Code or Cursor (user home) |
 | `ts-config tts history [--dupes]` | Windows: what was spoken and what was suppressed — the answer to "why did it say that twice" (`doc windows/tts-daemon`) |
-| `ccmute` | Silence it instantly for a call — sticky, absolute, works with the daemon stopped. Also the tray icon, `Ctrl+Alt+Shift+M`, or `Leader+m` |
+| `ccmute` (dashboard: tray, Open dashboard) | Silence it instantly for a call: sticky, absolute, works with the daemon stopped. Also the tray icon, `Ctrl+Alt+Shift+M`, or `Leader+m` |
 
 ### Config layout
 
