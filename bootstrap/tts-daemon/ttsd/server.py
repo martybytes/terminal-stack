@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 import time
 import urllib.parse
@@ -18,6 +19,7 @@ from urllib.parse import urlsplit
 
 from . import PROTOCOL_VERSION, history, mute
 from .config import logs_dir
+from . import keystore, settings_schema
 from .logtail import LogTail, parse_line
 from .webui import PAGE
 from .events import EventError, parse_event
@@ -37,6 +39,18 @@ def _qs_float(query: dict, key: str, default):
         return default
 
 log = logging.getLogger(__name__)
+
+_TEST_NOTE = ("Non-template modes only apply to 'done' announcements. A question, a "
+              "permission prompt or an error always uses the template, and a coalesced "
+              "multi-session line bypasses every mode.")
+
+
+def _key_text(described: dict) -> str:
+    if not described.get("set"):
+        return f"not set (looked in the secret store and ${described.get('envVar')})"
+    where = "secret store" if described.get("source") == "store" else "environment"
+    tail = described.get("tail")
+    return f"set, from the {where}" + (f" (ends {tail})" if tail else "")
 
 _MAX_BODY = 256 * 1024
 
@@ -135,7 +149,19 @@ class _Handler(BaseHTTPRequestHandler):
         app = self.app
         route = self.path.split("?", 1)[0]
         if route in ("/ui", "/ui/", "/dashboard"):
-            self._send_raw(200, PAGE.encode("utf-8"), "text/html; charset=utf-8")
+            # The page is same-origin and no route sends CORS headers, so cross-origin
+            # script cannot read this token out of the response. That, plus the Host
+            # allowlist, is what makes a write endpoint on an unauthenticated loopback
+            # port acceptable.
+            page = PAGE.replace("__TS_TOKEN__", app.token)
+            self._send_raw(200, page.encode("utf-8"), "text/html; charset=utf-8")
+            return
+        if route == "/v1/config/schema":
+            self._send(200, {"fields": settings_schema.public_schema(),
+                             "groups": list(settings_schema.GROUPS)})
+            return
+        if route == "/v1/config/effective":
+            self._send(200, self._effective_config())
             return
         if route == "/v1/history/summary":
             # history.summary() was CLI-only. daemon_silent_for is the number that let a
@@ -209,6 +235,21 @@ class _Handler(BaseHTTPRequestHandler):
 
     # ── POST ──────────────────────────────────────────────────────────────
 
+    # Writes need the token on every listener, not just the WSL-facing one. Loopback is
+    # unauthenticated, and the Host allowlist does not help here: a cross-site form POST
+    # carries the *target* Host, so any page you visit could otherwise mute your machine or
+    # write your config. Left deliberately open: /v1/event (every hook posts it and none
+    # carries a token), /v1/config/reload (ts-config from pwsh has no token to hand), and
+    # /v1/duck/release and /v1/shutdown (the installer calls them, and both are nuisances
+    # rather than compromises now that a dead daemon restarts itself on the next hook).
+    _TOKEN_ROUTES = frozenset({
+        "/v1/config/set", "/v1/secrets/set", "/v1/summarizer/test", "/v1/daemon/restart",
+        "/v1/mute", "/v1/dnd", "/v1/speak",
+    })
+
+    def _token_ok(self) -> bool:
+        return self.headers.get("X-TS-Token", "") == self.app.token
+
     def do_POST(self) -> None:  # noqa: N802
         if not self._authorized():
             self._send(401, {"error": "bad token"})
@@ -216,7 +257,33 @@ class _Handler(BaseHTTPRequestHandler):
         if not self._host_ok():
             self._send(403, {"error": "unexpected Host header"})
             return
+        route = self.path.split("?", 1)[0]
+        if route in self._TOKEN_ROUTES and not self._token_ok():
+            self._send(401, {"error": "this route needs X-TS-Token"})
+            return
         app = self.app
+        if route == "/v1/config/set":
+            self._set_config()
+            return
+        if route == "/v1/secrets/set":
+            body = self._read_json() or {}
+            name = str(body.get("name") or "")
+            if name not in keystore.KNOWN:
+                self._send(400, {"error": "unknown secret"})
+                return
+            ok = keystore.set_value(name, str(body.get("value") or ""))
+            self._send(200 if ok else 500,
+                       {"ok": ok, "secret": keystore.describe(
+                           name, str(app.cfg.get("summarize.haiku.keyEnv",
+                                                 "ANTHROPIC_API_KEY")))})
+            return
+        if route == "/v1/summarizer/test":
+            self._send(200, self._summarizer_test())
+            return
+        if route == "/v1/daemon/restart":
+            self._send(200, {"restarting": True})
+            self._restart_daemon()
+            return
         if self.path == "/v1/event":
             body = self._read_json()
             if body is None:
@@ -274,6 +341,128 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(200, {"enabled": mute.is_muted(), "muted": mute.is_muted()})
         else:
             self._send(404, {"error": "not found"})
+
+    def _effective_config(self) -> dict:
+        """Every schema key with its effective value, its saved value, and which layer won."""
+        app = self.app
+        base, local = app.cfg.layers()
+
+        def dig(tree: dict, key: str):
+            node = tree
+            for part in key.split("."):
+                if not isinstance(node, dict) or part not in node:
+                    return None, False
+                node = node[part]
+            return node, True
+
+        values = {}
+        for field in settings_schema.FIELDS:
+            key = field["key"]
+            saved, in_base = dig(base, key)
+            override, in_local = dig(local, key)
+            values[key] = {
+                "effective": app.cfg.get(key, None),
+                "saved": saved if in_base else None,
+                # "local" means an override is winning; the page says so next to the field,
+                # because a change made anywhere else would otherwise look ignored.
+                "layer": "local" if in_local else ("saved" if in_base else "default"),
+                "override": override if in_local else None,
+            }
+        env_var = str(app.cfg.get("summarize.haiku.keyEnv", "ANTHROPIC_API_KEY"))
+        return {
+            "values": values,
+            "secrets": {keystore.ANTHROPIC_API_KEY: keystore.describe(
+                keystore.ANTHROPIC_API_KEY, env_var)},
+        }
+
+    def _set_config(self) -> None:
+        body = self._read_json()
+        if body is None:
+            self._send(400, {"error": "invalid JSON"})
+            return
+        clean, errors = settings_schema.validate(body.get("updates") or {})
+        written = 0
+        if clean:
+            # One read-modify-write for the whole form, which is what write_local_many
+            # exists for: N separate writes was the shape that could destroy the overlay.
+            if not self.app.cfg.write_local_many(clean):
+                self._send(500, {"error": "could not write local.json", "errors": errors})
+                return
+            written = len(clean)
+            log.info("dashboard wrote %d setting(s): %s", written, ", ".join(sorted(clean)))
+        self._send(200, {"written": written, "errors": errors})
+
+    def _summarizer_test(self) -> dict:
+        """Run the configured mode and report what actually happened.
+
+        A missing API key makes haiku produce exactly the template line, with no exception
+        and no log entry, so a test that only played audio could not tell the two apart.
+        This one names the mode, the key source, the latency and the fall-back reason.
+        """
+        import time as _time
+
+        from .events import Event
+        from .registry import Registry
+        from .summarize import Summarizer
+
+        app = self.app
+        mode = str(app.cfg.get("summarize.mode", "template"))
+        env_var = str(app.cfg.get("summarize.haiku.keyEnv", "ANTHROPIC_API_KEY"))
+        key = keystore.describe(keystore.ANTHROPIC_API_KEY, env_var)
+        sample = ("Rewrote the retry logic so a stale token refreshes once instead of "
+                  "failing every request for the life of the session, and added tests.")
+        event = Event(source="claude", event="stop", state="waiting",
+                      session_key="dashboard:test", project_name="terminal-stack",
+                      text=sample)
+        # A throwaway Summarizer, so a test never disturbs the daemon's own counters.
+        summarizer = Summarizer(app.cfg)
+        started = _time.monotonic()
+        try:
+            line = summarizer.line_for_batch([event], Registry()) or ""
+        except Exception as exc:  # noqa: BLE001 - a test must report, never 500
+            return {"mode": mode, "ran": "error", "key": _key_text(key), "ms": 0,
+                    "fell_back": True, "reason": f"{type(exc).__name__}: {exc}",
+                    "line": "", "note": _TEST_NOTE}
+        elapsed = int((_time.monotonic() - started) * 1000)
+        fell_back = mode != "template" and summarizer.degraded > 0
+        return {
+            "mode": mode,
+            "ran": "template" if (fell_back or mode == "template") else mode,
+            "key": _key_text(key),
+            "ms": elapsed,
+            "fell_back": fell_back,
+            "reason": summarizer.last_degrade,
+            "line": line,
+            "note": _TEST_NOTE,
+        }
+
+    def _restart_daemon(self) -> None:
+        """Spawn a replacement that waits for this one to release the port, then stop."""
+        import subprocess
+        import sys as _sys
+
+        from .process import popen_hidden
+
+        def _go() -> None:
+            time.sleep(0.2)  # let the 200 reach the browser first
+            command = ([_sys.executable, "daemon"] if getattr(_sys, "frozen", False)
+                       else [_sys.executable, "-m", "ttsd", "daemon"])
+            env = dict(os.environ)
+            env["CC_TTS_RESTART_WAIT"] = "12"
+            if getattr(_sys, "frozen", False):
+                env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+            try:
+                popen_hidden(command, detached=True, env=env,
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, close_fds=True)
+            except OSError as exc:
+                log.warning("restart spawn failed: %s", exc)
+                return
+            log.info("restarting on request from the dashboard")
+            if self.app.on_shutdown is not None:
+                self.app.on_shutdown()
+
+        threading.Thread(target=_go, daemon=True, name="ttsd-restart").start()
 
     def _stream_logs(self) -> None:
         """Server-sent events, one per log line, until the client or the daemon goes away.

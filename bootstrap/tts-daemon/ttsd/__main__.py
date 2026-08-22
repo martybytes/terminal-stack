@@ -15,6 +15,7 @@ import argparse
 import json
 import logging
 import logging.handlers
+import os
 import socket
 import sys
 import threading
@@ -74,7 +75,8 @@ def _nudge_daemon_stop() -> None:
         request = urllib.request.Request(
             f"http://127.0.0.1:{port}/v1/mute", method="POST",
             data=json.dumps({"enabled": True, "by": "cli"}).encode("utf-8"),
-            headers={"Content-Type": "application/json"})
+            headers={"Content-Type": "application/json",
+                     "X-TS-Token": load_or_create_token()})
         with urllib.request.urlopen(request, timeout=0.4):
             pass
     except (OSError, ValueError):
@@ -306,14 +308,31 @@ def main(argv: list[str] | None = None) -> int:
     port = args.port or int(cfg.get("daemon.port", 8890))
     app = _build(cfg, version)
 
+    # A dashboard restart spawns us while the previous daemon is still listening, so wait
+    # for it to let go before binding. Without this the replacement would see a healthy
+    # daemon on the port, exit 0 as designed, and leave nothing running once the old one
+    # shut down.
+    restart_wait = 0.0
     try:
-        loopback = Listener(app, "127.0.0.1", port, requires_token=False)
-    except OSError:
-        if _already_running(port):
-            log.info("ttsd already healthy on port %d — exiting", port)
-            return 0
-        log.error("port %d is taken by something that is not a healthy ttsd", port)
-        return 1
+        restart_wait = float(os.environ.get("CC_TTS_RESTART_WAIT") or 0)
+    except ValueError:
+        restart_wait = 0.0
+    deadline = time.time() + restart_wait
+    loopback = None
+    while loopback is None:
+        try:
+            loopback = Listener(app, "127.0.0.1", port, requires_token=False)
+        except OSError:
+            if time.time() < deadline:
+                time.sleep(0.25)
+                continue
+            if _already_running(port):
+                log.info("ttsd already healthy on port %d — exiting", port)
+                return 0
+            log.error("port %d is taken by something that is not a healthy ttsd", port)
+            return 1
+    if restart_wait:
+        log.info("bound port %d after waiting for the previous daemon", port)
 
     listeners = [loopback]
     gateway = _wsl_gateway_ip()

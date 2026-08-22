@@ -331,6 +331,59 @@ Two constraints shaped the mechanism:
 
 The availability half is smaller but mattered more in practice: autostart is logon-only with no watchdog, so a daemon that died at 22:17 was still dead at 13:30 the next day, with no error and nothing in the log. Every hook in between took the unserialized direct path and exited 0, which is how genuinely overlapping voices went unnoticed for fifteen hours. A hook that cannot reach an enabled daemon now starts it and retries once. That is safe to race: two hooks both spawning means the loser fails to bind the port and exits 0 (`_already_running`), so the check only ever asks whether the port answers, never which process won it. `ts-doctor` reports how long the daemon has been silent and flags any session that spoke twice, because neither is visible otherwise — every hook exits 0 either way.
 
+## Why the dashboard writes only local.json, and needs a token to do it
+
+The daemon is a Windows process and chezmoi `[data]` lives in WSL, so the page physically
+cannot write the authoritative store. Rather than shell across the boundary from a form
+submit, it writes `local.json`, which is the mechanism built for exactly this: untracked,
+deep-merged over the rendered config, wins, and survives every apply. The tray already
+wrote it for music and summarizer mode, so this is one mechanism rather than a new one.
+
+The cost is real and is stated on the page itself: these are machine-local overrides that do
+not travel to other machines. **Every field shows which layer won**, and says so explicitly
+when an override is beating the saved value. Without that, changing a setting somewhere else
+and seeing no effect would be unexplainable, which is the confusion this whole feature
+exists to end.
+
+**Writes need the token even on loopback.** Loopback needed no token because it cannot be
+reached from another machine, and that reasoning does not survive a browser: any page you
+visit can POST to 127.0.0.1. The Host allowlist does not help here, because a cross-site
+form POST carries the *target* Host. Before this, a random page could mute your machine
+(`/v1/mute` mutated on an empty body), and a config endpoint would have raised that to
+writing arbitrary dotted keys, including `kokoro.url` and the ollama URL, which are
+exfiltration shaped. So the new routes plus `/v1/mute` and `/v1/speak` require
+`X-TS-Token`, which the page carries because it is served same-origin and no route sends
+CORS headers.
+
+Three routes stayed open, deliberately, and it is worth knowing which: `/v1/event`, because
+every hook posts it and none of them has a token to hand; `/v1/config/reload`, because
+`ts-config` from pwsh has no token either; and `/v1/duck/release` with `/v1/shutdown`,
+because the installer calls them and both are nuisances rather than compromises now that a
+dead daemon restarts itself on the next hook.
+
+**Validation lives in a schema, not in the UI.** The enums existed only in `tray.py`'s
+tuples, `_cc_tts.sh`'s case arms and `_config.ps1`'s switch, and `write_local` accepted any
+path with any value. `ttsd/settings_schema.py` is now the single list the server validates
+against and the page renders from, so the two cannot drift, and two tests check that its
+`restart` and `shell` flags still match what the code does: a restart-flagged key must
+appear in `_build`, and a shell-only key must appear nowhere the daemon reads config. A
+stale flag would be a lie the UI repeats.
+
+The haiku model became a closed list rather than free text, because `max_tokens` is 60 and
+that interacts badly with a model that thinks by default.
+
+## Why the summarizer test reports rather than just speaks
+
+A missing API key makes `haiku` produce exactly the template line, with no exception and
+nothing in the log. A test button that only played audio could not tell that apart from
+success, so the test returns what actually ran: the mode requested, the mode that produced
+the line, where the key came from, the latency, whether it fell back and why, and the line
+itself. It also carries the structural caveat, because a correctly configured haiku *still*
+sounds like the template for a question: non-template modes only apply to `waiting`
+announcements, and a coalesced multi-session line bypasses every mode.
+
+It runs on a throwaway `Summarizer` so a test never disturbs the daemon's own counters.
+
 ## Why the dashboard is a page served by the daemon
 
 The daemon already runs an HTTP server on loopback, so a browser page costs no new bundled

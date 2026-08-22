@@ -148,6 +148,15 @@ def logs_dir() -> Path:
 # ── file plumbing shared by the local.json writer ─────────────────────────────
 
 
+def _read_json_dict(path: Path) -> dict:
+    """A JSON object from disk, or {} for anything that is not one. Never raises."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 def _dated_sibling(path: Path, tag: str) -> Path:
     """`local.json` -> `local.json.bad.YYYYMMDD`, never clobbering a same-day file.
 
@@ -268,6 +277,18 @@ class Config:
                 return None
             node = node[part]
         return node
+
+    def layers(self) -> tuple[dict, dict]:
+        """(rendered config.json, local.json overrides), both as fresh copies.
+
+        The dashboard has to show which layer a value came from. Without that it would be
+        possible to "change" a setting in the UI, see no effect, and have no way to learn
+        that an override two files away is winning -- which is the exact confusion this
+        whole feature exists to end.
+        """
+        base = _read_json_dict(tts_config_dir() / "config.json")
+        local = _read_json_dict(tts_config_dir() / "local.json")
+        return base, local
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
