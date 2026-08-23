@@ -19,7 +19,7 @@ terminal-stack/
 ├── dot_zshrc                       → ~/.zshrc (WSL)
 ├── dot_tmux.conf                   → ~/.tmux.conf (WSL)
 ├── dot_config/starship.toml        → ~/.config/starship.toml (WSL)
-├── dot_claude/settings.json.tmpl   → ~/.claude/settings.json (chezmoi template)
+├── dot_claude/modify_settings.json.tmpl → ~/.claude/settings.json (spliced per key, not replaced)
 ├── dot_claude/hooks/...            → ~/.claude/hooks/... (WSL)
 ├── dot_codex/...                   → ~/.codex/... (WSL; also mirrored to Windows)
 └── windows/                        ← NOT applied by chezmoi
@@ -37,7 +37,7 @@ terminal-stack/
 
 No file in this repo hard-codes a username. The username is resolved at apply time:
 
-- **WSL-side `.tmpl` files** (anything under the chezmoi source root, e.g. `dot_claude/settings.json.tmpl`) use chezmoi's native template engine — `{{ .chezmoi.homeDir }}` expands to the current `$HOME`.
+- **WSL-side `.tmpl` files** (anything under the chezmoi source root, e.g. `dot_config/starship.toml.tmpl`) use chezmoi's native template engine — `{{ .chezmoi.homeDir }}` expands to the current `$HOME`.
 - **Windows-side `.tmpl` files** (anything under `windows/`) use a `__WIN_USER__` placeholder that the `run_after_90-sync-windows.sh` hook substitutes. The hook resolves the Windows username in this order:
   1. `chezmoi data` → `windowsUsername` (set by the bootstrap script under `[data]` in `~/.config/chezmoi/chezmoi.toml`).
   2. Fallback: `cmd.exe /c echo %USERNAME%` via WSL interop.

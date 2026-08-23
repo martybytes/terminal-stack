@@ -15,6 +15,7 @@ desktop.ini
 
 # Python test/runtime caches
 __pycache__/
+.pytest_cache/
 *.py[cod]
 
 # chezmoi local-only artifacts that should never be committed

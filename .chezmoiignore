@@ -14,6 +14,15 @@ LICENSE
 bootstrap/**
 docs/**
 context/**
+# The pytest suite is repo infrastructure, run from the clone. Without this it
+# maps to ~/tests/** and litters $HOME with the test files — same trap the
+# installer entry points below fell into.
+tests/**
+# Python bytecode caches are build noise. .gitignore already covers them, but
+# chezmoi has its own ignore list — without this, running the codex hook tests
+# deploys ~/.codex/hooks/__pycache__/*.pyc.
+**/__pycache__/**
+.pytest_cache/**
 # Installer entry points + Windows sync script live at the repo root for the
 # raw-URL one-liners; they are run from the clone, never deployed to $HOME.
 # Without these, chezmoi maps them to ~/install-linux.sh, ~/scripts/…, etc.

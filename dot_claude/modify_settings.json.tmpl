@@ -1,0 +1,153 @@
+#!/usr/bin/env python3
+"""Splice the stack-owned keys of this template into the live ~/.claude/settings.json
+instead of replacing the file. POSIX twin of bootstrap/_merge_claude_settings.ps1
+(Windows); keep the two ownership rules identical.
+
+Why this is a modify_ script and not a plain chezmoi target: Claude Code WRITES
+this same file. `model`, `enabledPlugins`, `permissions`, `env`,
+`agentPushNotifEnabled` and friends are its own state, set from the Claude UI,
+not ours — and a whole-file target silently deletes every one of them with
+nothing in the diff to explain it. That is how the agentmemory plugin got
+disabled on the Windows side on 2026-08-20, and `docs/decisions.md` §"Why
+`~/.claude/settings.json` is spliced, not copied" called this exact day: "The
+WSL-side dot_claude/settings.json.tmpl is still a whole-file chezmoi target.
+That is correct only as long as WSL-side Claude Code has no plugins and no
+per-machine keys; the day it does, it needs a modify_ script doing the same
+splice."
+
+Ownership is derived from the rendered fragment below, NOT a hard-coded list —
+so dropping a key from the template drops it from the live file, and adding one
+takes it over. Everything else in the live file survives byte for byte.
+
+chezmoi hands us the current target contents on stdin and takes stdout as the
+new contents. We refuse rather than guess: if the live file is present but
+unparseable, we echo it back untouched instead of destroying hand-edits.
+"""
+import json
+import os
+import sys
+from collections import OrderedDict
+
+# The stack-owned fragment. chezmoi renders this before the script runs.
+FRAGMENT = r"""
+{
+  "statusLine": {
+    "type": "command",
+    "command": "bash {{ .chezmoi.homeDir }}/.claude/statusline-command.sh"
+  },
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{ .chezmoi.homeDir }}/.claude/hooks/wez-tab-status.sh thinking"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{ .chezmoi.homeDir }}/.claude/hooks/wez-tab-status.sh working"
+          }
+        ]
+      }{{ if eq (index . "ccTtsEnabled" | default "false") "true" }},
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{ .chezmoi.homeDir }}/.claude/hooks/cc-speak-input.sh question"
+          }
+        ]
+      }{{ end }}
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{ .chezmoi.homeDir }}/.claude/hooks/wez-tab-status.sh waiting"
+          }{{ if eq (index . "ccTtsEnabled" | default "false") "true" }},
+          {
+            "type": "command",
+            "command": "{{ .chezmoi.homeDir }}/.claude/hooks/cc-speak.sh waiting"
+          }{{ end }}
+        ]
+      }
+    ],
+    "StopFailure": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{ .chezmoi.homeDir }}/.claude/hooks/wez-tab-status.sh error"
+          }{{ if eq (index . "ccTtsEnabled" | default "false") "true" }},
+          {
+            "type": "command",
+            "command": "{{ .chezmoi.homeDir }}/.claude/hooks/cc-speak.sh error"
+          }{{ end }}
+        ]
+      }
+    ]{{ if eq (index . "ccTtsEnabled" | default "false") "true" }},
+    "Notification": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{ .chezmoi.homeDir }}/.claude/hooks/cc-speak-input.sh notification"
+          }
+        ]
+      }
+    ]{{ end }}
+  },
+  "theme": "{{ if hasKey . "resolvedTheme" }}{{ .resolvedTheme }}{{ else }}dark{{ end }}"
+}
+"""
+
+
+def emit(text):
+    sys.stdout.write(text)
+    raise SystemExit(0)
+
+
+live_raw = sys.stdin.read()
+fragment = json.loads(FRAGMENT, object_pairs_hook=OrderedDict)
+
+# No live file yet (fresh machine): nothing to preserve, so the fragment IS the file.
+if not live_raw.strip():
+    emit(json.dumps(fragment, indent=2) + "\n")
+
+try:
+    live = json.loads(live_raw, object_pairs_hook=OrderedDict)
+except ValueError as exc:
+    # Refuse rather than guess. Echoing the input back is a no-op apply; a
+    # destroyed hand-edit would not be recoverable.
+    sys.stderr.write(
+        "modify_settings.json: live ~/.claude/settings.json is not valid JSON "
+        "(%s); leaving it untouched.\n" % exc
+    )
+    emit(live_raw)
+
+if not isinstance(live, dict):
+    sys.stderr.write(
+        "modify_settings.json: live ~/.claude/settings.json is not a JSON object; "
+        "leaving it untouched.\n"
+    )
+    emit(live_raw)
+
+# Splice: overwrite the keys the fragment renders, in place, and append any it
+# adds. Every other key — and the live file's key order — is preserved.
+merged = OrderedDict(live)
+for key, value in fragment.items():
+    merged[key] = value
+
+emit(json.dumps(merged, indent=2) + "\n")

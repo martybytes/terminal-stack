@@ -90,9 +90,20 @@ ts_find_stray() {
         "$HOME/command-reference.txt" \
         "$HOME/command-reference.html" \
         "$HOME/.local/bin/wzr" \
-        "$HOME/.wezterm-ref"; do
+        "$HOME/.wezterm-ref" \
+        "$HOME/tests/test_agent_tools.py" \
+        "$HOME/tests/test_codex_dashboard.py"; do
         [ -e "$f" ] && printf '1\t%s\tretired terminal-stack artifact\n' "$f"
     done
+    # ~/tests/ was created by chezmoi before tests/** joined .chezmoiignore: the
+    # repo's pytest suite was being deployed into $HOME. A .chezmoiremove entry
+    # cannot clear it — chezmoi skips ignored paths — so it is retired here.
+    [ -d "$HOME/tests" ] && [ -z "$(ls -A "$HOME/tests" 2>/dev/null)" ] \
+        && printf '1\t%s\tempty dir left by the retired test deploy\n' "$HOME/tests"
+    # Same story: __pycache__ was deployed before **/__pycache__/** joined
+    # .chezmoiignore, so an older machine still has ~/.codex/hooks/__pycache__.
+    [ -d "$HOME/.codex/hooks/__pycache__" ] \
+        && printf '1\t%s\tpython bytecode cache from a retired deploy\n' "$HOME/.codex/hooks/__pycache__"
     # Heuristic: loose top-level *.sh in $HOME that reference the stack. Off by
     # default — provenance is uncertain, so the user opts in per file.
     for f in "$HOME"/*.sh; do
