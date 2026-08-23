@@ -154,12 +154,33 @@ alias gp='git pull'
 alias gl='git log --oneline --graph --decorate -10'
 
 # Claude Code shorthands (PowerShell equivalents live in windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1).
-# Each cc* sets the WezTerm tab title to the bare project leaf while claude runs
-# and clears it on exit — no 'cc' prefix: the tab bar's Claude icon and state
-# dots already say Claude, and the prefix wasted tab width.
-_wez_tab_title() {
-  [[ -n "$WEZTERM_PANE" ]] || return
-  wezterm cli set-tab-title "$1" >/dev/null 2>&1
+# Each cc* sets the tab title to the bare project leaf while claude runs and
+# clears it on exit — no 'cc' prefix: the tab bar's Claude icon and state dots
+# already say Claude, and the prefix wasted tab width.
+#
+# Three terminals, three mechanisms, because only one of them has a sticky
+# per-tab title reachable from a script:
+#
+#   WezTerm  `wezterm cli set-tab-title` — a real tab-title override that
+#            survives the running app's own OSC. What this stack has always used.
+#   tmux     tmux OWNS the outer title while attached: it swallows our OSC 2 and
+#            substitutes set-titles-string (dot_tmux.conf). So we skip, and the
+#            session name shows instead — already the project leaf for `ccs`.
+#   else     (Ghostty, Terminal.app, …) plain OSC 2. Ghostty *has* a sticky tab
+#            title, but it is keybind-only: no CLI drives a running instance and
+#            no escape sequence reaches it (ConEmu OSC 9;3 sets the surface
+#            title, tested). OSC 2 is all we get — and it only STAYS because the
+#            cc* wrappers set CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 so Claude
+#            never writes a title of its own. Without that pair this is pointless.
+#
+# Clearing is handled by _set_title on the next prompt, so an empty title here
+# only needs to deal with WezTerm's sticky override.
+_ts_tab_title() {
+  if [[ -n "$WEZTERM_PANE" ]]; then
+    wezterm cli set-tab-title "$1" >/dev/null 2>&1
+  elif [[ -z "$TMUX" && -n "$1" ]]; then
+    printf '\033]2;%s\007' "$1" > /dev/tty 2>/dev/null
+  fi
   # Empty title marks CC exit in this pane -> clear cc_state; WezTerm Lua restores bg.
   if [[ -z "$1" ]]; then
     local uv=$'\033]1337;SetUserVar=cc_state=\007'
@@ -262,13 +283,13 @@ claude() {
 }
 # { } always { }: the title clears even when Ctrl+C aborts the function body
 # (matches the pwsh wrappers' try/finally); exit status of the body is preserved.
-cc()    { _wez_tab_title "${PWD:t}"; { claude "$@" }                                           always { _wez_tab_title "" } }
-ccc()   { _wez_tab_title "${PWD:t}"; { claude --continue "$@" }                                always { _wez_tab_title "" } }
-ccd()   { _wez_tab_title "${PWD:t}"; { claude --dangerously-skip-permissions "$@" }            always { _wez_tab_title "" } }
-ccdc()  { _wez_tab_title "${PWD:t}"; { claude --dangerously-skip-permissions --continue "$@" } always { _wez_tab_title "" } }
-ccr()   { _wez_tab_title "${PWD:t}"; { claude --resume "$@" }                                  always { _wez_tab_title "" } }
-ccdr()  { _wez_tab_title "${PWD:t}"; { claude --dangerously-skip-permissions --resume "$@" }   always { _wez_tab_title "" } }
-cca()   { _wez_tab_title "agents";   { claude agents }                                         always { _wez_tab_title "" } }
+cc()    { _ts_tab_title "${PWD:t}"; { CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 claude "$@" }                                           always { _ts_tab_title "" } }
+ccc()   { _ts_tab_title "${PWD:t}"; { CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 claude --continue "$@" }                                always { _ts_tab_title "" } }
+ccd()   { _ts_tab_title "${PWD:t}"; { CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 claude --dangerously-skip-permissions "$@" }            always { _ts_tab_title "" } }
+ccdc()  { _ts_tab_title "${PWD:t}"; { CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 claude --dangerously-skip-permissions --continue "$@" } always { _ts_tab_title "" } }
+ccr()   { _ts_tab_title "${PWD:t}"; { CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 claude --resume "$@" }                                  always { _ts_tab_title "" } }
+ccdr()  { _ts_tab_title "${PWD:t}"; { CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 claude --dangerously-skip-permissions --resume "$@" }   always { _ts_tab_title "" } }
+cca()   { _ts_tab_title "agents";   { CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 claude agents }                                         always { _ts_tab_title "" } }
 
 # Interactive Codex sessions get a three-row WezTerm dashboard. Utility commands
 # remain stock, and codex-stock is an explicit no-enhancements escape hatch.
@@ -374,7 +395,7 @@ cyr()   { _ts_codex yolo resume "$@" }
 
 # Escape hatch: vanilla zsh, no rc files (no oh-my-zsh/starship/aliases).
 # Nested — `exit` drops back to the customized shell.
-plain() { _wez_tab_title "plain • ${PWD:t}"; { zsh -df "$@" } always { _wez_tab_title "" } }
+plain() { _ts_tab_title "plain • ${PWD:t}"; { zsh -df "$@" } always { _ts_tab_title "" } }
 
 # Fix Home/End keys in PuTTY / some terminals.
 bindkey "\e[1~" beginning-of-line
@@ -457,7 +478,7 @@ fi
 ccs() {
   local name="${1:-$(basename "$PWD")}"
   name="${name//[^A-Za-z0-9_.-]/_}"
-  [[ -n "$WEZTERM_PANE" ]] && wezterm cli set-tab-title "$name" >/dev/null 2>&1
+  _ts_tab_title "$name"
   tmux new-session -A -s "cc-$name" -n claude "claude --name \"$name\""
 }
 
@@ -465,7 +486,7 @@ ccs() {
 ssht() {
   local host="$1" sess="${2:-main}"
   if [[ -z "$host" ]]; then echo "usage: ssht host [session]"; return 2; fi
-  [[ -n "$WEZTERM_PANE" ]] && wezterm cli set-tab-title "ssh-$host:$sess" >/dev/null 2>&1
+  _ts_tab_title "ssh-$host:$sess"
   ssh -t -- "$host" "tmux new-session -A -s $(printf '%q' "$sess")"
 }
 

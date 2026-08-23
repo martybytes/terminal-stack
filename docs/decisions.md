@@ -1086,12 +1086,28 @@ running instance (`ghostty +new-window` reports "not supported on this platform"
 escape sequence maps to it. ConEmu's `OSC 9;3` is present in the binary and looks like the
 answer, but it sets the *surface* title, which Claude then overwrites — tested, not assumed.
 
-tmux solves it instead, and better, because it is terminal-agnostic: while a session is
-attached tmux **owns** the outer terminal's title, intercepting the inner program's `OSC 2`
-completely — Claude's conversation slug never reaches the terminal at all — and substituting
+tmux handles the `ccs` case, and terminal-agnostically: while a session is attached tmux
+**owns** the outer terminal's title, intercepting the inner program's `OSC 2` completely —
+Claude's conversation slug never reaches the terminal at all — and substituting
 `set-titles-string`. Setting that to `#{s/^cc-//:session_name}` puts the bare project leaf in
-the tab for `ccs` sessions, in Ghostty and WezTerm alike. The wrappers that do *not* use tmux
-(`ccd`, `ccdc`, `ccr`, `ccdr`) cannot be helped under Ghostty, and the KB page says so.
+the tab, in Ghostty and WezTerm alike.
+
+The wrappers that do *not* use tmux (`ccd`, `ccdc`, `ccr`, `ccdr`) were initially written off
+as unfixable under Ghostty. That was wrong, and the fix is the other half of the problem
+rather than the same half again: **stop Claude writing a title at all.** Claude Code honours
+`CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1` — verified by probing it in a pty, where the default
+run writes `OSC 0 ✳ Claude Code` and the disabled run writes nothing whatsoever. So the
+wrapper emits `OSC 2` with the project leaf, Claude leaves it alone, and the tab keeps it.
+
+Both halves are load-bearing and neither is obvious from the other's code, which is why a
+test pins them together: the wrapper's `OSC 2` without the env var is overwritten within
+seconds, and the env var without the `OSC 2` just leaves whatever the shell last set. The
+before/after is exact — `terminal-stack` then `✳ Claude Code`, versus `terminal-stack` alone.
+
+`claude --name <name>` is the documented alternative and produces `✳ <name>`; `ccs` uses it
+because a tmux session needs a name regardless. The `cc*` wrappers prefer the env var because
+it leaves the title entirely to the stack, so the tab reads `terminal-stack` rather than
+`✳ terminal-stack`, matching the existing rule that a tab shows the bare project leaf.
 
 One trap: inside `#{...}` tmux wants the variable *name*. `#{s/^cc-//:#S}` is accepted and
 silently renders an **empty** string — a blank tab title, which is worse than the noisy one it

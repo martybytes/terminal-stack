@@ -62,28 +62,25 @@ nothing to configure there. The absence is a decision, not drift.
 - **Behaviour**: copy-on-select, paste protection, and a 10000-line scrollback
   matching WezTerm's.
 
-### Two things it does not do
+### Tab titles, and the one thing Ghostty still can't do
 
 - **No stack tab bar.** The Claude pane tints, the fleet counters and the status
   line are `.wezterm.lua` Lua, and Ghostty has no equivalent.
-- **No *scriptable* sticky tab title — but tmux gets you the project name.**
-  Ghostty does have a sticky per-tab title: `set_tab_title` is distinct from
-  `set_surface_title`, and a title set that way **survives** Claude Code
-  overwriting the OSC title (verified). It is simply unreachable from a script:
-  Ghostty ships no CLI to drive a running instance (`ghostty +new-window`
-  reports *"not supported on this platform"*) and no escape sequence maps to it
-  — ConEmu's `OSC 9;3` sets the *surface* title, which Claude then overwrites
-  (also verified). WezTerm has `wezterm cli set-tab-title`; Ghostty has no
-  equivalent.
+- **The tab shows the project name.** The `cc*` wrappers set it, and Claude
+  Code is told not to overwrite it (`CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1`) —
+  without that pair Claude replaces it with `✳ Claude Code` and then its
+  conversation slug, which is what used to happen here. `ccs` goes through tmux
+  instead, where tmux owns the title and substitutes the session name.
 
-  **Use `ccs`.** It runs Claude inside tmux, and tmux *owns* the terminal title
-  while attached — it intercepts the inner program's OSC 2 entirely and
-  substitutes `set-titles-string`, so Claude's slug never reaches Ghostty at
-  all. The stack sets that string to the session name with `ccs`'s `cc-` prefix
-  stripped, so the tab reads `terminal-stack`. This works in every terminal, not
-  just Ghostty. `ccd`/`ccdc`/`ccr`/`ccdr` run Claude directly with no tmux, so
-  under Ghostty their tab shows Claude's conversation slug and nothing can
-  prevent it.
+  Worth knowing if you ever change this: Ghostty *does* have a sticky per-tab
+  title (`set_tab_title`, distinct from `set_surface_title`) and a title set
+  that way genuinely survives Claude. It is just unreachable from a script —
+  there is no CLI to drive a running instance (`ghostty +new-window` reports
+  *"not supported on this platform"*) and no escape sequence maps to it;
+  ConEmu's `OSC 9;3` sets the *surface* title, tested. So the stack uses plain
+  `OSC 2` and removes the thing that was overwriting it, rather than fighting
+  for a sticky title it cannot reach. WezTerm still uses
+  `wezterm cli set-tab-title`, which is a real override.
 
 | Command | What it does |
 |---|---|

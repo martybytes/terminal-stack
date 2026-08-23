@@ -168,3 +168,29 @@ WSL invokes the Windows GUI-subsystem EXE, whose WinRT MediaPlayer uses the same
 **Cursor:** confirm `~/.cursor/hooks.json` has `afterAgentResponse`, `stop`, and `postToolUse` entries. `afterAgentResponse` carries the spoken completion text; `stop` is retained for failures. Other tools' entries sit in the same arrays and are expected — look for the one whose command is `terminal-stack-tts.exe`, not for a one-entry array. Restart Cursor after first deploy. Check **Settings → Hooks** if silent.
 
 Skip at bootstrap: `TS_CC_TTS=off`. Enable: `TS_CC_TTS=on`.
+
+## Tab titles
+
+Every `cc*` wrapper sets the terminal tab to the bare project leaf and clears it
+on exit, so a screenful of Claude sessions is readable at a glance.
+
+Claude Code sets a terminal title of its own — `✳ Claude Code`, then the
+conversation slug — which would overwrite that. The wrappers therefore run it
+with **`CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1`**, so the title the wrapper set is
+the one that stays. Both halves are needed; either alone does nothing useful.
+
+Three mechanisms, because only one terminal has a sticky tab title a script can
+set:
+
+| Where | How |
+|---|---|
+| WezTerm | `wezterm cli set-tab-title` — a real override that survives the app's own OSC |
+| inside tmux | skipped: tmux owns the outer title and substitutes `set-titles-string` (the session name) |
+| Ghostty, Terminal.app, … | plain `OSC 2`, which stays only because Claude is writing none |
+
+`claude --name <name>` is the supported alternative — it puts `✳ <name>` in the
+title — and `ccs` uses it, since a tmux session wants a name anyway. The `cc*`
+wrappers prefer the env var because it leaves the title entirely to the stack,
+so a Ghostty tab reads `terminal-stack` rather than `✳ terminal-stack`.
+
+Running `claude` directly is unaffected: it sets its own title as usual.

@@ -1068,3 +1068,38 @@ def test_tmux_title_format_uses_the_variable_name_not_the_shorthand():
     assert ":#S}" not in line, "#{...:#S} renders empty — see the comment above it"
     assert "s/^cc-//" in line, "ccs's cc- prefix must be stripped from the tab title"
     assert "set -g set-titles on" in conf
+
+
+def test_cc_wrappers_stop_claude_overwriting_the_tab_title():
+    """The wrappers set the tab to the project leaf, but Claude Code then writes
+    its own OSC title ('✳ Claude Code', later the conversation slug) and wins.
+    Only WezTerm has a sticky tab title a script can set; everywhere else the
+    wrapper's OSC 2 survives solely because Claude is told not to write one."""
+    rc = (ROOT / "dot_zshrc").read_text(encoding="utf-8")
+    ps = (ROOT / "windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1").read_text(encoding="utf-8")
+    for name in ("cc()", "ccc()", "ccd()", "ccdc()", "ccr()", "ccdr()", "cca()"):
+        line = next(l for l in rc.splitlines() if l.startswith(name))
+        assert "CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1" in line, \
+            f"{name} would have its tab title overwritten by Claude"
+        assert "_ts_tab_title" in line
+    for name in ("function cc ", "function ccc ", "function ccd ", "function ccdc",
+                 "function ccr ", "function ccdr", "function cca "):
+        line = next(l for l in ps.splitlines() if l.startswith(name))
+        assert "CLAUDE_CODE_DISABLE_TERMINAL_TITLE" in line, \
+            f"{name.strip()} (pwsh) would have its tab title overwritten"
+        assert "Set-TsTabTitle" in line
+    # The old WezTerm-only names must be fully retired on both sides.
+    assert "_wez_tab_title" not in rc
+    assert "Set-WezTabTitle" not in ps
+
+
+def test_tab_title_helper_skips_tmux_and_falls_back_to_osc2():
+    """tmux owns the outer title while attached and substitutes its own string,
+    so emitting OSC 2 there would be swallowed. WezTerm gets its sticky
+    override; everything else (Ghostty, Terminal.app) gets OSC 2."""
+    rc = (ROOT / "dot_zshrc").read_text(encoding="utf-8")
+    body = rc[rc.index("_ts_tab_title() {"):]
+    body = body[:body.index("\n}\n") + 3]
+    assert "WEZTERM_PANE" in body and "set-tab-title" in body
+    assert '-z "$TMUX"' in body, "must not emit OSC 2 inside tmux"
+    assert "\\033]2;%s\\007" in body or "033]2;" in body
