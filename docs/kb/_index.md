@@ -23,7 +23,7 @@ edits the highlighted topic. The reader is `less`: `/pattern` searches, `q` quit
 - `common/codex.md` / `common/claude-code.md` — AI coding-agent shortcuts and footer configuration (`doc codex`, `doc claude-code`); `common/tools/{grok,gemini}.md` cover the other two agents, and `common/tools/node-python.md` the runtimes they need
 - `linux/` — apt, VeraCrypt, ssh permissions, systemd, docker
 - `macos/` — Homebrew, macOS WezTerm toggles
-- `windows/` — pwsh, winget
+- `windows/` — pwsh, winget, the TTS tray daemon
 - `wezterm/` — WezTerm keybindings + dev workflow (all OSes)
 - `_style/` — glamour style JSONs; dark/light follows your baked theme, `$DOC_STYLE` overrides
 

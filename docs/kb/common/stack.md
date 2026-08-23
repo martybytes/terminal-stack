@@ -97,46 +97,11 @@ repair offers the same canonical move and re-syncs (a pin is written to
 `profile.local.ps1` only when the clone stays at a non-canonical path).
 
 ## `ts-config`
-| Command | What it does |
-|---|---|
-| `ts-config` | interactive menu (leader / theme / tmux / apps / TTS / coding agents / WezTerm mux / restore) |
-| `ts-config wezterm` | WezTerm build info and channel — see below |
-| `ts-config show` | print the saved config + the derived bindings |
-| `ts-config leader <chord>` | WezTerm leader, e.g. `ctrl-space`, `ctrl-a`, `alt-x` |
-| `ts-config theme <dark\|light\|follow>` | palette; `follow` tracks the OS theme |
-| `ts-config tmux <chord>` | tmux prefix, e.g. `ctrl-a` — see `doc common/tmux` |
-| `ts-config apps [recommended\|all\|none\|id,…]` | app catalog; no arg → picker; installs, never uninstalls |
-| `ts-config wizard` | re-run **every** install question (leader, theme, terminal emulator, apps, mux, restore, TTS, agent tools) and persist the lot. `ts-config apps` re-asks only the apps question; this is the "start over as if installing" path. `TS_ASSUME_YES=1 ts-config wizard` takes the defaults without prompting, and the per-question `TS_*` env vars still skip individual prompts |
-| `ts-config tts <show\|on\|off\|test\|…>` | Claude/Cursor voice — see `doc common/claude-code` |
-| `ccmute` | silence the voice instantly, until you unmute. Also the tray icon, `Ctrl+Alt+Shift+M`, `Leader+m` |
-| (tray) | the tray's **Open dashboard** gives live activity, the daemon log and a settings editor: see `doc windows/tts-daemon` |
-| `ts-config mux [on\|off\|…]` | hand-off to `ts-mux` (WezTerm multiplexer domain) |
-| `ts-config restore <on\|off>` | reopen the last WezTerm session at startup (default off) |
-| `ts-config wezterm` | your build + date, newest on each channel, and a count of what changed since |
-| `ts-config wezterm changes` | the full upstream changelog since your build, paged |
-| `ts-config wezterm install <stable\|nightly>` | switch channel — removes the other package first |
-| `ts-config wezterm upgrade` | refresh the channel you are on; never switches |
-| `ts-config agents [show]` | saved Headroom, Caveman, AgentMemory state for this computer |
-| `ts-config agents <tool> on\|off\|status\|repair\|uninstall` | manage one tool at user scope; never edits a project or Docker |
-| `ts-config agents headroom dashboard` | open the Headroom GUI monitor |
-| `ts-config agents headroom cursor <mcp\|byok\|off>` | Cursor-only mode; `mcp` keeps subscription traffic direct |
 
-Every change persists (chezmoi `[data]` on WSL/Linux, `config.json` on Windows) and
-re-applies. In a combined WSL+Windows setup run it from **WSL** — its apply is
-authoritative for the Windows-side files too.
+Every saved setting — leader, theme, tmux prefix, apps, atuin, Ghostty, voice,
+WezTerm channel, the agent tools — plus `ts-config wizard` to re-ask the lot.
 
-Agent-tool pins live in `bootstrap/agent-tools.json`. `ts-update` reconciles only
-tools enabled on this machine. Headroom routing is process-local to the Claude and
-enhanced Codex wrappers, restored on exit, and bypassed with a warning when the
-proxy is unavailable; `claude-stock` and `codex-stock` always go direct. Docker
-Compose, API secrets, AgentMemory feature flags, containers, volumes, and service
-data remain owned by docker-local.
-
-For a live check, run the three `ts-config agents <tool> status` commands and
-open the Headroom dashboard. Dashboard attribution follows the originating
-client: Claude requests appear as Claude/Anthropic; Codex requests appear as
-OpenAI and increment Codex WebSocket counters. Setting changes apply to newly
-started agent sessions, not a process that was already running.
+**Full command table: `doc ts-config`.**
 
 ## `ts-wezterm`
 

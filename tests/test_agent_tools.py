@@ -1453,3 +1453,69 @@ def test_macos_has_a_synthesis_floor():
     # from the extension and only really writes AIFF.
     assert ".aiff" in say, "say must synthesise to .aiff, not the caller's extension"
     assert "-gt 1024" in say, "must reject the junk-file case, not trust exit status"
+
+
+def test_ts_config_and_tts_are_findable_by_name():
+    """`doc ts-config` matched ZERO labels — the material existed inside
+    common/stack.md, which no one would guess. And the cross-platform half of
+    the TTS docs lived in windows/, which the picker hides on other OSes."""
+    kb = ROOT / "docs/kb/common"
+    assert (kb / "ts-config.md").exists(), "no page named for ts-config"
+    assert (kb / "tts.md").exists(), "no OS-neutral TTS page"
+    # The support matrix is the point of the TTS page.
+    tts = (kb / "tts.md").read_text(encoding="utf-8")
+    for must in ("macOS / native Linux", "daemon-only", "say", "SAPI", "self"):
+        assert must in tts, f"tts.md missing {must!r}"
+    # stack.md should point at the new page, not duplicate it.
+    stack = (kb / "stack.md").read_text(encoding="utf-8")
+    assert "doc ts-config" in stack
+    assert "ts-config agents headroom cursor" not in stack, "table left behind in stack.md"
+    # _index.md advertised windows/ as "pwsh, winget" and omitted the TTS page.
+    idx = (ROOT / "docs/kb/_index.md").read_text(encoding="utf-8")
+    assert "TTS" in idx.split("`windows/`")[1].split("\n")[0]
+
+
+def test_doc_reports_a_miss_before_falling_back_to_fzf():
+    """A zero-match query dropped straight into fzf, which re-queried the
+    NARROWER per-OS index — so the user got an empty picker and no message."""
+    rc = (ROOT / "dot_zshrc").read_text(encoding="utf-8")
+    body = rc[rc.index("_doc_open() {"):]
+    body = body[:body.index("\n}\n")]
+    miss = body.index("no topic matching")
+    fzf = body.index("_doc_finder")
+    assert miss < fzf, "must report the miss before handing off to fzf"
+
+
+def test_tts_wizard_is_platform_aware_and_asks_what_it_says():
+    """One binary question was the whole TTS wizard; engine, voice and message
+    mode were never asked. And daemon-only modes must not be offered on a host
+    that cannot run a daemon."""
+    tts = (ROOT / "bootstrap/_cc_tts.sh").read_text(encoding="utf-8")
+    assert "ts_prompt_cc_tts_message" in tts, "no question about what it says"
+    msg = tts[tts.index("ts_prompt_cc_tts_message() {"):]
+    msg = msg[:msg.index("\n}\n")]
+    assert "RECOMMENDATION: self" in msg
+    for mode in ("self", "template", "hook"):
+        assert f"'{mode}|{mode}|" in msg, f"{mode} not offered"
+    for daemon_only in ("haiku", "ollama"):
+        assert f"'{daemon_only}|" not in msg, f"{daemon_only} needs a daemon; must not be offered"
+    # Probed, not hardcoded.
+    assert "ts_cc_tts_engine_report" in tts
+    # Daemon-only settings refuse rather than storing a value nothing reads.
+    code = _uncommented(tts)
+    for verb in ("music", "duck-level"):
+        arm = code[code.index(f"        {verb})"):]
+        arm = arm[:arm.index("\n            ;;")]
+        assert "ts_cc_tts_daemon_supported" in arm, f"{verb} has no platform guard"
+    # Bare `ts-config tts` shows status like every sibling verb.
+    assert "''|show)" in tts
+
+
+def test_wizard_does_not_reset_tuned_tts_keys():
+    """ts_cc_tts_apply_wizard_choice reset every key on BOTH on and off, so each
+    `ts-config wizard` silently discarded any `ts-config tts …` tuning."""
+    body = (ROOT / "bootstrap/_cc_tts.sh").read_text(encoding="utf-8")
+    fn = body[body.index("ts_cc_tts_apply_wizard_choice() {"):]
+    fn = fn[:fn.index("\n}\n")]
+    assert "[ -n \"$configured\" ] || ts_cc_tts_reset_defaults" in fn, \
+        "defaults must only be seeded on a never-configured host"

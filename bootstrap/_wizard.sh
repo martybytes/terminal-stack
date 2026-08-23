@@ -568,6 +568,7 @@ ts_wizard_review() {
     printf '    tmux prefix      %s\n' "$TS_WIZ_TMUX"
     printf '    Apps             %s\n' "${TS_WIZ_APPS:-<none>}"
     printf '    Claude TTS       %s\n' "${TS_WIZ_CC_TTS:-off}"
+    [ "${TS_WIZ_CC_TTS:-off}" = on ] && printf '    Voice says       %s\n' "${TS_WIZ_CC_TTS_MESSAGE:-template}"
     [ "${TS_WIZ_CC_TTS:-off}" = on ] && printf '    TTS daemon       %s\n' "${TS_WIZ_CC_TTS_DAEMON:-off}"
     printf '    Headroom         %s (Cursor: %s)\n' "${TS_WIZ_HEADROOM:-off}" "${TS_WIZ_HEADROOM_CURSOR:-mcp}"
     printf '    Caveman          %s\n' "${TS_WIZ_CAVEMAN:-off}"
@@ -585,6 +586,7 @@ ts_wizard_review() {
 # watching it (CI, a detached install).
 ts_wizard_ask() {
     local _hr_report="" _hr_def=off _hr_note="" _am_report="" _am_def=off _am_note=""
+    TS_WIZ_CC_TTS_MESSAGE="${TS_WIZ_CC_TTS_MESSAGE:-template}"
     TS_WIZ_ASKED=0
 
     # The leader key only matters for WezTerm (a GUI app). On a headless server
@@ -634,6 +636,16 @@ ts_wizard_ask() {
         case "$TS_CC_TTS" in on) TS_WIZ_CC_TTS=on ;; *) TS_WIZ_CC_TTS=off ;; esac
     else
         TS_WIZ_CC_TTS="$(ts_prompt_cc_tts)"; TS_WIZ_ASKED=$((TS_WIZ_ASKED + 1))
+    fi
+
+    # Follow-up: WHAT it says. Only worth asking once voice is on, and only
+    # `self`/`template`/`hook` are offered — haiku and ollama need the daemon,
+    # so they are never shown on a host that cannot run one.
+    if [ "$TS_WIZ_CC_TTS" = on ]; then
+        TS_WIZ_CC_TTS_MESSAGE="$(ts_prompt_cc_tts_message)"
+        [ -n "${TS_CC_TTS_MESSAGE:-}" ] || TS_WIZ_ASKED=$((TS_WIZ_ASKED + 1))
+    else
+        TS_WIZ_CC_TTS_MESSAGE=template
     fi
 
     # Tray daemon follow-up (TS_CC_TTS_DAEMON=on|off skips): only when TTS was
@@ -706,7 +718,7 @@ ts_wizard_collect() {
         esac
     done
 
-    export TS_WIZ_LEADER TS_WIZ_THEME TS_WIZ_APPS TS_WIZ_TMUX TS_WIZ_CC_TTS TS_WIZ_CC_TTS_DAEMON TS_WIZ_TERMINALS TS_WIZ_WEZ_MUX TS_WIZ_WEZ_RESTORE TS_WIZ_HEADROOM TS_WIZ_HEADROOM_CURSOR TS_WIZ_CAVEMAN TS_WIZ_AGENTMEMORY TS_WIZ_ATUIN
+    export TS_WIZ_LEADER TS_WIZ_THEME TS_WIZ_APPS TS_WIZ_TMUX TS_WIZ_CC_TTS TS_WIZ_CC_TTS_DAEMON TS_WIZ_CC_TTS_MESSAGE TS_WIZ_TERMINALS TS_WIZ_WEZ_MUX TS_WIZ_WEZ_RESTORE TS_WIZ_HEADROOM TS_WIZ_HEADROOM_CURSOR TS_WIZ_CAVEMAN TS_WIZ_AGENTMEMORY TS_WIZ_ATUIN
     # These two lines summarise the CHOICES. They are printed before anything is
     # written, and used to read exactly like a save confirmation — which is how a
     # run that lost every answer still looked successful. The bootstraps now

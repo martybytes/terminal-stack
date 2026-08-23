@@ -458,6 +458,37 @@ ts_cc_tts_wizard_probe() {
     echo probe_fail
 }
 
+# Which engines could actually make a sound on this host. Echoes one line per
+# engine; the wizard uses it to recommend something that will work rather than
+# hardcoding kokoro and hoping.
+ts_cc_tts_engine_report() {
+    local url
+    url="$(ts_data_get ccTtsKokoroUrl 2>/dev/null || true)"; url="${url:-http://127.0.0.1:8880}"
+    if ts_probe_http "$url/health" 2 || ts_probe_http "$url/v1/models" 2; then
+        printf '  kokoro:     reachable at %s\n' "$url"
+    else
+        printf '  kokoro:     NOT reachable at %s (needs the Docker container)\n' "$url"
+    fi
+    url="$(ts_data_get ccTtsChatterboxUrl 2>/dev/null || true)"; url="${url:-http://127.0.0.1:8881}"
+    if ts_probe_http "$url/health" 2; then
+        printf '  chatterbox: reachable at %s\n' "$url"
+    else
+        printf '  chatterbox: not reachable at %s\n' "$url"
+    fi
+    if command -v edge-tts >/dev/null 2>&1; then
+        printf '  edge-tts:   installed (cloud voice, needs network)\n'
+    else
+        printf '  edge-tts:   not installed (pip install edge-tts)\n'
+    fi
+    if [ "$(uname -s 2>/dev/null)" = Darwin ] && command -v say >/dev/null 2>&1; then
+        printf '  say:        always available — the offline floor, used if all else fails\n'
+    fi
+}
+
+# Enable/disable. Rendered through ts_prompt_choice like every other question;
+# it used to be hand-rolled with three options and only two outcomes, and its
+# pwsh twin already used Read-TsChoice with two — a live break of the
+# byte-identical menu rule.
 ts_prompt_cc_tts() {
     if [ -n "${TS_CC_TTS:-}" ]; then
         case "$TS_CC_TTS" in
@@ -465,24 +496,42 @@ ts_prompt_cc_tts() {
             off|skip) echo off; return ;;
         esac
     fi
-    {
-        printf '\nClaude Code voice notifications (local Kokoro TTS, am_adam)?\n'
-        printf '  Requires Kokoro on http://127.0.0.1:8880 (Docker). Does not install containers.\n'
-        if ts_cc_tts_wizard_probe | grep -q probe_ok; then
-            printf '  Kokoro probe: OK\n'
-            printf '  1) Enable (am_adam, waiting+error)  [recommended]\n'
-        else
-            printf '  Kokoro probe: not reachable\n'
-            printf '  1) Enable (am_adam, waiting+error)\n'
-        fi
-        printf '  2) Enable anyway (start Kokoro later)\n'
-        printf '  3) Skip\n'
-    } > /dev/tty 2>/dev/null
-    local ans; ans="$(ts_tty_prompt 'Choose [3]: ')"
-    case "$ans" in
-        1|2) echo on ;;
-        *)   echo off ;;
-    esac
+    local report def _mute_hint=""
+    report="$(ts_cc_tts_engine_report 2>/dev/null || true)"
+    # ccmute is the daemon's sentinel file, so only promise it where it exists.
+    ts_cc_tts_daemon_supported && _mute_hint=' Silence it instantly with `ccmute`.'
+    # Something can always speak on a Mac now that `say` is the floor.
+    if [ "$(uname -s 2>/dev/null)" = Darwin ]; then def=on
+    elif printf '%s' "$report" | grep -q 'reachable at'; then def=on
+    else def=off; fi
+    ts_prompt_choice "$def" 'Agent voice notifications?' \
+"  RECOMMENDATION: ${def}. Claude, Cursor and Codex speak when they finish,
+  hit an error, or need you — so you can leave a long run and be called back.
+  What can speak here, probed just now:
+${report}
+  The first reachable engine wins, in that order. Nothing is installed for you.
+  Turn it off any time with \`cctts off\`.${_mute_hint}" \
+        'off|off|stay silent' \
+        'on|on|speak on finish, error and questions'
+}
+
+# What gets said. This is the question users actually want and were never asked.
+ts_prompt_cc_tts_message() {
+    if [ -n "${TS_CC_TTS_MESSAGE:-}" ]; then
+        case "$TS_CC_TTS_MESSAGE" in template|self|hook) echo "$TS_CC_TTS_MESSAGE"; return ;; esac
+    fi
+    ts_prompt_choice self 'What should it say when the agent finishes?' \
+'  RECOMMENDATION: self. The agent writes its own one-line summary, so you hear
+  what actually happened ("Migrated the parser and all tests pass") instead of
+  the same sentence every time. No extra model call, no added latency.
+  NOTE: self appends a short instruction block to ~/.claude/CLAUDE.md and
+  ~/.codex/AGENTS.md, between markers, so the agent knows to write that line.
+  ts-config tts summarizer template removes it again.
+  template is the fixed wording. hook reads the last message out raw, which is
+  blunt but needs no instruction block.' \
+        'self|self|the agent writes its own line' \
+        'template|template|same fixed sentence every time' \
+        'hook|hook|read the last message out raw'
 }
 
 # Rendered via ts_prompt_choice — must stay byte-identical to Read-TsCcTtsDaemon
@@ -500,18 +549,41 @@ ts_prompt_cc_tts_daemon() {
 }
 
 ts_cc_tts_apply_wizard_choice() {
-    local choice="$1" daemon="${2:-off}"
+    local choice="$1" daemon="${2:-off}" message="${3:-}"
+    # Seed the defaults ONLY on a host that has never been configured. This used
+    # to call ts_cc_tts_reset_defaults unconditionally on both on and off, so
+    # every `ts-config wizard` re-run silently discarded whatever the user had
+    # tuned with `ts-config tts voice …`, `… engine …`, `… template …`.
+    local configured
+    configured="$(ts_data_get ccTtsEnabled 2>/dev/null || true)"
     case "$choice" in
         on)
-            ts_cc_tts_reset_defaults
+            [ -n "$configured" ] || ts_cc_tts_reset_defaults
             ts_cc_tts_set ccTtsEnabled true
             ;;
         off|skip)
-            ts_cc_tts_reset_defaults
+            [ -n "$configured" ] || ts_cc_tts_reset_defaults
             ts_cc_tts_set ccTtsEnabled false
             daemon=off
             ;;
     esac
+    # What the wizard was told it should say. `self` also installs the marker
+    # block into the agent instruction files, which is why it is applied through
+    # ts_config_tts rather than a bare ts_cc_tts_set.
+    if [ "$choice" = on ] && [ -n "$message" ]; then
+        case "$message" in
+            self)     ts_cc_tts_set ccTtsMessageMode template
+                      ts_cc_tts_set ccTtsSummarizer self
+                      ts_cc_tts_self_install || true ;;
+            hook)     ts_cc_tts_set ccTtsMessageMode hook
+                      ts_cc_tts_set ccTtsSummarizer template
+                      ts_cc_tts_self_remove || true ;;
+            template) ts_cc_tts_set ccTtsMessageMode template
+                      ts_cc_tts_set ccTtsSummarizer template
+                      ts_cc_tts_self_remove || true ;;
+        esac
+    fi
+
     if [ "$choice" = on ] && ts_cc_tts_daemon_supported; then
         if [ "$daemon" = on ]; then
             ts_cc_tts_daemon_installer || {
@@ -538,7 +610,10 @@ ts_cc_tts_apply_wizard_choice() {
 ts_config_tts() {
     local sub="${1:-}" arg="${2:-}" arg2="${3:-}"
     case "$sub" in
-        show)
+        # Bare `ts-config tts` shows status. Every sibling entrypoint does this
+        # (ts-mux, ts-smb, ts-wezterm, ts-doctor, and `tts daemon` below); this
+        # was the one verb in the stack that answered with an error instead.
+        ''|show)
             ts_cc_tts_show
             ;;
         on)
@@ -697,6 +772,17 @@ ts_config_tts() {
             [ -n "$arg" ] || { echo "usage: ts-config tts summarizer template|self|haiku|ollama" >&2; return 2; }
             case "$arg" in template|self|haiku|ollama) ;; *)
                 echo "ts-config tts summarizer: expected template, self, haiku, or ollama" >&2; return 2 ;; esac
+            # template and self run in the shell path on every platform. haiku
+            # and ollama live in the daemon, so storing them on a host without
+            # one is a setting nothing will ever read — say so instead.
+            case "$arg" in
+                haiku|ollama)
+                    ts_cc_tts_daemon_supported || {
+                        echo "ts-config tts summarizer: '$arg' needs the tray daemon (Windows)." >&2
+                        echo "  On this host use: template (fixed lines) or self (the agent writes its own line)." >&2
+                        return 1
+                    } ;;
+            esac
             ts_cc_tts_set ccTtsSummarizer "$arg"
             if [ "$arg" = self ]; then ts_cc_tts_self_install || true; else ts_cc_tts_self_remove || true; fi
             ts_cc_tts_finish
@@ -716,6 +802,13 @@ ts_config_tts() {
             finish
             ;;
         music)
+            # Ducking is daemon-only AND built on pycaw/WinRT, so on any
+            # other host this accepted and persisted a value with no reader.
+            ts_cc_tts_daemon_supported || {
+                echo "ts-config tts $sub: music ducking needs the tray daemon (Windows only)." >&2
+                echo "  There is no CoreAudio equivalent here; the setting would do nothing." >&2
+                return 1
+            }
             [ -n "$arg" ] || { echo "usage: ts-config tts music duck|smart|pause|off" >&2; return 2; }
             case "$arg" in duck|smart|pause|off) ;; *)
                 echo "ts-config tts music: expected duck, smart, pause, or off" >&2; return 2 ;; esac
@@ -724,6 +817,13 @@ ts_config_tts() {
             finish
             ;;
         duck-level)
+            # Ducking is daemon-only AND built on pycaw/WinRT, so on any
+            # other host this accepted and persisted a value with no reader.
+            ts_cc_tts_daemon_supported || {
+                echo "ts-config tts $sub: music ducking needs the tray daemon (Windows only)." >&2
+                echo "  There is no CoreAudio equivalent here; the setting would do nothing." >&2
+                return 1
+            }
             case "$arg" in ''|*[!0-9]*) echo "usage: ts-config tts duck-level <0-100>" >&2; return 2 ;; esac
             [ "$arg" -le 100 ] || { echo "ts-config tts duck-level: expected 0-100" >&2; return 2; }
             ts_cc_tts_set ccTtsDuckPercent "$arg"
@@ -799,7 +899,7 @@ ts-config tts — agent local TTS (Kokoro / Chatterbox / edge-tts)
 EOF
             ;;
         *)
-            echo "ts-config tts: unknown subcommand '$sub' (try: show, on, off, test, history)" >&2
+            echo "ts-config tts: unknown subcommand '$sub' (try: show, on, off, test; -h for all)" >&2
             return 2
             ;;
     esac

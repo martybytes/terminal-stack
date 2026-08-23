@@ -121,7 +121,7 @@ run_wizard() {
     ts_wez_mux_set "${TS_WIZ_WEZ_MUX:-off}"
     ts_wez_restore_set "${TS_WIZ_WEZ_RESTORE:-off}"
     ts_atuin_set "${TS_WIZ_ATUIN:-off}"
-    ts_cc_tts_apply_wizard_choice "${TS_WIZ_CC_TTS:-off}"
+    ts_cc_tts_apply_wizard_choice "${TS_WIZ_CC_TTS:-off}" off "${TS_WIZ_CC_TTS_MESSAGE:-}"
 
     install_apps "${TS_WIZ_APPS:-}" || ts_note_failure "optional apps" "retry: ts-config apps"
     # The pwsh $runWizard has always installed the chosen emulator; this side

@@ -1376,8 +1376,13 @@ _doc_open() {
   m=("${(@f)$(_doc_index all | awk -F'\t' -v q="${(L)q}" 'tolower($1) ~ q {print}')}")
   m=(${m:#})
   if (( ${#m} == 0 )); then
-    command -v fzf >/dev/null && { _doc_finder "$os" "$q"; return; }   # no exact hit -> fuzzy finder
-    echo "doc: no topic matching '$q' (try: doc ls)" >&2; return 1
+    # Say so BEFORE handing off. This used to drop straight into fzf, which then
+    # re-queried the NARROWER per-OS index — so a miss on the full index became
+    # an empty picker with no message at all, and `doc ts-config` looked like
+    # the docs simply did not exist.
+    echo "doc: no topic matching '$q' (try: doc ls)" >&2
+    command -v fzf >/dev/null && { _doc_finder "$os" ""; return; }
+    return 1
   fi
   if (( ${#m} == 1 )); then _doc_view "${m[1]#*$'\t'}"; return; fi
   for line in $m; do
