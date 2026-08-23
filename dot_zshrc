@@ -840,6 +840,56 @@ wsw() {
 # Project-specific shortcuts (wscalibra, wsnetsuite, …) belong in
 # ~/.zshrc.local — see dot_zshrc.local.example.
 
+# Dropbox navigation (mirrors the db PowerShell function). $DROPBOX_DIR (set in
+# ~/.zshrc.local) wins; otherwise Dropbox's own info.json, then the per-platform
+# candidates. Resolved at CALL time for the same reason as _ts_workspace, and a
+# shell function rather than a script because a child cannot cd its parent.
+_ts_dropbox() {
+  [[ -n "${DROPBOX_DIR:-}" ]] && { echo "$DROPBOX_DIR"; return 0 }
+  local d info
+  # info.json is authoritative: it is the only thing that gets a relocated
+  # folder, a Business account, or two linked accounts right.
+  if command -v python3 >/dev/null 2>&1; then
+    for info in "$HOME/.dropbox/info.json" "$HOME/.config/dropbox/info.json"; do
+      [[ -r "$info" ]] || continue
+      d="$(python3 -c 'import json,sys
+try: c = json.load(open(sys.argv[1], encoding="utf-8"))
+except Exception: raise SystemExit(0)
+for k in ("personal", "business"):
+    p = (c.get(k) or {}).get("path")
+    if p: print(p); break' "$info" 2>/dev/null)"
+      [[ -n "$d" && -d "$d" ]] && { echo "$d"; return 0 }
+    done
+  fi
+  # macOS moved Dropbox under CloudStorage in Ventura; ~/Dropbox persists on
+  # Linux and older macOS.
+  for d in "$HOME/Library/CloudStorage/Dropbox" "$HOME/Dropbox" \
+           "$HOME/Dropbox (Personal)" "$HOME/Dropbox (Business)"; do
+    [[ -d "$d" ]] && { echo "$d"; return 0 }
+  done
+  # Under WSL the real store is the Windows one; reuse the same interop username
+  # lookup the sync hook uses.
+  if [[ -n "${WSL_DISTRO_NAME:-}" ]] && command -v cmd.exe >/dev/null 2>&1; then
+    local wu; wu="$(cmd.exe /c 'echo %USERNAME%' 2>/dev/null | tr -d '\r\n')"
+    if [[ -n "$wu" ]]; then
+      for d in "/mnt/c/Users/$wu/Dropbox" "/mnt/c/Users/$wu/Dropbox (Personal)" \
+               "/mnt/c/Users/$wu/Dropbox (Business)"; do
+        [[ -d "$d" ]] && { echo "$d"; return 0 }
+      done
+    fi
+  fi
+  return 1
+}
+db() {
+  local d
+  d="$(_ts_dropbox)" || {
+    echo "db: no Dropbox found — export DROPBOX_DIR in ~/.zshrc.local" >&2
+    return 1
+  }
+  cd "$d"
+}
+dbx() { db "$@" }
+
 # --- organised tree: per-owner jumps -----------------------------------------
 # Repos live at <workspace>/<tier>/<host>/<owner>/<repo>; see `doc workspace-org`.
 # These stay shell functions rather than moving into `wso` because a child

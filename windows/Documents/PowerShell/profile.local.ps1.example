@@ -23,6 +23,11 @@
 #
 # $env:WORKSPACE_DIR = 'D:\src'
 
+# Where `db` / `dbx` jump to. Only needed when Dropbox is somewhere the
+# autodetect misses — it already reads Dropbox's own info.json and probes
+# %USERPROFILE%\Dropbox.
+# $env:DROPBOX_DIR = 'D:\Dropbox'
+
 # ── Runtime clone location (rarely needed) ────────────────────────────────────
 # ts-update / ts-config / wso / doc find the clone on their own: the canonical
 # location %LOCALAPPDATA%\terminal-stack\stack first, then the legacy defaults.

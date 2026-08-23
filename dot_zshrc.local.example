@@ -24,6 +24,11 @@
 #
 # export WORKSPACE_DIR="$HOME/src"
 
+# Where `db` / `dbx` jump to. Only needed when Dropbox is somewhere the
+# autodetect misses — it already reads Dropbox's own info.json and probes
+# ~/Library/CloudStorage/Dropbox and ~/Dropbox.
+# export DROPBOX_DIR="$HOME/Dropbox (Work)"
+
 # ── Runtime clone location (rarely needed) ────────────────────────────────────
 # ts-update / ts-config / wso / doc find the clone on their own: $TERMINAL_STACK_DIR,
 # then chezmoi's sourceDir, then the canonical location and the legacy defaults.

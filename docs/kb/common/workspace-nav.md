@@ -11,6 +11,7 @@
 | `wsw` | cd to the work workspace — `$WORK_WORKSPACE_DIR` if set, else the `*_Work` / `*-Work` sibling |
 | `wsw --set [dir]` | write `WORK_WORKSPACE_DIR` into `~/.zshrc.local` / `profile.local.ps1` (default: current dir) |
 | `wsw --show` | print the resolved work workspace without changing directory |
+| `db` / `dbx` | cd to Dropbox — `$DROPBOX_DIR` if set, else Dropbox's own `info.json`, else the platform candidates |
 | `z dirname` | zoxide — jump to any directory you've visited, from anywhere |
 | `zi` | zoxide interactive picker when there are multiple matches |
 | `zoxide-prune` | drop dead paths from zoxide's database (pwsh) |
@@ -21,6 +22,15 @@ Autodetect probes (first existing wins): `/mnt/c/DATA/Workspace`, `~/Documents/W
 `Workspace_Work` and `Workspace-Work` both resolve. When the work tree lives somewhere
 unrelated to the main workspace, `wsw --set /path/to/work` records it in the per-machine
 override file (backing the file up first) and takes effect immediately.
+
+`db` resolves in the same call-time, override-first style. It reads Dropbox's own
+`info.json` (`~/.dropbox/`, `~/.config/dropbox/`, `%LOCALAPPDATA%\Dropbox\`) before guessing
+at paths, because that file is the only thing that gets a relocated folder, a Business
+account, or two linked accounts right; a `personal` root wins over a `business` one. The
+fallbacks are `~/Library/CloudStorage/Dropbox` (macOS Ventura and later), `~/Dropbox`
+(Linux, older macOS, Windows), then the `(Personal)` / `(Business)` variants. Under WSL it
+looks at the Windows side via `/mnt/c/Users/<you>/`, since that is where the real store is.
+Set `DROPBOX_DIR` in `~/.zshrc.local` / `profile.local.ps1` to override.
 
 `ws37`/`ws42`/`wsmb`/`wsmd`/`wsar`/`wsj` address the organised tree that `wso` builds —
 see `doc common/workspace-org`. They fall back to the archive tier when an owner has no

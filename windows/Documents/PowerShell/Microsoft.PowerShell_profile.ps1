@@ -173,6 +173,43 @@ function wsw {
 }
 # Project-specific shortcuts (wscalibra, wsnetsuite, …) belong in
 # profile.local.ps1 — see profile.local.ps1.example.
+
+# Dropbox navigation (mirrors the zsh db function). $env:DROPBOX_DIR (set in
+# profile.local.ps1) wins; otherwise Dropbox's own info.json, then the usual
+# candidates. Resolved at call time so the local override always applies.
+function Get-TsDropbox {
+    if ($env:DROPBOX_DIR) { return $env:DROPBOX_DIR }
+    # info.json is authoritative: it is the only thing that gets a relocated
+    # folder, a Business account, or two linked accounts right.
+    foreach ($info in @(
+        (Join-Path $env:LOCALAPPDATA 'Dropbox\info.json'),
+        (Join-Path $env:APPDATA 'Dropbox\info.json')
+    )) {
+        if (-not (Test-Path -LiteralPath $info)) { continue }
+        try {
+            $cfg = Get-Content -LiteralPath $info -Raw | ConvertFrom-Json
+            foreach ($account in @('personal', 'business')) {
+                $prop = $cfg.PSObject.Properties[$account]
+                if ($prop -and $prop.Value.path -and (Test-Path -LiteralPath $prop.Value.path)) {
+                    return $prop.Value.path
+                }
+            }
+        } catch {}
+    }
+    foreach ($d in @(
+        (Join-Path $env:USERPROFILE 'Dropbox'),
+        (Join-Path $env:USERPROFILE 'Dropbox (Personal)'),
+        (Join-Path $env:USERPROFILE 'Dropbox (Business)')
+    )) {
+        if (Test-Path -LiteralPath $d) { return $d }
+    }
+    return $null
+}
+function db {
+    $r = Get-TsDropbox
+    if ($r) { Set-Location $r } else { Write-Warning 'db: no Dropbox found — set $env:DROPBOX_DIR in profile.local.ps1' }
+}
+function dbx { db @args }
 # ---- workspace-nav-end ----
 
 function Set-WezTabTitle([string]$title) {
