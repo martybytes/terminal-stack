@@ -1338,3 +1338,42 @@ def test_platform_impossible_apps_are_not_offered_forever():
     pend = cfg[cfg.index("ts_apps_pending() {"):]
     pend = pend[:pend.index("\n}\n")]
     assert "ts_app_installable" in pend, "pending list must filter impossible ids"
+
+
+@pytest.mark.skipif(not shutil.which("bash"), reason="bash is unavailable")
+def test_nightly_is_preticked_even_when_stable_is_installed():
+    """Pre-ticking 'whatever is installed' meant a stable box saw nightly
+    unticked, so pressing Enter — the thing everyone does — silently kept a
+    February 2024 build that this stack's WezTerm config is not written for.
+    Nightly is pre-selected regardless; only a hand-installed WezTerm
+    ('unknown', not ours to replace) leaves both unticked."""
+    wiz = (ROOT / "bootstrap/_wizard.sh").read_text(encoding="utf-8")
+    body = wiz[wiz.index("ts_prompt_terminals() {"):]
+    body = body[:body.index("\n}\n")]
+    assert "stable)  preticked=\"wezterm-stable\"" not in body, \
+        "installed-wins pre-tick is back"
+    assert "RECOMMENDATION: nightly" in body
+
+    def pretick(channel):
+        script = (
+            '. bootstrap/_config.sh >/dev/null 2>&1\n'
+            '. bootstrap/_wizard.sh\n'
+            f'ts_wezterm_channel() {{ echo {channel}; }}\n'
+            # Stub the intro: it fetches upstream release data over the network,
+            # which makes this test slow and dependent on being online.
+            'ts_wezterm_prompt_intro() { :; }\n'
+            # non-interactive keeps the pre-ticks, so the answer IS the pre-tick
+            'ts_prompt_terminals 2>/dev/null\n')
+        r = subprocess.run(["bash", "-c", script], cwd=ROOT, capture_output=True,
+                           text=True, stdin=subprocess.DEVNULL)
+        return r.stdout.split()
+
+    for ch in ("stable", "nightly", "none"):
+        assert "wezterm-nightly" in pretick(ch), f"{ch}: nightly not pre-ticked"
+        assert "wezterm-stable" not in pretick(ch), f"{ch}: stable pre-ticked"
+    # A hand-placed WezTerm is left alone.
+    got = pretick("unknown")
+    assert "wezterm-nightly" not in got and "wezterm-stable" not in got, got
+
+    ps = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
+    assert "'stable'  { @('wezterm-stable') }" not in ps, "pwsh twin still installed-wins"

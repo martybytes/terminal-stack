@@ -808,12 +808,15 @@ function Read-TsTerminals {
         return $envSel
     }
 
-    # Whatever is installed starts ticked, on its detected channel.
+    # NIGHTLY is pre-selected, including on a machine that already has stable.
+    # This used to pre-tick whatever was installed, so a stable box saw nightly
+    # unticked and Enter kept a February 2024 build that this stack's WezTerm
+    # config is not written for. The one exception is `unknown`: a WezTerm
+    # installed outside a package manager is not ours to replace.
+    # POSIX twin: the same case in ts_prompt_terminals.
     $preticked = switch (Get-TsWezChannel) {
-        'nightly' { @('wezterm-nightly') }
-        'stable'  { @('wezterm-stable') }
-        'unknown' { @() }              # not ours to replace; leave both unticked
-        default   { @('wezterm-nightly') }   # nothing installed: the default
+        'unknown' { @() }
+        default   { @('wezterm-nightly') }
     }
 
     $intro = @()

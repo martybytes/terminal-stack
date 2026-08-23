@@ -193,12 +193,20 @@ ts_prompt_terminals() {
         opts+=("$entry")
     done < <(ts_terminal_candidates)
 
-    # Whatever is installed starts ticked, on its detected channel.
+    # NIGHTLY is pre-selected, including on a machine that already has stable.
+    #
+    # This used to pre-tick whatever was installed, which meant a stable box saw
+    # nightly unticked and pressing Enter kept a build from February 2024 —
+    # upstream has cut no stable since, and this stack's Lua config targets
+    # current builds. "Keep what you have" is the wrong default when what you
+    # have is two and a half years old and the config is written for newer.
+    #
+    # The one exception is `unknown`: a WezTerm installed outside a package
+    # manager is not ours to replace, so neither channel is ticked and Enter
+    # leaves it alone. Same rule ts_wezterm_install applies at install time.
     case "$(ts_wezterm_channel 2>/dev/null || echo none)" in
-        nightly) preticked="wezterm-nightly" ;;
-        stable)  preticked="wezterm-stable" ;;
-        unknown) preticked="" ;;          # not ours to replace; leave both unticked
-        *)       preticked="wezterm-nightly" ;;   # nothing installed: the default
+        unknown) preticked="" ;;
+        *)       preticked="wezterm-nightly" ;;
     esac
     command -v ghostty >/dev/null 2>&1 && preticked="$preticked ghostty"
 
@@ -206,6 +214,19 @@ ts_prompt_terminals() {
     if command -v ghostty >/dev/null 2>&1; then
         intro="${intro:+$intro
 }  Ghostty:  $(ghostty --version 2>/dev/null | head -1)"
+    fi
+    # A RECOMMENDATION line, like the other behaviour questions. Only shown when
+    # a channel is actually pre-ticked — on an `unknown` install we are
+    # deliberately not recommending anything.
+    if [ -n "$preticked" ]; then
+        intro="${intro:+$intro
+}  RECOMMENDATION: nightly. Upstream's newest stable is 20240203 — February
+  2024, with no cut since — and this stack's WezTerm config targets current
+  builds, so stable misses features it assumes. Nightly is what upstream's
+  author uses daily.
+  Picking nightly SWAPS the cask: both own /Applications/WezTerm.app, so the
+  other channel is removed first. Your config and sessions are untouched, and
+  nothing upgrades on its own afterwards — ts-update only offers."
     fi
 
     # The two WezTerm channels are mutually exclusive, so the tick-list enforces

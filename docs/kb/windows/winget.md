@@ -9,9 +9,8 @@ in the catalog; tmux/tldr/nvtop/lazydocker are WSL/Linux-only.
 
 **WezTerm is a wizard question, not a prerequisite** — tick `wez.wezterm.nightly`
 or `wez.wezterm`, or leave both unticked and keep using Windows Terminal or an
-existing install. Whatever is already installed starts ticked, on its detected channel; nightly is
-the pre-selection only on a machine with no WezTerm at all, because upstream's
-newest stable is `20240203`
+existing install. Nightly is pre-selected on every machine, including one that already has stable,
+because upstream's newest stable is `20240203`
 (February 2024, no cut since). Switching channel uninstalls the other package
 first — they install to the same place. `ts-config wezterm` shows your build and
 its date, the newest on each channel, and what changed in between; nothing

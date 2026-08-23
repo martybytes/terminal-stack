@@ -975,19 +975,23 @@ under Ghostty, or on a machine that already has WezTerm from somewhere else, and
 question is a tick-list: WezTerm nightly, WezTerm stable and Ghostty are separate ticks,
 whatever is installed starts ticked on its detected channel, and `[n]one` is one keystroke.
 
-**Both channels are offered; nightly is the pre-selection only when nothing is installed.**
+**Both channels are offered, and nightly is pre-selected — on every machine.**
 Upstream's newest *stable* is `20240203-110809-5046fc22` — February 2024, with no cut since.
 Nightly is what @wez uses as a daily driver and what this stack's Lua config targets, so
 defaulting a *fresh* machine to stable would put it on a two-and-a-half-year-old build. This
 briefly *was* stable-only, and that was the wrong call for exactly this reason.
 
-On a machine that already has WezTerm, though, **whatever is installed starts ticked, on its
-detected channel** (`ts_wezterm_channel`, read back from the package manager — there is no
-saved `weztermChannel` key). A re-run therefore offers to *upgrade what you have* rather than
-silently switching your channel, which is the same "nothing is automatic" rule as below. It
-does mean a stable box sees nightly unticked while row 1 still reads "what this stack
-configures", which reads like a bug and has been reported as one; the row note, not the
-default, is the thing to reword if it keeps confusing people.
+This briefly pre-ticked **whatever was installed** instead, on the theory that a re-run should
+offer to upgrade what you have rather than switch your channel behind you. That was wrong, and
+it was reported as a bug within a day: a stable box saw nightly unticked, and pressing Enter —
+the thing everyone does — silently kept the February 2024 build while row 1 read "what this
+stack configures". A default that quietly preserves a two-and-a-half-year-old build is not a
+conservative default, it is the wrong one. Nightly is pre-ticked regardless of what is
+installed; the channel is still only ever *offered*, never switched without a keystroke.
+
+The one exception is a WezTerm installed **outside a package manager**
+(`ts_wezterm_channel` → `unknown`): neither channel is ticked and Enter leaves it alone,
+the same "not ours to replace" rule `ts_wezterm_install` applies at install time.
 
 The two channels are **mutually exclusive in the tick-list itself**: both casks own
 `/Applications/WezTerm.app` and both apt packages own `/usr/bin/wezterm`, so ticking one
