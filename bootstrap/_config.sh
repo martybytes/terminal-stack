@@ -429,7 +429,7 @@ ts_install_ai_clis() {
 # Print what each selected app resolved to, so a curl-pipe installer that failed
 # quietly is visible rather than assumed.
 ts_report_installed_apps() {
-    local id bin path ver
+    local id bin path ver raw
     ts_load_node_env
     [ -z "${1:-}" ] && return 0
     echo
@@ -437,8 +437,17 @@ ts_report_installed_apps() {
     for id in $1; do
         bin="$(ts_app_bin "$id")"
         if path="$(command -v "$bin" 2>/dev/null)"; then
-            # Strip ANSI: btop and friends colour their own --version output.
-            ver="$("$bin" --version 2>/dev/null | head -1 | sed $'s/\033\\[[0-9;]*m//g' | cut -c1-40)"
+            # Capture FIRST, then process. This used to be one four-stage
+            # pipeline assigned directly, which under `set -euo pipefail` meant
+            # any tool whose --version exits non-zero killed the whole function
+            # — and with it `finish`, so `chezmoi apply` silently never ran.
+            # tmux is exactly that tool (it wants -V and exits 1 on --version)
+            # and it is FIRST in TS_APPS_RECOMMENDED, so the report died on
+            # entry one every single time, printing only its own header.
+            raw="$("$bin" --version 2>/dev/null || true)"
+            [ -n "$raw" ] || raw="$("$bin" -V 2>/dev/null || true)"
+            # Strip ANSI: btop and friends colour their own version output.
+            ver="$(printf '%s\n' "$raw" | head -1 | sed $'s/\033\\[[0-9;]*m//g' | cut -c1-40 || true)"
             printf '    %-14s %s\n' "$id" "${ver:-$path}"
         else
             printf '    %-14s %s\n' "$id" "NOT FOUND on PATH"

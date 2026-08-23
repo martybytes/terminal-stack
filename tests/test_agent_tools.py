@@ -1193,3 +1193,42 @@ def test_terminal_tick_list_enforces_one_wezterm_channel_live():
     # The env path returned early without the constraint on both sides.
     assert "ts_terminals_one_channel" in wiz
     assert wiz.count("ts_terminals_one_channel") >= 3   # def + env path + picker
+
+
+@pytest.mark.skipif(not shutil.which("bash"), reason="bash is unavailable")
+def test_installed_apps_report_survives_a_tool_that_rejects_version():
+    """The report assigned a four-stage pipeline directly, so under
+    `set -euo pipefail` any tool whose --version exits non-zero killed the
+    function — and with it `finish`, so `chezmoi apply` silently never ran.
+    tmux is exactly that tool (it wants -V) and is FIRST in the recommended
+    list, so this fired on every single run."""
+    script = (
+        'set -euo pipefail\n'
+        '. bootstrap/_config.sh >/dev/null 2>&1\n'
+        # A binary that exits non-zero for BOTH --version and -V is the worst case.
+        'mkdir -p /tmp/_tsbin\n'
+        'printf "#!/bin/sh\\nexit 3\\n" > /tmp/_tsbin/tmux; chmod +x /tmp/_tsbin/tmux\n'
+        'PATH=/tmp/_tsbin:$PATH ts_report_installed_apps "tmux" >/dev/null\n'
+        'echo SURVIVED\n')
+    r = subprocess.run(["bash", "-c", script], cwd=ROOT, capture_output=True, text=True)
+    assert "SURVIVED" in r.stdout, f"report aborted: {r.stderr.strip()[:200]}"
+    # And the guard must be in the source, not incidental.
+    cfg = _uncommented((ROOT / "bootstrap/_config.sh").read_text(encoding="utf-8"))
+    body = cfg[cfg.index("ts_report_installed_apps()"):]
+    body = body[:body.index("\n}\n")]
+    assert '--version 2>/dev/null || true' in body, "version probe must not be fatal"
+    assert '-V 2>/dev/null' in body, "tmux-style tools need the -V fallback"
+
+
+def test_ts_config_wizard_asks_about_terminals_and_saves_first():
+    """`ts-config wizard` never set TS_WIZ_ASK_TERMINALS, so it skipped the
+    question and reported 'none selected' — a re-run could not switch WezTerm
+    channel, which is a main reason to run it again. And like the bootstraps it
+    must save before installing."""
+    body = _uncommented((ROOT / "bootstrap/ts-config.sh").read_text(encoding="utf-8"))
+    rw = body[body.index("run_wizard()"):]
+    rw = rw[:rw.index("\n}\n")]
+    assert "TS_WIZ_ASK_TERMINALS=1" in rw, "ts-config wizard must ask about terminals"
+    assert rw.index("ts_save_config") < rw.index("install_apps"), \
+        "run_wizard installs before saving the answers"
+    assert "ts_note_failure" in rw, "installs here must not be fatal either"

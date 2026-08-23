@@ -101,18 +101,29 @@ install_terminals() {
 # since every value is being re-stated anyway. TS_ASSUME_YES=1 makes it
 # non-interactive, and the per-question TS_* vars still skip individual prompts.
 run_wizard() {
+    # Ask about the terminal emulator, same rule as the bootstraps: a GUI host
+    # gets the question, a headless one does not. Without this `ts-config wizard`
+    # never asked, TS_WIZ_TERMINALS came back empty, and it reported
+    # "Terminal emulator: none selected" — so a re-run could not switch channel,
+    # which is precisely what someone runs the wizard again to do.
+    ts_is_headless || TS_WIZ_ASK_TERMINALS=1
     ts_wizard_collect || { echo "ts-config: wizard cancelled; nothing changed."; return 0; }
-    install_apps "${TS_WIZ_APPS:-}"
-    # The pwsh $runWizard has always installed the chosen emulator; this side
-    # never did, so a `ts-config wizard` that picked WezTerm silently did nothing.
-    install_terminals "${TS_WIZ_TERMINALS:-}"
+
+    # Save BEFORE installing. An install that fails must never cost the user the
+    # answers they just gave — the same ordering the bootstraps now use.
     ts_save_config "${TS_WIZ_LEADER:-ctrl-space}" "${TS_WIZ_THEME:-dark}" "${TS_WIZ_TMUX:-ctrl-b}" ${TS_WIZ_APPS:-}
     ts_agents_save_config "${TS_WIZ_HEADROOM:-off}" "${TS_WIZ_HEADROOM_CURSOR:-mcp}" "${TS_WIZ_CAVEMAN:-off}" "${TS_WIZ_AGENTMEMORY:-off}"
     ts_wez_mux_set "${TS_WIZ_WEZ_MUX:-off}"
     ts_wez_restore_set "${TS_WIZ_WEZ_RESTORE:-off}"
     ts_atuin_set "${TS_WIZ_ATUIN:-off}"
     ts_cc_tts_apply_wizard_choice "${TS_WIZ_CC_TTS:-off}"
+
+    install_apps "${TS_WIZ_APPS:-}" || ts_note_failure "optional apps" "retry: ts-config apps"
+    # The pwsh $runWizard has always installed the chosen emulator; this side
+    # never did, so a `ts-config wizard` that picked WezTerm silently did nothing.
+    install_terminals "${TS_WIZ_TERMINALS:-}" || ts_note_failure "terminal emulator" "retry: ts-config wezterm install <channel>"
     ts_report_installed_apps "${TS_WIZ_APPS:-}"
+    ts_report_failures
     finish
 }
 
