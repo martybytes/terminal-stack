@@ -39,4 +39,15 @@ scripts/**
 {{ if ne .chezmoi.os "darwin" }}
 .wezterm.lua
 .wezterm/**
+.config/ghostty/**
+{{ end }}
+{{- /* Ghostty config, off switch. Two independent gates: the darwin one above
+       (Ghostty has no Windows build and native-Linux hosts here are headless),
+       and this one, which is how `ts-config ghostty off` stops the config being
+       re-rendered. Turning it off does NOT delete anything from $HOME — that is
+       ts-config's job, deliberately, because .chezmoiignore is evaluated on
+       every machine and a removal rule would wipe a hand-written Ghostty config
+       on a box that never opted in. */}}
+{{ if ne (index . "ghosttyConfig" | default "on") "on" }}
+.config/ghostty/**
 {{ end }}

@@ -694,6 +694,28 @@ ts_atuin_set() {
     ts_mirror_windows_config
 }
 
+# ── Ghostty config ──────────────────────────────────────────────────────────────
+# "on"  (default) -> chezmoi renders ~/.config/ghostty/config and the custom
+#                    light theme.
+# "off"           -> .chezmoiignore drops both, so apply stops touching them.
+#
+# Turning it off does NOT itself delete anything: .chezmoiignore is evaluated on
+# every machine, so a removal rule there would wipe a hand-written Ghostty config
+# on a box that never opted in. `ts-config ghostty off` does the removal (and the
+# backup restore) explicitly, for the machine you run it on.
+ts_ghostty_get() {
+    local v; v="$(ts_data_get ghosttyConfig 2>/dev/null || true)"
+    case "$v" in on|off) echo "$v" ;; *) echo on ;; esac
+}
+
+# ts_ghostty_set <on|off> — persist, regenerate derived keys, mirror to Windows.
+ts_ghostty_set() {
+    case "$1" in on|off) ;; *) echo "ts_ghostty_set: expected on|off" >&2; return 2 ;; esac
+    ts_data_set ghosttyConfig "$1"
+    local cz; if cz="$(ts_chezmoi_bin)"; then "$cz" init >/dev/null 2>&1 || true; fi
+    ts_mirror_windows_config
+}
+
 # ── OS appearance detection ─────────────────────────────────────────────────────
 # Echoes the baked palette (light|dark) for a theme mode. follow → detect; on any
 # failure default to dark (the stack's historical look).

@@ -1030,9 +1030,56 @@ endpoint (60/hour per IP).
 build, so it is absent from `$script:TsTerminalCandidates` there. On Debian/Ubuntu upstream
 publishes no official repo, and the bootstrap points at `ghostty.org/download` rather than
 running a guessed third-party `.deb` or snap — a wrong guess here installs something the user
-did not choose from a source they did not vet. Note the stack ships no Ghostty *config*:
-theme, leader chord and font are baked into `.wezterm.lua` by chezmoi and have no Ghostty
-equivalent here, so a Ghostty user gets the tooling but not the theming.
+did not choose from a source they did not vet. **This originally said the stack ships no Ghostty config; that was reversed on
+2026-08-23** — see "Why Ghostty gets a managed config after all" below.
+
+## Why Ghostty gets a managed config after all
+
+The original position was that theme, leader chord and font are baked into `.wezterm.lua`
+and "have no Ghostty equivalent", so a Ghostty user got the tooling but not the theming.
+That was true of the *tab bar* and turned out to be false of everything else: Ghostty has a
+theme system, a font stack, padding, key bindings and a quick terminal, and configuring none
+of them meant Ghostty looked nothing like the rest of the stack on the same machine.
+
+Four things decided the shape of it.
+
+**Theme is live, not baked.** Every other consumer of the theme setting reads `resolvedTheme`,
+the palette resolved at apply time, because Starship, tmux and Claude cannot re-evaluate at
+runtime. WezTerm is the exception — it re-executes its Lua when the OS appearance changes, so
+it reads the raw `themeMode`. Ghostty turns out to be in WezTerm's class, not Starship's: its
+`theme = dark:X,light:Y` syntax follows the OS by itself. So the template reads `themeMode`,
+and `follow` genuinely switches live. Reading `resolvedTheme` would have looked correct and
+silently frozen `follow` until the next apply.
+
+`Catppuccin Mocha` is a Ghostty builtin, so dark needs nothing. **VS Code Light Modern is
+not**, so the stack ships `themes/vs-code-light-modern`, generated from the same hexes as
+`dot_wezterm.lua.tmpl`'s `PALETTES.light.scheme_def`. A test compares the two, because two
+hand-maintained copies of a 16-colour palette drift the moment anyone touches either.
+
+**`off` had to be a real revert, and `.chezmoiremove` could not provide it.** The obvious
+implementation — list `.config/ghostty/**` in `.chezmoiremove` behind the same gate — is
+wrong, because `.chezmoiremove` is evaluated on *every* machine. A user who never opted in,
+on a Linux box with a hand-written Ghostty config, would have it deleted by an apply. So the
+gate in `.chezmoiignore` only stops re-rendering, and `ts-config ghostty off` does the
+removal explicitly, for the machine you actually run it on.
+
+**Nothing on the POSIX side backs up before an overwrite.** The `.bak.YYYYMMDD[.N]`
+convention fires in the Windows sync hook and the merge helpers, but a plain `chezmoi apply`
+replaces a `$HOME` file with no backup at all — so the first managed apply would have
+destroyed a hand-written `~/.config/ghostty/config` silently, with nothing in the diff to
+show it. `run_before_20-backup-ghostty.sh` takes the backup, skipping any file that already
+carries our marker so a managed config does not spawn a new `.bak` on every apply. That
+backup is also what makes `off` a restore rather than a delete.
+
+**No PowerShell twin**, for the same reason `ts-smb` has none: Ghostty ships no Windows
+build, so there is nothing there to configure. Stated in `-h` so the absence reads as a
+decision rather than drift.
+
+What is still WezTerm-only, and honestly documented as such: the tab bar (Claude pane tints,
+fleet counters, status line) is `.wezterm.lua` Lua with no Ghostty equivalent, and there is
+no sticky per-tab project name. Ghostty *has* the right primitive — `set_tab_title`, distinct
+from `set_surface_title`, the same split that makes the WezTerm approach work — but ships no
+CLI to drive a running instance, so nothing can invoke it from a shell wrapper.
 
 ## Why `~/.claude/settings.json` is spliced, not copied
 

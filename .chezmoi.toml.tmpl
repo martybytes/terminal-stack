@@ -97,6 +97,10 @@ weztermRestore = {{ index . "weztermRestore" | default "off" | quote }}
        saved setting rather than a presence check, because the binary is often
        installed but dormant. `ts-config atuin on|off`. */}}
 atuinEnabled = {{ index . "atuinEnabled" | default "off" | quote }}
+{{- /* Ghostty config, macOS only. "off" makes .chezmoiignore drop it so apply
+       stops re-rendering; `ts-config ghostty off` also removes/restores the
+       deployed files. Default on. */}}
+ghosttyConfig = {{ index . "ghosttyConfig" | default "on" | quote }}
 {{- /* Per-computer agent integrations. These are deliberately user-global but
        machine-local: a laptop without the Docker services stays off. */}}
 headroomEnabled = {{ index . "headroomEnabled" | default "off" | quote }}

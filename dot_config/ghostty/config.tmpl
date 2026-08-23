@@ -1,0 +1,94 @@
+# Ghostty — managed by terminal-stack. Edit the source
+# (dot_config/ghostty/config.tmpl), not this file: `chezmoi apply` overwrites it.
+#
+# Turn the whole thing off and restore whatever was here before with
+#   ts-config ghostty off
+# and check what would change with `ts-config ghostty diff`.
+#
+# Ghostty's config syntax has no inline comments — a `#` after a value becomes
+# part of the value. Every comment here is on its own line, deliberately.
+#
+# macOS only: Ghostty has no Windows build, and native-Linux hosts in this stack
+# are headless. Gated in .chezmoiignore alongside .wezterm.lua.
+
+# ── Theme ─────────────────────────────────────────────────────────────────────
+# Unlike Starship and tmux, which bake a resolved palette at apply time, Ghostty
+# follows the OS itself through its `dark:…,light:…` syntax — so this reads the
+# raw themeMode, like WezTerm, and `follow` switches live with no re-apply.
+# Catppuccin Mocha is a Ghostty builtin; VS Code Light Modern is not, so it is
+# shipped as themes/vs-code-light-modern, generated from the same hex values as
+# dot_wezterm.lua.tmpl's PALETTES.light.
+{{ if eq (index . "themeMode" | default "dark") "light" -}}
+theme = vs-code-light-modern
+{{- else if eq (index . "themeMode" | default "dark") "follow" -}}
+theme = dark:Catppuccin Mocha,light:vs-code-light-modern
+{{- else -}}
+theme = Catppuccin Mocha
+{{- end }}
+
+# ── Font ──────────────────────────────────────────────────────────────────────
+# Same face and size as WezTerm (config.font_size = 11.5), so panes look
+# identical side by side. font-thicken is a macOS Retina nicety.
+font-family = JetBrainsMono Nerd Font
+font-size = 11.5
+font-thicken = true
+
+# ── Window ────────────────────────────────────────────────────────────────────
+window-padding-x = 8
+window-padding-y = 6
+window-padding-balance = true
+window-padding-color = extend
+# display-p3 gives noticeably richer colour on a modern Mac display. The palette
+# hexes are authored as sRGB, so this shifts them slightly; drop the line if you
+# want byte-exact parity with WezTerm's rendering.
+window-colorspace = display-p3
+# WezTerm is fully opaque. This is a deliberate Ghostty-only difference and the
+# easiest line to remove if you dislike it: set 1 for opaque.
+background-opacity = 0.97
+background-blur = 20
+window-save-state = always
+
+# ── Cursor ────────────────────────────────────────────────────────────────────
+cursor-style = block
+cursor-style-blink = false
+mouse-hide-while-typing = true
+
+# ── Keys ──────────────────────────────────────────────────────────────────────
+# Required for Alt-based keys to reach tmux, vim and readline instead of being
+# eaten as macOS dead-key composition. The single most important line here.
+macos-option-as-alt = true
+# Readline motions from Mac-style chords: Cmd+left/right = start/end of line,
+# Cmd+Backspace = kill to start.
+keybind = cmd+left=text:\x01
+keybind = cmd+right=text:\x05
+keybind = cmd+backspace=text:\x15
+# NOTE: cmd+t / cmd+w / cmd+d are deliberately left on Ghostty's own tab and
+# split actions. This stack multiplexes *inside* the terminal with WezTerm and
+# tmux, so there is no host multiplexer to forward them to; unbinding them here
+# would remove working keys and give nothing back.
+
+# ── Quick terminal (Quake-style drop-down) ────────────────────────────────────
+# Needs Accessibility permission: System Settings > Privacy & Security >
+# Accessibility > enable Ghostty. Without it the global hotkey silently does
+# nothing — Ghostty cannot tell you, because it never receives the key.
+# cmd+grave_accent shadows macOS's "cycle windows in app" while Ghostty runs.
+keybind = global:cmd+grave_accent=toggle_quick_terminal
+quick-terminal-position = top
+quick-terminal-size = 40%
+quick-terminal-autohide = true
+
+# ── Behaviour ─────────────────────────────────────────────────────────────────
+copy-on-select = clipboard
+clipboard-paste-protection = true
+clipboard-trim-trailing-spaces = true
+# Matches WezTerm's config.scrollback_lines = 10000.
+scrollback-limit = 10000
+mouse-scroll-multiplier = 2
+link-url = true
+# Homebrew installed Ghostty (bootstrap/mac-bootstrap.sh installs the cask) and
+# should stay its only updater — two updaters fighting over /Applications is how
+# you get a half-replaced app bundle. `brew upgrade --cask ghostty`.
+auto-update = off
+# no-cursor: the shell already manages cursor shape via the prompt, and letting
+# both do it makes the cursor flicker between styles.
+shell-integration-features = no-cursor,sudo,title

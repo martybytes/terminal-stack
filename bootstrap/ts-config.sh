@@ -14,6 +14,7 @@
 #   ts-config mux [on|off|...]  hand-off to ts-mux (WezTerm multiplexer domain)
 #   ts-config restore <on|off>  reopen the last WezTerm session at startup
 #   ts-config atuin   <on|off>  atuin shell history (owns Ctrl+R when on)
+#   ts-config ghostty [on|off|status|diff]   managed Ghostty config (macOS)
 #   ts-config agents [show|<tool> on|off|status|repair|uninstall]
 #   ts-config wezterm [status|changes|install <chan>|upgrade]
 #   ts-config wizard          re-run the whole install questionnaire
@@ -124,6 +125,83 @@ set_restore() { ts_wez_restore_set "$1"; finish; }
 # the setting alone changes nothing until chezmoi rewrites atuin.zsh.
 set_atuin() { ts_atuin_set "$1"; finish; }
 
+# ── Ghostty ───────────────────────────────────────────────────────────────────
+# macOS only: Ghostty ships no Windows build and native-Linux hosts here are
+# headless. No pwsh twin for the same reason ts-smb has none — the absence is a
+# decision, not drift.
+GHOSTTY_CFG="$HOME/.config/ghostty/config"
+GHOSTTY_THEME="$HOME/.config/ghostty/themes/vs-code-light-modern"
+
+ghostty_require_darwin() {
+    [ "$(uname -s)" = Darwin ] && return 0
+    echo "ts-config ghostty: macOS only (Ghostty has no Windows build, and this" >&2
+    echo "  stack's Linux hosts are headless)." >&2
+    return 1
+}
+
+ghostty_status() {
+    ghostty_require_darwin || return 1
+    echo "ghostty config: $(ts_ghostty_get)"
+    if [ -e "$GHOSTTY_CFG" ]; then
+        if head -20 "$GHOSTTY_CFG" | grep -q 'managed by terminal-stack'; then
+            echo "  $GHOSTTY_CFG  (ours)"
+        else
+            echo "  $GHOSTTY_CFG  (NOT ours — apply would replace it; a backup is taken first)"
+        fi
+    else
+        echo "  $GHOSTTY_CFG  (absent)"
+    fi
+    [ -e "$GHOSTTY_THEME" ] && echo "  $GHOSTTY_THEME  (custom light theme)"
+    local b
+    b="$(ls -1t "$HOME/.config/ghostty"/config.bak.* 2>/dev/null | head -1 || true)"
+    [ -n "$b" ] && echo "  newest backup: $b"
+    if command -v ghostty >/dev/null 2>&1; then
+        echo "  ghostty: $(ghostty --version 2>/dev/null | head -1)"
+        if [ -e "$GHOSTTY_CFG" ]; then
+            if ghostty +validate-config --config-file="$GHOSTTY_CFG" >/dev/null 2>&1; then
+                echo "  validate: ok"
+            else
+                echo "  validate: FAILED —"
+                ghostty +validate-config --config-file="$GHOSTTY_CFG" 2>&1 | sed 's/^/    /'
+            fi
+        fi
+    else
+        echo "  ghostty: not installed (ts-config wizard installs the cask)"
+    fi
+}
+
+# What apply would change, without applying it.
+ghostty_diff() {
+    ghostty_require_darwin || return 1
+    "$CZ" diff -- "$GHOSTTY_CFG" "$GHOSTTY_THEME" 2>/dev/null || true
+}
+
+# `off` is a real revert, not merely "stop managing": restore the newest backup
+# if there is one, else remove our files so Ghostty falls back to its defaults.
+ghostty_off() {
+    ghostty_require_darwin || return 1
+    ts_ghostty_set off
+    local b
+    b="$(ls -1t "$HOME/.config/ghostty"/config.bak.* 2>/dev/null | head -1 || true)"
+    if [ -n "$b" ] && [ -e "$b" ]; then
+        cp -p -- "$b" "$GHOSTTY_CFG"
+        echo "==> restored $GHOSTTY_CFG from $b"
+    elif [ -e "$GHOSTTY_CFG" ]; then
+        rm -f -- "$GHOSTTY_CFG"
+        echo "==> removed $GHOSTTY_CFG (no backup existed; Ghostty uses its defaults)"
+    fi
+    [ -e "$GHOSTTY_THEME" ] && { rm -f -- "$GHOSTTY_THEME"; echo "==> removed $GHOSTTY_THEME"; }
+    echo "==> ghostty config off. Reload Ghostty with Cmd+Shift+, (or restart it)."
+    finish
+}
+
+ghostty_on() {
+    ghostty_require_darwin || return 1
+    ts_ghostty_set on
+    finish
+    echo "==> ghostty config on. Reload Ghostty with Cmd+Shift+, (or restart it)."
+}
+
 # The mux has its own verbs (kill/restart/reset), so ts-config just hands off.
 run_mux() {
     TERMINAL_STACK_DIR="$SRC" TERMINAL_STACK_CHEZMOI="$CZ" bash "$SRC/bootstrap/ts-mux.sh" "$@"
@@ -211,6 +289,9 @@ show() {
     echo "  wezmux     : $(ts_wez_mux_get)   (ts-mux on|off|status)"
     echo "  wezrestore : $(ts_wez_restore_get)   (ts-config restore on|off)"
     echo "  atuin      : $(ts_atuin_get)   (ts-config atuin on|off)"
+    if [ "$(uname -s)" = Darwin ]; then
+        echo "  ghostty    : $(ts_ghostty_get)   (ts-config ghostty on|off)"
+    fi
     echo "  wezterm    : $(ts_wezterm_channel)$(_ts_cfg_wezterm_built)   (ts-config wezterm)"
     echo "  headroom   : $(ts_agent_get headroomEnabled)   (Cursor: $(ts_agent_get headroomCursorMode))"
     echo "  caveman    : $(ts_agent_get cavemanEnabled)"
@@ -222,7 +303,7 @@ menu() {
         echo
         show
         echo
-        echo "  1) leader key   2) theme   3) tmux prefix   4) apps   5) re-apply   6) Claude TTS   7) WezTerm mux   8) session restore   9) coding agents   a) atuin   t) WezTerm build   w) re-run wizard   q) quit"
+        echo "  1) leader key   2) theme   3) tmux prefix   4) apps   5) re-apply   6) Claude TTS   7) WezTerm mux   8) session restore   9) coding agents   a) atuin   g) ghostty   t) WezTerm build   w) re-run wizard   q) quit"
         local c; c="$(ts_tty_prompt 'Choose: ')"
         case "$c" in
             1) set_leader "$(ts_prompt_leader)" ;;
@@ -235,6 +316,7 @@ menu() {
             8) local r; r="$(ts_prompt_wezterm_restore)"; set_restore "$r" ;;
             9) agents_menu ;;
             a|A) set_atuin "$(ts_prompt_atuin)" ;;
+            g|G) ghostty_status ;;
             t|T) run_wezterm status ;;
             w|W) run_wizard ;;
             q|Q|"") return 0 ;;
@@ -270,19 +352,28 @@ case "${1:-}" in
         case "${2:-}" in on|off) ;; *)
             echo "usage: ts-config atuin <on|off>" >&2; exit 2 ;; esac
         set_atuin "$2" ;;
+    ghostty)
+        case "${2:-status}" in
+            on)     ghostty_on ;;
+            off)    ghostty_off ;;
+            status) ghostty_status ;;
+            diff)   ghostty_diff ;;
+            *) echo "usage: ts-config ghostty [on|off|status|diff]" >&2; exit 2 ;;
+        esac ;;
     agents)
         shift
         agents_config "$@" ;;
     -h|--help|help)
-        sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
+        sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'
         echo "  tts show|on|off|test|reset|engine|message|voice|..."
         echo "  mux status|on|off|list|kill|restart|reset  (see: ts-mux -h)"
         echo "  restore on|off   reopen the last WezTerm session at startup"
         echo "  atuin on|off     atuin shell history; when on it owns Ctrl+R (fzf keeps Ctrl+T/Alt+C)"
+        echo "  ghostty [on|off|status|diff]   managed Ghostty config (macOS only; off restores your backup)"
         echo "  agents [show|<headroom|caveman|agentmemory> on|off|status|repair|uninstall]"
         echo "  wezterm [status|changes|install <stable|nightly>|upgrade]  (see: ts-wezterm -h)"
         echo "  wizard           re-run the whole install questionnaire (TS_ASSUME_YES=1 to accept defaults)"
         echo "  agents headroom cursor <mcp|byok|off> | dashboard"
         ;;
-    *) echo "ts-config: unknown command '$1' (try: show, leader, theme, tmux, apps, tts, mux, restore, atuin, agents, wezterm, wizard)" >&2; exit 2 ;;
+    *) echo "ts-config: unknown command '$1' (try: show, leader, theme, tmux, apps, tts, mux, restore, atuin, ghostty, agents, wezterm, wizard)" >&2; exit 2 ;;
 esac

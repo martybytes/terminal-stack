@@ -884,3 +884,71 @@ def test_atuin_has_no_winget_id_and_no_pwsh_init():
     assert not any(l.strip().startswith("atuin") for l in assigns), \
         "atuin must not have a winget id"
     assert "yazi       = 'sxyazi.yazi'" in ids, "yazi's winget id is real and verified"
+
+
+# ── Ghostty ─────────────────────────────────────────────────────────────────────
+
+def _wez_light_scheme():
+    """PALETTES.light.scheme_def out of dot_wezterm.lua.tmpl."""
+    lua = (ROOT / "dot_wezterm.lua.tmpl").read_text(encoding="utf-8")
+    sd = lua[lua.index("scheme_def = {"):]
+    sd = sd[:sd.index("\n    },")]
+    def one(key):
+        return re.search(r"%s = '(#[0-9A-Fa-f]{6})'" % key, sd).group(1).lower()
+    def arr(key):
+        block = re.search(r"%s = \{(.*?)\}" % key, sd, re.S).group(1)
+        return [c.lower() for c in re.findall(r"'(#[0-9A-Fa-f]{6})'", block)]
+    return one, arr
+
+
+def test_ghostty_light_theme_matches_the_wezterm_palette():
+    """Ghostty ships no VS Code Light Modern builtin, so the stack carries one.
+    It is generated from the same hexes as WezTerm's PALETTES.light so the two
+    terminals render the light theme identically; this pins them together."""
+    theme = (ROOT / "dot_config/ghostty/themes/vs-code-light-modern").read_text(encoding="utf-8")
+    one, arr = _wez_light_scheme()
+    pal = dict(re.findall(r"^palette = (\d+)=(#[0-9a-f]{6})$", theme, re.M))
+    ansi, brights = arr("ansi"), arr("brights")
+    assert len(pal) == 16, "expected 16 palette entries, got %d" % len(pal)
+    for i, c in enumerate(ansi):
+        assert pal[str(i)] == c, "palette %d drifted from the Lua ansi table" % i
+    for i, c in enumerate(brights):
+        assert pal[str(i + 8)] == c, "palette %d drifted from the Lua brights" % (i + 8)
+    for key, lua_key in (("background", "background"), ("foreground", "foreground"),
+                         ("cursor-color", "cursor_bg"), ("cursor-text", "cursor_fg"),
+                         ("selection-background", "selection_bg"),
+                         ("selection-foreground", "selection_fg")):
+        got = re.search(r"^%s = (#[0-9a-f]{6})$" % key, theme, re.M).group(1)
+        assert got == one(lua_key), "%s drifted from the Lua scheme_def" % key
+
+
+def test_ghostty_config_follows_theme_mode_not_resolved_theme():
+    """Ghostty's dark:/light: syntax follows the OS itself, so it belongs in
+    WezTerm's live-switching class, not Starship/tmux's bake-at-apply class.
+    Reading resolvedTheme would silently freeze `follow` until the next apply."""
+    cfg = (ROOT / "dot_config/ghostty/config.tmpl").read_text(encoding="utf-8")
+    assert "themeMode" in cfg
+    assert "resolvedTheme" not in cfg, "Ghostty must not bake resolvedTheme"
+    assert "dark:Catppuccin Mocha,light:vs-code-light-modern" in cfg
+    # Ghostty has no inline comments: a `#` after a value becomes the value.
+    for ln in cfg.splitlines():
+        st = ln.strip()
+        if st.startswith("#") or st.startswith("{{") or "=" not in st:
+            continue
+        assert "#" not in st.split("=", 1)[1] or "color" in st or "palette" in st, \
+            "inline comment would be parsed as part of the value: %r" % ln
+
+
+def test_ghostty_is_gated_and_never_removed_by_chezmoi():
+    """.chezmoiignore is evaluated on every machine, so a removal rule there
+    would wipe a hand-written Ghostty config on a box that never opted in.
+    Removal is ts-config ghostty off's job, for the machine you run it on."""
+    ign = (ROOT / ".chezmoiignore").read_text(encoding="utf-8")
+    assert ign.count(".config/ghostty/**") == 2, "expected a darwin gate and an off gate"
+    rm = (ROOT / ".chezmoiremove").read_text(encoding="utf-8")
+    assert "ghostty" not in rm, ".chezmoiremove must never target ghostty"
+    hook = ROOT / "run_before_20-backup-ghostty.sh"
+    assert hook.exists() and os.access(hook, os.X_OK), "backup hook must exist and be executable"
+    body = hook.read_text(encoding="utf-8")
+    assert "managed by terminal-stack" in body, "must skip a config that is already ours"
+    assert "Darwin" in body, "must no-op off macOS"
