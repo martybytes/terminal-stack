@@ -176,6 +176,70 @@ cc_tts_effective_chatterbox_energy() {
     cc_tts_json .chatterbox.energy 0.25
 }
 
+# ── `self` summarizer, shell side ──────────────────────────────────────────────
+# Port of ttsd/summarize.py's _extract_marker/_self_summary. That Python runs
+# only inside the Windows EXE, so on macOS and native Linux `self` used to be
+# accepted, persisted, and never read — while STILL appending the marker block
+# to ~/.claude/CLAUDE.md, so the agent emitted <!-- speak: … --> comments that
+# nothing consumed. These two helpers give the direct path the same behaviour.
+#
+# Keep in step with ttsd/summarize.py:136-169; a test drives both on the same
+# fixtures and compares.
+
+# Strip a fenced code block, markdown emphasis, links and bare URLs, and
+# collapse whitespace — the shell twin of summarize.py's _speakable().
+cc_tts_speakable() {
+    printf '%s' "$1" | sed -E \
+        -e 's/`[^`]*`/ /g' \
+        -e 's/!?\[([^]]*)\]\([^)]*\)/\1/g' \
+        -e 's#https?://[^[:space:]]*# #g' \
+        -e 's/[*_~>#]+/ /g' \
+        -e 's/[[:space:]]+/ /g' \
+        -e 's/^ //; s/ $//'
+}
+
+# Last <!-- speak: … --> in the text, or empty. Last wins, matching
+# _extract_marker's matches[-1].
+cc_tts_speak_marker() {
+    local one
+    one="$(printf '%s' "$1" | tr '\n' ' ')"
+    printf '%s' "$one" | sed -n 's/.*<!--[[:space:]]*speak:[[:space:]]*\(.*\)[[:space:]]*-->.*/\1/p' \
+        | sed -E 's/[[:space:]]+$//'
+}
+
+# Remove every marker comment, so it can never be spoken verbatim in hook mode.
+cc_tts_strip_markers() {
+    printf '%s' "$1" | sed -E 's/<!--[[:space:]]*speak:[^>]*-->/ /g'
+}
+
+# One prose sentence from the agent's final message: drop fenced code, drop the
+# markers, skip blanks and headings, strip list bullets, first sentence, ≤15
+# words. Mirrors _self_summary's fallback branch.
+cc_tts_self_summary() {
+    local text="$1" marked clean line spoken sentence
+    marked="$(cc_tts_speak_marker "$text")"
+    if [ -n "$marked" ]; then
+        cc_tts_speakable "$marked"
+        return 0
+    fi
+    clean="$(printf '%s' "$text" | sed -E '/^[[:space:]]*```/,/^[[:space:]]*```/d')"
+    clean="$(cc_tts_strip_markers "$clean")"
+    printf '%s\n' "$clean" | while IFS= read -r line; do
+        line="${line#"${line%%[![:space:]]*}"}"
+        [ -z "$line" ] && continue
+        case "$line" in \#*) continue ;; esac
+        line="$(printf '%s' "$line" | sed -E 's/^([-*+][[:space:]]+|[0-9]+[.)][[:space:]]+)//')"
+        spoken="$(cc_tts_speakable "$line")"
+        [ -z "$spoken" ] && continue
+        sentence="$(printf '%s' "$spoken" | sed -E 's/([.!?])[[:space:]].*/\1/')"
+        printf '%s' "$sentence" | awk '{
+            if (NF > 15) { out=""; for (i=1;i<=15;i++) out=out (i>1?" ":"") $i;
+                           sub(/[,;:-]+$/, "", out); printf "%s.", out }
+            else printf "%s", $0 }'
+        break
+    done
+}
+
 cc_tts_build_speech() {
     # cc_tts_build_speech <source> <state> <project> [override_text]
     local source="$1" state="$2" project="$3" override_text="${4:-}"
@@ -215,11 +279,45 @@ cc_tts_build_speech() {
         [ -z "${text:-}" ] && message_mode=template
     fi
 
+    # `self`: the agent writes its own announcement. Applied ONLY to the "done"
+    # event, exactly as ttsd/summarize.py:84-99 does — question/permission/error
+    # keep their templates, because a marker written for "I finished" is the
+    # wrong thing to say when the agent is asking you something.
+    #
+    # The mode is read from .summarize.mode, which config.json.tmpl already
+    # renders on every platform, so this needs no new key.
+    if [ -z "$override_text" ] && [ "$state" = waiting ] \
+       && [ "$(cc_tts_json .summarize.mode template)" = self ] \
+       && [ -n "${CC_TTS_HOOK_JSON:-}" ] && command -v jq >/dev/null 2>&1; then
+        local final_text self_line
+        final_text="$(printf '%s' "${CC_TTS_HOOK_JSON}" | jq -r '
+            [.. | objects
+             | select(.role? == "assistant" or .type? == "assistant")
+             | (.content // .message // empty)
+             | if type == "array" then
+                 [ .[] | select(.type? == "text") | .text ] | join(" ")
+               elif type == "string" then .
+               else empty end
+            ] | last // empty' 2>/dev/null || true)"
+        if [ -n "$final_text" ]; then
+            self_line="$(cc_tts_self_summary "$final_text")"
+            if [ -n "$self_line" ]; then
+                text="${project:+$project} finished. $self_line"
+                text="${text# }"
+                message_mode=self
+            fi
+        fi
+    fi
+
     if [ "$message_mode" = template ] || [ -z "${text:-}" ]; then
         tpl="$(cc_tts_json ".announce.templates.$state" "")"
         [ -z "$tpl" ] && tpl="$(cc_tts_json ".templates.$state" "")"
         text="${tpl//\{project\}/$project}"
     fi
+
+    # Never speak the marker itself. In hook mode the raw final message is the
+    # speech text, so a <!-- speak: … --> comment would otherwise be read out.
+    case "$text" in *'<!--'*) text="$(cc_tts_strip_markers "$text")" ;; esac
 
     text="${text//$'\n'/ }"
     text="${text//$'\r'/ }"
@@ -371,6 +469,41 @@ cc_tts_synth_edge() {
     edge-tts --voice "$voice" --text "$text" --write-media "$out" >/dev/null 2>&1
 }
 
+# The macOS floor, mirroring Windows' SAPI rung (ttsd/synth.py). Without it the
+# ladder ended in SILENCE: a Mac with Kokoro stopped and no edge-tts turns
+# "voice notifications: on" into a switch that does nothing, and the worker runs
+# detached with output discarded, so nothing anywhere says why.
+#
+# TRAP: `say -o out.mp3` exits 0 and writes a 16-byte junk file. say picks its
+# format from the EXTENSION and only really writes AIFF, so synthesise to a
+# .aiff and move it into place — afplay sniffs content, not the name.
+cc_tts_synth_say() {
+    local text="$1" out="$2" tmp
+    [ "$(uname -s 2>/dev/null)" = Darwin ] || return 1
+    command -v say >/dev/null 2>&1 || return 1
+    tmp="${out%.*}.say.aiff"
+    say -o "$tmp" -- "$text" >/dev/null 2>&1 || { rm -f "$tmp"; return 1; }
+    # Guard the junk-file case explicitly rather than trusting the exit code.
+    [ -s "$tmp" ] && [ "$(wc -c < "$tmp" 2>/dev/null || echo 0)" -gt 1024 ] || {
+        rm -f "$tmp"; return 1; }
+    mv -f "$tmp" "$out" || { rm -f "$tmp"; return 1; }
+    cc_tts_log "synth say (fallback: no Kokoro/Chatterbox/edge-tts)"
+    cc_tts_say_notice
+    return 0
+}
+
+# Tell the user ONCE A DAY that the system voice is standing in, so a changed
+# voice reads as "Kokoro is down", not "my config broke". Never fatal.
+cc_tts_say_notice() {
+    local stamp dir
+    dir="${TMPDIR:-/tmp}"
+    stamp="${dir%/}/cc-tts-say-notice.$(date +%Y%m%d)"
+    [ -e "$stamp" ] && return 0
+    : > "$stamp" 2>/dev/null || return 0
+    printf 'cc-tts: using the macOS system voice — Kokoro/Chatterbox/edge-tts were unavailable.\n' >&2
+    return 0
+}
+
 cc_tts_synth() {
     local text="$1" out="$2" engine ok=1
     engine="$(cc_tts_json .engine kokoro)"
@@ -383,6 +516,9 @@ cc_tts_synth() {
             ;;
     esac
     [ "$ok" -ne 0 ] && cc_tts_synth_edge "$text" "$out" && ok=0
+    # Last rung. Offline, always present on macOS, and the reason "on" can no
+    # longer mean silence.
+    [ "$ok" -ne 0 ] && cc_tts_synth_say "$text" "$out" && ok=0
     return "$ok"
 }
 

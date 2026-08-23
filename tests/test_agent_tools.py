@@ -1377,3 +1377,79 @@ def test_nightly_is_preticked_even_when_stable_is_installed():
 
     ps = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
     assert "'stable'  { @('wezterm-stable') }" not in ps, "pwsh twin still installed-wins"
+
+
+# ── TTS on macOS: self summarizer + the say floor ──────────────────────────────
+
+CC_TTS_LIB = ROOT / "dot_claude/hooks/cc-tts-lib.sh"
+
+
+def _self_summary_sh(text):
+    r = subprocess.run(
+        ["bash", "-c", '. dot_claude/hooks/cc-tts-lib.sh 2>/dev/null; cc_tts_self_summary "$1"',
+         "_", text], cwd=ROOT, capture_output=True, text=True)
+    return r.stdout.strip()
+
+
+@pytest.mark.skipif(not shutil.which("bash"), reason="bash is unavailable")
+def test_self_summarizer_matches_the_python_daemon():
+    """`self` was implemented only in ttsd/summarize.py, which runs inside the
+    Windows EXE — so on macOS/Linux it was accepted, persisted and never read,
+    while STILL appending the marker block to ~/.claude/CLAUDE.md. The shell
+    twin must agree with the Python on the same input, the parity rule this
+    repo already applies to its bash/pwsh twins."""
+    sys.path.insert(0, str(ROOT / "bootstrap/tts-daemon"))
+    try:
+        from ttsd.summarize import Summarizer
+    except Exception as exc:                     # pragma: no cover
+        pytest.skip(f"ttsd not importable: {exc}")
+    cases = [
+        "x <!-- speak: All tests pass. -->",
+        "<!-- speak: a --> <!-- speak: b two -->",          # last marker wins
+        "# Heading\n- Migrated the parser to the new tokenizer and every single "
+        "one of the tests now passes cleanly.\nmore",        # 15-word cap
+        "```\ncode here\n```\nRefactored the loader.",        # fenced code dropped
+        "Just one short sentence. And a second one.",
+        "",
+    ]
+    for c in cases:
+        assert _self_summary_sh(c) == Summarizer._self_summary(c).strip(), \
+            f"shell/python disagree on {c!r}"
+
+
+@pytest.mark.skipif(not shutil.which("bash"), reason="bash is unavailable")
+def test_speak_marker_is_never_spoken_verbatim():
+    """In hook mode the raw final message IS the speech text, so a
+    <!-- speak: … --> comment would be read out loud. _speakable() is
+    Python-side only and has no shell twin."""
+    r = subprocess.run(
+        ["bash", "-c",
+         '. dot_claude/hooks/cc-tts-lib.sh 2>/dev/null; '
+         'cc_tts_strip_markers "Done. <!-- speak: hidden text --> tail"'],
+        cwd=ROOT, capture_output=True, text=True)
+    assert "hidden text" not in r.stdout and "<!--" not in r.stdout, r.stdout
+    lib = CC_TTS_LIB.read_text(encoding="utf-8")
+    assert "cc_tts_strip_markers" in lib
+    # self applies to the done event only, matching summarize.py:84-99.
+    body = lib[lib.index("cc_tts_build_speech() {"):]
+    assert '[ "$state" = waiting ]' in body, "self must not fire on question/permission/error"
+
+
+def test_macos_has_a_synthesis_floor():
+    """The ladder was Kokoro -> Chatterbox -> edge-tts -> SILENCE. Windows falls
+    back to SAPI; /usr/bin/say ships with every Mac and was never used, so a
+    stock Mac could have TTS fully 'on' and hear nothing, with the worker
+    detached and its output discarded."""
+    lib = CC_TTS_LIB.read_text(encoding="utf-8")
+    assert "cc_tts_synth_say" in lib
+    synth = lib[lib.index("\ncc_tts_synth() {"):]
+    synth = synth[:synth.index("\n}\n")]
+    # say must be the LAST rung, after edge.
+    assert synth.index("cc_tts_synth_edge") < synth.index("cc_tts_synth_say"), \
+        "say must be the floor, not preferred over a real engine"
+    say = lib[lib.index("cc_tts_synth_say() {"):]
+    say = say[:say.index("\n}\n")]
+    # `say -o out.mp3` exits 0 and writes a 16-byte junk file: it picks format
+    # from the extension and only really writes AIFF.
+    assert ".aiff" in say, "say must synthesise to .aiff, not the caller's extension"
+    assert "-gt 1024" in say, "must reject the junk-file case, not trust exit status"
