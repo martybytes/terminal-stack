@@ -226,25 +226,54 @@ function Test-TsHeadroomRuntime {
     return $script:TsHeadroomProbeOk
 }
 
-$script:TsClaudeCommand = @('claude.exe', 'claude.cmd') |
-    ForEach-Object { Get-Command $_ -CommandType Application -ErrorAction SilentlyContinue } |
-    Select-Object -First 1 -ExpandProperty Source
-if (-not $script:TsClaudeCommand) {
-    $script:TsClaudeCommand = (Get-Command claude -CommandType Application -ErrorAction SilentlyContinue).Source
+# Resolve an agent CLI at CALL time and cache the hit, rather than snapshotting it
+# when the profile loads. These CLIs are routinely installed into an already-open
+# shell, and a load-time snapshot left every wrapper in that session throwing
+# "not found on PATH" until a new one was opened. POSIX twin: _ts_agent_bin in
+# dot_zshrc. -CommandType Application excludes our own claude/codex *functions*,
+# so this cannot recurse.
+function Get-TsAgentCommand {
+    param([Parameter(Mandatory)][string]$Name)
+    $var = "Ts${Name}Command"
+    $cached = Get-Variable -Name $var -Scope Script -ValueOnly -ErrorAction SilentlyContinue
+    # Re-test the path: it self-heals a cached location the CLI later replaced.
+    if ($cached -and (Test-Path -LiteralPath $cached)) { return $cached }
+    $probe = { @("$Name.exe", "$Name.cmd", $Name) |
+        ForEach-Object { Get-Command $_ -CommandType Application -ErrorAction SilentlyContinue } |
+        Select-Object -First 1 -ExpandProperty Source }
+    $found = & $probe
+    if (-not $found) {
+        # An installer that just ran wrote the User PATH; this process still holds
+        # the copy it started with. Refresh from the registry and probe once more —
+        # the pwsh analogue of zsh's rehash.
+        $env:PATH = @(
+            [Environment]::GetEnvironmentVariable('PATH', 'Machine'),
+            [Environment]::GetEnvironmentVariable('PATH', 'User')
+        ) -join ';'
+        $found = & $probe
+    }
+    if ($found) { Set-Variable -Name $var -Scope Script -Value $found }
+    return $found
+}
+$script:TsClaudeCommand = $null
+function Get-TsClaudeCommand {
+    $bin = Get-TsAgentCommand 'Claude'
+    if (-not $bin) { throw 'claude: not found. Install it from https://claude.ai/install (or run the native installer), then retry.' }
+    return $bin
 }
 function claude-stock {
-    if (-not $script:TsClaudeCommand) { throw 'claude executable was not found on PATH when this profile loaded' }
-    & $script:TsClaudeCommand @args
+    $bin = Get-TsClaudeCommand
+    & $bin @args
 }
 function claude {
-    if (-not $script:TsClaudeCommand) { throw 'claude executable was not found on PATH when this profile loaded' }
-    if ((Get-TsAgentRuntimeSetting headroomEnabled) -ne 'on') { & $script:TsClaudeCommand @args; return }
+    $bin = Get-TsClaudeCommand
+    if ((Get-TsAgentRuntimeSetting headroomEnabled) -ne 'on') { & $bin @args; return }
     if (-not (Test-TsHeadroomRuntime)) {
         if (-not $script:TsHeadroomWarned) {
             Write-Warning 'Headroom is enabled but unavailable on 127.0.0.1:8787; this Claude launch is going direct.'
             $script:TsHeadroomWarned = $true
         }
-        & $script:TsClaudeCommand @args
+        & $bin @args
         return
     }
     $savedBase = $env:ANTHROPIC_BASE_URL
@@ -254,7 +283,7 @@ function claude {
         $env:ANTHROPIC_BASE_URL = 'http://127.0.0.1:8787'
         if (-not $env:ENABLE_TOOL_SEARCH) { $env:ENABLE_TOOL_SEARCH = 'true' }
         $env:HEADROOM_PROJECT = Split-Path -Leaf $PWD
-        & $script:TsClaudeCommand @args
+        & $bin @args
     } finally {
         $env:ANTHROPIC_BASE_URL = $savedBase
         $env:ENABLE_TOOL_SEARCH = $savedSearch
@@ -274,11 +303,11 @@ function cca   { Set-WezTabTitle "agents"; try { claude agents } finally { Set-W
 
 # Interactive Codex sessions get a three-row WezTerm dashboard. Utility commands
 # remain stock, and codex-stock is an explicit no-enhancements escape hatch.
-$script:TsCodexCommand = @('codex.exe', 'codex.cmd') |
-    ForEach-Object { Get-Command $_ -CommandType Application -ErrorAction SilentlyContinue } |
-    Select-Object -First 1 -ExpandProperty Source
-if (-not $script:TsCodexCommand) {
-    $script:TsCodexCommand = (Get-Command codex -CommandType Application -ErrorAction SilentlyContinue).Source
+$script:TsCodexCommand = $null
+function Get-TsCodexCommand {
+    $bin = Get-TsAgentCommand 'Codex'
+    if (-not $bin) { throw 'codex: not found. Install it with: npm install -g @openai/codex  (or see github.com/openai/codex/releases)' }
+    return $bin
 }
 
 function Test-TsCodexInteractive {
@@ -312,8 +341,8 @@ function Test-TsCodexInteractive {
 }
 
 function codex-stock {
-    if (-not $script:TsCodexCommand) { throw 'codex executable was not found on PATH when this profile loaded' }
-    & $script:TsCodexCommand @args
+    $bin = Get-TsCodexCommand
+    & $bin @args
 }
 
 function Invoke-TsCodex {
@@ -326,6 +355,9 @@ function Invoke-TsCodex {
     $launched = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
     $codexArgs = @()
     if ($Yolo) { $codexArgs += '--yolo' }
+    # Resolve before the sidecar pane is spawned: throwing later would leave an
+    # orphaned dashboard pane behind.
+    $bin = Get-TsCodexCommand
 
     if ($python -and (Test-Path -LiteralPath $helper) -and (Test-Path -LiteralPath $profile)) {
         $codexArgs += @('-p', 'terminal-stack')
@@ -351,7 +383,6 @@ function Invoke-TsCodex {
     $env:TS_CODEX_PARENT_PANE = $parent
     $exitCode = 0
     try {
-        if (-not $script:TsCodexCommand) { throw 'codex executable was not found on PATH when this profile loaded' }
         if ((Get-TsAgentRuntimeSetting headroomEnabled) -eq 'on') {
             if (Test-TsHeadroomRuntime) {
                 $env:OPENAI_BASE_URL = 'http://127.0.0.1:8787/v1'
@@ -362,7 +393,7 @@ function Invoke-TsCodex {
                 $script:TsHeadroomWarned = $true
             }
         }
-        & $script:TsCodexCommand @codexArgs @CliArgs
+        & $bin @codexArgs @CliArgs
         $exitCode = $LASTEXITCODE
     } finally {
         if ($sidecar -and $sidecar -match '^\d+$') {

@@ -1,5 +1,9 @@
-# If you come from bash you might have to change your $PATH.
-# export PATH=$HOME/bin:$HOME/.local/bin:/usr/local/bin:$PATH
+# ~/.local/bin must go on PATH here, before anything in this file resolves a
+# binary. The agent-CLI wrappers below (claude/codex) and _ts_chezmoi all look
+# for tools the native installers drop there; when this export lived down in the
+# cli-tools block, every top-level login shell resolved them against a PATH that
+# did not yet contain it and the cc*/ccd wrappers died with "not found on PATH".
+export PATH="$HOME/.local/bin:$PATH"
 
 # Path to your Oh My Zsh installation.
 export ZSH="$HOME/.oh-my-zsh"
@@ -210,13 +214,40 @@ _ts_headroom_healthy() {
   _TS_HEADROOM_PROBE_OK=1
 }
 
-typeset -g _TS_CLAUDE_BIN="${commands[claude]:-$(whence -p claude 2>/dev/null)}"
+# Resolve an agent CLI at CALL time and cache the hit, rather than snapshotting
+# it at shell load. These CLIs are routinely installed *into an already-open
+# shell* (`curl … | bash` into ~/.local/bin), and a load-time snapshot left every
+# wrapper in that shell dead until the user opened a new tab. `rehash` first:
+# zsh caches the PATH directory listing, so a binary added since startup is
+# invisible to $commands until the hash table is rebuilt. Same shape as
+# _ts_chezmoi below, including the literal ~/.local/bin fallback.
+#   $1 = command name, $2 = name of the variable to cache the path in
+# Sets $2 in the CALLER's shell rather than echoing the path: callers must not
+# wrap this in $( ), because the subshell would throw the cache away and every
+# launch would re-scan PATH.
+_ts_agent_bin() {
+  local name="$1" var="$2" cached="${(P)var}"
+  # Re-check -x: it also self-heals a cached path that vanished, e.g. Claude Code
+  # garbage-collecting an old ~/.local/share/claude/versions/* directory.
+  [[ -n "$cached" && -x "$cached" ]] && return 0
+  rehash
+  local found="${commands[$name]:-$(whence -p "$name" 2>/dev/null)}"
+  [[ -z "$found" && -x "$HOME/.local/bin/$name" ]] && found="$HOME/.local/bin/$name"
+  [[ -n "$found" ]] || return 1
+  typeset -g "$var=$found"
+}
+typeset -g _TS_CLAUDE_BIN=""
+_ts_claude_bin() {
+  _ts_agent_bin claude _TS_CLAUDE_BIN && return 0
+  print -u2 'claude: not found. Install it with: curl -fsSL https://claude.ai/install.sh | bash'
+  return 127
+}
 claude-stock() {
-  [[ -n "$_TS_CLAUDE_BIN" ]] || { print -u2 'claude executable was not found on PATH when this shell loaded'; return 127; }
+  _ts_claude_bin || return 127
   "$_TS_CLAUDE_BIN" "$@"
 }
 claude() {
-  [[ -n "$_TS_CLAUDE_BIN" ]] || { print -u2 'claude executable was not found on PATH when this shell loaded'; return 127; }
+  _ts_claude_bin || return 127
   if [[ "$(_ts_agent_setting headroomEnabled)" != on ]]; then "$_TS_CLAUDE_BIN" "$@"; return; fi
   if ! _ts_headroom_healthy; then
     if (( ! _TS_HEADROOM_WARNED )); then
@@ -241,7 +272,12 @@ cca()   { _wez_tab_title "agents";   { claude agents }                          
 
 # Interactive Codex sessions get a three-row WezTerm dashboard. Utility commands
 # remain stock, and codex-stock is an explicit no-enhancements escape hatch.
-typeset -g _TS_CODEX_BIN="${commands[codex]:-$(whence -p codex 2>/dev/null)}"
+typeset -g _TS_CODEX_BIN=""
+_ts_codex_bin() {
+  _ts_agent_bin codex _TS_CODEX_BIN && return 0
+  print -u2 'codex: not found. Install it with: npm install -g @openai/codex  (or see github.com/openai/codex/releases)'
+  return 127
+}
 
 _ts_codex_is_interactive() {
   local arg skip_value=0
@@ -269,7 +305,7 @@ _ts_codex_is_interactive() {
 }
 
 codex-stock() {
-  [[ -n "$_TS_CODEX_BIN" ]] || { print -u2 'codex executable was not found on PATH when this shell loaded'; return 127; }
+  _ts_codex_bin || return 127
   "$_TS_CODEX_BIN" "$@"
 }
 
@@ -281,14 +317,12 @@ _ts_codex() {
   local parent="${WEZTERM_PANE:-}" sidecar="" launched
   local -a command status_command
   local OPENAI_BASE_URL="${OPENAI_BASE_URL:-}" HEADROOM_PROJECT="${HEADROOM_PROJECT:-}"
+  # Resolve before building the command line — the old order populated
+  # command=() from the cached variable and only checked it was set afterwards.
+  _ts_codex_bin || return 127
   command=("$_TS_CODEX_BIN")
   [[ "$launch_mode" == yolo ]] && command+=(--yolo)
   launched="$(date +%s)"
-
-  if [[ -z "$_TS_CODEX_BIN" ]]; then
-    print -u2 'codex executable was not found on PATH when this shell loaded'
-    return 127
-  fi
 
   if command -v python3 >/dev/null 2>&1 && [[ -f "$helper" && -f "$profile" ]]; then
     command+=(-p terminal-stack)
@@ -868,7 +902,18 @@ wso() {
 # ---- terminal-stack-helpers-end ----
 
 # ---- cli-tools-start ----
-export PATH="$HOME/.local/bin:$PATH"
+# PATH for ~/.local/bin is set at the top of this file, not here — the agent-CLI
+# resolvers need it long before this block runs.
+# fnm — Node version manager. --use-on-cd auto-switches on .nvmrc/.node-version,
+# which is the whole reason to run a manager rather than a single brew node.
+# Chosen over nvm because nvm costs 200-500ms of shell startup and fnm ~10ms;
+# an unsourced ~/.nvm can stay where it is, this does not touch it.
+command -v fnm    >/dev/null && eval "$(fnm env --use-on-cd --shell zsh 2>/dev/null)"
+# grok ships completions but its installer appends them to ~/.zshrc, which this
+# stack owns whole-file — chezmoi reverts that on the next apply. Carry the line
+# ourselves so the completions survive. (The binary itself is routed to
+# ~/.local/bin by ts_install_ai_cli, which is already on PATH above.)
+[[ -d "$HOME/.grok/completions/zsh" ]] && fpath=("$HOME/.grok/completions/zsh" $fpath)
 command -v zoxide >/dev/null && eval "$(zoxide init zsh)"
 # fzf --zsh exists from fzf 0.48+ (March 2024); older apt fzf prints
 # `unknown option: --zsh` on stderr. Redirect inside the process substitution
@@ -880,7 +925,17 @@ command -v eza    >/dev/null && alias ls='eza --icons=always --git --group-direc
 command -v eza    >/dev/null && alias lt='eza --tree --icons=always --git --group-directories-first'   # matches the pwsh lt
 command -v bat    >/dev/null && alias ccat='bat --paging=never'   # ccat, not cat — don't shadow real cat
 alias rmf='rm -rf'   # force-delete file/folder recursively, no confirmation
-command -v cursor >/dev/null 2>&1 && c() { cursor "${1:-.}" --classic "${@:2}" }
+# Defined unconditionally and resolved inside the body: gating the *definition*
+# on `command -v cursor` meant installing Cursor's shell command mid-session left
+# `c` silently undefined until a new shell. Matches the pwsh `c` function, which
+# has always resolved per call.
+c() {
+  command -v cursor >/dev/null 2>&1 || {
+    print -u2 "c: cursor CLI not found on PATH — install Cursor and enable its shell command"
+    return 127
+  }
+  cursor "${1:-.}" --classic "${@:2}"
+}
 
 # ref — alias into the `doc` knowledge base (replaced the old command-reference file).
 ref() { doc "$@"; }
