@@ -11,6 +11,11 @@
 | `lsr <dir>` | run it somewhere other than the current directory |
 | `cat file` / `bat file` | **bat** — syntax highlighting, line numbers |
 | `glow file.md` | render markdown in the terminal (`glow .` for a browser) |
+| `fd pattern` | find files by name — regex, colour, honours `.gitignore` (`doc fd`) |
+| `tree -L 2` | directory structure as text, for pasting (`doc tree`) |
+| `duf` | free space per mount, readable (`doc duf`) — **which disk is full** |
+| `dust` | biggest subdirectories, sorted tree, one shot (`doc dust`) — **what filled it** |
+| `gdu` / `ncdu` | interactive disk-usage browsers you can delete from (`doc gdu`, `doc ncdu`) |
 | `rmf <path…>` | force-delete recursively — **no confirmation, no undo** (see below) |
 | `df -h` | disk free, human-readable |
 | `du -sh *` | size of each item in the current dir |
@@ -54,3 +59,17 @@ Both shells agree on ordering. Two platform notes:
   two can cover slightly different sets on the same folder.
 - In PowerShell `lsr` emits objects, so it composes: `lsr | Where-Object Latest -gt (Get-Date).AddDays(-7)`,
   `lsr | Export-Csv recent.csv`. The zsh/bash version prints aligned text.
+
+## Which disk tool
+
+Four tools, four questions:
+
+| Question | Tool |
+|---|---|
+| How much free space is left, per mount? | `duf` |
+| What is taking up the space here? (one shot, pasteable) | `dust` |
+| Let me browse it and delete things | `gdu` (fast) or `ncdu` (classic) |
+| What is on a server I only have ssh to? | `gdu -o- / \| gzip > scan.gz`, copy it back, `gdu -f scan.gz` |
+
+`ncdu -f`/`gdu -f` reading a saved scan is the trick worth remembering: do the
+expensive walk on the server, browse it on your laptop.

@@ -1,13 +1,20 @@
 # Cursor (AI editor)
 
 VS Code fork with a built-in coding agent; the `cursor` CLI takes the same
-flags as `code`. The stack wires around Cursor but does not install it — get it
-yourself and enable its shell command.
+flags as `code`. The stack wires around the Cursor **editor** but does not
+install it — get it yourself and enable its shell command.
+
+Cursor's **CLI agent** (`cursor-agent`) is a different thing, and that one *is*
+in the install catalog: an opt-in pick in the `ai` group, so `ts-config apps` or
+`ts-config wizard` can install it. Nothing in the `ai` group is ever installed
+unasked.
 
 ## How this stack wires it
 
 - `c [path]` in both shells = `cursor <path> --classic` (classic UI), defaulting
-  to `.`; extra args pass through. Like `npp`, but for Cursor.
+  to `.`; extra args pass through. Like `npp`, but for Cursor. Defined
+  unconditionally and resolved per call, so installing Cursor's shell command
+  into an already-open shell works without restarting that shell.
 - Ctrl-click a `path/file.ext:123` in WezTerm and it opens in Cursor at that
   exact line via `cursor --goto` — see `doc wezterm/panes` § "Scrollback, quick
   select & links".

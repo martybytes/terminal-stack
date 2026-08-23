@@ -1,0 +1,64 @@
+# Node & Python runtimes
+
+Two catalog groups, both asked about at install and re-askable with
+`ts-config apps` / `ts-config wizard`.
+
+## Node — managed by fnm
+
+`fnm` rather than nvm: nvm costs 200-500ms on **every** shell start (it is a
+large shell script), fnm about 10ms (a binary). It reads the same
+`.nvmrc` / `.node-version` files, so per-project pins keep working.
+
+Wired into both shells with `--use-on-cd`, so entering a directory with a pin
+switches Node automatically.
+
+| Command | What it does |
+|---|---|
+| `fnm list` | installed Node versions; `*` marks active and default |
+| `fnm install --lts` / `fnm install 22` | add a version |
+| `fnm use 22` / `fnm default 22` | switch now / set the default |
+| `fnm env --use-on-cd` | the shell hook (already in your rc) |
+| `node --version` / `npm --version` | what is active here |
+
+**Global npm binaries live under the active Node**, and fnm's PATH entry is
+created per shell. That is why `ts_apps_pending` calls `ts_load_node_env` before
+probing — without it, `ts-update` would nag about `codex`/`gemini` forever even
+with both installed.
+
+Picking `fnm` at install also installs the current LTS: the manager alone gives
+you no runtime. `node` is a separate catalog id for machines that want a single
+brew/winget Node and no manager at all.
+
+## Python
+
+The interpreter comes from brew (`python@3.14`) / apt / winget. Everything else
+is a CLI tool, and **`pip install` into the system Python is blocked** on modern
+Homebrew and Debian (PEP 668) — use `uv tool install` or `pipx` for anything
+global.
+
+| Tool | What it is |
+|---|---|
+| `uv` | fast package/project manager; `uv tool install X` for global CLIs |
+| `pipx` | the older, still-good way to install a Python CLI in its own env |
+| `ruff` | linter + formatter in one fast binary — replaces flake8/isort/black |
+| `ipython` | a far better REPL (`%timeit`, `%debug`, real completion) |
+| `httpie` | `http GET example.com` — curl you can read |
+| `poetry` | project/dependency manager with lockfiles |
+| `pre-commit` | run hooks (ruff, formatters) before every commit |
+
+| Command | What it does |
+|---|---|
+| `uv tool install <pkg>` / `uv tool list` | install/list a global Python CLI |
+| `uv venv && source .venv/bin/activate` | a project venv, fast |
+| `uv pip install -r requirements.txt` | pip-compatible, much faster |
+| `pipx install <pkg>` / `pipx list` | the pipx equivalent |
+| `ruff check .` / `ruff format .` | lint / format |
+| `ipython` | the REPL |
+| `http GET api.example.com/x` | HTTP request, pretty-printed |
+
+## The `agent` name
+
+Both the grok and cursor-agent installers create a generic `agent` symlink in
+`~/.local/bin`, so **whichever is installed last wins that name**. Both tools
+always work under their own names (`grok`, `cursor-agent`) — prefer those, and
+treat `agent` as ambiguous.

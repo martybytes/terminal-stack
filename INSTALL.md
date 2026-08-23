@@ -39,10 +39,64 @@ Every question works the same way: the default is **marked with `>` and captione
 
 - **Leader key** (WezTerm) — `Ctrl+Space` (default), `Ctrl+A`, `Ctrl+B`, `Alt+Space`, or a custom `mod-key` chord (e.g. `ctrl-x`). Skip with `TS_LEADER=ctrl-a`.
 - **Theme** — `dark` (Catppuccin Mocha, default), `light` (VS Code Light Modern), or `follow` (track the OS light/dark setting; WezTerm switches live, the Starship/tmux palette is baked at apply and refreshed by `ts-update`/`ts-config`). Skip with `TS_THEME=dark|light|follow`.
-- **WezTerm** (Windows and macOS only — WSL and native Linux use the host's GUI terminal) — `nightly` (default; what this stack's config targets), `stable`, or `skip` if you already have it or use a different terminal. When WezTerm is already on `PATH` the default flips to keeping it. A nightly whose package manifest has gone stale falls back to stable automatically. Skip with `TS_WEZTERM=nightly|stable|skip`. There is no `ts-config` entry for this — change it later with a plain `winget install wez.wezterm` / `brew install --cask wezterm@nightly`.
+- **Terminal emulator** (Windows, macOS and desktop Linux — WSL and headless hosts never install one) — a tick-list, so each is individually opt-in and `[n]one` is one keystroke away. **WezTerm nightly**, **WezTerm stable** and (macOS/Linux) **Ghostty** are separate ticks. Whatever is installed starts ticked on its detected channel; on a fresh machine **nightly is pre-selected**, because upstream's newest stable is `20240203` — February 2024, with no cut since — and this stack's Lua config targets current builds.
+
+  The prompt shows the facts rather than just a default: your installed build and its date, the newest build on each channel, and a count of what changed in between.
+
+  ```
+  Terminal emulator:
+    Installed: WezTerm 20240203-110809-5046fc22 (stable, 2024-02-03)
+    Latest:    nightly built 2026-08-23  | stable 20240203-110809-5046fc22 (2024-02-03)
+    Since your build: Changed 20  New 32  Fixed 74  Updated 9
+    [ ]  1) WezTerm nightly  (current builds; what this stack configures)
+    [x]  2) WezTerm stable  (20240203 — upstream has not cut one since)
+    [x]  3) Ghostty  (GPU-accelerated, platform-native UI)
+  Toggle a number, [a]ll, [n]one, Enter to continue, [s]kip:
+  ```
+
+  **Nothing is automatic.** Nothing installs unless you tick it, and neither channel ever upgrades on its own — `ts-update` reports and offers, `ts-config wezterm` changes it on demand. Ticking both WezTerm rows installs nightly and says so: the two packages install to the same place, so they cannot coexist, and switching channel removes the other first.
+
+  Skip the prompt with `TS_TERMINALS=wezterm-nightly,ghostty` / `TS_TERMINALS=wezterm-stable` / `TS_TERMINALS=none`; `TS_WEZTERM=nightly|stable|skip` still maps across. Change it later with **`ts-config wezterm install <stable|nightly>`**, which removes the other channel for you; `ts-config wezterm` (or `ts-wezterm`) shows your build, both channels' newest, and what changed in between. Rationale in `docs/decisions.md` § "Why the WezTerm channel is a question, and why it is not a saved setting".
 - **WezTerm multiplexer** — whether panes are hosted by `wezterm-mux-server` instead of the GUI, so a GUI crash leaves every pane alive and relaunching WezTerm reattaches. Defaults to **off**: the mux server loads its own copy of `.wezterm.lua`, so config changes then need `ts-mux restart` (which kills every pane), and mux panes can't render the per-pane Claude tint. Skipped on headless servers (no GUI to host). Change it any time with `ts-mux on|off`. Skip with `TS_WEZ_MUX=on|off`.
 - **Restore last session** — whether launching WezTerm reopens the workspace you last had (panes, layout and scrollback) or starts clean. Defaults to **off**; the autosave runs either way, so `Ctrl+Space` `L` still restores by hand and `ts-config restore on` flips it later. Skipped on headless servers. Skip with `TS_WEZ_RESTORE=on|off`.
-- **Apps** — accept the recommended set (`eza fzf bat delta ripgrep zoxide glow micro neovim gh ghq lazygit`, plus `tmux` off-Windows and `prettymark` on Windows), take **everything** (adds `zed` on Windows; `zed`, `tldr`, `nvtop`, `lazydocker` elsewhere), choose which ones (type a comma-separated list, or press Enter to be asked one at a time), or skip them all. The Nerd Font, Starship, chezmoi, git and zsh are always installed. Skip with `TS_APPS=recommended|all|none|id,id,…`.
+- **Apps** — five ways to answer: the **recommended set**, **everything**, **whole groups**, **individual tools**, or **none**. The Nerd Font, Starship, chezmoi, git and zsh are always installed regardless. Skip the question with `TS_APPS=recommended|all|none|id,id,…`.
+
+  The catalog is grouped so you can take a category without reading 30 lines:
+
+  | Group | Tools |
+  |---|---|
+  | `shell` | tmux, eza, bat, tree, zoxide, fzf |
+  | `search` | ripgrep, fd |
+  | `disk` | duf, ncdu, dust, gdu |
+  | `system` | btop, bottom, glances, nvtop, lazydocker |
+  | `network` | bandwhich, gping |
+  | `git` | delta, gh, ghq, lazygit |
+  | `editors` | micro, neovim, glow, zed, tldr (+ prettymark on Windows) |
+  | `runtimes` | fnm (Node version manager), node |
+  | `python` | python, uv, pipx, ruff, ipython, httpie, poetry, pre-commit |
+  | `ai` | claude, codex, cursor-agent, grok, gemini |
+
+  **choose whole groups** ticks groups — *all* of them start ticked, `ai` included; **choose individual tools** walks the groups one tick-list at a time, or takes a comma-separated list if you already know what you want. Anything in the recommended set starts ticked, so pressing Enter through the walk lands exactly on the recommended set.
+
+  **The `ai` group defaults to all five and is still a question** — every agent CLI starts ticked, and every one stays individually untickable. None of them come from a package manager:
+
+  | CLI | How it installs | Needs Node? |
+  |---|---|---|
+  | `claude` | official installer (`claude.ai/install.sh`) | no |
+  | `grok` | official installer (`x.ai/cli/install.sh`) — a standalone binary | no |
+  | `cursor-agent` | official installer (`cursor.com/install`) | no |
+  | `codex` | npm `@openai/codex` | **16+** |
+  | `gemini` | npm `@google/gemini-cli` | **20+** |
+
+  The two npm ones are gated on the Node version and say what to do rather than failing — install `fnm` from the `runtimes` group and they work. There is deliberately no brew fallback for `gemini`: the `gemini-cli` formula is deprecated upstream and scheduled for removal, so it would hand you a dead end.
+
+  **`python` and `runtimes`** are ordinary groups asked the same way. `fnm` is chosen over nvm because nvm costs 200-500ms of shell startup and fnm about 10ms, and it reads `.nvmrc`/`.node-version` so per-project pins keep working; picking it also installs the current Node LTS, since the manager alone gives you no runtime.
+
+  Groups are a picker concern only; the saved selection stays a flat list, so no new config key is involved.
+
+  After installing, the wizard prints what each tool actually resolved to and its version — an installer that failed quietly shows up as `NOT FOUND on PATH` rather than being assumed to have worked.
+
+- **Changed your mind later?** `ts-config apps` re-asks just the apps question; **`ts-config wizard`** replays the *entire* questionnaire — leader, theme, terminal emulator, apps, mux, restore, TTS, agent tools — and persists all of it. `TS_ASSUME_YES=1 ts-config wizard` takes the defaults without prompting.
 - **Claude Code voice notifications** — off unless a local Kokoro TTS server answers on `http://127.0.0.1:8880`, in which case enabling is the default. Skip with `TS_CC_TTS=on|off`.
 - **TTS tray daemon** (asked only when voice notifications were enabled, on Windows/WSL, never headless) — route announcements through a small native daemon that names the session ("terminal-stack finished — added the retry logic"), queues and coalesces simultaneous completions, and ducks (or pauses) your music while speaking. Defaults to **direct EXE playback**; enabling voice builds one console-free `terminal-stack-tts.exe` using a temporary Python venv, while choosing the daemon also adds autostart and the tray/session features. Python 3.10+ is a build dependency only — no persistent venv or Python runtime remains under `%LOCALAPPDATA%\terminal-stack\tts-daemon`. Change later with `ts-config tts daemon on|off`; hooks launch a detached direct worker in the same EXE whenever the daemon is unreachable. Skip with `TS_CC_TTS_DAEMON=on|off`. The daemon also hosts the dashboard (tray: Open dashboard, or `http://127.0.0.1:8890/ui`) for live activity, the log, and settings. Details: `doc windows/tts-daemon`.
 - **Workspace directory** — pre-filled with the autodetected candidate (`C:\DATA\Workspace` / `~/Documents/Workspace` / `~/workspace` / `~/Workspace`). Press Enter to accept. Persisted to `~/.zshrc.local` (zsh) or `Documents\PowerShell\profile.local.ps1` (pwsh) *only* when it differs from the autodetect. Skip with `WORKSPACE_DIR=/path` / `$env:WORKSPACE_DIR`.
@@ -70,9 +124,9 @@ cd $env:LOCALAPPDATA\terminal-stack\stack
 .\bootstrap\windows-bootstrap.ps1
 ```
 
-It runs the wizard (leader key / theme / WezTerm / mux / apps / TTS + optional tray daemon / workspace — see **Install wizard** above; set `$env:TS_LEADER`/`TS_THEME`/`TS_WEZTERM`/`TS_WEZ_MUX`/`TS_WEZ_RESTORE`/`TS_APPS`/`TS_CC_TTS`/`TS_CC_TTS_DAEMON` to skip prompts), shows the review, and only then installs:
+It runs the wizard (leader key / theme / terminal emulator / mux / apps / TTS + optional tray daemon / workspace — see **Install wizard** above; set `$env:TS_LEADER`/`TS_THEME`/`TS_TERMINALS`/`TS_WEZ_MUX`/`TS_WEZ_RESTORE`/`TS_APPS`/`TS_CC_TTS`/`TS_CC_TTS_DAEMON` to skip prompts), shows the review, and only then installs:
 - **Always:** JetBrainsMono Nerd Font (`DEVCOM.JetBrainsMonoNerdFont`), Starship (`Starship.Starship`), chezmoi (`twpayne.chezmoi`)
-- **WezTerm, if you asked for it:** `wez.wezterm.nightly` (default) or `wez.wezterm` (stable). A nightly that won't install — its winget manifest is republished more often than its hash is refreshed, so `Installer hash does not match` is routine — falls back to stable rather than leaving you with no terminal
+- **WezTerm, if you ticked it:** `wez.wezterm.nightly` or `wez.wezterm`, whichever channel you picked. Switching channel uninstalls the other package first — they install to the same place. Ghostty ships no Windows build, so it is not offered here
 - **Selected apps** (recommended set by default): eza, fzf, bat, delta, ripgrep, zoxide, glow, micro, neovim, gh, ghq, lazygit, prettymark; optionally `zed` (one winget install)
 
 It saves your choices to `%LOCALAPPDATA%\terminal-stack\config.json`. Any package that failed is **listed again at the end with the command to retry it**, so a failure can't scroll past unnoticed. Pass `-WhatIf` to preview without installing. UAC prompts on machine-scope installs; approve each.
@@ -135,9 +189,9 @@ Installs via Homebrew (installing Homebrew itself first if absent):
 - chezmoi, Starship
 - eza, zoxide, fzf, bat, git-delta, ripgrep
 - JetBrainsMono Nerd Font (`--cask font-jetbrains-mono-nerd-font`)
-- WezTerm, if you asked for it: `--cask wezterm@nightly` (default) or `--cask wezterm` (stable)
+- Terminal emulators, if you ticked them: `--cask wezterm@nightly` or `--cask wezterm` (your pick) and/or `--cask ghostty`
 
-The plain `wezterm` cask is pinned to the stale `20240203` stable, so the stack defaults to the `wezterm@nightly` cask and macOS matches the Windows side. It is a wizard question rather than a fixed step (`TS_WEZTERM=nightly|stable|skip`), and a nightly that won't install falls back to the stable cask. Headless Macs skip both casks — there is no window server to render them.
+Both WezTerm casks are offered and **nightly is pre-selected** — upstream's newest stable is `20240203-110809`, February 2024. Switching channel uninstalls the other cask first, since both ship `/Applications/WezTerm.app`. Each emulator is a separate tick (`TS_TERMINALS=wezterm-nightly,ghostty|none`); an already-installed one is upgraded rather than reinstalled, and never without being asked. `ts-config wezterm` shows your build, both channels' newest, and what changed. Headless Macs skip the emulator and font casks entirely — there is no window server to render them.
 
 It also writes `~/.config/chezmoi/chezmoi.toml` with `sourceDir` pointing at the
 clone (auto-detected from the script's own location). macOS keeps the system
@@ -233,14 +287,13 @@ Log out and back in (or close/reopen the WSL terminal) so the new login shell ta
 ### Phase 1 — WezTerm (Windows)
 
 ```powershell
-winget install --id wez.wezterm.nightly --exact --silent
-wezterm.exe --version    # expect 2025+ build, not 20240203
+winget install --id wez.wezterm.nightly --exact --silent   # or wez.wezterm for stable
+wezterm.exe --version
 ```
 
 Optional — the rest of the stack works without it, under Windows Terminal or an
-existing WezTerm. If nightly fails with `Installer hash does not match` (its
-manifest is republished more often than its hash is refreshed), use the stable
-package instead: `winget install --id wez.wezterm --exact --silent`.
+existing WezTerm. Either channel is fine; the stack asks rather than choosing for
+you, and `ts-config wezterm` compares what you have against both channels.
 
 ### Phase 2 — `.wezterm.lua`
 

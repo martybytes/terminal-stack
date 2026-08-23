@@ -965,22 +965,74 @@ cost a keystroke. `q` is meaningful precisely because nothing has happened yet.
 came from `TS_*` env vars has nothing to review, and prompting anyway would block forever
 in CI, where the tty exists and nobody is watching it.
 
-## Why WezTerm is a choice, and why a failed nightly falls back to stable
+## Why the WezTerm channel is a question, and why it is not a saved setting
 
 WezTerm sat in the always-installed set next to the Nerd Font, Starship, and chezmoi.
 Those three are load-bearing — the configs this repo deploys are meaningless without them.
 WezTerm is not in the same category: the stack is useful under Windows Terminal, over ssh,
-or on a machine that already has WezTerm from somewhere else, and the `.wezterm.lua` we
-deploy is inert when the binary is absent.
+under Ghostty, or on a machine that already has WezTerm from somewhere else, and the
+`.wezterm.lua` we deploy is inert when the binary is absent. So it stays a question, and the
+question is a tick-list: WezTerm nightly, WezTerm stable and Ghostty are separate ticks,
+whatever is installed starts ticked on its detected channel, and `[n]one` is one keystroke.
 
-It was also the least reliable install in the set. `wez.wezterm.nightly`'s winget manifest
-is republished more often than its hash is refreshed, so `Installer hash does not match`
-is a routine outcome rather than an exotic one — and the bootstrap's response was a
-`Write-Warning` that scrolled past behind a dozen more package installs, leaving an
-install that looked clean and had no terminal. Nightly is still the default (the config
-targets current builds), but a nightly that will not install now falls back to stable
-rather than to nothing, and every package that failed is reprinted at the end with the
-command to retry it.
+**Both channels are offered, and nightly is pre-selected.** Upstream's newest *stable* is
+`20240203-110809-5046fc22` — February 2024, with no cut since. Nightly is what @wez uses as
+a daily driver and what this stack's Lua config targets, so pre-selecting stable would put
+every fresh machine on a two-and-a-half-year-old build by default. This briefly *was*
+stable-only, and that was the wrong call for exactly this reason.
+
+**But nothing is automatic.** Nightly moving daily is precisely why it must not upgrade
+behind your back: the wizard asks at install, `ts-update` reports and offers when something
+newer exists on the channel you are already on, and `ts-config wezterm` changes it on demand.
+No path installs, upgrades or switches without a yes. Non-interactive runs print the command
+instead of running it.
+
+**The prompt shows facts, not just a default.** A choice between "stable" and "nightly" is
+meaningless without knowing that stable is from 2024 and nightly was rebuilt this morning, so
+the intro carries the installed build and its date, the newest build on each channel, and a
+count of what changed in between. All of it is derivable without an LLM:
+
+- The build date is **in the release name** — `<YYYYMMDD>-<HHMMSS>-<githash>` — so
+  `wezterm --version` alone dates the installed build with no network call.
+- Latest stable is the `releases/latest` tag and its `published_at`.
+- Latest nightly is **not** the nightly release's own `published_at` (that is stuck in 2019,
+  because the tag is a rolling one). It is the `updated_at` of the nightly asset *for this
+  platform*, which matters: the Debian10 nightly last built over a year ago while Debian12's
+  built today, and quoting a release-level date would be wrong on both counts.
+- "What changed" is sliced out of upstream's own `docs/changelog.md`, whose release headings
+  are exactly the strings `wezterm --version` prints — so the slice is an exact match rather
+  than a guess. The tally counts bullets per `#### Changed / New / Fixed / Updated`; the full
+  text is `ts-config wezterm changes`, paged through the same reader `doc` uses. For a
+  nightly there is no heading to anchor on, so the honest answer there is the commit count
+  from `compare/<hash>...main`.
+
+**The channel is not stored.** It is read back from the package manager — `brew list --cask
+wezterm@nightly` vs `wezterm`, `winget list --id wez.wezterm.nightly` vs `wez.wezterm`,
+`dpkg -s wezterm-nightly` vs `wezterm`. That cannot drift out of sync with what is actually
+installed the way a saved value can, it is self-healing after a manual `brew install`, and it
+keeps the seven-file blast radius of a new chezmoi `[data]` key out of this entirely — the
+same reasoning as the agentmemory wiring, which is auto-detected with no saved setting. A
+WezTerm that no package manager here owns reports channel `unknown`: its version and date are
+still shown, and install/upgrade leave it alone rather than fighting over it.
+
+**Switching removes the other channel first, in both directions.** On macOS both casks own
+`/Applications/WezTerm.app` and on Debian both packages own `/usr/bin/wezterm`, so the second
+install simply refuses. The removal is conditional on actually switching — a machine that
+declines WezTerm entirely keeps whatever it already had, which the earlier stable-only
+version got wrong by purging nightly unconditionally.
+
+Every network call fails **open and silent**, with a hard timeout: a report that degrades to
+"installed version and date" is fine, one that blocks an install or errors a shell is not.
+`gh api` is preferred where it exists (5000 requests/hour, authenticated) over the bare REST
+endpoint (60/hour per IP).
+
+**Ghostty is offered where it exists.** macOS gets the `ghostty` cask. Windows has no Ghostty
+build, so it is absent from `$script:TsTerminalCandidates` there. On Debian/Ubuntu upstream
+publishes no official repo, and the bootstrap points at `ghostty.org/download` rather than
+running a guessed third-party `.deb` or snap — a wrong guess here installs something the user
+did not choose from a source they did not vet. Note the stack ships no Ghostty *config*:
+theme, leader chord and font are baked into `.wezterm.lua` by chezmoi and have no Ghostty
+equivalent here, so a Ghostty user gets the tooling but not the theming.
 
 ## Why `~/.claude/settings.json` is spliced, not copied
 
@@ -1026,9 +1078,26 @@ keep the whole-file copy — is wrong twice over. AgentMemory's client wiring is
 outside version control (`docker-local/agentmemory/README.md`: user-scoped, global, one
 machine at a time), and it would not save `model` or anything else Claude Code writes next.
 
-The WSL-side `dot_claude/settings.json.tmpl` is still a whole-file chezmoi target. That is
-correct only as long as WSL-side Claude Code has no plugins and no per-machine keys; the day
-it does, it needs a `modify_` script doing the same splice.
+The POSIX side used to be a whole-file chezmoi target, "correct only as long as WSL-side
+Claude Code has no plugins and no per-machine keys; the day it does, it needs a `modify_`
+script doing the same splice". That day arrived on macOS: Claude Code wrote
+`agentPushNotifEnabled` into `~/.claude/settings.json`, and `chezmoi apply` wanted to delete
+it — the same silent, diff-less clobber as the Windows incident, one platform over.
+
+`dot_claude/modify_settings.json.tmpl` is that script. chezmoi hands a `modify_` script the
+current target on stdin and takes stdout as the new contents, so the splice is native rather
+than bolted onto a sync hook. It keeps the three properties that matter, matching the pwsh
+helper: ownership comes from the **rendered fragment**, not a hard-coded key list, so
+removing a hook from the template removes it from the live file; every other top-level key
+and the live file's key order survive byte for byte; and it **refuses rather than guesses** —
+a live file that will not parse is echoed straight back, because an unrecoverable hand-edit
+is worse than a skipped apply.
+
+Two smaller traps were closed at the same time. `tests/**` was missing from `.chezmoiignore`,
+so chezmoi had been deploying the pytest suite into `~/tests/` — the same trap the installer
+entry points fell into, and the reason those are listed there. And a `.chezmoiremove` entry
+cannot clean that up: chezmoi skips ignored paths entirely, so the stale copies are retired
+through `ts_find_stray` in `bootstrap/_cleanup.sh` instead.
 
 ## Why `~/.cursor/hooks.json` needs per-entry ownership
 

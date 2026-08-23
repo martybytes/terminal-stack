@@ -4,8 +4,8 @@ The Mac package manager, and this stack's installer: `bootstrap/mac-bootstrap.sh
 installs Homebrew itself, then `brew install zsh git starship chezmoi`, your app
 catalog picks (`delta` ships as the `git-delta` formula; Zed as a cask), and the
 cask `font-jetbrains-mono-nerd-font` — plus WezTerm if you asked for it
-(`wezterm@nightly` by default, `wezterm` for stable, or skipped; `TS_WEZTERM=`
-sets it non-interactively, and a nightly that won't install falls back to stable). `ts-config apps`
+(`--cask wezterm@nightly` or `--cask wezterm`, your pick) and Ghostty (`--cask ghostty`)
+if you ticked them; `TS_TERMINALS=wezterm-nightly,ghostty|none` sets it non-interactively. `ts-config apps`
 reuses the same brew path later.
 
 ## Daily commands
@@ -14,7 +14,10 @@ reuses the same brew path later.
 | `brew update` | refresh the package index |
 | `brew outdated` | what has a newer version (`--cask` for GUI apps) |
 | `brew upgrade` | upgrade everything installed |
-| `brew upgrade --cask wezterm@nightly` | upgrade WezTerm (nightly is the default — the plain `wezterm` cask is stale, but supported) |
+| `ts-config wezterm` | installed build + date, newest on each channel, what changed since — **use this instead of guessing** |
+| `ts-config wezterm upgrade` | refresh the channel you are on (never switches) |
+| `ts-config wezterm install nightly` | switch channel; removes the other cask first (they share `/Applications/WezTerm.app`) |
+| `brew upgrade --cask ghostty` | upgrade Ghostty |
 | `brew install formula` | install (`--cask` for GUI apps) |
 | `brew uninstall formula` | remove |
 | `brew cleanup` | remove old versions and stale downloads |

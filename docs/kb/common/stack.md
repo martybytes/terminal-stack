@@ -8,7 +8,9 @@
 | `ts-rollback` | undo the last `ts-update` — see below |
 | `ts-doctor [--repair]` | health-check / fix the install — see below |
 | `ts-config` | change leader, theme, tmux prefix, apps, TTS, agent tools, WezTerm mux/restore — see below |
+| `ts-config wizard` | re-run the whole install questionnaire from scratch — see below |
 | `ts-mux` | WezTerm multiplexer domain: on/off, status, kill/restart/reset — see below |
+| `ts-wezterm` | WezTerm build info, upstream comparison, channel switching — see below |
 | `plain` | vanilla shell, no rc/profile (no oh-my-zsh/starship/aliases) — `exit` to return |
 | `chezmoi diff` / `chezmoi apply -v` | preview / apply configs (run from inside WSL on Windows) |
 | `chezmoi re-add ~/.zshrc` | capture a hand-edit of a managed file back into the repo |
@@ -97,17 +99,22 @@ repair offers the same canonical move and re-syncs (a pin is written to
 | Command | What it does |
 |---|---|
 | `ts-config` | interactive menu (leader / theme / tmux / apps / TTS / coding agents / WezTerm mux / restore) |
-| — | WezTerm itself is an **install-time** choice, not a `ts-config` entry; change it with `winget install wez.wezterm` / `brew install --cask wezterm@nightly` |
+| `ts-config wezterm` | WezTerm build info and channel — see below |
 | `ts-config show` | print the saved config + the derived bindings |
 | `ts-config leader <chord>` | WezTerm leader, e.g. `ctrl-space`, `ctrl-a`, `alt-x` |
 | `ts-config theme <dark\|light\|follow>` | palette; `follow` tracks the OS theme |
 | `ts-config tmux <chord>` | tmux prefix, e.g. `ctrl-a` — see `doc common/tmux` |
 | `ts-config apps [recommended\|all\|none\|id,…]` | app catalog; no arg → picker; installs, never uninstalls |
+| `ts-config wizard` | re-run **every** install question (leader, theme, terminal emulator, apps, mux, restore, TTS, agent tools) and persist the lot. `ts-config apps` re-asks only the apps question; this is the "start over as if installing" path. `TS_ASSUME_YES=1 ts-config wizard` takes the defaults without prompting, and the per-question `TS_*` env vars still skip individual prompts |
 | `ts-config tts <show\|on\|off\|test\|…>` | Claude/Cursor voice — see `doc common/claude-code` |
 | `ccmute` | silence the voice instantly, until you unmute. Also the tray icon, `Ctrl+Alt+Shift+M`, `Leader+m` |
 | (tray) | the tray's **Open dashboard** gives live activity, the daemon log and a settings editor: see `doc windows/tts-daemon` |
 | `ts-config mux [on\|off\|…]` | hand-off to `ts-mux` (WezTerm multiplexer domain) |
 | `ts-config restore <on\|off>` | reopen the last WezTerm session at startup (default off) |
+| `ts-config wezterm` | your build + date, newest on each channel, and a count of what changed since |
+| `ts-config wezterm changes` | the full upstream changelog since your build, paged |
+| `ts-config wezterm install <stable\|nightly>` | switch channel — removes the other package first |
+| `ts-config wezterm upgrade` | refresh the channel you are on; never switches |
 | `ts-config agents [show]` | saved Headroom, Caveman, AgentMemory state for this computer |
 | `ts-config agents <tool> on\|off\|status\|repair\|uninstall` | manage one tool at user scope; never edits a project or Docker |
 | `ts-config agents headroom dashboard` | open the Headroom GUI monitor |
@@ -129,6 +136,24 @@ open the Headroom dashboard. Dashboard attribution follows the originating
 client: Claude requests appear as Claude/Anthropic; Codex requests appear as
 OpenAI and increment Codex WebSocket counters. Setting changes apply to newly
 started agent sessions, not a process that was already running.
+
+## `ts-wezterm`
+
+Also reachable as `ts-config wezterm …`, and `t` in the `ts-config` menu.
+
+| Command | What it does |
+|---|---|
+| `ts-wezterm` / `status` | your build + date, newest on each channel, a count of what changed since |
+| `ts-wezterm changes` | the full upstream changelog since your build, paged through glow |
+| `ts-wezterm install <stable\|nightly>` | switch channel — removes the other package first |
+| `ts-wezterm upgrade` | refresh the channel you are on; never switches |
+| `ts-wezterm -h` | help (works even when the clone or chezmoi is broken) |
+
+Nothing here runs on its own: the wizard asks at install, `ts-update` offers when
+something newer exists on the channel you are already on, and this changes it on
+demand. The channel is read back from the package manager rather than stored, so
+it cannot drift from what is installed. Details and the "where do those numbers
+come from" explanation: `doc wezterm`.
 
 ## `ts-mux`
 The WezTerm **multiplexer domain**: with it on, your shells run inside
