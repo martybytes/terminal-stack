@@ -128,10 +128,22 @@ agentmemory_apply() {
         codex plugin marketplace add "$(json_get agentmemory.source)" --ref "$(json_get agentmemory.ref)" || true
         codex plugin add agentmemory@agentmemory || true
     fi
+    # Host-side hook wiring. Installing the plugin is only half the job: without
+    # the deployment edits the hooks POST nothing and retrieval never fires, and
+    # nothing logs it because every vendor hook does fetch(...).catch(() => {})
+    # then exits 0. Re-run on every `on`/`repair` because a plugin upgrade
+    # replaces the cache and silently reverts every edit.
+    if [ -x "$ROOT/ts-agentmemory.sh" ]; then
+        bash "$ROOT/ts-agentmemory.sh" --apply || echo 'ts-agents: agentmemory hook wiring reported problems (see above).'
+    fi
     echo 'AgentMemory plugin enabled. Docker, secrets, and server feature flags were not changed.'
 }
 
 agentmemory_remove() {
+    # Undo the host-side wiring first, while the plugin cache it patched is still
+    # present — the restore reads the .agent007memory-original backups beside the
+    # vendor scripts.
+    [ -x "$ROOT/ts-agentmemory.sh" ] && { bash "$ROOT/ts-agentmemory.sh" --undo --apply || true; }
     command -v claude >/dev/null 2>&1 && { if [ "$action" = uninstall ]; then claude plugin uninstall agentmemory@agentmemory --scope user --keep-data -y || true; else claude plugin disable agentmemory@agentmemory --scope user || true; fi; }
     command -v codex >/dev/null 2>&1 && codex plugin remove agentmemory@agentmemory || true
 }

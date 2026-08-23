@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
   "headroom": {
-    "version": "0.36.3",
+    "version": "0.36.5",
     "proxyUrl": "http://127.0.0.1:8787",
     "mcpUrl": "http://127.0.0.1:8788/mcp",
     "dashboardUrl": "http://127.0.0.1:8787/dashboard",
     "healthPaths": ["/readyz", "/health"],
-    "dockerImage": "ghcr.io/chopratejas/headroom:0.36.3"
+    "dockerImage": "ghcr.io/headroomlabs-ai/headroom:0.36.5"
   },
   "caveman": {
     "version": "2.2.0",

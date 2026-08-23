@@ -18,8 +18,10 @@ PS_ADAPTER = ROOT / "bootstrap/ts-agents.ps1"
 
 def test_manifest_pins_reviewed_versions_and_local_endpoints():
     cfg = json.loads(MANIFEST.read_text(encoding="utf-8"))
-    assert cfg["headroom"]["version"] == "0.36.3"
-    assert cfg["headroom"]["dockerImage"] == "ghcr.io/chopratejas/headroom:0.36.3"
+    # Repinned 2026-08-23: ghcr.io/chopratejas/headroom no longer resolves at all
+    # (manifest 404), while ghcr.io/headroomlabs-ai/headroom:0.36.5 does (200).
+    assert cfg["headroom"]["version"] == "0.36.5"
+    assert cfg["headroom"]["dockerImage"] == "ghcr.io/headroomlabs-ai/headroom:0.36.5"
     assert cfg["headroom"]["proxyUrl"] == "http://127.0.0.1:8787"
     assert cfg["headroom"]["mcpUrl"] == "http://127.0.0.1:8788/mcp"
     assert cfg["caveman"]["version"] == "2.2.0"
@@ -952,3 +954,95 @@ def test_ghostty_is_gated_and_never_removed_by_chezmoi():
     body = hook.read_text(encoding="utf-8")
     assert "managed by terminal-stack" in body, "must skip a config that is already ours"
     assert "Darwin" in body, "must no-op off macOS"
+
+
+# ── agentmemory bash port ───────────────────────────────────────────────────────
+
+def _uncommented(text):
+    """Shell source with comment lines dropped. These files document at length
+    why a construct is absent, so a raw substring match hits the explanation
+    rather than real code."""
+    return "\n".join(l for l in text.splitlines() if not l.lstrip().startswith("#"))
+
+
+AM_SH = ROOT / "bootstrap/_agentmemory.sh"
+AM_PS = ROOT / "bootstrap/_agentmemory.ps1"
+AM_ENTRY = ROOT / "bootstrap/ts-agentmemory.sh"
+
+
+def test_agentmemory_sh_entry_point_exists_where_check_capture_probes():
+    """docker-local/agentmemory/check-capture.sh looks for this exact path and
+    fails loudly when it finds none. The name is not negotiable."""
+    assert AM_ENTRY.exists() and os.access(AM_ENTRY, os.X_OK)
+    assert AM_SH.exists() and (ROOT / "bootstrap/_merge_json_settings.sh").exists()
+
+
+def test_agentmemory_hook_commands_are_posix_not_cmd_exe():
+    """A cmd.exe `set X=…&&` chain written into a hooks file on a Mac fails
+    SILENTLY — precisely the failure this wiring exists to prevent."""
+    body = AM_ENTRY.read_text(encoding="utf-8")
+    assert "cmd /d /s /c" not in body
+    assert "AGENTMEMORY_URL=%s AGENTMEMORY_INJECT_CONTEXT=true node" in body
+    # Both variables inlined per command, never inherited: an exported variable
+    # only reaches processes started after it was set.
+    assert "AGENTMEMORY_INJECT_CONTEXT=true" in body
+
+
+def test_agentmemory_secret_recovery_uses_the_unix_cache_not_the_registry():
+    """`reg query HKCU\\Environment` throws on Unix, is caught, and leaves the
+    401 recovery a permanent no-op."""
+    sh = AM_SH.read_text(encoding="utf-8")
+    sh_code = _uncommented(sh)
+    assert "reg query" not in sh_code, "the Windows registry read must not survive the port"
+    assert "XDG_CONFIG_HOME" in sh
+    assert 'docker-local", "agentmemory.secret"' in sh
+    # The .ps1 keeps its registry form; this is a deliberate divergence, not drift.
+    assert "reg query" in AM_PS.read_text(encoding="utf-8")
+
+
+def test_agentmemory_edit_text_matches_the_powershell_twin():
+    """Edits keep the @T/@N encoding so the two files' edit text diffs directly.
+    These anchors are what break if either side is edited alone."""
+    sh, ps = AM_SH.read_text(encoding="utf-8"), AM_PS.read_text(encoding="utf-8")
+    for anchor in (
+        'const REST_URL = process.env["AGENTMEMORY_URL"] || "http://localhost:3111";',
+        'const INJECT_CONTEXT = process.env["AGENTMEMORY_INJECT_CONTEXT"] === "true";',
+        "@Tif (isSdkChildContext(data)) return;",
+        "//#region src/hooks/pre-tool-use.ts",
+    ):
+        assert anchor in sh, f"{anchor!r} missing from the bash twin"
+        assert anchor in ps, f"{anchor!r} missing from the pwsh twin"
+    # Edit ordering is load-bearing: the duplicate-guard helper anchors on the
+    # shebang, which the pre-tool-use project-helper edit must consume first.
+    assert sh.index("pre-tool-use gains the project helpers") < \
+        sh.index("duplicate-invocation guard helper")
+
+
+def test_agentmemory_is_bash32_clean_and_uses_python_for_json():
+    """The repo states bash 3.2: no associative arrays, no mapfile, no ${x,,}.
+    JSON is python3 here (json_get in ts-agents.sh), never node."""
+    for f in (AM_SH, AM_ENTRY, ROOT / "bootstrap/_merge_json_settings.sh"):
+        body = _uncommented(f.read_text(encoding="utf-8"))
+        assert "declare -A" not in body, f"{f.name}: associative array"
+        assert "mapfile" not in body, f"{f.name}: mapfile is bash 4"
+        assert "${x,,}" not in body and ",,}" not in body, f"{f.name}: bash 4 case conversion"
+        assert "readlink -f" not in body, f"{f.name}: not portable to older macOS"
+        assert "sed -i" not in body, f"{f.name}: sed -i differs on BSD vs GNU"
+        assert "node -e" not in body, f"{f.name}: JSON in bash is python3 here"
+
+
+def test_doctor_checks_agentmemory_natively_not_only_on_wsl():
+    """The [ -d /mnt/c/Users ] gate meant macOS and Linux never checked — and
+    never wired — anything at all."""
+    body = (ROOT / "bootstrap/_doctor.sh").read_text(encoding="utf-8")
+    assert "ts-agentmemory.sh" in body, "doctor must know about the bash twin"
+    seg = body[body.index("agentmemory hook wiring"):]
+    assert "--check" in seg
+
+
+def test_ts_agents_invokes_the_hook_wiring():
+    """Installing the plugin is only half the job: without the deployment edits
+    the hooks POST nothing and nothing logs it."""
+    body = (ROOT / "bootstrap/ts-agents.sh").read_text(encoding="utf-8")
+    assert "ts-agentmemory.sh" in body
+    assert "--apply" in body and "--undo --apply" in body
