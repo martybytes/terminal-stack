@@ -1054,3 +1054,17 @@ def test_ts_agents_invokes_the_hook_wiring():
     body = (ROOT / "bootstrap/ts-agents.sh").read_text(encoding="utf-8")
     assert "ts-agentmemory.sh" in body
     assert "--apply" in body and "--undo --apply" in body
+
+
+def test_tmux_title_format_uses_the_variable_name_not_the_shorthand():
+    """tmux owns the outer terminal's title while attached, which is the only way
+    a project name survives Claude Code in a Ghostty tab. The substitution must
+    address `session_name`: inside #{...} tmux wants the variable name, and
+    `#{s/^cc-//:#S}` silently evaluates to an EMPTY string — a blank tab title,
+    which is worse than the noisy one it replaced."""
+    conf = (ROOT / "dot_tmux.conf.tmpl").read_text(encoding="utf-8")
+    line = next(l for l in conf.splitlines() if l.startswith("set -g set-titles-string"))
+    assert "session_name" in line, "must use the variable name, not #S"
+    assert ":#S}" not in line, "#{...:#S} renders empty — see the comment above it"
+    assert "s/^cc-//" in line, "ccs's cc- prefix must be stripped from the tab title"
+    assert "set -g set-titles on" in conf

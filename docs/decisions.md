@@ -1075,11 +1075,27 @@ backup is also what makes `off` a restore rather than a delete.
 build, so there is nothing there to configure. Stated in `-h` so the absence reads as a
 decision rather than drift.
 
-What is still WezTerm-only, and honestly documented as such: the tab bar (Claude pane tints,
-fleet counters, status line) is `.wezterm.lua` Lua with no Ghostty equivalent, and there is
-no sticky per-tab project name. Ghostty *has* the right primitive — `set_tab_title`, distinct
-from `set_surface_title`, the same split that makes the WezTerm approach work — but ships no
-CLI to drive a running instance, so nothing can invoke it from a shell wrapper.
+What is still WezTerm-only: the tab bar (Claude pane tints, fleet counters, status line) is
+`.wezterm.lua` Lua with no Ghostty equivalent.
+
+**The per-tab project name turned out to be a tmux question, not a Ghostty one.** Ghostty does
+have the right primitive — `set_tab_title`, distinct from `set_surface_title`, the same split
+that makes the WezTerm approach work — and a title set that way genuinely survives Claude Code
+overwriting the OSC title. It is simply unreachable from a script: there is no CLI to drive a
+running instance (`ghostty +new-window` reports "not supported on this platform"), and no
+escape sequence maps to it. ConEmu's `OSC 9;3` is present in the binary and looks like the
+answer, but it sets the *surface* title, which Claude then overwrites — tested, not assumed.
+
+tmux solves it instead, and better, because it is terminal-agnostic: while a session is
+attached tmux **owns** the outer terminal's title, intercepting the inner program's `OSC 2`
+completely — Claude's conversation slug never reaches the terminal at all — and substituting
+`set-titles-string`. Setting that to `#{s/^cc-//:session_name}` puts the bare project leaf in
+the tab for `ccs` sessions, in Ghostty and WezTerm alike. The wrappers that do *not* use tmux
+(`ccd`, `ccdc`, `ccr`, `ccdr`) cannot be helped under Ghostty, and the KB page says so.
+
+One trap: inside `#{...}` tmux wants the variable *name*. `#{s/^cc-//:#S}` is accepted and
+silently renders an **empty** string — a blank tab title, which is worse than the noisy one it
+replaced. A test pins the working form.
 
 ## Why `~/.claude/settings.json` is spliced, not copied
 

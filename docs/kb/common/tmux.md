@@ -48,3 +48,23 @@ appearance alone changes nothing until the next apply or `ts-update`.
 | prefix `c` | new window |
 | prefix `n` / prefix `p` | next / previous window |
 | prefix `1-9` | jump to window by number |
+
+## The terminal tab title
+
+While a session is attached, **tmux owns the outer terminal's title**. It
+intercepts the inner program's `OSC 2` completely — the inner title never
+reaches the terminal — and substitutes `set-titles-string`, which this stack
+sets to the session name with `ccs`'s `cc-` prefix stripped:
+
+    set -g set-titles-string '#{s/^cc-//:session_name}'
+
+So a `ccs` session in `~/src/terminal-stack` shows a tab reading
+`terminal-stack`, and Claude Code's conversation slug never appears.
+
+This is the **only** way to keep a project name in a Ghostty tab: Ghostty's
+sticky tab title is reachable only from a keybind, with no CLI and no escape
+sequence to trigger it. See `doc common/tools/ghostty`.
+
+Note the variable is `session_name`, not `#S`. Inside `#{...}` tmux wants the
+variable name, and `#{s/^cc-//:#S}` silently evaluates to an **empty string** —
+a blank tab title, which is worse than a noisy one.

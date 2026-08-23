@@ -66,12 +66,24 @@ nothing to configure there. The absence is a decision, not drift.
 
 - **No stack tab bar.** The Claude pane tints, the fleet counters and the status
   line are `.wezterm.lua` Lua, and Ghostty has no equivalent.
-- **No sticky per-tab project name.** The `cc*` wrappers set WezTerm tab titles
-  with `wezterm cli set-tab-title`, which survives Claude Code overwriting the
-  OSC title. Ghostty *has* the right primitive — `set_tab_title`, distinct from
-  `set_surface_title` — but ships **no CLI to drive a running instance**, so
-  there is no scripted way to invoke it. Under Ghostty a Claude tab shows
-  Claude's own conversation slug.
+- **No *scriptable* sticky tab title — but tmux gets you the project name.**
+  Ghostty does have a sticky per-tab title: `set_tab_title` is distinct from
+  `set_surface_title`, and a title set that way **survives** Claude Code
+  overwriting the OSC title (verified). It is simply unreachable from a script:
+  Ghostty ships no CLI to drive a running instance (`ghostty +new-window`
+  reports *"not supported on this platform"*) and no escape sequence maps to it
+  — ConEmu's `OSC 9;3` sets the *surface* title, which Claude then overwrites
+  (also verified). WezTerm has `wezterm cli set-tab-title`; Ghostty has no
+  equivalent.
+
+  **Use `ccs`.** It runs Claude inside tmux, and tmux *owns* the terminal title
+  while attached — it intercepts the inner program's OSC 2 entirely and
+  substitutes `set-titles-string`, so Claude's slug never reaches Ghostty at
+  all. The stack sets that string to the session name with `ccs`'s `cc-` prefix
+  stripped, so the tab reads `terminal-stack`. This works in every terminal, not
+  just Ghostty. `ccd`/`ccdc`/`ccr`/`ccdr` run Claude directly with no tmux, so
+  under Ghostty their tab shows Claude's conversation slug and nothing can
+  prevent it.
 
 | Command | What it does |
 |---|---|

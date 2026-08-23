@@ -34,7 +34,25 @@ set -g status-right '#[fg={{ $dim }}]#{pane_current_path} | %m/%d/%Y %H:%M'
 
 setw -g automatic-rename on
 set -g set-titles on
-set -g set-titles-string '#S:#I.#P #W'
+# The terminal tab title. tmux OWNS this while a session is attached: it
+# intercepts the inner program's OSC 2 entirely and substitutes this string, so
+# Claude Code's conversation slug never reaches the outer terminal at all
+# (verified 2026-08-23 by capturing what tmux writes to its pty).
+#
+# That makes this the ONLY way to keep a project name in a Ghostty tab. Ghostty
+# has a sticky per-tab title (`set_tab_title`, distinct from the surface title,
+# and it does survive Claude), but it is reachable only from a keybind: there is
+# no CLI to drive a running instance (`ghostty +new-window` reports "not
+# supported on this platform") and no escape sequence maps to it — ConEmu's
+# OSC 9;3 sets the surface title, which Claude then overwrites. WezTerm has
+# `wezterm cli set-tab-title`; Ghostty has no equivalent.
+#
+# `s/^cc-//` strips the prefix `ccs` puts on its session names, so a tab reads
+# `terminal-stack`, not `cc-terminal-stack:0.0 claude`. Sessions not named that
+# way are left alone. NOTE the variable is `session_name`, not `#S`: inside
+# #{...} tmux wants the variable name, and `#{s/^cc-//:#S}` silently evaluates
+# to an EMPTY string — a blank tab title, which is worse than a noisy one.
+set -g set-titles-string '#{s/^cc-//:session_name}'
 
 # Claude Code passthrough: Shift+Enter and OSC notifications/progress
 set -g allow-passthrough on
