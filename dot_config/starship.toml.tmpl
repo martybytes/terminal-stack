@@ -46,37 +46,37 @@ disabled = false
 format   = "[$symbol ](bold blue)"
 
 [os.symbols]
-Alpine           = ""
-Arch             = ""
-CentOS           = ""
-Debian           = ""
-Fedora           = ""
-Linux            = ""
-Macos            = ""
-Manjaro          = ""
-Mint             = ""
-NixOS            = ""
-openSUSE         = ""
-Pop              = ""
-Raspbian         = ""
-Redhat           = ""
-RedHatEnterprise = ""
-Ubuntu           = ""
-Unknown          = ""
-Windows          = ""
+Alpine           = "\uf300"
+Arch             = "\uf303"
+CentOS           = "\uf304"
+Debian           = "\uf306"
+Fedora           = "\uf30a"
+Linux            = "\uf17c"
+Macos            = "\uf179"
+Manjaro          = "\uf312"
+Mint             = "\uf30e"
+NixOS            = "\uf313"
+openSUSE         = "\uf314"
+Pop              = "\uf32a"
+Raspbian         = "\uf315"
+Redhat           = "\uf316"
+RedHatEnterprise = "\uf316"
+Ubuntu           = "\uf31b"
+Unknown          = "\uf059"
+Windows          = "\uf17a"
 
 # ── Current directory (folder glyph + path) ───────────────────────────────────
 [directory]
-format            = "[   $path]($style)"
+format            = "[ \uf07b $path]($style)"
 style             = "bold blue"
 truncation_length = 4
 truncate_to_repo  = false
-read_only         = "  "
+read_only         = " \uf023"
 
 # ── Git branch (octocat + branch glyph + name) ────────────────────────────────
 [git_branch]
-format = "[    $branch]($style)"
-symbol = ""
+format = "[ \uf09b $symbol $branch]($style)"
+symbol = "\ue0a0"
 style  = "bold green"
 
 # ── Git status (modified/untracked/etc., yellow) ──────────────────────────────
@@ -114,14 +114,14 @@ style    = "bold blue"
 # ── Clock ─────────────────────────────────────────────────────────────────────
 [time]
 disabled    = false
-format      = " [ $time]($style)"
+format      = " [\uf017 $time]($style)"
 time_format = "%r"
 style       = "bold black"
 
 # ── Misc ──────────────────────────────────────────────────────────────────────
 [cmd_duration]
 min_time = 500
-format   = "took [$duration]($style) "
+format   = " [\uf252 $duration]($style)"
 
 [aws]
 disabled = true

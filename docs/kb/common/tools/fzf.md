@@ -15,6 +15,20 @@ Every interactive picker in this stack is fzf underneath.
 - The `doc`/`doc cmd` pickers bind `ctrl-u`/`ctrl-d` (scroll the preview),
   `ctrl-/` (toggle the preview), and `alt-e` (open the topic in `$EDITOR`).
 
+## The `Ctrl-T` workflow
+
+`Ctrl-T` inserts a **path** into the command line rather than launching
+anything, so it composes with whatever you have already typed:
+
+```
+v <Ctrl-T>            # then fuzzy-type "volks cal", Enter
+→ v 'notes/cars/Volkswagen California.md'
+```
+
+`v` is the stack's alias for `nvim`. The same works for any command —
+`cat`, `less`, `cp`, `rm`, `nvim`. Paths containing spaces come back
+shell-quoted, so they survive as a single argument.
+
 ## Query syntax (works in every picker)
 
 | Pattern | Matches |

@@ -509,6 +509,15 @@ if (-not (Test-TsAgentShell)) {
 # Default editor: micro (a nano alternative), when installed. git follows $EDITOR.
 if (Get-Command micro -ErrorAction SilentlyContinue) { $env:EDITOR = 'micro' }
 
+# v - open Neovim. POSIX twin: the `v` alias in dot_zshrc's cli-tools block.
+# Defined unconditionally and resolved per call, for the same reason `c` is:
+# gating the *definition* on Get-Command left the name silently undefined when
+# the tool was installed mid-session.
+# NOTE: fzf's Ctrl+T / Ctrl+R / Alt+C key bindings are WSL-side only. Native
+# pwsh has no fzf bindings - Ctrl+R here is PSReadLine's own reverse search.
+# See docs/kb/windows/pwsh.md.
+function v { nvim @args }
+
 # fnm — Node version manager. --use-on-cd auto-switches on .nvmrc/.node-version,
 # which is the whole reason to run a manager rather than a single winget node.
 # POSIX twin: the fnm line in dot_zshrc's cli-tools block.

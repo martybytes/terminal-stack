@@ -1016,12 +1016,24 @@ command -v zoxide >/dev/null && eval "$(zoxide init zsh)"
 # `unknown option: --zsh` on stderr. Redirect inside the process substitution
 # so the source just no-ops on older versions.
 command -v fzf    >/dev/null && source <(fzf --zsh 2>/dev/null)
+# fzf look & feel. Deliberately portable: no --preview here, because Ctrl-R and
+# Alt-C have nothing useful to preview and a broken preview command breaks the
+# widget. The Ctrl-T file preview is added separately, only when bat is present.
+export FZF_DEFAULT_OPTS='--height=40% --layout=reverse --border --info=inline'
+command -v bat    >/dev/null && \
+  export FZF_CTRL_T_OPTS='--preview "bat --color=always --style=numbers --line-range=:200 {}" --preview-window=right,60%,border-left'
 # Bold blue directories in eza listings (consistent across WezTerm panes/domains).
 export EZA_COLORS='di=1;34:da=1;34:ln=1;36'
 command -v eza    >/dev/null && alias ls='eza --icons=always --git --group-directories-first'
 command -v eza    >/dev/null && alias lt='eza --tree --icons=always --git --group-directories-first'   # matches the pwsh lt
 command -v bat    >/dev/null && alias ccat='bat --paging=never'   # ccat, not cat — don't shadow real cat
 alias rmf='rm -rf'   # force-delete file/folder recursively, no confirmation
+# v — open Neovim. Deliberately NOT gated on `command -v nvim`: gating the
+# *definition* is the trap documented on `c` just below, where installing the
+# tool mid-session left the name silently undefined until a new shell. Ungated,
+# the worst case is zsh's own "command not found: nvim", which says what to fix.
+# Pairs with fzf's Ctrl-T: type `v`, Ctrl-T, pick a path, Enter.
+alias v='nvim'
 # Defined unconditionally and resolved inside the body: gating the *definition*
 # on `command -v cursor` meant installing Cursor's shell command mid-session left
 # `c` silently undefined until a new shell. Matches the pwsh `c` function, which

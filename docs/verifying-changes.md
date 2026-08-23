@@ -38,6 +38,47 @@ Also check nothing picked up CRLF (see `.gitattributes` — the repo forces LF):
 grep -l $'\r' $(git diff --name-only)
 ```
 
+**Nerd Font glyphs must stay `\u` escapes, never literal characters.** Both
+starship templates (`dot_config/starship.toml.tmpl` and
+`windows/.config/starship.toml.tmpl`) carry Private-Use-Area glyphs. Pasted
+literally they are silently stripped by some editors — which is exactly what
+happened: all 19 `[os.symbols]` entries and the folder/branch/clock/lock glyphs
+were reduced to empty strings and bare padding spaces, and the prompt lost every
+icon with nothing in any diff to explain it. After touching either file, assert
+the source contains **no** PUA bytes:
+
+```sh
+python3 - <<'EOF'
+for p in ["dot_config/starship.toml.tmpl", "windows/.config/starship.toml.tmpl"]:
+    s = open(p, encoding="utf-8").read()
+    bad = [(i, hex(ord(c))) for i, c in enumerate(s) if 0xE000 <= ord(c) <= 0xF8FF]
+    print(p, "PUA bytes:", bad or "none")
+EOF
+```
+
+Then prove the escapes actually *render* — a valid escape for a codepoint the
+font lacks renders as a tofu box, which is worse than the blank it replaced:
+
+```sh
+starship prompt --terminal-width=100 --cmd-duration 3000 \
+  | python3 -c "import sys;s=sys.stdin.buffer.read().decode('utf8','replace');\
+print([hex(ord(c)) for c in s if 0xE000<=ord(c)<=0xF8FF])"
+```
+
+Check coverage against the actual font before adding a new codepoint:
+
+```sh
+uv run --with fonttools python -c "
+from fontTools.ttLib import TTFont
+cm = TTFont('$HOME/Library/Fonts/JetBrainsMonoNerdFont-Regular.ttf', fontNumber=0).getBestCmap()
+print(0xf07b in cm)"
+```
+
+**Do not 'simplify' by deleting `[os.symbols]` and taking starship's defaults.**
+Verified 2026-08-23: starship's built-in `Macos` symbol is 🍎 — a colour *emoji*,
+not a Nerd Font glyph. Dropping the block trades stripped glyphs for emoji that
+clash with the rest of the prompt.
+
 ## 2. WezTerm configs — load them without a GUI
 
 Render the template, then let WezTerm parse and execute it:

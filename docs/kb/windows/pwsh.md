@@ -9,6 +9,7 @@ Windows-specific bits:
 | `npp file` | open file(s) in Notepad++ (GUI; `npp` alone opens it empty) |
 | `pm file.md` | open file(s) in PrettyMark (GUI; `pm` alone opens it empty; Tab-completes `.md` files only — `pm ` + Tab cycles them, directories stay Tab-navigable) |
 | `glow file.md` | render markdown (`glow .` for a browser) |
+| `v file` | open Neovim (POSIX twin: the `v` alias in zsh) |
 | `zoxide-prune` | drop dead paths from zoxide's database |
 | `ll` / `la` / `lt` | eza long / hidden+long / tree |
 | `Ctrl+R` | PSReadLine reverse history search (native — the profile wires no fzf keys; see `doc common/tools/fzf`) |
