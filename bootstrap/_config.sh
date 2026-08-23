@@ -27,8 +27,8 @@
 #   TS_APPS_RECOMMENDED — pre-checked in the picker / installed by "recommended".
 #   TS_APPS_OPTIONAL    — unchecked by default (GUI editor, GPU/docker tools,
 #                         the agent CLIs — nothing here is installed unasked).
-TS_APPS_RECOMMENDED="tmux eza fzf bat fd tree delta ripgrep zoxide glow micro neovim gh ghq lazygit duf ncdu dust btop fnm python uv pipx ruff ipython claude codex cursor-agent grok gemini"
-TS_APPS_OPTIONAL="zed tldr nvtop lazydocker gdu bottom glances bandwhich gping rclone node httpie poetry pre-commit"
+TS_APPS_RECOMMENDED="tmux eza fzf bat fd tree delta ripgrep zoxide atuin glow micro neovim gh ghq lazygit duf ncdu dust btop fnm python uv pipx ruff ipython claude codex cursor-agent grok gemini pi"
+TS_APPS_OPTIONAL="zed tldr yazi nvtop lazydocker gdu bottom glances bandwhich gping rclone node httpie poetry pre-commit"
 TS_APPS_ALL="$TS_APPS_RECOMMENDED $TS_APPS_OPTIONAL"
 
 # Groups exist for the picker only — the saved `apps` array stays flat, so this
@@ -54,16 +54,16 @@ ts_app_group_desc() {
 }
 ts_app_group_members() {
     case "$1" in
-        shell)   echo "tmux eza bat tree zoxide fzf" ;;
+        shell)   echo "tmux eza bat tree zoxide fzf atuin" ;;
         search)  echo "ripgrep fd" ;;
         disk)    echo "duf ncdu dust gdu" ;;
         system)  echo "btop bottom glances nvtop lazydocker" ;;
         network) echo "bandwhich gping rclone" ;;
         git)     echo "delta gh ghq lazygit" ;;
-        editors) echo "micro neovim glow zed tldr" ;;
+        editors) echo "micro neovim glow zed tldr yazi" ;;
         runtimes) echo "fnm node" ;;
         python)  echo "python uv pipx ruff ipython httpie poetry pre-commit" ;;
-        ai)      echo "claude codex cursor-agent grok gemini" ;;
+        ai)      echo "claude codex cursor-agent grok gemini pi" ;;
         *)       echo "" ;;
     esac
 }
@@ -86,6 +86,7 @@ ts_app_desc() {
         delta)      echo "git diff pager";;
         ripgrep)    echo "fast recursive grep (rg)";;
         zoxide)     echo "smarter cd (z)";;
+        atuin)      echo "SQLite shell history, better Ctrl+R (opt-in)";;
         glow)       echo "terminal markdown renderer";;
         micro)      echo "nano-like terminal editor";;
         neovim)     echo "neovim editor (nvim)";;
@@ -94,6 +95,7 @@ ts_app_desc() {
         lazygit)    echo "git TUI (the wso status hand-off)";;
         zed)        echo "Zed GUI editor";;
         tldr)       echo "concise command examples";;
+        yazi)       echo "terminal file manager (y to cd on exit)";;
         nvtop)      echo "GPU process monitor (NVIDIA hosts)";;
         lazydocker) echo "docker TUI (docker hosts)";;
         fd)         echo "fast, friendly find (the WezTerm sessionizer needs it)";;
@@ -113,6 +115,7 @@ ts_app_desc() {
         cursor-agent) echo "Cursor's CLI agent";;
         grok)       echo "xAI Grok CLI (standalone binary; no Node needed)";;
         gemini)     echo "Google Gemini CLI";;
+        pi)         echo "Pi coding agent (earendil-works; needs Node 22+)";;
         fnm)        echo "fast Node version manager (reads .nvmrc; ~10ms shell cost)";;
         node)       echo "Node.js itself, without a version manager";;
         python)     echo "Python 3 interpreter";;
@@ -210,6 +213,8 @@ ts_brew_install_apps() {
             tmux)       formulae="$formulae tmux" ;;
             eza)        formulae="$formulae eza" ;;
             zoxide)     formulae="$formulae zoxide" ;;
+            atuin)      formulae="$formulae atuin" ;;
+            yazi)       formulae="$formulae yazi" ;;
             fzf)        formulae="$formulae fzf" ;;
             bat)        formulae="$formulae bat" ;;
             delta)      formulae="$formulae git-delta" ;;
@@ -316,12 +321,14 @@ ts_install_ai_cli() {
             GROK_BIN_DIR="$HOME/.local/bin" bash -c \
                 'curl -fsSL https://x.ai/cli/install.sh | bash' \
                 || echo "!! grok install failed; see https://x.ai/build" ;;
-        codex|gemini)
-            # npm-only. @openai/codex wants Node >= 16, @google/gemini-cli >= 20.
+        codex|gemini|pi)
+            # npm-only. @openai/codex wants Node >= 16, @google/gemini-cli >= 20,
+            # @earendil-works/pi-coding-agent >= 22.19 (engines field).
             local pkg want major
             case "$id" in
                 codex)  pkg="@openai/codex";     want=16 ;;
                 gemini) pkg="@google/gemini-cli"; want=20 ;;
+                pi)     pkg="@earendil-works/pi-coding-agent"; want=22 ;;
             esac
             major="$(ts_node_major)"
             if [ "${major:-0}" -ge "$want" ] 2>/dev/null && command -v npm >/dev/null 2>&1; then
@@ -523,8 +530,8 @@ TS_MIRROR_DATA_KEYS="
     ccTtsPrefixCodex ccTtsPrefixCodexEnabled ccTtsPrefixCursor ccTtsPrefixCursorEnabled 
     ccTtsSummarizer ccTtsTemplateError ccTtsTemplatePermission ccTtsTemplateQuestion 
     ccTtsTemplateWaiting ccTtsVoicePool leaderChord tmuxPrefix windowsUsername
-    weztermMux weztermRestore headroomEnabled headroomCursorMode cavemanEnabled
-    agentmemoryEnabled
+    weztermMux weztermRestore atuinEnabled headroomEnabled headroomCursorMode
+    cavemanEnabled agentmemoryEnabled
 "
 
 ts_data_prefetch() {
@@ -659,6 +666,34 @@ ts_wez_restore_set() {
     ts_mirror_windows_config
 }
 
+# ── atuin shell history ─────────────────────────────────────────────────────────
+# "on"  -> chezmoi renders the eval line into ~/.config/terminal-stack/atuin.zsh,
+#          which dot_zshrc sources. atuin then owns Ctrl+R.
+# "off" -> that fragment renders empty (the default), so Ctrl+R stays with fzf.
+#
+# This is a saved setting rather than a `command -v atuin` guard on purpose.
+# atuin *replaces* an existing binding, and the binary is frequently already
+# present (a brew dependency, an old manual install) while completely dormant —
+# a presence check would hijack Ctrl+R on the next apply without anyone choosing
+# it. Stored on its own like weztermMux, so flipping it doesn't re-state every
+# other wizard answer.
+#
+# dot_zshrc is deliberately NOT a chezmoi template: CLAUDE.md documents
+# `chezmoi re-add ~/.zshrc`, and re-adding a rendered file into a .tmpl would
+# clobber the template directives. Hence the sourced fragment.
+ts_atuin_get() {
+    local v; v="$(ts_data_get atuinEnabled 2>/dev/null || true)"
+    case "$v" in on|off) echo "$v" ;; *) echo off ;; esac
+}
+
+# ts_atuin_set <on|off> — persist, regenerate derived keys, mirror to Windows.
+ts_atuin_set() {
+    case "$1" in on|off) ;; *) echo "ts_atuin_set: expected on|off" >&2; return 2 ;; esac
+    ts_data_set atuinEnabled "$1"
+    local cz; if cz="$(ts_chezmoi_bin)"; then "$cz" init >/dev/null 2>&1 || true; fi
+    ts_mirror_windows_config
+}
+
 # ── OS appearance detection ─────────────────────────────────────────────────────
 # Echoes the baked palette (light|dark) for a theme mode. follow → detect; on any
 # failure default to dark (the stack's historical look).
@@ -773,6 +808,7 @@ EOF
   "tmuxPrefixResolved": "$tr",
   "weztermMux": "$(ts_wez_mux_get)",
   "weztermRestore": "$(ts_wez_restore_get)",
+  "atuinEnabled": "$(ts_atuin_get)",
   "headroomEnabled": "$(ts_agent_get headroomEnabled)",
   "headroomCursorMode": "$(ts_agent_get headroomCursorMode)",
   "cavemanEnabled": "$(ts_agent_get cavemanEnabled)",

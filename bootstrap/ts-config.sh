@@ -13,6 +13,7 @@
 #   ts-config apps [recommended|all|none|id,id,...]   (no arg → interactive picker)
 #   ts-config mux [on|off|...]  hand-off to ts-mux (WezTerm multiplexer domain)
 #   ts-config restore <on|off>  reopen the last WezTerm session at startup
+#   ts-config atuin   <on|off>  atuin shell history (owns Ctrl+R when on)
 #   ts-config agents [show|<tool> on|off|status|repair|uninstall]
 #   ts-config wezterm [status|changes|install <chan>|upgrade]
 #   ts-config wizard          re-run the whole install questionnaire
@@ -108,6 +109,7 @@ run_wizard() {
     ts_agents_save_config "${TS_WIZ_HEADROOM:-off}" "${TS_WIZ_HEADROOM_CURSOR:-mcp}" "${TS_WIZ_CAVEMAN:-off}" "${TS_WIZ_AGENTMEMORY:-off}"
     ts_wez_mux_set "${TS_WIZ_WEZ_MUX:-off}"
     ts_wez_restore_set "${TS_WIZ_WEZ_RESTORE:-off}"
+    ts_atuin_set "${TS_WIZ_ATUIN:-off}"
     ts_cc_tts_apply_wizard_choice "${TS_WIZ_CC_TTS:-off}"
     ts_report_installed_apps "${TS_WIZ_APPS:-}"
     finish
@@ -116,6 +118,11 @@ run_wizard() {
 # Reopening the last WezTerm session at startup. Stored on its own like the mux
 # key, so flipping it need not re-state every other choice.
 set_restore() { ts_wez_restore_set "$1"; finish; }
+
+# atuin owns Ctrl+R when on. Stored on its own like the mux/restore keys.
+# `finish` re-applies, which is what re-renders the sourced zsh fragment --
+# the setting alone changes nothing until chezmoi rewrites atuin.zsh.
+set_atuin() { ts_atuin_set "$1"; finish; }
 
 # The mux has its own verbs (kill/restart/reset), so ts-config just hands off.
 run_mux() {
@@ -203,6 +210,7 @@ show() {
     echo "  apps       : $(curapps)"
     echo "  wezmux     : $(ts_wez_mux_get)   (ts-mux on|off|status)"
     echo "  wezrestore : $(ts_wez_restore_get)   (ts-config restore on|off)"
+    echo "  atuin      : $(ts_atuin_get)   (ts-config atuin on|off)"
     echo "  wezterm    : $(ts_wezterm_channel)$(_ts_cfg_wezterm_built)   (ts-config wezterm)"
     echo "  headroom   : $(ts_agent_get headroomEnabled)   (Cursor: $(ts_agent_get headroomCursorMode))"
     echo "  caveman    : $(ts_agent_get cavemanEnabled)"
@@ -214,7 +222,7 @@ menu() {
         echo
         show
         echo
-        echo "  1) leader key   2) theme   3) tmux prefix   4) apps   5) re-apply   6) Claude TTS   7) WezTerm mux   8) session restore   9) coding agents   t) WezTerm build   w) re-run wizard   q) quit"
+        echo "  1) leader key   2) theme   3) tmux prefix   4) apps   5) re-apply   6) Claude TTS   7) WezTerm mux   8) session restore   9) coding agents   a) atuin   t) WezTerm build   w) re-run wizard   q) quit"
         local c; c="$(ts_tty_prompt 'Choose: ')"
         case "$c" in
             1) set_leader "$(ts_prompt_leader)" ;;
@@ -226,6 +234,7 @@ menu() {
             7) run_mux status ;;
             8) local r; r="$(ts_prompt_wezterm_restore)"; set_restore "$r" ;;
             9) agents_menu ;;
+            a|A) set_atuin "$(ts_prompt_atuin)" ;;
             t|T) run_wezterm status ;;
             w|W) run_wizard ;;
             q|Q|"") return 0 ;;
@@ -257,18 +266,23 @@ case "${1:-}" in
         case "${2:-}" in on|off) ;; *)
             echo "usage: ts-config restore <on|off>" >&2; exit 2 ;; esac
         set_restore "$2" ;;
+    atuin)
+        case "${2:-}" in on|off) ;; *)
+            echo "usage: ts-config atuin <on|off>" >&2; exit 2 ;; esac
+        set_atuin "$2" ;;
     agents)
         shift
         agents_config "$@" ;;
     -h|--help|help)
-        sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'
+        sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
         echo "  tts show|on|off|test|reset|engine|message|voice|..."
         echo "  mux status|on|off|list|kill|restart|reset  (see: ts-mux -h)"
         echo "  restore on|off   reopen the last WezTerm session at startup"
+        echo "  atuin on|off     atuin shell history; when on it owns Ctrl+R (fzf keeps Ctrl+T/Alt+C)"
         echo "  agents [show|<headroom|caveman|agentmemory> on|off|status|repair|uninstall]"
         echo "  wezterm [status|changes|install <stable|nightly>|upgrade]  (see: ts-wezterm -h)"
         echo "  wizard           re-run the whole install questionnaire (TS_ASSUME_YES=1 to accept defaults)"
         echo "  agents headroom cursor <mcp|byok|off> | dashboard"
         ;;
-    *) echo "ts-config: unknown command '$1' (try: show, leader, theme, tmux, apps, tts, mux, restore, agents, wezterm, wizard)" >&2; exit 2 ;;
+    *) echo "ts-config: unknown command '$1' (try: show, leader, theme, tmux, apps, tts, mux, restore, atuin, agents, wezterm, wizard)" >&2; exit 2 ;;
 esac

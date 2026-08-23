@@ -65,16 +65,16 @@ Every question works the same way: the default is **marked with `>` and captione
 
   | Group | Tools |
   |---|---|
-  | `shell` | tmux, eza, bat, tree, zoxide, fzf |
+  | `shell` | tmux, eza, bat, tree, zoxide, fzf, atuin |
   | `search` | ripgrep, fd |
   | `disk` | duf, ncdu, dust, gdu |
   | `system` | btop, bottom, glances, nvtop, lazydocker |
   | `network` | bandwhich, gping, rclone |
   | `git` | delta, gh, ghq, lazygit |
-  | `editors` | micro, neovim, glow, zed, tldr (+ prettymark on Windows) |
+  | `editors` | micro, neovim, glow, zed, tldr, yazi (+ prettymark on Windows) |
   | `runtimes` | fnm (Node version manager), node |
   | `python` | python, uv, pipx, ruff, ipython, httpie, poetry, pre-commit |
-  | `ai` | claude, codex, cursor-agent, grok, gemini |
+  | `ai` | claude, codex, cursor-agent, grok, gemini, pi |
 
   **choose whole groups** ticks groups — *all* of them start ticked, `ai` included; **choose individual tools** walks the groups one tick-list at a time, or takes a comma-separated list if you already know what you want. Anything in the recommended set starts ticked, so pressing Enter through the walk lands exactly on the recommended set.
 

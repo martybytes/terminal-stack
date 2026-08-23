@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -531,7 +532,8 @@ def test_every_catalog_id_belongs_to_exactly_one_group():
 def test_new_tools_are_in_the_catalog_with_descriptions():
     all_ids = _sh_eval('echo "$TS_APPS_ALL"').split()
     for tool in ("duf", "ncdu", "dust", "gdu", "btop", "bottom", "glances",
-                 "bandwhich", "gping", "bat", "eza", "fd", "ripgrep", "fzf", "tree"):
+                 "bandwhich", "gping", "bat", "eza", "fd", "ripgrep", "fzf", "tree",
+                 "atuin", "yazi", "pi"):
         assert tool in all_ids, f"{tool} missing from the catalog"
         assert _sh_eval(f'ts_app_desc {tool}'), f"{tool} has no description"
     # bottom's binary is btm, not bottom.
@@ -549,7 +551,7 @@ def test_agent_clis_are_asked_about_and_default_to_all():
     """Default-to-all, but still a question: every group starts ticked and every
     tool inside stays individually untickable."""
     ai = _sh_eval('ts_app_group_members ai').split()
-    assert set(ai) == {"claude", "codex", "cursor-agent", "grok", "gemini"}
+    assert set(ai) == {"claude", "codex", "cursor-agent", "grok", "gemini", "pi"}
     recommended = _sh_eval('echo "$TS_APPS_RECOMMENDED"').split()
     for tool in ai:
         assert tool in recommended, f"{tool} should be pre-ticked (default to all)"
@@ -807,3 +809,78 @@ def test_rclone_is_in_the_catalog_with_a_description():
     ps = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
     assert "rclone     = 'Rclone.Rclone'" in ps
     assert "'rclone'" in ps
+
+
+# ── atuin / arch-tag regressions ────────────────────────────────────────────────
+
+@pytest.mark.skipif(not shutil.which("bash"), reason="bash is unavailable")
+def test_common_arch_tag_rust_uses_aarch64_not_arm64():
+    """cargo-dist projects (atuin, yazi) name their ARM asset `aarch64`, while
+    `gnu` yields `arm64`. Getting this wrong fails *silently on ARM only*: the
+    asset regex matches nothing, x86_64 boxes keep working, and the tool is
+    quietly missing on every Pi/ARM server."""
+    lib = ROOT / "bootstrap/_common-debian.sh"
+    fn = re.search(r"^common_arch_tag\(\) \{.*?^\}", lib.read_text(encoding="utf-8"),
+                   re.S | re.M)
+    assert fn, "common_arch_tag not found"
+    def tag(machine, style):
+        script = (f'{fn.group(0)}\nuname() {{ echo "{machine}"; }}\n'
+                  f'common_arch_tag {style}\n')
+        return subprocess.run(["bash", "-c", script], capture_output=True,
+                              text=True).stdout.strip()
+    assert tag("aarch64", "rust") == "aarch64"
+    assert tag("arm64", "rust") == "aarch64"
+    assert tag("x86_64", "rust") == "x86_64"
+    # The existing styles must not have shifted.
+    assert tag("aarch64", "gnu") == "arm64"
+    assert tag("aarch64", "deb") == "arm64"
+    assert tag("x86_64", "deb") == "amd64"
+
+
+def test_atuin_is_gated_by_a_setting_not_a_presence_check():
+    """atuin *replaces* Ctrl+R and its binary is often installed but dormant, so
+    a `command -v atuin` guard in dot_zshrc would hijack the binding without the
+    user choosing it. The gate must be the rendered fragment."""
+    rc = (ROOT / "dot_zshrc").read_text(encoding="utf-8")
+    assert "terminal-stack/atuin.zsh" in rc, "dot_zshrc must source the fragment"
+    # Ignore comments: the file explains at length why this guard is wrong, so a
+    # raw substring match would hit the explanation rather than real code.
+    code = [l for l in rc.splitlines() if not l.lstrip().startswith("#")]
+    assert not any("command -v atuin" in l for l in code), \
+        "dot_zshrc must NOT gate atuin on a presence check"
+    # dot_zshrc stays a non-template so `chezmoi re-add ~/.zshrc` keeps working.
+    assert not (ROOT / "dot_zshrc.tmpl").exists()
+    frag = ROOT / "dot_config/terminal-stack/atuin.zsh.tmpl"
+    assert frag.exists()
+    body = frag.read_text(encoding="utf-8")
+    assert "atuinEnabled" in body and "--disable-up-arrow" in body
+    # Sourced AFTER fzf, or fzf would win Ctrl+R.
+    assert rc.index("fzf --zsh") < rc.index("terminal-stack/atuin.zsh")
+
+
+def test_atuin_history_filter_mirrors_the_zsh_secret_filter():
+    """atuin records via its own preexec and never sees zshaddhistory(), so the
+    secret patterns are duplicated on purpose. If they drift, secrets the stack
+    refuses to write to ~/.zsh_history land in atuin's SQLite database."""
+    cfg = (ROOT / "dot_config/atuin/config.toml.tmpl").read_text(encoding="utf-8")
+    rc = (ROOT / "dot_zshrc").read_text(encoding="utf-8")
+    zline = next(l for l in rc.splitlines() if "ANTHROPIC_API_KEY=" in l and "=~" in l)
+    for pat in ("ANTHROPIC_API_KEY=", "OPENAI_API_KEY=", "GITHUB_TOKEN=",
+                "GH_TOKEN=", "NPM_TOKEN=", "_KEY=", "_SECRET=", "_PASSWORD=",
+                "_TOKEN=", "sk-[A-Za-z0-9_-]{20,}"):
+        assert pat in zline, f"{pat} vanished from zshaddhistory"
+        assert pat in cfg, f"{pat} missing from atuin history_filter"
+    assert "secrets_filter = true" in cfg
+    assert "auto_sync = false" in cfg
+
+
+def test_atuin_has_no_winget_id_and_no_pwsh_init():
+    """There is no winget manifest for atuin and `atuin init` has no PowerShell
+    target, so an id here would always fail. Absent is the honest answer."""
+    ps = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
+    ids = ps.split("$script:TsWingetIds")[1].split("}")[0]
+    # Comment lines name atuin to explain the absence; only assignments count.
+    assigns = [l for l in ids.splitlines() if "=" in l and not l.lstrip().startswith("#")]
+    assert not any(l.strip().startswith("atuin") for l in assigns), \
+        "atuin must not have a winget id"
+    assert "yazi       = 'sxyazi.yazi'" in ids, "yazi's winget id is real and verified"

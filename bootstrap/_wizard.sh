@@ -242,6 +242,31 @@ ts_prompt_wezterm_restore() {
         'on|on|reopen the last session'
 }
 
+# atuin — SQLite shell history, and a much better Ctrl+R than fzf's.
+# Default off, and asked rather than inferred: atuin *replaces* an existing key
+# binding, and its binary is frequently already installed but dormant (a brew
+# dependency, an old manual install), so a presence check would take Ctrl+R
+# without anyone choosing it. Skipped headless, like the other behaviour toggles.
+#
+# NO PowerShell twin, deliberately: `atuin init` has no PowerShell target (zsh,
+# bash, fish, nu, xonsh only) and there is no winget manifest for it, so native
+# pwsh gets no integration to offer. On a Windows machine this question is asked
+# by the WSL wizard, which is where atuin actually runs. Same reasoning as the
+# Ghostty note in bootstrap/_config.ps1's $TsTerminalCandidates — the missing
+# twin is a decision, not drift, so the byte-identical rule does not apply here.
+ts_prompt_atuin() {
+    if [ -n "${TS_ATUIN:-}" ]; then
+        case "$TS_ATUIN" in on) printf 'on\n' ;; *) printf 'off\n' ;; esac
+        return 0
+    fi
+    ts_prompt_choice off 'atuin shell history (replaces Ctrl+R):' \
+'  On: Ctrl+R searches every shell'"'"'s history from a SQLite database, with
+  context and no 100k-line ceiling. Off: Ctrl+R stays fzf'"'"'s history widget.
+  Either way Ctrl+T and Alt+C keep working, and Up-arrow keeps prefix search.' \
+        'off|off|keep fzf on Ctrl+R' \
+        'on|on|atuin owns Ctrl+R'
+}
+
 # The tick-list prompt for questions with more than one answer. Same rendering as
 # ts_cleanup_menu's checklist, which is the house style for a multi-select; the
 # note suffix follows ts_prompt_choice. Menu goes to /dev/tty, the chosen keys go
@@ -452,6 +477,7 @@ ts_wizard_review() {
     [ "${TS_WIZ_ASK_TERMINALS:-0}" = "1" ] && printf '    Terminals        %s\n' "${TS_WIZ_TERMINALS:-<none>}"
     printf '    WezTerm mux      %s\n' "${TS_WIZ_WEZ_MUX:-off}"
     printf '    Session restore  %s\n' "${TS_WIZ_WEZ_RESTORE:-off}"
+    printf '    atuin (Ctrl+R)   %s\n' "${TS_WIZ_ATUIN:-off}"
     printf '    tmux prefix      %s\n' "$TS_WIZ_TMUX"
     printf '    Apps             %s\n' "${TS_WIZ_APPS:-<none>}"
     printf '    Claude TTS       %s\n' "${TS_WIZ_CC_TTS:-off}"
@@ -500,6 +526,14 @@ ts_wizard_ask() {
         case "$TS_WEZ_RESTORE" in on) TS_WIZ_WEZ_RESTORE=on ;; *) TS_WIZ_WEZ_RESTORE=off ;; esac
     elif command -v ts_is_headless >/dev/null 2>&1 && ts_is_headless; then TS_WIZ_WEZ_RESTORE=off
     else TS_WIZ_WEZ_RESTORE="$(ts_prompt_wezterm_restore)"; TS_WIZ_ASKED=$((TS_WIZ_ASKED + 1)); fi
+
+    # atuin. Headless is fine here — unlike the WezTerm questions this is a
+    # shell binding, and a headless server has a shell. Asked, never inferred:
+    # see ts_prompt_atuin. TS_WIZ_ASKED is tallied here, not inside the prompt,
+    # because prompts run through $( ) and a subshell increment is discarded.
+    if [ -n "${TS_ATUIN:-}" ]; then
+        case "$TS_ATUIN" in on) TS_WIZ_ATUIN=on ;; *) TS_WIZ_ATUIN=off ;; esac
+    else TS_WIZ_ATUIN="$(ts_prompt_atuin)"; TS_WIZ_ASKED=$((TS_WIZ_ASKED + 1)); fi
 
     if [ -n "${TS_APPS:-}" ]; then TS_WIZ_APPS="$(ts_expand_apps "$TS_APPS")"
     else TS_WIZ_APPS="$(ts_prompt_apps)"; TS_WIZ_ASKED=$((TS_WIZ_ASKED + 1)); fi
@@ -563,7 +597,7 @@ ts_wizard_collect() {
         esac
     done
 
-    export TS_WIZ_LEADER TS_WIZ_THEME TS_WIZ_APPS TS_WIZ_TMUX TS_WIZ_CC_TTS TS_WIZ_CC_TTS_DAEMON TS_WIZ_TERMINALS TS_WIZ_WEZ_MUX TS_WIZ_WEZ_RESTORE TS_WIZ_HEADROOM TS_WIZ_HEADROOM_CURSOR TS_WIZ_CAVEMAN TS_WIZ_AGENTMEMORY
+    export TS_WIZ_LEADER TS_WIZ_THEME TS_WIZ_APPS TS_WIZ_TMUX TS_WIZ_CC_TTS TS_WIZ_CC_TTS_DAEMON TS_WIZ_TERMINALS TS_WIZ_WEZ_MUX TS_WIZ_WEZ_RESTORE TS_WIZ_HEADROOM TS_WIZ_HEADROOM_CURSOR TS_WIZ_CAVEMAN TS_WIZ_AGENTMEMORY TS_WIZ_ATUIN
     echo "$INFO Config: leader=$TS_WIZ_LEADER theme=$TS_WIZ_THEME tmux-prefix=$TS_WIZ_TMUX wez-mux=${TS_WIZ_WEZ_MUX:-off} wez-restore=${TS_WIZ_WEZ_RESTORE:-off} cc-tts=${TS_WIZ_CC_TTS:-off} headroom=${TS_WIZ_HEADROOM:-off} caveman=${TS_WIZ_CAVEMAN:-off} agentmemory=${TS_WIZ_AGENTMEMORY:-off}"
     echo "$INFO Apps: ${TS_WIZ_APPS:-<none>}"
 }

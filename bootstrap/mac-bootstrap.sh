@@ -146,6 +146,7 @@ if [ -f "$TOML" ]; then
     # argument-free by design so ts-mux can flip it without re-stating the rest.
     ts_wez_mux_set "${TS_WIZ_WEZ_MUX:-off}"
     ts_wez_restore_set "${TS_WIZ_WEZ_RESTORE:-off}"
+    ts_atuin_set "${TS_WIZ_ATUIN:-off}"
     ts_cc_tts_apply_wizard_choice "${TS_WIZ_CC_TTS:-off}"
     ts_cc_tts_finish
     echo "$INFO Saved terminal-stack config to $TOML [data]"

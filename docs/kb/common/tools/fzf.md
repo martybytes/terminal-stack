@@ -8,6 +8,14 @@ Every interactive picker in this stack is fzf underneath.
 - **zsh**: the rc sources `fzf --zsh` (fzf ≥ 0.48; older builds silently
   no-op), which binds `Ctrl-R` fuzzy history, `Ctrl-T` insert-a-file, and
   `Alt-C` cd-to-subdirectory.
+- **Look & feel** comes from `FZF_DEFAULT_OPTS` (40% height, reverse layout,
+  inline info). `FZF_CTRL_T_OPTS` adds a `bat` preview to `Ctrl-T` **only when
+  `bat` is installed** — a preview command whose binary is missing breaks the
+  widget, so it is not set unconditionally. `Ctrl-R` and `Alt-C` deliberately
+  get no preview: there is nothing useful to show.
+- If `atuin` is enabled (`ts-config atuin on`), **`Ctrl-R` becomes atuin's**
+  history search instead of fzf's. `Ctrl-T` and `Alt-C` are unaffected. See
+  `doc common/tools/atuin`.
 - **pwsh**: no key bindings — `Ctrl+R` there is PSReadLine's own history
   search. fzf is used programmatically by the pickers instead.
 - Pickers built on it (both shells): `doc` (topic finder), `doc cmd` (command

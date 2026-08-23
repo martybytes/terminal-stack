@@ -518,6 +518,21 @@ if (Get-Command micro -ErrorAction SilentlyContinue) { $env:EDITOR = 'micro' }
 # See docs/kb/windows/pwsh.md.
 function v { nvim @args }
 
+# y - yazi, returning to whatever directory you exited in. POSIX twin: y() in
+# dot_zshrc. yazi writes its final cwd to --cwd-file and we Set-Location there,
+# because a child process cannot change its parent's directory.
+function y {
+    $tmp = [System.IO.Path]::GetTempFileName()
+    try {
+        yazi @args --cwd-file="$tmp"
+        $cwd = Get-Content -LiteralPath $tmp -Raw -Encoding UTF8 -ErrorAction SilentlyContinue
+        if ($cwd) { $cwd = $cwd.Trim() }
+        if ($cwd -and $cwd -ne $PWD.Path) { Set-Location -LiteralPath $cwd }
+    } finally {
+        Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+    }
+}
+
 # fnm — Node version manager. --use-on-cd auto-switches on .nvmrc/.node-version,
 # which is the whole reason to run a manager rather than a single winget node.
 # POSIX twin: the fnm line in dot_zshrc's cli-tools block.

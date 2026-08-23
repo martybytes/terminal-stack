@@ -2,7 +2,7 @@
 
 | Key / Command | What it does |
 |---|---|
-| `Ctrl+R` | fuzzy-search shell history — fzf in zsh; PSReadLine reverse search in pwsh |
+| `Ctrl+R` | fuzzy-search shell history — fzf in zsh (**atuin** if enabled); PSReadLine reverse search in pwsh |
 | `Ctrl+T` | fzf: fuzzy-find a file, insert its path on the command line (zsh) |
 | `Alt+C` | fzf: fuzzy-find a directory and cd into it (zsh) |
 | `Esc` `Esc` | prepend `sudo` to the current/previous command (zsh sudo plugin) |
@@ -22,6 +22,23 @@ valves: lines that look like secrets (`sk-…` keys, `Bearer` tokens,
 `--token`/`--api-key` flags, `*_KEY=`/`*_SECRET=`/`*_PASSWORD=`/`*_TOKEN=`
 assignments) are **discarded from history entirely**, and a leading space keeps any
 command out (`HIST_IGNORE_SPACE`).
+
+## atuin (optional)
+
+`ts-config atuin on` swaps `Ctrl+R` for [atuin](https://atuin.sh): history in
+SQLite, shared across every shell, with no 100k ceiling and no per-shell import
+step. `Ctrl+T`, `Alt+C` and Up-arrow are unchanged, and `hgrep` / `history` keep
+reading zsh's own file either way — the two stores coexist.
+
+Default **off**, and it is a *question*, not a presence check: the binary is
+often already installed but dormant, and a `command -v` guard would take
+`Ctrl+R` without anyone choosing it.
+
+**The secret filter is duplicated on purpose.** atuin records through its own
+`preexec` hook, not `zshaddhistory()`, so the discard rule above does *not*
+apply to it. `~/.config/atuin/config.toml` repeats the same patterns in
+`history_filter` and adds atuin's own `secrets_filter`. If you change the list
+in one place, change it in the other — `doc common/tools/atuin`.
 
 `hgrep` is case-insensitive in zsh; the pwsh version greps PSReadLine's saved
 history file (`(Get-PSReadLineOption).HistorySavePath`), which is shared across

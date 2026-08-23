@@ -42,29 +42,34 @@ $script:TsWingetIds = @{
     pipx       = 'pypa.pipx'
     ruff       = 'astral-sh.ruff'
     poetry     = 'Python-Poetry.Poetry'
-    # Deliberately absent: ncdu, bandwhich and tree have no reliable winget id
-    # (or, for bandwhich, no Windows build). An id that always fails is worse
-    # than an honest "not available on this platform" — Get-TsAppsPending skips
-    # anything not in this table, so they simply never nag on Windows.
+    yazi       = 'sxyazi.yazi'
+    # Deliberately absent: ncdu, bandwhich, tree and atuin. The first three have
+    # no reliable winget id (or, for bandwhich, no Windows build). atuin has no
+    # winget manifest at all, and `atuin init` has no PowerShell target — its
+    # shells are zsh/bash/fish/nu/xonsh — so even a hand-installed binary would
+    # get no Ctrl+R integration here; on a Windows box atuin belongs in WSL.
+    # An id that always fails is worse than an honest "not available on this
+    # platform" — Get-TsAppsPending skips anything not in this table, so they
+    # simply never nag on Windows.
 }
-$script:TsAppsRecommended = @('eza','fzf','bat','fd','delta','ripgrep','zoxide','glow','micro','neovim','gh','ghq','lazygit','prettymark','duf','dust','btop','fnm','python','uv','pipx','ruff','ipython','claude','codex','cursor-agent','grok','gemini')
-$script:TsAppsOptional    = @('zed','gdu','bottom','glances','gping','rclone','node','httpie','poetry','pre-commit')
+$script:TsAppsRecommended = @('eza','fzf','bat','fd','delta','ripgrep','zoxide','atuin','glow','micro','neovim','gh','ghq','lazygit','prettymark','duf','dust','btop','fnm','python','uv','pipx','ruff','ipython','claude','codex','cursor-agent','grok','gemini','pi')
+$script:TsAppsOptional    = @('zed','yazi','gdu','bottom','glances','gping','rclone','node','httpie','poetry','pre-commit')
 $script:TsAppsAll         = $script:TsAppsRecommended + $script:TsAppsOptional
 
 # Groups exist for the picker only — the saved `apps` array stays flat, so this
 # adds no chezmoi [data] key. Twin of ts_app_group_* in bootstrap/_config.sh;
 # ids absent on Windows are simply not in $TsWingetIds and are skipped.
 $script:TsAppGroups = [ordered]@{
-    shell   = @{ Desc = 'shell essentials';    Members = @('tmux','eza','bat','tree','zoxide','fzf') }
+    shell   = @{ Desc = 'shell essentials';    Members = @('tmux','eza','bat','tree','zoxide','fzf','atuin') }
     search  = @{ Desc = 'search and find';     Members = @('ripgrep','fd') }
     disk    = @{ Desc = 'disk usage';          Members = @('duf','ncdu','dust','gdu') }
     system  = @{ Desc = 'system monitors';     Members = @('btop','bottom','glances','nvtop','lazydocker') }
     network = @{ Desc = 'network';             Members = @('bandwhich','gping','rclone') }
     git     = @{ Desc = 'git tooling';         Members = @('delta','gh','ghq','lazygit') }
-    editors = @{ Desc = 'editors and readers'; Members = @('micro','neovim','glow','zed','tldr','prettymark') }
+    editors = @{ Desc = 'editors and readers'; Members = @('micro','neovim','glow','zed','tldr','prettymark','yazi') }
     runtimes = @{ Desc = 'language runtimes';  Members = @('fnm','node') }
     python  = @{ Desc = 'Python tooling';      Members = @('python','uv','pipx','ruff','ipython','httpie','poetry','pre-commit') }
-    ai      = @{ Desc = 'AI coding agents';    Members = @('claude','codex','cursor-agent','grok','gemini') }
+    ai      = @{ Desc = 'AI coding agents';    Members = @('claude','codex','cursor-agent','grok','gemini','pi') }
 }
 function Get-TsAppGroupOf([string]$id) {
     foreach ($g in $script:TsAppGroups.Keys) {
@@ -1030,12 +1035,17 @@ function Install-TsAiCli([string]$id) {
             try { & powershell -NoProfile -Command "irm https://x.ai/cli/install.ps1 | iex" }
             catch { Write-Warning 'grok install failed; see https://x.ai/build' }
         }
-        { $_ -in 'codex', 'gemini' } {
-            # npm-only. @openai/codex wants Node >= 16, @google/gemini-cli >= 20.
+        { $_ -in 'codex', 'gemini', 'pi' } {
+            # npm-only. @openai/codex wants Node >= 16, @google/gemini-cli >= 20,
+            # @earendil-works/pi-coding-agent >= 22.19 (its engines field).
             # No brew/winget fallback for gemini: the `gemini-cli` formula is
             # deprecated upstream and scheduled for removal on 2026-12-18.
-            $pkg  = if ($id -eq 'codex') { '@openai/codex' } else { '@google/gemini-cli' }
-            $want = if ($id -eq 'codex') { 16 } else { 20 }
+            $pkg = switch ($id) {
+                'codex'  { '@openai/codex' }
+                'gemini' { '@google/gemini-cli' }
+                'pi'     { '@earendil-works/pi-coding-agent' }
+            }
+            $want = switch ($id) { 'codex' { 16 } 'gemini' { 20 } 'pi' { 22 } }
             $node = Get-Command node -CommandType Application -ErrorAction SilentlyContinue
             $major = 0
             if ($node) { $major = [int]((& node --version) -replace '^v(\d+).*', '$1') }

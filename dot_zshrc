@@ -1022,12 +1022,32 @@ command -v fzf    >/dev/null && source <(fzf --zsh 2>/dev/null)
 export FZF_DEFAULT_OPTS='--height=40% --layout=reverse --border --info=inline'
 command -v bat    >/dev/null && \
   export FZF_CTRL_T_OPTS='--preview "bat --color=always --style=numbers --line-range=:200 {}" --preview-window=right,60%,border-left'
+# atuin — sourced AFTER fzf so it wins Ctrl+R when enabled. The fragment is
+# rendered by chezmoi from the saved `atuinEnabled` setting and is EMPTY when
+# off, which is the point: atuin is often installed but dormant, so gating on
+# `command -v atuin` here would hijack Ctrl+R without anyone choosing it.
+# Toggle with `ts-config atuin on|off`. (dot_zshrc stays non-templated so
+# `chezmoi re-add ~/.zshrc` keeps working — hence a fragment, not a {{ if }}.)
+[[ -r "$HOME/.config/terminal-stack/atuin.zsh" ]] && source "$HOME/.config/terminal-stack/atuin.zsh"
 # Bold blue directories in eza listings (consistent across WezTerm panes/domains).
 export EZA_COLORS='di=1;34:da=1;34:ln=1;36'
 command -v eza    >/dev/null && alias ls='eza --icons=always --git --group-directories-first'
 command -v eza    >/dev/null && alias lt='eza --tree --icons=always --git --group-directories-first'   # matches the pwsh lt
 command -v bat    >/dev/null && alias ccat='bat --paging=never'   # ccat, not cat — don't shadow real cat
 alias rmf='rm -rf'   # force-delete file/folder recursively, no confirmation
+# y — yazi, returning to whatever directory you exited in. Upstream's own
+# wrapper: yazi writes its final cwd to --cwd-file and the shell cds there,
+# because a child process cannot change its parent's directory. Without this,
+# yazi is a viewer rather than a navigator. Ungated for the same reason as `v`.
+y() {
+  local tmp cwd
+  tmp="$(mktemp -t yazi-cwd.XXXXXX)" || return 1
+  yazi "$@" --cwd-file="$tmp"
+  if IFS= read -r -d '' cwd < "$tmp" 2>/dev/null; then
+    [[ -n "$cwd" && "$cwd" != "$PWD" ]] && builtin cd -- "$cwd"
+  fi
+  rm -f -- "$tmp"
+}
 # v — open Neovim. Deliberately NOT gated on `command -v nvim`: gating the
 # *definition* is the trap documented on `c` just below, where installing the
 # tool mid-session left the name silently undefined until a new shell. Ungated,

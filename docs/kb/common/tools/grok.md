@@ -22,10 +22,11 @@ xAI's coding agent in the terminal. Ships as a **standalone binary**, so unlike
 | `grok -p "explain this codebase"` | one-shot prompt, prints and exits |
 | `grok --version` | build and commit |
 | `grok completions zsh` | regenerate shell completions |
-| `curl -fsSL https://x.ai/cli/install.sh \| bash` | upgrade in place (or re-run `ts-config apps grok`) |
+| `grok update` | self-update in place (preferred over re-running the installer) |
+| `curl -fsSL https://x.ai/cli/install.sh \| bash` | reinstall (Windows: `irm https://x.ai/cli/install.ps1 \| iex`) |
 
-First launch opens a browser to authenticate. For headless or CI use, an API key
-from `console.x.ai` in the environment instead. Config lives in
+First launch opens a browser to authenticate. For headless or CI use, put an API
+key from `console.x.ai` in **`XAI_API_KEY`** instead. Config lives in
 `~/.grok/config.toml`; the versioned binaries in `~/.grok/downloads`.
 
 See also `doc claude-code`, `doc codex`, `doc gemini`, `doc cursor`.

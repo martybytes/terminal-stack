@@ -167,6 +167,24 @@ common_install_selected_apps() {
             || common_install_github_binary "orf/gping" "gping" "gping-$(common_arch_tag gnu)-unknown-linux-(gnu|musl)\\.tar\\.gz$" \
             || echo "$WARN gping unavailable (GitHub fallback failed)" ;;
     esac
+    # atuin and yazi are cargo-dist projects: their ARM asset says `aarch64`,
+    # not `arm64`, hence `common_arch_tag rust`. Neither is in any Debian or
+    # Ubuntu archive, so there is no apt arm above to fall back from.
+    case " $apps " in *" atuin "*)
+        command -v atuin >/dev/null 2>&1 \
+            || common_install_github_binary "atuinsh/atuin" "atuin" "atuin-$(common_arch_tag rust)-unknown-linux-gnu\\.tar\\.gz$" \
+            || echo "$WARN atuin unavailable (GitHub fallback failed)" ;;
+    esac
+    # yazi ships a .zip, and two binaries: `yazi` (the TUI) and `ya` (its CLI,
+    # needed by plugin management). Fetch both; the second is best-effort.
+    case " $apps " in *" yazi "*)
+        command -v yazi >/dev/null 2>&1 \
+            || common_install_github_binary "sxyazi/yazi" "yazi" "yazi-$(common_arch_tag rust)-unknown-linux-gnu\\.zip$" \
+            || echo "$WARN yazi unavailable (GitHub fallback failed)"
+        command -v ya >/dev/null 2>&1 \
+            || common_install_github_binary "sxyazi/yazi" "ya" "yazi-$(common_arch_tag rust)-unknown-linux-gnu\\.zip$" \
+            || true ;;
+    esac
     case " $apps " in *" btop "*)
         command -v btop >/dev/null 2>&1 \
             || common_install_github_binary "aristocratos/btop" "btop" "btop-$(common_arch_tag gnu)-linux-musl\\.tbz$" \
@@ -266,17 +284,21 @@ common_install_neovim() {
     sudo apt-get install -y neovim >/dev/null 2>&1 || echo "$WARN apt install neovim failed"
 }
 
-# uname -m -> the token upstream release assets actually use. Two spellings are
-# common and projects disagree, so callers say which they need:
-#   deb  -> amd64 / arm64   (gh, ghq, and most Go projects)
-#   gnu  -> x86_64 / arm64  (lazygit, eza, delta)
+# uname -m -> the token upstream release assets actually use. Three spellings
+# are common and projects disagree, so callers say which they need:
+#   deb  -> amd64 / arm64     (gh, ghq, and most Go projects)
+#   gnu  -> x86_64 / arm64    (lazygit, eza, delta)
+#   rust -> x86_64 / aarch64  (atuin, yazi — anything shipped by cargo-dist)
+# The rust/gnu split is only the ARM spelling, and getting it wrong fails
+# *silently on ARM only*: the asset regex simply matches nothing, x86_64 boxes
+# keep working, and the tool is quietly missing on every Pi/ARM server.
 # Unknown machines fall back to the 64-bit Intel asset, which is what the older
 # call sites hardcoded anyway.
 common_arch_tag() {
     local style="${1:-deb}" m
     m="$(uname -m 2>/dev/null || echo x86_64)"
     case "$m" in
-        aarch64|arm64) echo arm64 ;;
+        aarch64|arm64) if [ "$style" = rust ]; then echo aarch64; else echo arm64; fi ;;
         *) if [ "$style" = deb ]; then echo amd64; else echo x86_64; fi ;;
     esac
 }

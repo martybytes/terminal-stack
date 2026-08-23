@@ -1,0 +1,41 @@
+# atuin — shell history in SQLite. Managed by terminal-stack; edit the source
+# (dot_config/atuin/config.toml.tmpl), not this file. Enable/disable the Ctrl+R
+# integration with `ts-config atuin on|off`.
+
+## SECURITY — keep in sync with zshaddhistory() in dot_zshrc.
+##
+## dot_zshrc defines zshaddhistory(), which returns 1 to *discard* a command
+## containing a secret so it never reaches ~/.zsh_history. atuin does not use
+## that hook — it records through its own preexec — so without the filter below
+## every secret the stack refuses to write to the history file would still land
+## in atuin's SQLite database. The two lists must say the same thing; if you
+## change one, change the other. (dot_zshrc line ~99.)
+history_filter = [
+  "sk-[A-Za-z0-9_-]{20,}",
+  "Bearer[[:space:]]+[^[:space:]]+",
+  "--token[=[:space:]]+[^[:space:]]+",
+  "--api-key[=[:space:]]+[^[:space:]]+",
+  "OPENAI_API_KEY=",
+  "ANTHROPIC_API_KEY=",
+  "GITHUB_TOKEN=",
+  "GH_TOKEN=",
+  "NPM_TOKEN=",
+  "_KEY=",
+  "_SECRET=",
+  "_PASSWORD=",
+  "_TOKEN=",
+]
+
+## atuin's own secret detection, on top of the list above. Belt and braces:
+## it catches shapes the regexes miss (AWS keys, GitHub PATs, Slack tokens).
+secrets_filter = true
+
+## No atuin account is configured by this stack, so never try to sync.
+auto_sync = false
+
+## Updates come from brew / the GitHub-release fallback / winget, not from
+## atuin phoning home on shell start.
+update_check = false
+
+## Enter runs the selected command; Tab puts it on the command line to edit.
+enter_accept = true

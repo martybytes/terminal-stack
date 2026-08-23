@@ -148,6 +148,25 @@ printf "\n" | timeout 20 script -qec "bash -c '. bootstrap/_wizard.sh; ts_prompt
 Wrap the payload in `bash -c`. `script` runs `$SHELL`, which is zsh here, and zsh's
 `read -p` means "read from the coprocess" — the prompt helper errors out under it.
 
+**That recipe is util-linux `script`, and it is Linux-only.** macOS/BSD `script`
+takes `script [-q] <file> <cmd>...` and does **not** forward piped stdin into
+the pty. It fails *silently and wrongly*: the prompt renders, the keystrokes go
+nowhere, every run takes the default, and a check of "does option 2 work?"
+passes-looking with the option-1 answer. Verified 2026-08-23 — five different
+inputs all returned the default. On macOS drive the pty directly instead:
+
+```python
+import os, pty, select, time
+pid, fd = pty.fork()
+if pid == 0:
+    os.execvp("bash", ["bash", "-c", ". bootstrap/_wizard.sh; ts_prompt_<name> > /tmp/_answer"])
+time.sleep(0.5); os.write(fd, b"2\r")      # then drain fd until EOF
+```
+
+Assert on two things, not one: the **answer**, and how many times the prompt was
+rendered — a bogus input must render it **twice** (re-prompt), which is the
+documented rule that a `default:` catch-all would silently break.
+
 The pwsh side just needs the helper dot-sourced:
 
 ```powershell

@@ -92,6 +92,11 @@ weztermMux = {{ index . "weztermMux" | default "off" | quote }}
 {{- /* Reopen the last session at WezTerm start: "on" registers resurrect's
        gui-startup restore, "off" (default) starts clean. `ts-config restore`. */}}
 weztermRestore = {{ index . "weztermRestore" | default "off" | quote }}
+{{- /* atuin owns Ctrl+R when "on"; "off" (default) leaves it to fzf. Rendered
+       into ~/.config/terminal-stack/atuin.zsh, which dot_zshrc sources — a
+       saved setting rather than a presence check, because the binary is often
+       installed but dormant. `ts-config atuin on|off`. */}}
+atuinEnabled = {{ index . "atuinEnabled" | default "off" | quote }}
 {{- /* Per-computer agent integrations. These are deliberately user-global but
        machine-local: a laptop without the Docker services stays off. */}}
 headroomEnabled = {{ index . "headroomEnabled" | default "off" | quote }}
