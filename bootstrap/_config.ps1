@@ -443,9 +443,32 @@ function Read-TsMulti {
         [Parameter(Mandatory)][string]$Title,
         [Parameter(Mandatory)][object[]]$Options,
         [string[]]$Preticked = @(),
-        [string[]]$Intro = @()
+        [string[]]$Intro = @(),
+        # Mutually exclusive keys: ticking one visibly unticks the others, so the
+        # screen can never show a combination the caller will refuse. POSIX twin
+        # takes this as the TS_MULTI_EXCLUSIVE global (bash has no named params);
+        # the RENDERED OUTPUT is unchanged either way, which is what the
+        # byte-identical rule constrains.
+        [string[]]$Exclusive = @()
     )
     $ticks = @($Options | ForEach-Object { [bool]($Preticked -contains $_.Key) })
+    # Keep at most one group member ticked. $keep is the index that just won;
+    # -1 means no winner, in which case the FIRST ticked member survives —
+    # matching Get-TsTerminalsChannel's nightly-wins tie-break.
+    $exclusive = {
+        param($keep)
+        if (-not $Exclusive) { return }
+        $first = -1
+        for ($j = 0; $j -lt $Options.Count; $j++) {
+            if ($Exclusive -notcontains $Options[$j].Key) { continue }
+            if (-not $ticks[$j]) { continue }
+            if ($keep -ge 0) {
+                if ($j -ne $keep) { $ticks[$j] = $false }
+            } elseif ($first -lt 0) { $first = $j }
+            else { $ticks[$j] = $false }
+        }
+    }
+    & $exclusive -1
     $render = {
         Write-Host ''
         Write-Host $Title
@@ -474,6 +497,7 @@ function Read-TsMulti {
         }
         if ($ans -imatch '^(a|all)$') {
             for ($i = 0; $i -lt $Options.Count; $i++) { $ticks[$i] = $true }
+            & $exclusive -1
             & $render; continue
         }
         if ($ans -imatch '^(n|no|none)$') {
@@ -482,7 +506,10 @@ function Read-TsMulti {
         }
         $picks = Resolve-TsMultiAnswer -Count $Options.Count -Answer $ans
         if ($picks) {
-            foreach ($i in $picks) { $ticks[$i - 1] = -not $ticks[$i - 1] }
+            foreach ($i in $picks) {
+                $ticks[$i - 1] = -not $ticks[$i - 1]
+                if ($ticks[$i - 1]) { & $exclusive ($i - 1) }
+            }
         } else {
             Write-Host "  ? enter a number 1-$($Options.Count) (several are fine), a, n, s, or Enter"
         }
@@ -769,8 +796,16 @@ function Read-TsTerminals {
     if ($value) {
         if ($value -ieq 'none') { return @() }
         # `wezterm` on its own has never named a channel; take the default one.
-        return @($value -split '[,\s]+' | Where-Object { $_ } |
-                 ForEach-Object { if ($_ -eq 'wezterm') { 'wezterm-nightly' } else { $_ } })
+        $envSel = @($value -split '[,\s]+' | Where-Object { $_ } |
+                    ForEach-Object { if ($_ -eq 'wezterm') { 'wezterm-nightly' } else { $_ } })
+        # The same one-channel rule the picker enforces. This path returned early
+        # without it, so TS_TERMINALS=wezterm-nightly,wezterm-stable put BOTH
+        # keys in the saved list.
+        if (($envSel -contains 'wezterm-nightly') -and ($envSel -contains 'wezterm-stable')) {
+            Write-Warning 'both WezTerm channels requested — installing nightly (they cannot coexist).'
+            $envSel = @($envSel | Where-Object { $_ -ne 'wezterm-stable' })
+        }
+        return $envSel
     }
 
     # Whatever is installed starts ticked, on its detected channel.
@@ -798,13 +833,14 @@ function Read-TsTerminals {
         if ($tally) { $intro += "  Since your build: $tally" }
     }
 
+    # The two WezTerm channels are mutually exclusive, so the tick-list enforces
+    # it live: ticking nightly visibly unticks stable. Before this, the screen
+    # showed [x] [x] and the choice was silently corrected only after Enter.
     $chosen = @(Read-TsMulti -Title 'Terminal emulator:' -Options $script:TsTerminalCandidates `
-        -Preticked $preticked -Intro $intro)
+        -Preticked $preticked -Intro $intro -Exclusive @('wezterm-nightly', 'wezterm-stable'))
 
-    # One WezTerm, one channel: the two packages install to the same place, so
-    # both ticked is impossible to honour. Resolved here rather than teaching
-    # Read-TsMulti radio-group semantics — it is a byte-identical twin of
-    # ts_prompt_multi, and forking it would cost more than it is worth.
+    # Belt to the tick-list's braces: the live constraint should make this
+    # unreachable, but a non-interactive run keeps whatever was pre-ticked.
     if (($chosen -contains 'wezterm-nightly') -and ($chosen -contains 'wezterm-stable')) {
         Write-Warning 'both WezTerm channels ticked — installing nightly (they cannot coexist).'
         $chosen = @($chosen | Where-Object { $_ -ne 'wezterm-stable' })

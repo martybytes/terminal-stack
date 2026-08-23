@@ -140,6 +140,21 @@ ts_terminal_candidates() {
         'ghostty|Ghostty|GPU-accelerated, platform-native UI'
 }
 
+# One WezTerm, one channel. Both casks own /Applications/WezTerm.app and the two
+# apt packages own /usr/bin/wezterm, so installing both is impossible. Nightly
+# wins, matching ts_terminals_channel's tie-break.
+ts_terminals_one_channel() {
+    local sel=" $1 "
+    case "$sel" in
+        *" wezterm-nightly "*)
+            case "$sel" in *" wezterm-stable "*)
+                printf 'note: both WezTerm channels ticked — installing nightly (they cannot coexist).\n' >&2
+                sel="$(printf '%s' "$sel" | tr ' ' '\n' | grep -v '^wezterm-stable$' | tr '\n' ' ')" ;;
+            esac ;;
+    esac
+    printf '%s\n' "$(printf '%s' "$sel" | tr -s ' ' | sed 's/^ //; s/ $//')"
+}
+
 ts_prompt_terminals() {
     # TS_TERMINALS=wezterm-nightly,ghostty | wezterm-stable | none.
     # TS_WEZTERM is the older spelling and still maps across, so an unattended
@@ -163,7 +178,11 @@ ts_prompt_terminals() {
             [ "$tok" = wezterm ] && tok=wezterm-nightly
             out="$out $tok"
         done
-        printf '%s\n' "${out# }"
+        # The same one-channel rule the picker enforces. This path returned early
+        # without it, so TS_TERMINALS=wezterm-nightly,wezterm-stable put BOTH
+        # keys in the saved list — harmless only by luck, because
+        # ts_terminals_channel happens to prefer nightly on a tie.
+        printf '%s\n' "$(ts_terminals_one_channel "${out# }")"
         return 0
     fi
 
@@ -189,21 +208,15 @@ ts_prompt_terminals() {
 }  Ghostty:  $(ghostty --version 2>/dev/null | head -1)"
     fi
 
-    chosen="$(ts_prompt_multi "${preticked# }" 'Terminal emulator:' "$intro" "${opts[@]}")"
+    # The two WezTerm channels are mutually exclusive, so the tick-list enforces
+    # it live: ticking nightly visibly unticks stable. Before this, the screen
+    # showed [x] [x] and the choice was silently corrected only after Enter.
+    TS_MULTI_EXCLUSIVE="wezterm-nightly wezterm-stable" \
+        chosen="$(ts_prompt_multi "${preticked# }" 'Terminal emulator:' "$intro" "${opts[@]}")"
 
-    # One WezTerm, one channel. Both casks own /Applications/WezTerm.app and the
-    # two apt packages own /usr/bin/wezterm, so installing both is impossible —
-    # resolve it here rather than teaching ts_prompt_multi radio-group semantics
-    # (it is a byte-identical twin of Read-TsMulti; forking it to handle this
-    # would cost more than it is worth).
-    case " $chosen " in
-        *" wezterm-nightly "*)
-            case " $chosen " in *" wezterm-stable "*)
-                printf 'note: both WezTerm channels ticked — installing nightly (they cannot coexist).\n' >&2
-                chosen="$(printf '%s' "$chosen" | tr ' ' '\n' | grep -v '^wezterm-stable$' | tr '\n' ' ')" ;;
-            esac ;;
-    esac
-    printf '%s\n' "$(printf '%s' "$chosen" | tr -s ' ' | sed 's/^ //; s/ $//')"
+    # Belt to the tick-list's braces: the live constraint above should make this
+    # unreachable, but a non-interactive run keeps whatever was pre-ticked.
+    ts_terminals_one_channel "$chosen"
 }
 
 # The multiplexer domain (ts-mux). Asked wherever a WezTerm GUI actually runs —
@@ -275,10 +288,17 @@ ts_prompt_atuin() {
 #
 # usage: ts_prompt_multi <preticked-space-list> <title> <intro-or-empty> "key|label|note"...
 # Twin of bootstrap/_config.ps1 Read-TsMulti — keep the rendered output identical.
+# TS_MULTI_EXCLUSIVE — optional space-separated keys that are mutually
+# exclusive. Ticking one visibly unticks the others, so the screen can never show
+# a combination the caller will refuse. Passed as a global rather than a new
+# positional argument so this stays signature-compatible with its pwsh twin
+# Read-TsMulti (which takes it as -Exclusive); the RENDERED OUTPUT is unchanged
+# either way, which is what the byte-identical rule actually constrains.
 ts_prompt_multi() {
     local preticked=" $1 " title="$2" intro="$3"; shift 3
     local -a keys=() labels=() notes=() ticks=()
     local opt key rest label note i n ans tok idx
+    local excl=" ${TS_MULTI_EXCLUSIVE:-} "
 
     for opt in "$@"; do
         key="${opt%%|*}"; rest="${opt#*|}"
@@ -289,6 +309,7 @@ ts_prompt_multi() {
     done
     n=${#keys[@]}
     [ "$n" -eq 0 ] && { printf '\n'; return 0; }
+    exclusive -1
 
     render() {
         {
@@ -301,6 +322,23 @@ ts_prompt_multi() {
                 printf '  [%s] %2d) %s%s\n' "$mark" "$((i + 1))" "${labels[$i]}" "$suffix"
             done
         } > /dev/tty 2>/dev/null
+    }
+
+    # Keep at most one member of the exclusive group ticked. <keep> is the index
+    # that just won; -1 means "no winner", in which case the FIRST ticked member
+    # survives — matching ts_terminals_channel's nightly-wins tie-break.
+    exclusive() {
+        local keep="$1" j first=-1
+        [ "$excl" = "  " ] && return 0
+        for j in $(seq 0 $((n - 1))); do
+            case "$excl" in *" ${keys[$j]} "*) ;; *) continue ;; esac
+            [ "${ticks[$j]}" = "1" ] || continue
+            if [ "$keep" -ge 0 ]; then
+                [ "$j" = "$keep" ] || ticks[$j]=0
+            elif [ "$first" -lt 0 ]; then first=$j
+            else ticks[$j]=0
+            fi
+        done
     }
 
     emit() {
@@ -323,7 +361,7 @@ ts_prompt_multi() {
         case "$ans" in
             "")        break ;;
             s|S|skip)  for i in $(seq 0 $((n - 1))); do ticks[$i]=0; done; break ;;
-            a|A|all)   for i in $(seq 0 $((n - 1))); do ticks[$i]=1; done; render; continue ;;
+            a|A|all)   for i in $(seq 0 $((n - 1))); do ticks[$i]=1; done; exclusive -1; render; continue ;;
             n|N|no|none) for i in $(seq 0 $((n - 1))); do ticks[$i]=0; done; render; continue ;;
         esac
         # Several toggles in one answer: "1 3" and "1,3" both work. Deliberately
@@ -335,7 +373,8 @@ ts_prompt_multi() {
             esac
             idx=$((tok - 1))
             if [ "$idx" -ge 0 ] && [ "$idx" -lt "$n" ]; then
-                [ "${ticks[$idx]}" = "1" ] && ticks[$idx]=0 || ticks[$idx]=1
+                if [ "${ticks[$idx]}" = "1" ]; then ticks[$idx]=0
+                else ticks[$idx]=1; exclusive "$idx"; fi
             else
                 bad=1
             fi
@@ -344,7 +383,7 @@ ts_prompt_multi() {
         render
     done
     emit
-    unset -f render emit 2>/dev/null
+    unset -f render emit exclusive 2>/dev/null
 }
 
 # Expand a TS_APPS env value (recommended|all|none|csv) to a space list.
@@ -598,6 +637,10 @@ ts_wizard_collect() {
     done
 
     export TS_WIZ_LEADER TS_WIZ_THEME TS_WIZ_APPS TS_WIZ_TMUX TS_WIZ_CC_TTS TS_WIZ_CC_TTS_DAEMON TS_WIZ_TERMINALS TS_WIZ_WEZ_MUX TS_WIZ_WEZ_RESTORE TS_WIZ_HEADROOM TS_WIZ_HEADROOM_CURSOR TS_WIZ_CAVEMAN TS_WIZ_AGENTMEMORY TS_WIZ_ATUIN
+    # These two lines summarise the CHOICES. They are printed before anything is
+    # written, and used to read exactly like a save confirmation — which is how a
+    # run that lost every answer still looked successful. The bootstraps now
+    # persist immediately after this, and say so themselves when they do.
     echo "$INFO Config: leader=$TS_WIZ_LEADER theme=$TS_WIZ_THEME tmux-prefix=$TS_WIZ_TMUX wez-mux=${TS_WIZ_WEZ_MUX:-off} wez-restore=${TS_WIZ_WEZ_RESTORE:-off} cc-tts=${TS_WIZ_CC_TTS:-off} headroom=${TS_WIZ_HEADROOM:-off} caveman=${TS_WIZ_CAVEMAN:-off} agentmemory=${TS_WIZ_AGENTMEMORY:-off}"
     echo "$INFO Apps: ${TS_WIZ_APPS:-<none>}"
 }

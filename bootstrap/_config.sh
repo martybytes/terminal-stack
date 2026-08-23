@@ -196,6 +196,48 @@ ts_apps_install_note() {
     fi
 }
 
+# ── Optional-install failure collection ────────────────────────────────────────
+# NOTHING optional may ever be fatal. The bootstraps run under `set -euo
+# pipefail`, and `set -e` exempts only the NON-final members of an && / || list:
+#
+#     brew list --cask zed >/dev/null 2>&1 || brew install --cask zed
+#
+# looks guarded and is not — the install is the final command, so its failure
+# kills the whole script. That one line (a hand-installed /Applications/Zed.app
+# that Homebrew did not know about) aborted a real install at line 55 of 207,
+# taking every terminal, oh-my-zsh, chsh, chezmoi.toml and — worst — the entire
+# persistence of the user's wizard answers with it, silently.
+#
+# So: every optional install ends in `|| ts_note_failure`, and the run reports
+# what failed at the end instead of dying. This is the Windows path's existing
+# discipline (windows-bootstrap.ps1 uses Install-WingetPackage "so a failure
+# lands in the end-of-run report"); these two helpers bring POSIX into line.
+TS_INSTALL_FAILURES=""
+
+# ts_note_failure <what> [hint] — record and warn, never abort.
+ts_note_failure() {
+    local what="$1" hint="${2:-}"
+    TS_INSTALL_FAILURES="${TS_INSTALL_FAILURES}${what}|${hint}
+"
+    echo "!! ${what} failed${hint:+ — $hint}" >&2
+    return 0
+}
+
+# ts_report_failures — end-of-run summary. Returns 0 always: a report is not a
+# failure, and the caller has already done everything it could.
+ts_report_failures() {
+    [ -n "$TS_INSTALL_FAILURES" ] || return 0
+    echo
+    echo "==> Some optional steps did not complete:"
+    printf '%s' "$TS_INSTALL_FAILURES" | while IFS='|' read -r what hint; do
+        [ -n "$what" ] || continue
+        printf '    %-28s %s\n' "$what" "$hint"
+    done
+    echo "    Everything else was applied. Re-run the installer or the named"
+    echo "    command to retry just these."
+    return 0
+}
+
 # Install the selected toggleable apps via Homebrew (macOS). Idempotent: brew
 # skips already-installed formulae. Debian/WSL uses common_install_selected_apps
 # in _common-debian.sh instead (it needs the bespoke glow/neovim/… installers).
@@ -250,16 +292,44 @@ ts_brew_install_apps() {
             poetry)     formulae="$formulae poetry" ;;
             pre-commit) formulae="$formulae pre-commit" ;;
             nvtop)      echo "==> nvtop is Linux-only; skipping on macOS" ;;
+            # zed IS mapped — as a cask, handled below. Without this arm the
+            # catch-all printed "no macOS package mapping; skipped" and then
+            # installed it twelve lines later, so the transcript blamed the
+            # wrong thing when the cask was what actually failed.
+            zed)        ;;
             *)          ts_app_is_ai "$id" || echo "==> $id: no macOS package mapping; skipped" ;;
         esac
     done
-    # shellcheck disable=SC2086
-    [ -n "$formulae" ] && brew install $formulae
+    # `brew install $formulae` is the final command of the old `[ -n … ] && …`
+    # list, so one bad bottle killed the bootstrap the same way zed did. An `if`
+    # puts it in statement position where the `||` actually guards it.
+    if [ -n "$formulae" ]; then
+        # shellcheck disable=SC2086
+        brew install $formulae || ts_note_failure "brew formulae" "retry: brew install$formulae"
+    fi
     case " $apps " in *" zed "*)
-        brew list --cask zed >/dev/null 2>&1 || brew install --cask zed ;;
+        # Check the FILESYSTEM, not just Homebrew's registry. A Zed installed by
+        # hand (or by zed.dev's own installer) leaves brew believing the cask is
+        # absent, so a plain install collides with the existing bundle and errors
+        # — which is the failure that aborted a whole bootstrap.
+        #
+        # A hand-placed app is not ours to replace, same rule as
+        # ts_wezterm_install applies to a WezTerm outside a package manager.
+        # `--cask --adopt` was tried and REJECTED: on a bundle whose xattrs brew
+        # cannot rewrite it fails partway and REMOVES the app it was supposed to
+        # adopt. Verified the hard way — it deleted a real /Applications/Zed.app.
+        # Never adopt; never --force. Say it is there and move on.
+        if brew list --cask zed >/dev/null 2>&1; then
+            echo "==> zed: already installed"
+        elif [ -d "${TS_ZED_APP:-/Applications/Zed.app}" ]; then
+            echo "==> zed: already present at ${TS_ZED_APP:-/Applications/Zed.app} (installed outside Homebrew); leaving it alone."
+        else
+            brew install --cask zed || ts_note_failure "zed" "install it by hand later"
+        fi ;;
     esac
-    ts_install_node_lts "$apps"
-    ts_install_ai_clis "$apps"
+    ts_install_node_lts "$apps" || ts_note_failure "Node LTS" "retry: ts-config apps node"
+    ts_install_ai_clis "$apps"  || ts_note_failure "agent CLIs" "retry: ts-config apps claude,codex,…"
+    return 0
 }
 
 # fnm installs the manager, not a runtime — without this, `node` still does not

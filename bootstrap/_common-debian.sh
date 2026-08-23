@@ -524,14 +524,30 @@ common_install_all() {
     # the GUI lives on the Windows host — and neither is a headless server.
     if ! ts_is_headless && ! _ts_is_wsl; then TS_WIZ_ASK_TERMINALS=1; fi
     ts_wizard_collect || return 1
-    common_install_selected_apps "$TS_WIZ_APPS"
-    common_install_terminals "${TS_WIZ_TERMINALS:-}"
+    # chezmoi FIRST, then persist, then everything optional.
+    #
+    # These used to run in the other order, so an optional install that aborted
+    # the script threw away every answer the user had just typed. That is not
+    # hypothetical: a hand-installed app made a cask collide and die under
+    # `set -e`, and ten answered questions were silently lost. Persistence needs
+    # chezmoi (ts_save_config runs `chezmoi init` to regenerate the derived
+    # keys), which is the only reason it was late in the first place — so
+    # chezmoi moves up rather than persistence moving down.
+    #
+    # TS_PERSIST_HOOK is the wrapper's persistence function; each wrapper owns
+    # its own because native Linux and WSL differ (windowsUsername).
+    common_chezmoi
+    if [ -n "${TS_PERSIST_HOOK:-}" ] && command -v "$TS_PERSIST_HOOK" >/dev/null 2>&1; then
+        "$TS_PERSIST_HOOK"
+    fi
+    common_install_selected_apps "$TS_WIZ_APPS" || ts_note_failure "optional apps" "retry: ts-config apps"
+    common_install_terminals "${TS_WIZ_TERMINALS:-}" || ts_note_failure "terminal emulator" "retry: ts-config wezterm install <channel>"
     common_oh_my_zsh
     common_login_shell_zsh
-    common_chezmoi
     common_starship
     common_nerd_font_jetbrains
     common_git_include
     common_workspace_config
     ts_report_installed_apps "$TS_WIZ_APPS"
+    ts_report_failures
 }

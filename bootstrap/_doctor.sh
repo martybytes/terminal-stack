@@ -3,6 +3,13 @@
 # entry ts-doctor.sh, by the installers (post-apply health check), and by ts-update.
 # Depends on _config.sh (sourceDir helpers) and _cleanup.sh (clone discovery).
 #
+# CARE WITH NON-ASCII AFTER A BARE $VAR. macOS ships bash 3.2, whose
+# legal_variable_char() is not multibyte-aware: under en_US.UTF-8 the lead byte
+# of a UTF-8 character passes isalnum(), so "$desired…" parses the NAME as
+# `desired\xE2` — never set — and `set -u` (ts-doctor.sh) aborts mid-repair.
+# `bash -n` cannot catch it; it is a runtime failure. Always brace the variable:
+# "${desired}…". A test greps for the pattern.
+#
 # This file is sourced, not executed. Do not `exit`; return non-zero instead.
 
 if ! command -v ts_chezmoi_bin >/dev/null 2>&1; then
@@ -45,7 +52,7 @@ ts_relocate_clone() {
     # Repoint chezmoi at the new location and re-apply.
     if cz="$(ts_chezmoi_bin)"; then
         ts_ensure_source_dir "$dst"
-        echo "$INFO re-applying from $dst…"
+        echo "$INFO re-applying from ${dst}…"
         "$cz" apply || echo "$WARN chezmoi apply failed — run it manually after fixing the issue."
     fi
 
@@ -461,7 +468,7 @@ ts_repair() {
         case "$ans" in
             n|N|no|NO) echo "$INFO left sourceDir unchanged." ;;
             *) ts_ensure_source_dir "$desired"
-               echo "$INFO re-applying from $desired…"
+               echo "$INFO re-applying from ${desired}…"
                "$cz" apply && echo "$INFO chezmoi apply done — run 'exec zsh -l' to reload your shell." ;;
         esac
     else

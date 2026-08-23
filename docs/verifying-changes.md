@@ -451,6 +451,50 @@ And two platform traps worth re-confirming rather than assuming, because both fa
 automatically — a test pins that, because it fails on macOS 26.6 where fuse-t's
 default NFS backend does not.
 
+## 4e. Installer changes — the two failure modes that hide
+
+**Nothing optional may be fatal.** The bootstraps run under `set -euo pipefail`,
+and `set -e` exempts only the **non-final** members of an `&&`/`||` list. So
+
+```sh
+brew list --cask zed >/dev/null 2>&1 || brew install --cask zed
+```
+
+looks guarded and is not — the install is last, so its failure kills the script.
+That exact line aborted a real run at line 55 of 207, taking every terminal,
+oh-my-zsh, `chsh`, `chezmoi.toml` and the whole persistence of the user's wizard
+answers with it, printing nothing of its own. Reproduce the class in one line:
+
+```sh
+bash -c 'set -e; false || /usr/bin/false; echo SURVIVED'   # prints nothing, exits 1
+```
+
+Every optional install must end in `|| ts_note_failure …`. A test enforces it.
+Also **never** `brew install --cask --adopt`: on a bundle whose xattrs brew
+cannot rewrite it fails partway and **removes the app it was adopting** —
+verified by deleting a real `/Applications/Zed.app`.
+
+**Answers must be saved before anything that can fail.** Persistence used to run
+last, so any abort discarded the whole questionnaire. Drill it with a throwaway
+`HOME` and a deliberately failing install:
+
+```sh
+H=/tmp/ts-wiz; rm -rf $H; mkdir -p $H/.config/chezmoi
+HOME=$H TS_ASSUME_YES=1 TS_ATUIN=on TS_THEME=light TS_APPS=none bash -c '
+  . bootstrap/_config.sh; . bootstrap/_wizard.sh; ts_wizard_collect >/dev/null
+  ts_ensure_source_dir "$PWD" >/dev/null; ts_atuin_set "$TS_WIZ_ATUIN"
+  false || ts_note_failure "optional apps" "retry"'
+HOME=$H bash -c '. bootstrap/_config.sh; ts_atuin_get'    # must be "on"
+```
+
+**A `$var` followed by a non-ASCII character is a latent crash.** macOS bash 3.2
+is not multibyte-aware, so `"$desired…"` parses the name as `desired\xE2` and
+`set -u` aborts — at runtime, invisible to `bash -n`. Brace it: `"${desired}…"`.
+
+```sh
+bash -uc 'desired=/tmp; echo "$desired…"'    # bash: desired?: unbound variable
+```
+
 ## 5. What you cannot verify from a dev clone
 
 `chezmoi source-path` points at the **runtime** clone

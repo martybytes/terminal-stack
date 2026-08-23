@@ -975,11 +975,24 @@ under Ghostty, or on a machine that already has WezTerm from somewhere else, and
 question is a tick-list: WezTerm nightly, WezTerm stable and Ghostty are separate ticks,
 whatever is installed starts ticked on its detected channel, and `[n]one` is one keystroke.
 
-**Both channels are offered, and nightly is pre-selected.** Upstream's newest *stable* is
-`20240203-110809-5046fc22` — February 2024, with no cut since. Nightly is what @wez uses as
-a daily driver and what this stack's Lua config targets, so pre-selecting stable would put
-every fresh machine on a two-and-a-half-year-old build by default. This briefly *was*
-stable-only, and that was the wrong call for exactly this reason.
+**Both channels are offered; nightly is the pre-selection only when nothing is installed.**
+Upstream's newest *stable* is `20240203-110809-5046fc22` — February 2024, with no cut since.
+Nightly is what @wez uses as a daily driver and what this stack's Lua config targets, so
+defaulting a *fresh* machine to stable would put it on a two-and-a-half-year-old build. This
+briefly *was* stable-only, and that was the wrong call for exactly this reason.
+
+On a machine that already has WezTerm, though, **whatever is installed starts ticked, on its
+detected channel** (`ts_wezterm_channel`, read back from the package manager — there is no
+saved `weztermChannel` key). A re-run therefore offers to *upgrade what you have* rather than
+silently switching your channel, which is the same "nothing is automatic" rule as below. It
+does mean a stable box sees nightly unticked while row 1 still reads "what this stack
+configures", which reads like a bug and has been reported as one; the row note, not the
+default, is the thing to reword if it keeps confusing people.
+
+The two channels are **mutually exclusive in the tick-list itself**: both casks own
+`/Applications/WezTerm.app` and both apt packages own `/usr/bin/wezterm`, so ticking one
+unticks the other on screen. That used to be resolved only *after* Enter, which meant the
+list happily displayed `[x] [x]` for a combination the code would silently refuse.
 
 **But nothing is automatic.** Nightly moving daily is precisely why it must not upgrade
 behind your back: the wizard asks at install, `ts-update` reports and offers when something

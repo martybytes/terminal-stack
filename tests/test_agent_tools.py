@@ -1103,3 +1103,93 @@ def test_tab_title_helper_skips_tmux_and_falls_back_to_osc2():
     assert "WEZTERM_PANE" in body and "set-tab-title" in body
     assert '-z "$TMUX"' in body, "must not emit OSC 2 inside tmux"
     assert "\\033]2;%s\\007" in body or "033]2;" in body
+
+
+# ── installer robustness ────────────────────────────────────────────────────────
+
+BOOTSTRAP_SH = sorted((ROOT / "bootstrap").glob("*.sh"))
+
+
+def test_no_bare_variable_followed_by_non_ascii():
+    """macOS ships bash 3.2, whose legal_variable_char() is not multibyte-aware:
+    under en_US.UTF-8 the lead byte of a UTF-8 char passes isalnum(), so
+    `"$desired…"` parses the NAME as `desired\\xE2` — never set — and `set -u`
+    aborts. It crashed `ts-doctor --repair` mid-run, after repointing sourceDir
+    and before `chezmoi apply`. `bash -n` cannot catch it; brace the variable."""
+    bad = []
+    pat = re.compile(r"\$[A-Za-z_][A-Za-z0-9_]*[^\x00-\x7F\s]")
+    for f in BOOTSTRAP_SH:
+        for i, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
+            if line.lstrip().startswith("#"):
+                continue          # prose explaining the trap is not the trap
+            if pat.search(line):
+                bad.append(f"{f.name}:{i}: {line.strip()}")
+    assert not bad, "brace these: " + "; ".join(bad)
+
+
+@pytest.mark.skipif(not shutil.which("bash"), reason="bash is unavailable")
+def test_optional_installs_are_never_fatal():
+    """`set -e` exempts only the NON-final members of an && / || list, so
+    `brew list --cask zed || brew install --cask zed` is not guarded at all. That
+    one line aborted a real install at line 55 of 207 and discarded every wizard
+    answer. Every optional install must end in a `||` fallback."""
+    cfg = (ROOT / "bootstrap/_config.sh").read_text(encoding="utf-8")
+    assert "ts_note_failure" in cfg and "ts_report_failures" in cfg
+    for f in (ROOT / "bootstrap/_config.sh", ROOT / "bootstrap/mac-bootstrap.sh"):
+        for i, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
+            st = line.strip()
+            if st.startswith("#") or "brew install" not in st:
+                continue
+            # The prerequisite formulae are deliberately fatal: without
+            # zsh/git/starship/chezmoi there is no stack to configure.
+            if "zsh git starship chezmoi" in st:
+                continue
+            assert st.endswith("\\") or "||" in st, \
+                f"{f.name}:{i} unguarded install: {st}"
+    # --adopt destroyed a real /Applications/Zed.app; never reintroduce it.
+    # Comments explaining that are not the thing being banned.
+    code = _uncommented(cfg)
+    assert "--adopt" not in code, "brew --cask --adopt can delete the app it adopts"
+    assert "--cask --force" not in code
+
+
+def test_wizard_answers_persist_before_any_optional_install():
+    """Persistence used to run at the very end, so an install that aborted the
+    script threw away every answer the user had just typed. Two shapes satisfy
+    this: macOS persists inline before its installs; the Debian wrappers hand
+    _common-debian.sh a TS_PERSIST_HOOK that it calls before any optional step."""
+    mac = _uncommented((ROOT / "bootstrap/mac-bootstrap.sh").read_text(encoding="utf-8"))
+    assert mac.index("ts_save_config") < mac.index("ts_brew_install_apps"), \
+        "mac-bootstrap installs apps before saving the wizard answers"
+    # The agent WIRING needs the CLIs installed, so it alone stays late.
+    assert mac.index("ts_agents_apply_wizard") > mac.index("ts_save_config")
+
+    deb = (ROOT / "bootstrap/_common-debian.sh").read_text(encoding="utf-8")
+    body = deb[deb.index("common_install_all() {"):]
+    body = body[:body.index("\n}\n")]
+    body = _uncommented(body)   # index the calls, not the prose about them
+    hook = body.index("TS_PERSIST_HOOK")
+    for installer in ("common_install_selected_apps", "common_install_terminals"):
+        assert hook < body.index(installer), \
+            f"_common-debian.sh: {installer} runs before the persistence hook"
+    # chezmoi must precede the hook: ts_save_config runs `chezmoi init`.
+    assert body.index("common_chezmoi") < hook
+
+    for name in ("linux-bootstrap.sh", "wsl-bootstrap.sh"):
+        w = (ROOT / "bootstrap" / name).read_text(encoding="utf-8")
+        assert "TS_PERSIST_HOOK=_ts_persist_wizard" in w, f"{name} sets no hook"
+        assert "ts_save_config" in w[w.index("_ts_persist_wizard() {"):], \
+            f"{name}: the hook does not actually save"
+
+
+def test_terminal_tick_list_enforces_one_wezterm_channel_live():
+    """Both casks own /Applications/WezTerm.app, so both ticked is impossible.
+    The constraint used to run only after Enter, so the screen showed [x] [x]."""
+    wiz = (ROOT / "bootstrap/_wizard.sh").read_text(encoding="utf-8")
+    ps = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
+    assert "TS_MULTI_EXCLUSIVE" in wiz
+    assert 'TS_MULTI_EXCLUSIVE="wezterm-nightly wezterm-stable"' in wiz
+    assert "$Exclusive" in ps and "-Exclusive @('wezterm-nightly', 'wezterm-stable')" in ps
+    # The env path returned early without the constraint on both sides.
+    assert "ts_terminals_one_channel" in wiz
+    assert wiz.count("ts_terminals_one_channel") >= 3   # def + env path + picker
