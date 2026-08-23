@@ -230,9 +230,15 @@ ts_prompt_wezterm_mux() {
         return 0
     fi
     ts_prompt_choice off 'WezTerm multiplexer (keeps panes alive when the GUI dies):' \
-'  On: your shells run in wezterm-mux-server, so a GUI crash leaves every
-  pane alive and relaunching WezTerm reattaches. Cost: config changes then
-  need "ts-mux restart" (kills every pane) and mux panes lose the Claude tint.' \
+'  RECOMMENDATION: off. You only want this if WezTerm crashes on you often
+  enough to be worth the cost, and it costs real day-to-day comfort:
+    - every config change needs "ts-mux restart", which KILLS every pane;
+    - mux panes lose the Claude state tint, so the tab bar stops telling you
+      which sessions are working, done or waiting;
+    - the server holds your shells, so it is one more thing to restart.
+  On: shells run in wezterm-mux-server, so a GUI crash leaves panes alive and
+  relaunching WezTerm reattaches. Off: the GUI owns them, and closing it ends
+  them - which is what most people actually expect.' \
         'off|off|panes are spawned by the GUI' \
         'on|on|panes survive a GUI crash'
 }
@@ -248,9 +254,13 @@ ts_prompt_wezterm_restore() {
         return 0
     fi
     ts_prompt_choice off 'WezTerm session restore (reopen the last session at startup):' \
-'  On: WezTerm reopens the tabs, panes and scrollback you had when you last
-  closed it. Off: it starts clean, and Leader+L still restores a session on
-  demand from the same autosaved state.' \
+'  RECOMMENDATION: off. A terminal that silently reopens yesterday shells is a
+  surprise, and the panes come back without their processes - you get the
+  layout and the scrollback, not the running commands, which is easy to
+  mistake for a session that is still live.
+  You lose nothing by saying off: the autosave runs either way, so Leader+L
+  restores the same session on demand, when you actually want it.
+  On: every launch replays the last autosaved session.' \
         'off|off|start clean every time' \
         'on|on|reopen the last session'
 }
@@ -272,10 +282,17 @@ ts_prompt_atuin() {
         case "$TS_ATUIN" in on) printf 'on\n' ;; *) printf 'off\n' ;; esac
         return 0
     fi
-    ts_prompt_choice off 'atuin shell history (replaces Ctrl+R):' \
-'  On: Ctrl+R searches every shell'"'"'s history from a SQLite database, with
-  context and no 100k-line ceiling. Off: Ctrl+R stays fzf'"'"'s history widget.
-  Either way Ctrl+T and Alt+C keep working, and Up-arrow keeps prefix search.' \
+    ts_prompt_choice on 'atuin shell history (replaces Ctrl+R):' \
+'  RECOMMENDATION: on. It is the single biggest day-to-day upgrade here -
+  Ctrl+R searches every shell'"'"'s history from one SQLite database, with the
+  directory and exit status of each command, and no 100k-line ceiling.
+  What changes: Ctrl+R becomes atuin instead of fzf. Ctrl+T, Alt+C and
+  Up-arrow are untouched, and `history`/`hgrep` still read zsh'"'"'s own file,
+  so nothing you already use stops working.
+  Secrets are filtered the same way as ~/.zsh_history, so API keys do not
+  land in the database either. Nothing syncs anywhere: no account is set up
+  and auto-sync is off, so it all stays on this machine.
+  Reversible any time with `ts-config atuin off`.' \
         'off|off|keep fzf on Ctrl+R' \
         'on|on|atuin owns Ctrl+R'
 }
@@ -309,7 +326,6 @@ ts_prompt_multi() {
     done
     n=${#keys[@]}
     [ "$n" -eq 0 ] && { printf '\n'; return 0; }
-    exclusive -1
 
     render() {
         {
@@ -349,6 +365,11 @@ ts_prompt_multi() {
         printf '%s\n' "${out# }"
     }
 
+    # Normalise the pre-ticks before the first render: a machine mid-channel-switch
+    # can legitimately have both installed. Must come AFTER the helper is defined
+    # — bash resolves function names at call time, so doing this up with the tick
+    # parsing printed "exclusive: command not found" and silently skipped it.
+    exclusive -1
     render
     if ! ts_is_interactive; then
         printf 'Toggle a number, [a]ll, [n]one, Enter to continue, [s]kip: (non-interactive — keeping the defaults)\n' \
@@ -484,11 +505,17 @@ ts_prompt_apps() {
     esac
 }
 
+# <env-var> <title> <intro> [default] [on-note]
+# The default is a parameter so a caller can probe the service first and answer
+# the question the way the machine actually is, instead of always defaulting off
+# and letting someone wire an agent to something that is not running.
 ts_prompt_agent_toggle() {
-    local env_name="$1" title="$2" note="$3" value=""
+    local env_name="$1" title="$2" note="$3" def="${4:-off}" onnote="${5:-user-global on this computer}" value=""
     eval "value=\${$env_name:-}"
     if [ -n "$value" ]; then case "$value" in on) echo on ;; *) echo off ;; esac; return; fi
-    ts_prompt_choice off "$title" "$note" 'off|off|configure later with ts-config agents' 'on|on|user-global on this computer'
+    ts_prompt_choice "$def" "$title" "$note" \
+        'off|off|configure later with ts-config agents' \
+        "on|on|$onnote"
 }
 
 ts_prompt_headroom_cursor() {
@@ -536,6 +563,7 @@ ts_wizard_review() {
 # and prompting anyway would block forever when /dev/tty exists but nobody is
 # watching it (CI, a detached install).
 ts_wizard_ask() {
+    local _hr_report="" _hr_def=off _hr_note="" _am_report="" _am_def=off _am_note=""
     TS_WIZ_ASKED=0
 
     # The leader key only matters for WezTerm (a GUI app). On a headless server
@@ -604,11 +632,32 @@ ts_wizard_ask() {
     if command -v ts_is_headless >/dev/null 2>&1 && ts_is_headless; then
         TS_WIZ_HEADROOM="${TS_HEADROOM:-off}"; TS_WIZ_CAVEMAN="${TS_CAVEMAN:-off}"; TS_WIZ_AGENTMEMORY="${TS_AGENTMEMORY:-off}"
     else
-        TS_WIZ_HEADROOM="$(ts_prompt_agent_toggle TS_HEADROOM 'Headroom prompt compression and monitoring?' '  Expects the docker-local proxy on 127.0.0.1:8787 and MCP sidecar on 8788. This installer never manages those containers.')"
+        # Interrogate before offering. Wiring an agent to a service that is not
+        # running fails LATER and silently, so the probe decides the default and
+        # the question says what it actually found.
+        _hr_report="$(ts_probe_headroom 2>/dev/null || true)"
+        if ts_probe_headroom >/dev/null 2>&1; then _hr_def=on; _hr_note='user-global on this computer'
+        else _hr_def=off; _hr_note='proxy is NOT answering — agents would fall back to direct'; fi
+        TS_WIZ_HEADROOM="$(ts_prompt_agent_toggle TS_HEADROOM 'Headroom prompt compression and monitoring?' \
+"  RECOMMENDATION: ${_hr_def}, based on probing this machine just now.
+${_hr_report}
+  docker-local owns these containers; this installer never starts or stops them.
+  Turning it on only points Claude/Codex/Cursor at the proxy, and each launch
+  falls back to the provider directly if the proxy is down — so it degrades
+  rather than breaking." "$_hr_def" "$_hr_note")"
         [ -n "${TS_HEADROOM:-}" ] || TS_WIZ_ASKED=$((TS_WIZ_ASKED + 1))
         TS_WIZ_CAVEMAN="$(ts_prompt_agent_toggle TS_CAVEMAN 'Caveman terse output for all projects?' '  Installs the pinned user-scope plugin/skill; no project files are changed.')"
         [ -n "${TS_CAVEMAN:-}" ] || TS_WIZ_ASKED=$((TS_WIZ_ASKED + 1))
-        TS_WIZ_AGENTMEMORY="$(ts_prompt_agent_toggle TS_AGENTMEMORY 'AgentMemory for all projects?' '  Expects the docker-local service on 127.0.0.1:3111; terminal-stack owns only agent wiring.')"
+        _am_report="$(ts_probe_agentmemory 2>/dev/null || true)"
+        if ts_probe_agentmemory >/dev/null 2>&1; then _am_def=on; _am_note='user-global on this computer'
+        else _am_def=off; _am_note='service is NOT answering — nothing would be captured'; fi
+        TS_WIZ_AGENTMEMORY="$(ts_prompt_agent_toggle TS_AGENTMEMORY 'AgentMemory for all projects?' \
+"  RECOMMENDATION: ${_am_def}, based on probing this machine just now.
+${_am_report}
+  docker-local owns the service; terminal-stack owns only the agent wiring.
+  Note the hooks fail silently by design — they swallow errors and exit 0 — so
+  a machine wired to a service that is not running captures nothing and says
+  nothing about it. That is why this is probed rather than guessed." "$_am_def" "$_am_note")"
         [ -n "${TS_AGENTMEMORY:-}" ] || TS_WIZ_ASKED=$((TS_WIZ_ASKED + 1))
     fi
     if [ "$TS_WIZ_HEADROOM" = on ]; then

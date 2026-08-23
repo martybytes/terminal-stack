@@ -26,6 +26,16 @@ if grep -qi microsoft /proc/version 2>/dev/null; then
     fi
 fi
 
+# Any HTTP response means a server is there. A 404/401 is not "down".
+am_probe() {
+    local code
+    code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "$1" 2>/dev/null || true)"
+    case "$code" in
+        ''|000) echo "  !!  not reachable at $1"; return 1 ;;
+        *)      echo "  ok  reachable at $1 (HTTP $code)"; return 0 ;;
+    esac
+}
+
 json_get() {
     python3 - "$MANIFEST" "$1" <<'PY'
 import json, sys
@@ -64,8 +74,14 @@ headroom_status() {
         || curl -fsS --max-time 1 "$proxy/health" >/dev/null 2>&1; then
         echo "  ok  proxy reachable at $proxy"
     else echo "  !!  proxy not reachable at $proxy (docker-local owns it)"; ok=0; fi
-    if curl -sS --max-time 1 "$mcp" >/dev/null 2>&1; then echo "  ok  MCP sidecar reachable at $mcp"
-    else echo "  !!  MCP sidecar not reachable at $mcp"; ok=0; fi
+    if am_probe "$mcp" >/dev/null 2>&1; then echo "  ok  MCP reachable at $mcp"
+    else
+        # Not a fault in this stack: `headroom mcp serve` is a SEPARATE process
+        # (default 127.0.0.1:8788) that docker-local's compose does not start.
+        echo "  !!  MCP not reachable at $mcp"
+        echo "      start it with: headroom mcp serve --transport http"
+        ok=0
+    fi
     echo "  dashboard: $(json_get headroom.dashboardUrl)"
     [ "$ok" = 1 ]
 }
@@ -157,7 +173,13 @@ run_one() {
         caveman:status) echo "Caveman: pinned $(json_get caveman.version)"; grep -q 'terminal-stack-caveman-start' "${CODEX_HOME:-$HOME/.codex}/AGENTS.md" 2>/dev/null ;;
         caveman:on|caveman:repair) caveman_apply ;;
         caveman:off|caveman:uninstall) caveman_remove ;;
-        agentmemory:status) echo "AgentMemory: pinned $(json_get agentmemory.version)"; curl -fsS --max-time 1 "$(json_get agentmemory.restUrl)" >/dev/null ;;
+        agentmemory:status)
+            echo "AgentMemory: pinned $(json_get agentmemory.version)"
+            # NOT `curl -fsS`: AgentMemory answers 404 on / and 401 on
+            # /agentmemory/health, and -f turns either into a failure — so this
+            # reported the service DOWN while it was up and serving. Any HTTP
+            # response proves something is listening.
+            am_probe "$(json_get agentmemory.restUrl)" ;;
         agentmemory:on|agentmemory:repair) agentmemory_apply ;;
         agentmemory:off|agentmemory:uninstall) agentmemory_remove ;;
         *) echo "ts-agents: unsupported action $action for $1" >&2; return 2 ;;

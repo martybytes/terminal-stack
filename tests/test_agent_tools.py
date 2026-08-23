@@ -1232,3 +1232,109 @@ def test_ts_config_wizard_asks_about_terminals_and_saves_first():
     assert rw.index("ts_save_config") < rw.index("install_apps"), \
         "run_wizard installs before saving the answers"
     assert "ts_note_failure" in rw, "installs here must not be fatal either"
+
+
+@pytest.mark.skipif(not shutil.which("bash"), reason="bash is unavailable")
+def test_wizard_prompts_run_without_undefined_functions():
+    """A RUNTIME smoke test, because the static text checks around it missed two
+    real regressions: `exclusive -1` was called before its function was defined,
+    and ts-config.sh called ts_is_headless without sourcing _detect.sh. Both
+    printed 'command not found' in a live run and silently skipped their work."""
+    script = (
+        'SRC="$PWD"\n'
+        '. "$SRC/bootstrap/_config.sh" >/dev/null 2>&1\n'
+        '. "$SRC/bootstrap/_wizard.sh"\n'
+        '. "$SRC/bootstrap/_detect.sh"\n'
+        # every function ts-config.sh / the bootstraps call on the wizard path
+        'for f in ts_is_headless ts_is_interactive ts_prompt_multi ts_prompt_choice \\\n'
+        '         ts_prompt_terminals ts_terminals_one_channel ts_wizard_collect \\\n'
+        '         ts_note_failure ts_report_failures; do\n'
+        '  command -v "$f" >/dev/null || echo "UNDEFINED: $f"\n'
+        'done\n'
+        # and actually drive the picker, which is where the ordering bug lived
+        'TS_MULTI_EXCLUSIVE="a b" ts_prompt_multi "a b" "T:" "" "a|A|" "b|B|" "c|C|"\n')
+    r = subprocess.run(["bash", "-c", script], cwd=ROOT,
+                       capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    assert "UNDEFINED:" not in r.stdout, r.stdout
+    # /dev/tty is legitimately absent under pytest; anything else is a real fault.
+    noise = [l for l in r.stderr.splitlines()
+             if l.strip() and "/dev/tty" not in l]
+    assert not noise, "wizard emitted errors: " + "; ".join(noise)
+    # The exclusive group must have collapsed a pre-tick of BOTH a and b.
+    picked = r.stdout.replace("UNDEFINED:", "").split()
+    assert picked == ["a"], f"exclusive group not applied: {picked!r}"
+
+
+def test_ts_config_sources_what_it_calls():
+    """ts-config.sh called ts_is_headless, which lives in _detect.sh and was
+    never sourced there."""
+    body = (ROOT / "bootstrap/ts-config.sh").read_text(encoding="utf-8")
+    # Match the SOURCE STATEMENT, not the shellcheck comment above it.
+    src_line = next((l for l in body.splitlines()
+                     if l.strip().startswith(". ") and "_detect.sh" in l), None)
+    assert src_line, "ts-config.sh must source _detect.sh"
+    assert body.index(src_line) < body.index("ts_is_headless ||"), \
+        "_detect.sh sourced after first use of ts_is_headless"
+
+
+# ── wizard recommendations + readiness probing ──────────────────────────────────
+
+@pytest.mark.skipif(not shutil.which("bash"), reason="bash is unavailable")
+def test_service_probes_treat_any_http_response_as_up():
+    """AgentMemory answers 404 on / and 401 on /agentmemory/health. `curl -fsS`
+    turns either into a failure, which is why `ts-agents agentmemory status`
+    reported the service down while it was up and serving. Any response proves
+    something is listening; only a refused connection is 'down'."""
+    script = (
+        '. bootstrap/_config.sh >/dev/null 2>&1\n'
+        # port 9 (discard) is reliably not an HTTP server
+        'ts_probe_http http://127.0.0.1:9 1 && echo BAD_UP || echo ok_down\n'
+        'ts_probe_http_ok http://127.0.0.1:9 1 && echo BAD_OK || echo ok_not_ok\n')
+    r = subprocess.run(["bash", "-c", script], cwd=ROOT, capture_output=True, text=True)
+    assert "BAD_" not in r.stdout, r.stdout
+    assert r.stdout.split() == ["ok_down", "ok_not_ok"], r.stdout
+    agents = _uncommented((ROOT / "bootstrap/ts-agents.sh").read_text(encoding="utf-8"))
+    assert 'curl -fsS --max-time 1 "$(json_get agentmemory.restUrl)"' not in agents, \
+        "-f makes a 404/401 look like the service is down"
+
+
+def test_wizard_recommends_and_probes_before_offering():
+    """Blind on/off questions let a machine be wired to a service that is not
+    running — which then fails later and silently, because the agentmemory hooks
+    swallow errors and exit 0. Probe first, default from what was found."""
+    wiz = (ROOT / "bootstrap/_wizard.sh").read_text(encoding="utf-8")
+    for fn in ("ts_prompt_wezterm_mux", "ts_prompt_wezterm_restore", "ts_prompt_atuin"):
+        body = wiz[wiz.index(f"{fn}() {{"):]
+        body = body[:body.index("\n}\n")]
+        assert "RECOMMENDATION:" in body, f"{fn} has no recommendation"
+    # atuin now defaults to ON; the other two stay off.
+    at = wiz[wiz.index("ts_prompt_atuin() {"):]
+    at = at[:at.index("\n}\n")]
+    assert "ts_prompt_choice on " in at, "atuin should default to on"
+    for fn in ("ts_prompt_wezterm_mux", "ts_prompt_wezterm_restore"):
+        b = wiz[wiz.index(f"{fn}() {{"):]
+        b = b[:b.index("\n}\n")]
+        assert "ts_prompt_choice off " in b, f"{fn} should default to off"
+    # The agent toggles must be probe-driven, not hardcoded off.
+    assert "ts_probe_headroom" in wiz and "ts_probe_agentmemory" in wiz
+    assert "_hr_def" in wiz and "_am_def" in wiz
+    # Compare against the PROMPT call, not the headless/env-override branch that
+    # also assigns TS_WIZ_HEADROOM earlier in the same function.
+    ask = wiz[wiz.index("ts_wizard_ask() {"):]
+    prompt_call = 'TS_WIZ_HEADROOM="$(ts_prompt_agent_toggle'
+    assert prompt_call in ask
+    assert ask.index("ts_probe_headroom") < ask.index(prompt_call), \
+        "headroom must be probed before it is offered"
+    am_call = 'TS_WIZ_AGENTMEMORY="$(ts_prompt_agent_toggle'
+    assert ask.index("ts_probe_agentmemory") < ask.index(am_call), \
+        "agentmemory must be probed before it is offered"
+
+
+def test_platform_impossible_apps_are_not_offered_forever():
+    """nvtop is Linux-only, so on macOS it can never install — it was reported
+    missing on every ts-update, accepted, and printed 'Linux-only; skipping'."""
+    cfg = (ROOT / "bootstrap/_config.sh").read_text(encoding="utf-8")
+    assert "ts_app_installable" in cfg
+    pend = cfg[cfg.index("ts_apps_pending() {"):]
+    pend = pend[:pend.index("\n}\n")]
+    assert "ts_app_installable" in pend, "pending list must filter impossible ids"

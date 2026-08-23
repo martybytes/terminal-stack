@@ -38,6 +38,11 @@ fi
 . "$SRC/bootstrap/_config.sh"
 # shellcheck source=_wizard.sh
 . "$SRC/bootstrap/_wizard.sh"
+# _detect.sh supplies ts_is_headless, which run_wizard needs to decide whether to
+# ask the terminal-emulator question. It is side-effect free and documented as
+# "sourced after _config.sh and _wizard.sh", which is exactly here.
+# shellcheck source=_detect.sh
+. "$SRC/bootstrap/_detect.sh"
 
 cur()     { local v; v="$(ts_data_get "$1" 2>/dev/null || true)"; [ -n "$v" ] && echo "$v" || echo "$2"; }
 # The installed build date, for the `show` line. No network — the date is in the

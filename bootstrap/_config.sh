@@ -174,6 +174,22 @@ ts_load_node_env() {
     eval "$(fnm env 2>/dev/null)" 2>/dev/null || true
 }
 
+# Can this platform actually install <id>? Returns 1 for ids that are real
+# catalog entries but impossible here, so they are never offered and never nag.
+# The Windows side has always done this ("Only offer what this platform can
+# actually install" in Get-TsAppsPending); POSIX did not, so a macOS user who
+# picked "install everything" was told nvtop was missing on every single
+# ts-update, accepted, and watched it print "Linux-only; skipping" forever.
+ts_app_installable() {
+    case "$(uname -s 2>/dev/null)" in
+        Darwin)
+            case "$1" in
+                nvtop) return 1 ;;   # NVIDIA/Linux only; no macOS build exists
+            esac ;;
+    esac
+    return 0
+}
+
 ts_apps_pending() {
     local saved id seen="" out=""
     ts_load_node_env
@@ -182,6 +198,7 @@ ts_apps_pending() {
         case " $seen " in *" $id "*) continue ;; esac
         seen="$seen $id"
         command -v "$(ts_app_bin "$id")" >/dev/null 2>&1 && continue
+        ts_app_installable "$id" || continue
         out="$out $id"
     done
     echo "${out# }"
@@ -194,6 +211,87 @@ ts_apps_install_note() {
     elif [ "$(uname -s 2>/dev/null)" = "Darwin" ]; then
         printf '  Optional apps install via Homebrew (user-space; no sudo for formulae).\n\n'
     fi
+}
+
+# ── Service readiness probes ───────────────────────────────────────────────────
+# The wizard used to offer Headroom and AgentMemory as blind on/off questions and
+# happily wire a machine to a service that was not running — the failure then
+# showed up much later as an agent that silently retrieved nothing. These probe
+# first, so the question can default sensibly and say what it found.
+#
+# "Answering" is the test, NOT a 2xx. AgentMemory returns 404 on `/` and 401 on
+# `/agentmemory/health`; both prove a server is listening and speaking HTTP.
+# `curl -fsS` treats either as failure, which is why `ts-agents agentmemory
+# status` reported the service down while it was up and serving.
+
+# ts_probe_http <url> [timeout] — 0 if anything answered, 1 if nothing did.
+ts_probe_http() {
+    local url="$1" t="${2:-2}" code
+    command -v curl >/dev/null 2>&1 || return 1
+    code="$(curl -s -o /dev/null -w '%{http_code}' --max-time "$t" "$url" 2>/dev/null || true)"
+    case "$code" in ''|000) return 1 ;; *) return 0 ;; esac
+}
+
+# ts_probe_http_ok <url> [timeout] — stricter: only 2xx counts. For endpoints
+# that are genuinely readiness checks, like Headroom's /readyz.
+ts_probe_http_ok() {
+    local url="$1" t="${2:-2}" code
+    command -v curl >/dev/null 2>&1 || return 1
+    code="$(curl -s -o /dev/null -w '%{http_code}' --max-time "$t" "$url" 2>/dev/null || true)"
+    case "$code" in 2??) return 0 ;; *) return 1 ;; esac
+}
+
+# ts_docker_ports <name-substring> — published host ports for a running
+# container, so a "not reachable" warning can say what IS listening instead of
+# just repeating the port we expected.
+ts_docker_ports() {
+    command -v docker >/dev/null 2>&1 || return 1
+    docker ps --filter "name=$1" --format '{{.Names}} {{.Ports}}' 2>/dev/null | head -3
+}
+
+# ts_probe_headroom — 0 when the proxy is ready. Echoes a human summary.
+# The MCP endpoint is reported separately because it is a SEPARATE process
+# (`headroom mcp serve`, default 127.0.0.1:8788) that docker-local's compose does
+# not start — so the proxy being up says nothing about MCP being up.
+ts_probe_headroom() {
+    local proxy="${1:-http://127.0.0.1:8787}" mcp="${2:-http://127.0.0.1:8788/mcp}" rc=1
+    if ts_probe_http_ok "$proxy/readyz" || ts_probe_http_ok "$proxy/health"; then
+        printf '  Proxy:  reachable at %s\n' "$proxy"
+        rc=0
+    else
+        printf '  Proxy:  NOT reachable at %s\n' "$proxy"
+        local seen; seen="$(ts_docker_ports headroom 2>/dev/null || true)"
+        [ -n "$seen" ] && printf '          docker shows: %s\n' "$(printf '%s' "$seen" | tr '\n' ';')"
+    fi
+    if ts_probe_http "$mcp"; then
+        printf '  MCP:    reachable at %s\n' "$mcp"
+    else
+        printf '  MCP:    not reachable at %s — that is a separate process\n' "$mcp"
+        printf '          (`headroom mcp serve --transport http`); compose does not start it.\n'
+    fi
+    return $rc
+}
+
+# ts_probe_agentmemory — 0 when the REST service answers at all.
+ts_probe_agentmemory() {
+    local rest="${1:-http://127.0.0.1:3111}" rc=1
+    if ts_probe_http "$rest"; then
+        printf '  Service: reachable at %s\n' "$rest"
+        rc=0
+    else
+        printf '  Service: NOT reachable at %s\n' "$rest"
+        local seen; seen="$(ts_docker_ports agentmemory 2>/dev/null || true)"
+        [ -n "$seen" ] && printf '           docker shows: %s\n' "$(printf '%s' "$seen" | tr '\n' ';')"
+    fi
+    # The hook wiring is gated on the plugin cache, not on reachability, so a
+    # missing cache is worth saying: enabling installs it, it is not an error.
+    if [ -d "$HOME/.claude/plugins/cache/agentmemory" ] \
+       || [ -d "${CODEX_HOME:-$HOME/.codex}/plugins/cache/agentmemory" ]; then
+        printf '  Plugin:  installed\n'
+    else
+        printf '  Plugin:  not installed yet — turning this on installs it\n'
+    fi
+    return $rc
 }
 
 # ── Optional-install failure collection ────────────────────────────────────────
@@ -449,6 +547,8 @@ ts_report_installed_apps() {
             # Strip ANSI: btop and friends colour their own version output.
             ver="$(printf '%s\n' "$raw" | head -1 | sed $'s/\033\\[[0-9;]*m//g' | cut -c1-40 || true)"
             printf '    %-14s %s\n' "$id" "${ver:-$path}"
+        elif ! ts_app_installable "$id"; then
+            printf '    %-14s %s\n' "$id" "not available on this platform"
         else
             printf '    %-14s %s\n' "$id" "NOT FOUND on PATH"
         fi
