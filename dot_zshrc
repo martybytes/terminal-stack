@@ -656,6 +656,28 @@ ts-update() {
       echo "    Install them with: ts-config apps"
     fi
   fi
+  # A WezTerm upgrade is not a stack update, but ts-update is the moment you are
+  # already thinking about being current — and neither channel ever moves on its
+  # own. Silent unless there is genuinely something newer on the channel you are
+  # already on; silent too when WezTerm is absent, hand-installed, or offline.
+  local _wez_new
+  _wez_new="$(TERMINAL_STACK_CHEZMOI="$cz" bash -c \
+    'source "$1/bootstrap/_wezterm.sh" >/dev/null 2>&1 && ts_wezterm_update_available' _ "$src" 2>/dev/null)"
+  if [[ -n "$_wez_new" ]]; then
+    echo "==> WezTerm: $_wez_new"
+    if [[ -t 0 ]]; then
+      local wans
+      read -r "wans?Upgrade WezTerm now? [y/N]: "
+      case "$wans" in
+        y|Y|yes|YES)
+          TERMINAL_STACK_DIR="$src" TERMINAL_STACK_CHEZMOI="$cz" \
+            bash "$src/bootstrap/ts-wezterm.sh" upgrade ;;
+        *) echo "    Skipped. 'ts-config wezterm' for the details, 'ts-config wezterm upgrade' to do it." ;;
+      esac
+    else
+      echo "    Upgrade it with: ts-config wezterm upgrade"
+    fi
+  fi
   # The tts daemon keeps running its pre-pull code. Like the mux server it is
   # never auto-restarted (it may be mid-announcement or holding a duck) —
   # nudge instead, same philosophy as ts-mux restart.
@@ -722,6 +744,18 @@ ts-mux() {
     echo "ts-mux: $src/bootstrap/ts-mux.sh not found. Run 'ts-update'." >&2; return 1
   fi
   TERMINAL_STACK_DIR="$src" TERMINAL_STACK_CHEZMOI="$cz" bash "$src/bootstrap/ts-mux.sh" "$@"
+}
+
+# ts-wezterm — which WezTerm build you have, what upstream has, and what changed.
+# Also switches channel. Nothing here runs on its own; see `ts-wezterm -h`.
+ts-wezterm() {
+  local cz src
+  cz="$(_ts_chezmoi)" || { echo "ts-wezterm: chezmoi not found on PATH." >&2; return 1 }
+  src="$(_ts_src "$cz" ts-wezterm)" || return 1
+  if [[ ! -f "$src/bootstrap/ts-wezterm.sh" ]]; then
+    echo "ts-wezterm: $src/bootstrap/ts-wezterm.sh not found. Run 'ts-update'." >&2; return 1
+  fi
+  TERMINAL_STACK_DIR="$src" TERMINAL_STACK_CHEZMOI="$cz" bash "$src/bootstrap/ts-wezterm.sh" "$@"
 }
 
 # Diagnose / repair the install: stale chezmoi sourceDir, missing `doc`, leftover

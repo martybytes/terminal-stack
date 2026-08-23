@@ -808,6 +808,27 @@ function Update-TerminalStack {
         } catch { Write-Warning "app check skipped: $_" }
     }
 
+    # A WezTerm upgrade is not a stack update, but ts-update is the moment you are
+    # already thinking about being current — and neither channel ever moves on its
+    # own. Silent unless there is genuinely something newer on the channel you are
+    # already on; silent too when WezTerm is absent, hand-installed, or offline.
+    if (Test-Path $cfgHelper) {
+        try {
+            . $cfgHelper
+            $wezNew = Get-TsWezUpdateAvailable
+            if ($wezNew) {
+                Write-Host "==> WezTerm: $wezNew"
+                if ([Console]::IsInputRedirected) {
+                    Write-Host '    Upgrade it with: ts-config wezterm upgrade'
+                } else {
+                    $a = Read-Host 'Upgrade WezTerm now? [y/N]'
+                    if ($a -match '^(y|Y|yes|YES)$') { Update-TsWezterm }
+                    else { Write-Host "    Skipped. 'ts-config wezterm' for the details, 'ts-config wezterm upgrade' to do it." }
+                }
+            }
+        } catch { Write-Warning "WezTerm check skipped: $_" }
+    }
+
     # The tts daemon keeps running its pre-pull code. Like the mux server it is
     # never auto-restarted (it may be mid-announcement or holding a duck) —
     # nudge instead, same philosophy as ts-mux restart.
@@ -951,16 +972,17 @@ function Set-TerminalStackConfig {
                 Write-Host "  cc-tts     : $(if ($ccTts.enabled) { 'on' } else { 'off' })"
                 Write-Host "  wezmux     : $(Get-TsWeztermMux)"
                 Write-Host "  wezrestore : $(Get-TsWeztermRestore)"
+                Write-Host "  wezterm    : $(Get-TsWezChannel)   (ts-config wezterm)"
                 Write-Host "  headroom   : $headroom   (Cursor: $headroomCursor)"
                 Write-Host "  caveman    : $caveman"
                 Write-Host "  agentmemory: $agentmemory"
                 Write-Host ''
-                Write-Host '  1) leader  2) theme  3) tmux prefix  4) apps  5) re-apply  6) Claude TTS  7) WezTerm mux  8) session restore  9) coding agents  q) quit'
+                Write-Host '  1) leader  2) theme  3) tmux prefix  4) apps  5) re-apply  6) Claude TTS  7) WezTerm mux  8) session restore  9) coding agents  t) WezTerm build  w) re-run wizard  q) quit'
                 switch (Read-Host 'Choose') {
                     '1' { $leader = Read-TsLeader; & $save }
                     '2' { $theme  = Read-TsTheme;  & $save }
                     '3' { $t = Read-Host 'tmux prefix chord (e.g. ctrl-a) [ctrl-b]'; $tmux = if ($t) { $t } else { 'ctrl-b' }; & $save }
-                    '4' { $apps = @(Read-TsApps); Install-TsApps $apps; & $save }
+                    '4' { $apps = @(Read-TsApps); Install-TsApps $apps; Show-TsInstalledApps $apps; & $save }
                     '5' { & $save }
                     '6' {
                         Show-CcTtsConfig
@@ -970,6 +992,13 @@ function Set-TerminalStackConfig {
                             'c' { Invoke-TsConfigTts -Sub test -Apply $save }
                             'd' { Show-CcTtsDaemonStatus }
                         }
+                    }
+                    't' { Show-TsWezStatus }
+                    'w' {
+                        $w = & $runWizard
+                        $leader = $w.Leader; $theme = $w.Theme; $apps = @($w.Apps)
+                        $headroom = $w.Headroom; $headroomCursor = $w.HeadroomCursor
+                        $caveman = $w.Caveman; $agentmemory = $w.Agentmemory
                     }
                     '7' { Invoke-TsMux status }
                     '8' { $restore = Read-TsWeztermRestore; Save-TsConfig -WeztermRestore $restore | Out-Null; Invoke-TsSync $src; Write-Host '==> done.' }
@@ -1105,7 +1134,7 @@ function Set-TerminalStackConfig {
             $muxArgs = @(@($Value) + @($Rest) | Where-Object { $_ })
             Invoke-TsMux @muxArgs
         }
-        default { Write-Warning "ts-config: unknown command '$Action' (show, leader, theme, tmux, apps, tts, mux, restore, agents)" }
+        default { Write-Warning "ts-config: unknown command '$Action' (show, leader, theme, tmux, apps, tts, mux, restore, agents, wezterm, wizard)" }
     }
 }
 Set-Alias -Name ts-config -Value Set-TerminalStackConfig
