@@ -1,0 +1,40 @@
+# shares.local.conf.example — copy to ~/.config/terminal-stack/shares.local.conf
+#
+# This is the per-machine share inventory for `ts-smb`. It is UNTRACKED and
+# never leaves this machine: no gist, no repo sync, no cross-machine transport.
+# It is read after the tracked bootstrap/shares.conf and wins key-by-key, so you
+# can override a single field without restating a whole stanza.
+#
+# Full grammar and the list of fields is in bootstrap/shares.conf.
+#
+# Reminder: the SMB share name is `path`, not `share` — `share` opens a stanza.
+# A stanza with no `host` is almost always that mistake; `ts-smb doctor` says so.
+
+# A NAS share you mount read-write, with credentials in the OS keychain.
+# Store the password once with:  ts-smb creds media set
+share media
+  host       nas.lan
+  path       Media
+  user       marty
+  cred       keychain
+  mountpoint ~/mnt/media
+  vfs        writes
+  flags      --transfers 8 --smb-idle-timeout 5m
+
+# A guest-readable share. rclone has no anonymous mode; user `guest` with an
+# empty password is the documented substitute, which is the default already.
+share public
+  host  fileserver.local
+  path  Public
+  cred  none
+
+# A share that needs the no-FUSE path (or one you just want on NFS).
+share backup
+  host   10.0.0.9
+  path   Backups
+  user   backupsvc
+  engine nfs
+
+# Override just one field of a stanza defined above — last match wins.
+# share media
+#   vfs full

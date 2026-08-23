@@ -1227,3 +1227,110 @@ review rather than following `latest` service images. `ts-update` checks only to
 enabled on the current machine and repairs their user-global client wiring. JSON
 files shared with the agents are edited by named entry, with a backup, so unrelated
 MCP servers and hooks survive.
+
+## Why `ts-smb` pins the macOS FUSE library instead of letting rclone choose
+
+`rclone mount` uses cgofuse, which on darwin loads the first FUSE library it
+finds in a fixed order: `$CGOFUSE_LIBFUSE_PATH`, then macFUSE's
+`/usr/local/lib/libfuse.2.dylib`, then `libosxfuse.2.dylib`, then FUSE-T's
+`libfuse-t.dylib`. There is no `--fuse-lib` flag — `--fuse-flag` only forwards
+arguments *to* libfuse — so the environment variable is the only lever.
+
+That order is actively harmful on a machine that has both. The development Mac
+carried macFUSE 4.2.4 built for macOS 12.1 (December 2021) alongside FUSE-T 1.2.6
+(May 2026). macFUSE wins the order, its kext does not load on macOS 26, and the
+resulting failure is a **hang, not an error** — and a hung FUSE mount takes any
+shell that touches the mountpoint with it. Nothing in the error surface points at
+the library that was actually chosen.
+
+So `ts-smb` never invokes `rclone mount` on darwin without setting
+`CGOFUSE_LIBFUSE_PATH` explicitly, and `auto` prefers FUSE-T: it is userspace, it
+is unaffected by Apple deprecating kexts, and unlike a kext its viability is
+decidable from the filesystem alone. macFUSE is used only when
+`kmutil showloaded --list-only` proves its kext is actually loaded — a check that
+is unprivileged and takes about 0.2s. A merely *plausible* macFUSE ranks **below**
+`rclone nfsmount`, because an unloadable kext hangs while nfsmount at worst gives
+a slow mount. Prefer degraded-but-working over possibly-wedged.
+
+Two related findings are baked into the code as comments, because both cost real
+time to rediscover. Homebrew's macOS rclone refuses to mount at all, aborting
+with "rclone mount is not supported on MacOS when rclone is installed via
+Homebrew" — a build-time guard no library or variable can get past, so a brew
+rclone browses and copies perfectly but can never mount; `ts-smb doctor` reports
+it and names the official binary. And FUSE-T's FSKit backend, which looks like
+the modern choice on macOS 26, fails outright there (`fuse: mount failed with
+error: -1`) where the default NFS backend does not, so `-o backend=fskit` is
+**not** passed automatically.
+
+## Why `ts-smb` tracks mounts in a state dir rather than through `rclone rc`
+
+rclone can expose a control API with `--rc`, including `mount/listmounts` and
+`mount/unmount`. It is the wrong tool here for three reasons.
+
+The rc server is **per process**. Running `--rc` on N daemonised mounts means N
+ports, and knowing which port belongs to which share requires a local record
+anyway — so it buys nothing that the state dir does not already provide. The
+alternative shape, one long-lived `rclone rcd` that owns every mount, is a second
+daemon to supervise, autostart and health-check; the TTS daemon section of
+`CLAUDE.md` is a monument to what that costs. And `--rc-no-auth` on loopback is an
+unauthenticated channel that can mount arbitrary remotes, which is a lesson this
+repo has already paid for once (hence the Host-header checks and `X-TS-Token` on
+the TTS dashboard).
+
+So identity and intent live in
+`${XDG_STATE_HOME:-~/.local/state}/terminal-stack/smb/<name>.mnt`, in the same
+whitespace `key value` grammar as the share store so one parser serves both, and
+**liveness is derived, never stored**: pid alive × mountpoint present gives
+live/zombie/orphan/gone. The state dir alone cannot tell whether a mount is real;
+the mount table alone cannot tell whether a mount is *ours*, which is what makes
+`ts-smb umount --all` safe.
+
+The hard constraint underneath is that nothing may `stat`, `ls`, `test -d` or glob
+a mountpoint to answer "is this mounted": on a dead FUSE mount those block forever.
+Liveness is read from `mount(8)` on macOS and `/proc/self/mounts` on Linux, both of
+which answer without touching the path. `findmnt --target` is specifically avoided
+because it resolves the path, which touches it.
+
+## Why the SMB share inventory is local-only and never synced
+
+The obvious wish is to keep one share list across machines, and the obvious
+vehicle is a GitHub gist. Both halves are wrong.
+
+Gists are owned by user accounts, never by organisations, so "shares grouped by
+org" does not map onto them at all. "Secret" gists are not private — anyone with
+the URL can read one, and since November 2025 GitHub scans unlisted gists and
+reports findings to secret-scanning partners. NAS hostnames, share names and
+usernames are exactly the sort of quiet inventory leak that is invisible until it
+matters. A private repository is the primitive that actually has org ownership
+and access control.
+
+The deeper objection is architectural: a network round-trip must not sit in the
+path of `ts-smb mount`. A mount tool has to work when the network is flaky, which
+is precisely when someone is using it. Any sync design therefore has to be
+local-first with explicit push/pull anyway — at which point the sync is a separate
+concern that can be added later without changing anything here.
+
+So `~/.config/terminal-stack/shares.local.conf` is untracked, machine-local, and
+the only source of truth. `bootstrap/shares.conf` is tracked but holds **defaults
+only and never a host**, so the repository never learns where anyone's NAS is.
+No chezmoi `[data]` key is involved either: the inventory is a list of records,
+which that store is explicitly not built for, and every field here is per-machine.
+
+## Why `ts-smb` ships without a PowerShell twin
+
+Every other dual-shell command in this stack keeps a parallel pwsh implementation
+whose `-h` output stays byte-identical. `ts-smb` does not, as of 2026-08-23, and
+that is a decision rather than drift — recorded here, stated in the `-h` prose,
+and noted in `CLAUDE.md` so nobody "fixes" the asymmetry without reading this.
+
+Most of what `ts-smb` exists to do is moot on Windows: Explorer and `net use`
+already browse and map SMB shares natively, with credentials in Credential
+Manager, and the entire FUSE engine layer has no Windows analogue beyond WinFsp.
+The interrogation half would still be useful, so a twin may be worth writing —
+but it is a separate piece of work, and pretending otherwise by shipping an
+untested pwsh file would be worse than the honest gap.
+
+Two notes for whoever writes it. The store's `flags` directive carries a
+free-form tail, so a pwsh `-split '\s+'` destroys it — split with a limit of 3
+and parse the remainder. And the credential layer maps to Credential Manager, not
+to `security`/`secret-tool`.

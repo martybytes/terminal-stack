@@ -335,6 +335,42 @@ ts_doctor() {
         fi
     fi
 
+    # ── ts-smb (SMB shares over rclone) ───────────────────────────────────────
+    # Gated: ts_doctor is already long, so this runs only once you actually use
+    # ts-smb. `ts-smb doctor` is the full report; these are the three lines that
+    # matter to a general health check.
+    local smb_conf="${XDG_CONFIG_HOME:-$HOME/.config}/terminal-stack/shares.local.conf"
+    local smb_state="${XDG_STATE_HOME:-$HOME/.local/state}/terminal-stack/smb"
+    if [ -f "$smb_conf" ] || [ -n "$(ls -A "$smb_state" 2>/dev/null || true)" ]; then
+        if command -v rclone >/dev/null 2>&1; then
+            _ok "ts-smb: rclone present"
+        else
+            _bad "ts-smb: shares are configured but rclone is missing; repair: ts-config apps rclone"
+        fi
+        # The Homebrew macOS build refuses to mount, and nothing at runtime can
+        # get past it — worth saying out loud, because browsing still works and
+        # only mounting breaks.
+        if [ "$(uname -s 2>/dev/null)" = Darwin ] && command -v rclone >/dev/null 2>&1; then
+            local rcp; rcp="$(command -v rclone)"
+            rcp="$(realpath "$rcp" 2>/dev/null || printf '%s' "$rcp")"
+            case "$rcp" in
+                */Cellar/*|/opt/homebrew/*|/usr/local/Homebrew/*)
+                    _bad "ts-smb: this rclone is the Homebrew build, which cannot mount on macOS (browsing is unaffected); repair: install the official binary from https://rclone.org/downloads/"
+                    ;;
+            esac
+        fi
+        local smb_stale=0 f pid mp
+        for f in "$smb_state"/*.mnt; do
+            [ -f "$f" ] || continue
+            pid="$(awk '$1 == "pid" { print $2 }' "$f" 2>/dev/null | tail -1)"
+            case "$pid" in ''|*[!0-9]*) smb_stale=$((smb_stale + 1)); continue ;; esac
+            kill -0 "$pid" 2>/dev/null || smb_stale=$((smb_stale + 1))
+        done
+        if [ "$smb_stale" -gt 0 ]; then
+            _bad "ts-smb: $smb_stale stale mount record(s); repair: ts-smb umount --all --force"
+        fi
+    fi
+
     # Location advisories (not health failures): a legacy-path runtime clone can
     # be moved to the canonical location; a dev-clone pin is deliberate.
     local canon=""

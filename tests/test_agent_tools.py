@@ -138,6 +138,12 @@ def test_shell_entrypoints_parse():
         "bootstrap/ts-agents.sh", "bootstrap/wsl-bootstrap.sh",
         "bootstrap/linux-bootstrap.sh", "bootstrap/mac-bootstrap.sh",
         "run_after_90-sync-windows.sh",
+        # These were never covered by the gate; a syntax error in any of them
+        # only showed up when someone ran the command.
+        "bootstrap/ts-mux.sh", "bootstrap/ts-wezterm.sh", "bootstrap/ts-doctor.sh",
+        "bootstrap/wso.sh", "bootstrap/_workspace.sh", "bootstrap/_doctor.sh",
+        "bootstrap/_common-debian.sh",
+        "bootstrap/ts-smb.sh", "bootstrap/_smb.sh",
     ]
     result = subprocess.run([shutil.which("bash"), "-n", *files], cwd=ROOT,
                             text=True, capture_output=True, check=False)
@@ -663,3 +669,141 @@ def test_shared_pwsh_prompts_live_where_both_callers_can_reach_them():
     for fn in ("function Read-TsWizard", "function Install-TsTerminals"):
         assert fn in cfg, f"{fn} must live in _config.ps1"
         assert fn not in boot, f"{fn} is duplicated in windows-bootstrap.ps1"
+
+
+# ── ts-smb ──────────────────────────────────────────────────────────────────────
+
+def _smb_eval(tmp_path, local_conf, snippet, tracked="set default_user guest\n"):
+    """Run a snippet with bootstrap/_smb.sh sourced against a sandboxed store."""
+    lib = tmp_path / "lib"; lib.mkdir(exist_ok=True)
+    (lib / "shares.conf").write_text(tracked, encoding="utf-8")
+    cfg = tmp_path / "cfg" / "terminal-stack"; cfg.mkdir(parents=True, exist_ok=True)
+    (cfg / "shares.local.conf").write_text(local_conf, encoding="utf-8")
+    env = dict(os.environ, XDG_CONFIG_HOME=str(tmp_path / "cfg"),
+               TS_SMB_LIB_DIR=str(lib))
+    r = subprocess.run([shutil.which("bash"), "-c",
+                        f'. bootstrap/_smb.sh >/dev/null 2>&1; {snippet}'],
+                       cwd=ROOT, text=True, capture_output=True, check=False, env=env)
+    assert r.returncode == 0, r.stderr
+    return r.stdout.strip()
+
+
+@pytest.mark.skipif(not shutil.which("bash"), reason="bash is unavailable")
+def test_smb_store_parses_stanzas(tmp_path):
+    conf = "share media\n  host nas.lan\n  path Media\n  user marty\n"
+    assert _smb_eval(tmp_path, conf, 'ts_smb_get media host ""') == "nas.lan"
+    assert _smb_eval(tmp_path, conf, 'ts_smb_get media path ""') == "Media"
+    assert _smb_eval(tmp_path, conf, 'ts_smb_names') == "media"
+
+
+@pytest.mark.skipif(not shutil.which("bash"), reason="bash is unavailable")
+def test_smb_store_last_match_wins(tmp_path):
+    """The local file must be able to override ONE field without restating a stanza."""
+    conf = ("share media\n  host nas.lan\n  path Media\n  vfs off\n"
+            "share media\n  vfs writes\n")
+    assert _smb_eval(tmp_path, conf, 'ts_smb_get media vfs ""') == "writes"
+    assert _smb_eval(tmp_path, conf, 'ts_smb_get media host ""') == "nas.lan"
+    # ...and the name is not duplicated by the second stanza.
+    assert _smb_eval(tmp_path, conf, 'ts_smb_names') == "media"
+
+
+@pytest.mark.skipif(not shutil.which("bash"), reason="bash is unavailable")
+def test_smb_store_falls_back_to_set_defaults(tmp_path):
+    conf = "share media\n  host nas.lan\n  path Media\n"
+    assert _smb_eval(tmp_path, conf, 'ts_smb_get media user ""',
+                     tracked="set default_user guest\n") == "guest"
+
+
+@pytest.mark.skipif(not shutil.which("bash"), reason="bash is unavailable")
+def test_smb_flags_tail_keeps_its_spaces(tmp_path):
+    """`flags` is the one free-form tail; the space-delimited store cannot hold it,
+    so it lives in its own accumulator. An inline comment is stripped, and so is
+    the whitespace the strip leaves behind."""
+    conf = ("share media\n  host nas.lan\n  path Media\n"
+            "  flags --transfers 8 --smb-idle-timeout 5m   # tuned\n")
+    assert _smb_eval(tmp_path, conf, 'ts_smb_flags media') == \
+        "--transfers 8 --smb-idle-timeout 5m"
+
+
+@pytest.mark.skipif(not shutil.which("bash"), reason="bash is unavailable")
+def test_smb_validate_catches_the_share_vs_path_trap(tmp_path):
+    """`share` opens a stanza, so writing `share Media` for the SMB share name
+    silently opens a second one. That mistake must be reported, not absorbed."""
+    conf = "share media\n  host nas.lan\n  share Media\n"
+    out = _smb_eval(tmp_path, conf, 'ts_smb_validate || true')
+    # Stanza names are folded to lower case, so `share Media` merges back into the
+    # `media` stanza rather than creating a spurious one — the mistake therefore
+    # shows up as a missing `path`, and the message has to say why.
+    assert "has no path" in out
+    assert "'share' opens a stanza" in out
+    assert _smb_eval(tmp_path, conf, 'ts_smb_names') == "media"
+
+
+@pytest.mark.skipif(not shutil.which("bash"), reason="bash is unavailable")
+def test_smb_help_works_without_a_clone():
+    """`ts-smb -h` must work on a box where the clone or chezmoi is the broken thing."""
+    env = {k: v for k, v in os.environ.items() if k != "TERMINAL_STACK_DIR"}
+    env.update({"PATH": "/usr/bin:/bin", "HOME": "/nonexistent"})
+    r = subprocess.run([shutil.which("bash"), "bootstrap/ts-smb.sh", "-h"],
+                       cwd=ROOT, text=True, capture_output=True, check=False, env=env)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.startswith("ts-smb —")
+    assert "Windows is not supported yet" in r.stdout
+
+
+def test_smb_never_offers_a_password_flag():
+    """A password in argv is world-readable via /proc/PID/cmdline, and a mount is
+    long-lived. --password prompts; --password-stdin reads. There is no third form."""
+    src = (ROOT / "bootstrap/ts-smb.sh").read_text(encoding="utf-8")
+    assert "--password-stdin" in src
+    # The flag parser must treat --password as a BOOLEAN. Every value-taking flag
+    # in that loop ends with `shift`; --password must not, or it would be pulling
+    # a secret off the command line.
+    arm = [l for l in src.splitlines() if "--password)" in l]
+    assert arm, "no --password arm in the flag loop"
+    assert "shift" not in arm[0], f"--password consumes a value: {arm[0]}"
+    assert "OPT_PASSWORD=1" in arm[0]
+    # the connection string builder must never interpolate a password
+    lib = (ROOT / "bootstrap/_smb.sh").read_text(encoding="utf-8")
+    conn = lib[lib.index("ts_smb_conn() {"):]
+    conn = conn[:conn.index("\n}\n")]
+    assert "pass" not in conn
+
+
+def test_smb_never_stats_a_mountpoint_to_test_liveness():
+    """On a dead FUSE mount, stat/ls/test -d block forever and take the shell with
+    them. Liveness must come from the kernel mount table only."""
+    lib = (ROOT / "bootstrap/_smb.sh").read_text(encoding="utf-8")
+    fn = lib[lib.index("ts_smb_is_mounted() {"):]
+    fn = fn[:fn.index("\n}\n")]
+    for forbidden in ("test -d", "[ -d ", "stat ", "ls "):
+        assert forbidden not in fn, f"ts_smb_is_mounted touches the path: {forbidden}"
+    assert "/proc/self/mounts" in fn or "mount " in fn
+
+
+def test_smb_does_not_auto_enable_fskit():
+    """fuse-t's FSKit backend fails outright on macOS 26.6 with fuse-t 1.2.6
+    ("fuse: mount failed with error: -1") while the default nfs backend does not."""
+    src = (ROOT / "bootstrap/ts-smb.sh").read_text(encoding="utf-8")
+    mount_fn = src[src.index("cmd_mount() {"):]
+    mount_fn = mount_fn[:mount_fn.index("\n}\n")]
+    code = "\n".join(l for l in mount_fn.splitlines() if not l.strip().startswith("#"))
+    assert "backend=fskit" not in code
+
+
+def test_smb_exists_in_zshrc_and_is_not_claimed_for_pwsh():
+    """Bash-only by decision, not by drift: the zsh wrapper exists, and the help
+    says Windows is unsupported so nobody 'fixes' the missing twin silently."""
+    zsh = (ROOT / "dot_zshrc").read_text(encoding="utf-8")
+    assert "\nts-smb() {" in zsh
+    assert "bootstrap/ts-smb.sh" in zsh
+    src = (ROOT / "bootstrap/ts-smb.sh").read_text(encoding="utf-8")
+    assert "THERE IS NO pwsh TWIN YET" in src
+
+
+def test_rclone_is_in_the_catalog_with_a_description():
+    cfg = (ROOT / "bootstrap/_config.sh").read_text(encoding="utf-8")
+    assert "rclone" in cfg
+    ps = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
+    assert "rclone     = 'Rclone.Rclone'" in ps
+    assert "'rclone'" in ps

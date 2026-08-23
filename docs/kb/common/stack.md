@@ -10,6 +10,7 @@
 | `ts-config` | change leader, theme, tmux prefix, apps, TTS, agent tools, WezTerm mux/restore — see below |
 | `ts-config wizard` | re-run the whole install questionnaire from scratch — see below |
 | `ts-mux` | WezTerm multiplexer domain: on/off, status, kill/restart/reset — see below |
+| `ts-smb` | SMB/CIFS shares over rclone: discover, interrogate, mount — `doc smb-shares` (macOS/Linux) |
 | `ts-wezterm` | WezTerm build info, upstream comparison, channel switching — see below |
 | `plain` | vanilla shell, no rc/profile (no oh-my-zsh/starship/aliases) — `exit` to return |
 | `chezmoi diff` / `chezmoi apply -v` | preview / apply configs (run from inside WSL on Windows) |
@@ -186,6 +187,66 @@ for a scripted install. The setting is saved with the rest of the config
 (`ts-config show` prints it as `wezmux`; `ts-config mux …` is the same command).
 On WSL the mux server is a **Windows** process — `ts-mux` reaches it over interop,
 so it works from either side.
+
+## `ts-smb`
+Find, interrogate and mount **SMB/CIFS shares** through rclone, with one flag
+vocabulary on macOS and Linux instead of `smbutil`/`mount_smbfs` on one box and
+`smbclient`/`mount.cifs` on another. **Windows is not covered yet** — Explorer and
+`net use` already do this there.
+
+| Command | What it does |
+|---|---|
+| `ts-smb` / `ts-smb list` | live mounts: name, state, engine, mountpoint (strays flagged) |
+| `ts-smb hosts` | SMB servers advertising on this LAN over mDNS |
+| `ts-smb hosts --sweep` | also port-scan your /24 — asks first, and it is noisy |
+| `ts-smb shares HOST` | the shares a host offers |
+| `ts-smb probe HOST/SHARE` | which credentials work, and what they get you |
+| `ts-smb probe … --write` | also test writability (creates a file; asks first) |
+| `ts-smb ls` / `tree` / `du` | look inside without mounting (`--depth N` for tree) |
+| `ts-smb get SRC DST` | copy out without mounting |
+| `ts-smb add NAME` | add a share (`--host`/`--path`/`--user` to skip the prompts) |
+| `ts-smb creds NAME set` | store the password, obscured, in the OS keychain |
+| `ts-smb mount NAME` | mount read-only (`--rw`, `--at DIR`, `--engine auto\|fuse\|nfs`) |
+| `ts-smb umount NAME` | unmount (`--all`, `--force`) |
+| `ts-smb engine` | which mount engine is used here, and why the others lost |
+| `ts-smb doctor` | rclone, the FUSE engines, stale mounts, the store |
+| `-n` / `--dry-run` | print the rclone command instead of running it |
+
+Nothing has to be configured to interrogate a host: `ts-smb shares nas.lan` builds
+an rclone connection string on the fly. rclone has no anonymous mode — user
+`guest` with an empty password is the substitute, and it is the default.
+
+Your shares live in `~/.config/terminal-stack/shares.local.conf`, which is
+**untracked and never synced anywhere**; defaults come from `bootstrap/shares.conf`
+in the clone. A stanza looks like:
+
+```
+share media
+  host nas.lan
+  path Media
+  user marty
+  cred keychain
+```
+
+The SMB share name is **`path`**, not `share` — `share` opens a stanza. Get that
+wrong and `ts-smb doctor` says so by name.
+
+Passwords are obscured once by `ts-smb creds` and kept in the OS keychain (macOS
+`security`, Linux `secret-tool`, with a 0600 file fallback); they reach rclone
+through the environment and never appear in a command line. There is deliberately
+no `--password VALUE` flag — use `-P` to be prompted or `--password-stdin` in a
+script.
+
+If a mount will not work, `ts-smb doctor` is the command. On macOS it knows the
+three things that break mounting silently: **Homebrew's rclone cannot mount at
+all** (a build-time guard; browsing still works, so install the official binary
+from <https://rclone.org/downloads/> if you need mounts), rclone picks its FUSE
+library by a fixed order that a stale **macFUSE** wins over a working **FUSE-T**
+(`ts-smb` pins it, so this cannot bite), and FUSE-T's **FSKit** backend is not
+enabled by default because it fails where the default NFS backend does not. On
+Linux it detects the AppArmor block on `fusermount3` that Ubuntu 24.04+ ships.
+
+See `doc smb-shares` for the topic page and `doc rclone` for the tool itself.
 
 ## SSH (stack shortcut)
 `ssht host [session]` — SSH and attach-or-create a remote tmux session in one shot

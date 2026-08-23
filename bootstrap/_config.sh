@@ -28,7 +28,7 @@
 #   TS_APPS_OPTIONAL    — unchecked by default (GUI editor, GPU/docker tools,
 #                         the agent CLIs — nothing here is installed unasked).
 TS_APPS_RECOMMENDED="tmux eza fzf bat fd tree delta ripgrep zoxide glow micro neovim gh ghq lazygit duf ncdu dust btop fnm python uv pipx ruff ipython claude codex cursor-agent grok gemini"
-TS_APPS_OPTIONAL="zed tldr nvtop lazydocker gdu bottom glances bandwhich gping node httpie poetry pre-commit"
+TS_APPS_OPTIONAL="zed tldr nvtop lazydocker gdu bottom glances bandwhich gping rclone node httpie poetry pre-commit"
 TS_APPS_ALL="$TS_APPS_RECOMMENDED $TS_APPS_OPTIONAL"
 
 # Groups exist for the picker only — the saved `apps` array stays flat, so this
@@ -58,7 +58,7 @@ ts_app_group_members() {
         search)  echo "ripgrep fd" ;;
         disk)    echo "duf ncdu dust gdu" ;;
         system)  echo "btop bottom glances nvtop lazydocker" ;;
-        network) echo "bandwhich gping" ;;
+        network) echo "bandwhich gping rclone" ;;
         git)     echo "delta gh ghq lazygit" ;;
         editors) echo "micro neovim glow zed tldr" ;;
         runtimes) echo "fnm node" ;;
@@ -107,6 +107,7 @@ ts_app_desc() {
         glances)    echo "cross-platform system monitor";;
         bandwhich)  echo "which process is using the bandwidth";;
         gping)      echo "ping with a live graph";;
+        rclone)     echo "sync/mount 70+ storage backends, SMB shares included (ts-smb)";;
         claude)     echo "Claude Code CLI (cc/ccd wrappers drive it)";;
         codex)      echo "OpenAI Codex CLI (cx/cy wrappers drive it)";;
         cursor-agent) echo "Cursor's CLI agent";;
@@ -232,6 +233,7 @@ ts_brew_install_apps() {
             glances)    formulae="$formulae glances" ;;
             bandwhich)  formulae="$formulae bandwhich" ;;
             gping)      formulae="$formulae gping" ;;
+            rclone)     formulae="$formulae rclone" ;;
             fnm)        formulae="$formulae fnm" ;;
             node)       formulae="$formulae node" ;;
             python)     formulae="$formulae python@3.14" ;;

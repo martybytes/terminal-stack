@@ -746,6 +746,19 @@ ts-mux() {
   TERMINAL_STACK_DIR="$src" TERMINAL_STACK_CHEZMOI="$cz" bash "$src/bootstrap/ts-mux.sh" "$@"
 }
 
+# ts-smb — SMB/CIFS shares over rclone: find them, look inside, mount them.
+# Thin wrapper over the shared bootstrap/ts-smb.sh in the clone. macOS and Linux
+# only for now: there is deliberately no pwsh twin (see `ts-smb -h`).
+ts-smb() {
+  local cz src
+  cz="$(_ts_chezmoi)" || { echo "ts-smb: chezmoi not found on PATH." >&2; return 1 }
+  src="$(_ts_src "$cz" ts-smb)" || return 1
+  if [[ ! -f "$src/bootstrap/ts-smb.sh" ]]; then
+    echo "ts-smb: $src/bootstrap/ts-smb.sh not found. Run 'ts-update'." >&2; return 1
+  fi
+  TERMINAL_STACK_DIR="$src" TERMINAL_STACK_CHEZMOI="$cz" bash "$src/bootstrap/ts-smb.sh" "$@"
+}
+
 # ts-wezterm — which WezTerm build you have, what upstream has, and what changed.
 # Also switches channel. Nothing here runs on its own; see `ts-wezterm -h`.
 ts-wezterm() {

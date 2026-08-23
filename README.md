@@ -38,6 +38,8 @@ The install is a short **wizard** — pick your WezTerm **leader key** (`Ctrl+Sp
 
 Change them anytime with **`ts-config`** (both shells): run it bare for an interactive menu, or one-shot — `ts-config theme follow`, `ts-config leader ctrl-a`, `ts-config tmux ctrl-a`, `ts-config apps`, `ts-config restore on`, `ts-config show`. It re-applies and installs any newly-selected apps (it never uninstalls). In `follow` mode WezTerm switches light/dark live; the Starship/tmux palette is baked at apply and refreshed by `ts-update`/`ts-config`. In a combined Windows+WSL setup, run `ts-config` from WSL (its `chezmoi apply` is authoritative for the Windows files). Scripted installs skip the prompts with `TS_LEADER` / `TS_THEME` / `TS_TERMINALS` / `TS_WEZ_MUX` / `TS_WEZ_RESTORE` / `TS_APPS` / `TS_CC_TTS` / `TS_CC_TTS_DAEMON` / `TS_HEADLESS`, and `TS_ASSUME_YES=1` (bash) skips the review (see `INSTALL.md` § Install wizard).
 
+**`ts-smb`** (macOS/Linux) finds, interrogates and mounts **SMB/CIFS shares** through rclone, so the same commands work everywhere instead of `smbutil`/`mount_smbfs` on one box and `smbclient`/`mount.cifs` on another. `ts-smb hosts` browses the LAN over mDNS (`--sweep` adds a confirmed port-445 scan), `ts-smb shares HOST` lists what a host offers, `ts-smb probe HOST/SHARE` says which credentials work and what they get you, and `ts-smb ls`/`tree`/`du`/`get` look inside without mounting — none of which needs the host to be configured first. `ts-smb add`/`mount`/`umount`/`list` manage mounts, and `ts-smb doctor` explains why one will not mount. Your shares live in an untracked `~/.config/terminal-stack/shares.local.conf` that is **never synced anywhere**; passwords are obscured into the OS keychain and never appear in a command line. Windows is not covered yet — Explorer and `net use` already do this there.
+
 **`ts-mux`** (both shells) owns the WezTerm **multiplexer domain** the wizard asks about: whether WezTerm hosts your panes in `wezterm-mux-server` instead of the GUI, so a GUI crash leaves every pane alive. It defaults to **off** — the mux server loads its own copy of `.wezterm.lua` (config changes need `ts-mux restart`, which kills every pane) and mux panes can't render the per-pane Claude tint. `ts-mux on`/`off` flip it and re-apply; `ts-mux` alone reports the setting, the *rendered* setting and the live server; `ts-mux kill`/`restart`/`reset` drive the server itself. From WSL it reaches the Windows-side server over interop, so it works from either shell.
 
 ## Updating & rollback
@@ -134,6 +136,9 @@ terminal-stack/
 │   ├── ts-config.sh         # backend for the `ts-config` shell command
 │   ├── ts-doctor.sh         # backend for `ts-doctor`
 │   ├── ts-mux.sh            # backend for `ts-mux` (WezTerm multiplexer domain)
+│   ├── ts-smb.sh            # backend for `ts-smb` (SMB shares over rclone)
+│   ├── _smb.sh              # share store, engine probe, mount lifecycle
+│   ├── shares.conf          # tracked ts-smb defaults (never a real host)
 │   ├── workspace.conf       # tracked layout map for `wso` (org → tier, renames)
 │   ├── _workspace.sh + wso.sh              # `wso` — bash half (WSL/Linux/macOS)
 │   └── _workspace.ps1 + _workspace_cmd.ps1 # `wso` — pwsh half (Windows)

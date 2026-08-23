@@ -34,6 +34,7 @@ $script:TsWingetIds = @{
     bottom     = 'Clement.bottom'
     glances    = 'nicolargo.glances'
     gping      = 'orf.gping'
+    rclone     = 'Rclone.Rclone'
     fnm        = 'Schniz.fnm'
     node       = 'OpenJS.NodeJS'
     python     = 'Python.Python.3.13'
@@ -47,7 +48,7 @@ $script:TsWingetIds = @{
     # anything not in this table, so they simply never nag on Windows.
 }
 $script:TsAppsRecommended = @('eza','fzf','bat','fd','delta','ripgrep','zoxide','glow','micro','neovim','gh','ghq','lazygit','prettymark','duf','dust','btop','fnm','python','uv','pipx','ruff','ipython','claude','codex','cursor-agent','grok','gemini')
-$script:TsAppsOptional    = @('zed','gdu','bottom','glances','gping','node','httpie','poetry','pre-commit')
+$script:TsAppsOptional    = @('zed','gdu','bottom','glances','gping','rclone','node','httpie','poetry','pre-commit')
 $script:TsAppsAll         = $script:TsAppsRecommended + $script:TsAppsOptional
 
 # Groups exist for the picker only — the saved `apps` array stays flat, so this
@@ -58,7 +59,7 @@ $script:TsAppGroups = [ordered]@{
     search  = @{ Desc = 'search and find';     Members = @('ripgrep','fd') }
     disk    = @{ Desc = 'disk usage';          Members = @('duf','ncdu','dust','gdu') }
     system  = @{ Desc = 'system monitors';     Members = @('btop','bottom','glances','nvtop','lazydocker') }
-    network = @{ Desc = 'network';             Members = @('bandwhich','gping') }
+    network = @{ Desc = 'network';             Members = @('bandwhich','gping','rclone') }
     git     = @{ Desc = 'git tooling';         Members = @('delta','gh','ghq','lazygit') }
     editors = @{ Desc = 'editors and readers'; Members = @('micro','neovim','glow','zed','tldr','prettymark') }
     runtimes = @{ Desc = 'language runtimes';  Members = @('fnm','node') }
@@ -136,6 +137,7 @@ function Get-TsAppDesc([string]$id) {
         'gh'      { 'GitHub CLI (org enumeration for wso)' }
         'ghq'     { 'clone into the derived workspace path' }
         'lazygit' { 'git TUI (the wso status hand-off)' }
+        'rclone'  { 'sync/mount 70+ storage backends, SMB shares included' }
         'prettymark' { 'markdown viewer (pm alias)' }
         default   { '' }
     }

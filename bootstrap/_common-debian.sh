@@ -69,6 +69,7 @@ common_install_selected_apps() {
             ncdu)    apt_pkgs="$apt_pkgs ncdu" ;;
             btop)    apt_pkgs="$apt_pkgs btop" ;;         # 22.04+; github fallback below
             glances) apt_pkgs="$apt_pkgs glances" ;;
+            rclone)  apt_pkgs="$apt_pkgs rclone" ;;      # apt lags upstream; fine for ts-smb
             nvtop)   command -v nvidia-smi >/dev/null 2>&1 && apt_pkgs="$apt_pkgs nvtop" ;;
         esac
     done

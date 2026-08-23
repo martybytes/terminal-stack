@@ -334,6 +334,63 @@ For the per-entry merges, TTS off is a distinct case, not a weaker version of TT
 off must remove every one of ours and keep every one of theirs, and turning it back on must
 return to exactly the starting counts with no duplicates.
 
+## 4d. `ts-smb` changes (`bootstrap/ts-smb.sh`, `bootstrap/_smb.sh`)
+
+The store parser, the engine probe and the mount lifecycle are all testable without
+an SMB server; only the last two steps need one.
+
+```sh
+python -m pytest tests -q -k smb        # store, flags tail, validate, help, invariants
+bash -n bootstrap/ts-smb.sh bootstrap/_smb.sh
+TERMINAL_STACK_DIR="$PWD" bash bootstrap/ts-smb.sh engine    # and `doctor`
+```
+
+Point the store and state dir somewhere throwaway so you never touch your real
+shares — the same discipline as §4:
+
+```sh
+export XDG_CONFIG_HOME=/tmp/smbtest/cfg XDG_STATE_HOME=/tmp/smbtest/state
+mkdir -p "$XDG_CONFIG_HOME/terminal-stack"
+```
+
+`--dry-run` prints the exact rclone command without running it, which is the fastest
+way to check flag assembly:
+
+```sh
+TERMINAL_STACK_DIR="$PWD" bash bootstrap/ts-smb.sh mount NAME -n
+```
+
+Mount-record states are testable with synthetic records — no mount required. Write a
+`<name>.mnt` into the state dir with a live pid and a mountpoint that is not mounted
+and `ts-smb list` must report `zombie`; a dead pid and no mount must report `gone`
+and be pruned on sight.
+
+For the real thing, a container is enough:
+
+```sh
+docker run -d --name smbtest -p 4450:445 \
+  -e "USER=tester;testpass123" -e "SHARE=Media;/share;yes;no;no;tester" \
+  -v /tmp/smbshare:/share dperson/samba:latest -p
+printf 'testpass123' | bash bootstrap/ts-smb.sh shares 127.0.0.1 \
+  --port 4450 --user tester --password-stdin
+```
+
+Two things to check every time you touch the credential path:
+
+- **Nothing secret in `argv`.** With a mount (or any long rclone call) live,
+  `ps auxww | grep '[r]clone'` must show the connection string and flags and no
+  password. It travels in `RCLONE_SMB_PASS`, and it must be **obscured** there —
+  rclone rejects plaintext with "input too short when revealing password".
+- **`--password-stdin` is consumed exactly once.** `ts-smb probe` tries several
+  credential candidates; re-reading an exhausted stdin used to leave rclone
+  retrying against an empty password until it timed out.
+
+And two platform traps worth re-confirming rather than assuming, because both fail
+*silently*: Homebrew's macOS rclone refuses to mount at all (a build-time guard, so
+`ts-smb doctor` should say so), and `-o backend=fskit` must never be passed
+automatically — a test pins that, because it fails on macOS 26.6 where fuse-t's
+default NFS backend does not.
+
 ## 5. What you cannot verify from a dev clone
 
 `chezmoi source-path` points at the **runtime** clone

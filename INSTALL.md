@@ -69,7 +69,7 @@ Every question works the same way: the default is **marked with `>` and captione
   | `search` | ripgrep, fd |
   | `disk` | duf, ncdu, dust, gdu |
   | `system` | btop, bottom, glances, nvtop, lazydocker |
-  | `network` | bandwhich, gping |
+  | `network` | bandwhich, gping, rclone |
   | `git` | delta, gh, ghq, lazygit |
   | `editors` | micro, neovim, glow, zed, tldr (+ prettymark on Windows) |
   | `runtimes` | fnm (Node version manager), node |
@@ -465,6 +465,8 @@ Open WezTerm, confirm the active tab renders as a solid accent block and the clo
 If you enabled the TTS daemon: `ts-config tts daemon status` should report healthy with the clone's git SHA, and `~/.claude/hooks/cc-tts-test.sh --daemon` (pwsh: `cc-tts-test.ps1 -Daemon`) should speak "Daemon test…". Then prove the never-silence fallback once: `cc-tts-test.sh --daemon-fallback` must still speak through the classic direct path.
 
 Two more, both quick. `ccmute` should report `MUTED`, silence the next announcement, and cut off anything speaking at that moment; `ccmute off` restores it. And the tray's **Open dashboard** should load, with the Status tab reporting the daemon up and the Log tab streaming lines as they happen.
+
+If you use SMB shares: `ts-smb doctor` should report rclone present and name the mount engine it picked, and `ts-smb hosts` should list any SMB server advertising on your network. On macOS, note that a Homebrew-installed rclone **cannot mount** — doctor says so and points at the official binary; browsing and copying work either way.
 
 ### Phase 10 — Done
 
