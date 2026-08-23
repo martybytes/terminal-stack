@@ -11,7 +11,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 # Config store + app catalog + wizard prompts (Save-TsConfig, $TsWingetIds,
-# Read-TsChoice, Read-TsLeader/Theme/Wezterm/Apps, etc.).
+# Read-TsChoice, Read-TsMulti, Read-TsLeader/Theme/Terminals/Apps, etc.).
 . (Join-Path $PSScriptRoot '_config.ps1')
 
 # Packages that didn't install, reported together at the end. A Write-Warning
@@ -36,23 +36,15 @@ function Install-WingetPackage {
     return $false
 }
 
-# WezTerm nightly's winget manifest is republished more often than its hash is
-# refreshed, so a nightly install fails outright on a bad day. Stable is a fine
-# fallback — the config targets nightly features but degrades rather than breaks.
-function Install-TsWezterm {
-    param([Parameter(Mandatory)][string]$Choice)
-    switch ($Choice) {
-        'skip'   { Write-Host '==> WezTerm: skipped'; return }
-        'stable' { Install-WingetPackage -Id 'wez.wezterm' -Because 'terminal emulator' | Out-Null; return }
-        default  {
-            if (Install-WingetPackage -Id 'wez.wezterm.nightly' -Because 'terminal emulator') { return }
-            Write-Host '==> nightly unavailable; falling back to WezTerm stable'
-            # The nightly failure is now handled, not outstanding.
-            $script:TsFailedPackages = @($script:TsFailedPackages | Where-Object { $_.Id -ne 'wez.wezterm.nightly' })
-            Install-WingetPackage -Id 'wez.wezterm' -Because 'terminal emulator (nightly fallback)' | Out-Null
-        }
-    }
-}
+# Stable only. Nightly's winget manifest is republished more often than its hash
+# is refreshed, so `Installer hash does not match` was a routine outcome rather
+# than an exotic one — and the trade-off (upstream stable is old) is written up in
+# docs/decisions.md § "Why WezTerm is stable-only, and why the emulator is still a
+# choice". Nothing here installs nightly; a nightly a previous bootstrap left is
+# removed FIRST and unconditionally, whether or not WezTerm was selected this run.
+# Install-TsTerminals now lives in bootstrap/_config.ps1 (dot-sourced above) so
+# `ts-config wizard` can call it too; it uses Install-WingetPackage when that is
+# in scope, so this script keeps its end-of-run failure report.
 
 function Test-WingetAvailable {
     try {
@@ -106,32 +98,8 @@ Write-Host "PowerShell $($PSVersionTable.PSVersion); user $env:USERNAME"
 # re-run. Env vars (TS_LEADER / TS_THEME / TS_WEZTERM / TS_WEZ_MUX /
 # TS_WEZ_RESTORE / TS_APPS / TS_CC_TTS / WORKSPACE_DIR) still skip their prompt
 # individually.
-function Read-TsWizard {
-    $w = [ordered]@{
-        Leader    = (Read-TsLeader)
-        Theme     = (Read-TsTheme)
-        Wezterm   = (Read-TsWezterm)
-        WezMux    = (Read-TsWeztermMux)
-        WezRestore = (Read-TsWeztermRestore)
-        Apps      = @(Read-TsApps)
-        CcTts     = (Read-TsCcTts)
-        Headroom  = (Read-TsAgentToggle TS_HEADROOM 'Headroom prompt compression and monitoring?' @(
-            '  Expects docker-local on 127.0.0.1:8787 and its MCP sidecar on 8788.',
-            '  This installer never manages those containers.'
-        ))
-        Caveman   = (Read-TsAgentToggle TS_CAVEMAN 'Caveman terse output for all projects?' @(
-            '  Installs the pinned user-scope plugin/skill; no project files are changed.'
-        ))
-        Agentmemory = (Read-TsAgentToggle TS_AGENTMEMORY 'AgentMemory for all projects?' @(
-            '  Expects docker-local on 127.0.0.1:3111; terminal-stack owns only agent wiring.'
-        ))
-        Workspace = (Read-TsWorkspaceDir)
-    }
-    # Tray daemon follow-up only makes sense when TTS itself was enabled.
-    $w.CcTtsDaemon = if ($w.CcTts -eq 'on') { Read-TsCcTtsDaemon } else { 'off' }
-    $w.HeadroomCursor = if ($w.Headroom -eq 'on') { Read-TsHeadroomCursorMode } else { 'mcp' }
-    return $w
-}
+# Read-TsWizard now lives in bootstrap/_config.ps1 (dot-sourced above) so that
+# `ts-config wizard` can replay the identical questionnaire.
 
 function Show-TsWizardReview($w) {
     $themeLabel = switch ($w.Theme) {
@@ -144,7 +112,7 @@ function Show-TsWizardReview($w) {
     Write-Host '==> Review'
     Write-Host ("    Leader           {0}" -f $w.Leader)
     Write-Host ("    Theme            {0}" -f $themeLabel)
-    Write-Host ("    WezTerm          {0}" -f $w.Wezterm)
+    Write-Host ("    Terminals        {0}" -f $(if ($w.Terminals) { $w.Terminals -join ' ' } else { '<none>' }))
     Write-Host ("    WezTerm mux      {0}" -f $w.WezMux)
     Write-Host ("    Session restore  {0}" -f $w.WezRestore)
     Write-Host ("    Apps             {0}" -f $(if ($w.Apps.Count) { $w.Apps -join ', ' } else { '<none>' }))
@@ -176,10 +144,10 @@ $selectedApps = @($wizard.Apps)
 $ccTtsChoice  = $wizard.CcTts
 $ccTts        = Set-CcTtsWizardChoice $ccTtsChoice
 Write-Host ''
-Write-Host "==> Config: leader=$leaderChord theme=$themeMode wezterm=$($wizard.Wezterm) wez-mux=$($wizard.WezMux) wez-restore=$($wizard.WezRestore) cc-tts=$ccTtsChoice headroom=$($wizard.Headroom) caveman=$($wizard.Caveman) agentmemory=$($wizard.Agentmemory)"
+Write-Host "==> Config: leader=$leaderChord theme=$themeMode terminals=$(if ($wizard.Terminals) { $wizard.Terminals -join ',' } else { 'none' }) wez-mux=$($wizard.WezMux) wez-restore=$($wizard.WezRestore) cc-tts=$ccTtsChoice headroom=$($wizard.Headroom) caveman=$($wizard.Caveman) agentmemory=$($wizard.Agentmemory)"
 
-# Required packages (always installed; not part of the picker). WezTerm is NOT
-# here — it is a wizard choice, see Read-TsWezterm.
+# Required packages (always installed; not part of the picker). Terminal
+# emulators are NOT here — they are a wizard choice, see Read-TsTerminals.
 $requiredPackages = @(
     'DEVCOM.JetBrainsMonoNerdFont',     # Nerd Font for glyph rendering
     'Starship.Starship',                # Shell prompt
@@ -187,14 +155,20 @@ $requiredPackages = @(
 )
 foreach ($pkg in $requiredPackages) { Install-WingetPackage -Id $pkg -Because 'required' | Out-Null }
 
-Install-TsWezterm -Choice $wizard.Wezterm
+Install-TsTerminals -Selected $wizard.Terminals
 
-# Selected toggleable apps (catalog id -> winget id).
+# Selected toggleable apps (catalog id -> winget id). Uses Install-WingetPackage
+# rather than Install-TsApps so a failure lands in the end-of-run report.
 foreach ($id in $selectedApps) {
+    if (Test-TsAppIsAi $id) { continue }   # not winget packages; handled below
     if ($script:TsWingetIds.ContainsKey($id)) {
         Install-WingetPackage -Id $script:TsWingetIds[$id] -Because $id | Out-Null
+    } else {
+        Write-Host "==> ${id}: no Windows package available; skipped"
     }
 }
+foreach ($id in $selectedApps) { if (Test-TsAppIsAi $id) { Install-TsAiCli $id } }
+Show-TsInstalledApps $selectedApps
 
 # Save the chosen config to %LOCALAPPDATA%\terminal-stack\config.json — read by
 # sync-windows.ps1 (and the WSL hook's mirror) to render the Windows .tmpl files.

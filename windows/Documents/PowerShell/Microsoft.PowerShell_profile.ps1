@@ -509,6 +509,13 @@ if (-not (Test-TsAgentShell)) {
 # Default editor: micro (a nano alternative), when installed. git follows $EDITOR.
 if (Get-Command micro -ErrorAction SilentlyContinue) { $env:EDITOR = 'micro' }
 
+# fnm — Node version manager. --use-on-cd auto-switches on .nvmrc/.node-version,
+# which is the whole reason to run a manager rather than a single winget node.
+# POSIX twin: the fnm line in dot_zshrc's cli-tools block.
+if (Get-Command fnm -ErrorAction SilentlyContinue) {
+    fnm env --use-on-cd --shell powershell | Out-String | Invoke-Expression
+}
+
 if (Get-Command zoxide -ErrorAction SilentlyContinue) {
     Invoke-Expression (& { (zoxide init powershell | Out-String) })
 }
@@ -886,6 +893,28 @@ function Set-TerminalStackConfig {
     $caveman = Get-TsAgentSetting cavemanEnabled
     $agentmemory = Get-TsAgentSetting agentmemoryEnabled
 
+    # Re-run the whole questionnaire, not just one answer. `ts-config apps`
+    # re-asks the apps question alone; this replays every prompt the installer
+    # asks and persists all of it. POSIX twin: run_wizard in bootstrap/ts-config.sh.
+    # Runs the questionnaire, installs, and persists; returns the answers so the
+    # CALLER can refresh its own variables. A scriptblock invoked with & gets a
+    # child scope, so assignments in here would not reach the menu's copies and
+    # the menu would keep printing the pre-wizard values.
+    $runWizard = {
+        $w = Read-TsWizard
+        Install-TsTerminals -Selected $w.Terminals
+        Install-TsApps @($w.Apps)
+        Save-TsConfig -LeaderChord $w.Leader -ThemeMode $w.Theme -TmuxPrefix $tmux -Apps @($w.Apps) -CcTts $ccTts `
+            -WeztermMux $w.WezMux -WeztermRestore $w.WezRestore `
+            -HeadroomEnabled $w.Headroom -HeadroomCursorMode $w.HeadroomCursor `
+            -CavemanEnabled $w.Caveman -AgentmemoryEnabled $w.Agentmemory | Out-Null
+        Export-CcTtsJson
+        Invoke-TsSync $src
+        Show-TsInstalledApps @($w.Apps)
+        Write-Host '==> done.'
+        return $w
+    }
+
     $save = {
         param($Tts = $ccTts)
         Save-TsConfig -LeaderChord $leader -ThemeMode $theme -TmuxPrefix $tmux -Apps $apps -CcTts $Tts `
@@ -989,8 +1018,33 @@ function Set-TerminalStackConfig {
                     default       { $apps = ($Value -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
                 }
             } else { $apps = @(Read-TsApps) }
-            Install-TsApps $apps; & $save
+            Install-TsApps $apps; Show-TsInstalledApps $apps; & $save
         }
+        'wezterm' {
+            switch ($Value) {
+                ''         { Show-TsWezStatus }
+                'status'   { Show-TsWezStatus }
+                'upgrade'  { Update-TsWezterm }
+                'install'  {
+                    if ($Rest[0] -notin 'stable', 'nightly') { Write-Warning 'usage: ts-config wezterm install <stable|nightly>'; return }
+                    Install-TsWezterm $Rest[0]
+                }
+                'changes'  {
+                    $inst = Get-TsWezInstalled
+                    if (-not $inst) { Write-Warning 'WezTerm is not installed, so there is no build to compare against.'; return }
+                    $text = Get-TsWezChangesText $inst.Version
+                    if (-not $text) { Write-Warning "could not fetch upstream's changelog (offline?)"; return }
+                    if (Get-Command glow -ErrorAction SilentlyContinue) {
+                        "# WezTerm changes since $($inst.Version)`n`n$text" | & glow -p -
+                    } else {
+                        "# WezTerm changes since $($inst.Version)`n`n$text" | Out-Host -Paging
+                    }
+                }
+                default    { Write-Warning "ts-config wezterm: unknown '$Value' (status, changes, install <stable|nightly>, upgrade)" }
+            }
+        }
+        'wizard'       { $null = & $runWizard }
+        'reconfigure'  { $null = & $runWizard }
         'tts' {
             Invoke-TsConfigTts -Sub $Value -Arg $Rest[0] -Arg2 $Rest[1] -Apply {
                 param($Tts)

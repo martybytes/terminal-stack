@@ -63,6 +63,12 @@ common_install_selected_apps() {
             delta)   apt_pkgs="$apt_pkgs git-delta" ;;
             tldr)    apt_pkgs="$apt_pkgs tldr" ;;
             gh)      apt_pkgs="$apt_pkgs gh" ;;          # universe on 24.04+; github fallback below
+            fd)      apt_pkgs="$apt_pkgs fd-find" ;;      # ships the binary as `fdfind`; symlinked below
+            tree)    apt_pkgs="$apt_pkgs tree" ;;
+            duf)     apt_pkgs="$apt_pkgs duf" ;;
+            ncdu)    apt_pkgs="$apt_pkgs ncdu" ;;
+            btop)    apt_pkgs="$apt_pkgs btop" ;;         # 22.04+; github fallback below
+            glances) apt_pkgs="$apt_pkgs glances" ;;
             nvtop)   command -v nvidia-smi >/dev/null 2>&1 && apt_pkgs="$apt_pkgs nvtop" ;;
         esac
     done
@@ -75,7 +81,7 @@ common_install_selected_apps() {
                     # eza/git-delta aren't in older Debian/Ubuntu repos by design —
                     # the GitHub-release fallback below installs them and reports
                     # the real outcome. Don't cry wolf here.
-                    eza|git-delta|gh) : ;;
+                    eza|git-delta|gh|btop|duf) : ;;
                     *) echo "$WARN apt install $id failed" ;;
                 esac
             done
@@ -85,12 +91,12 @@ common_install_selected_apps() {
     # eza/delta: prefer apt, else upstream release. Only warn if BOTH fail.
     case " $apps " in *" eza "*)
         command -v eza >/dev/null 2>&1 \
-            || common_install_github_binary "eza-community/eza" "eza" "eza_x86_64-unknown-linux-gnu\\.tar\\.gz$" \
+            || common_install_github_binary "eza-community/eza" "eza" "eza_$(common_arch_tag gnu)-unknown-linux-gnu\\.tar\\.gz$" \
             || echo "$WARN eza unavailable (not in apt and GitHub fallback failed)" ;;
     esac
     case " $apps " in *" delta "*)
         command -v delta >/dev/null 2>&1 \
-            || common_install_github_binary "dandavison/delta" "delta" "delta-.*-x86_64-unknown-linux-gnu\\.tar\\.gz$" \
+            || common_install_github_binary "dandavison/delta" "delta" "delta-.*-$(common_arch_tag gnu)-unknown-linux-gnu\\.tar\\.gz$" \
             || echo "$WARN delta unavailable (not in apt and GitHub fallback failed)" ;;
     esac
     # gh / ghq / lazygit — the workspace-organizer toolchain. ghq and lazygit are
@@ -116,7 +122,7 @@ common_install_selected_apps() {
     case " $apps " in *" neovim "*) common_install_neovim ;; esac
     case " $apps " in *" lazydocker "*)
         if command -v docker >/dev/null 2>&1; then
-            common_install_github_binary "jesseduffield/lazydocker" "lazydocker" "lazydocker_.*_Linux_x86_64\\.tar\\.gz$" || true
+            common_install_github_binary "jesseduffield/lazydocker" "lazydocker" "lazydocker_.*_Linux_$(common_arch_tag gnu)\\.tar\\.gz$" || true
         else
             echo "$INFO lazydocker selected but docker not found; skipping"
         fi ;;
@@ -127,6 +133,50 @@ common_install_selected_apps() {
             curl -f https://zed.dev/install.sh | sh >/dev/null 2>&1 || echo "$WARN Zed install failed (headless / network?)"
         fi ;;
     esac
+    case " $apps " in *" fd "*) common_fd_symlink ;; esac
+    # dust / gdu / bottom / bandwhich / gping are in no Debian or Ubuntu archive,
+    # and btop/duf only in recent ones — upstream releases for all of them. Every
+    # pattern is arch-aware via common_arch_tag: these are wanted on arm64 boxes
+    # (Raspberry Pi, Ampere VMs) as much as on x86_64.
+    case " $apps " in *" dust "*)
+        command -v dust >/dev/null 2>&1 \
+            || common_install_github_binary "bootandy/dust" "dust" "dust-.*-$(common_arch_tag gnu)-unknown-linux-gnu\\.tar\\.gz$" \
+            || echo "$WARN dust unavailable (GitHub fallback failed)" ;;
+    esac
+    case " $apps " in *" gdu "*)
+        command -v gdu >/dev/null 2>&1 \
+            || common_install_github_binary "dundee/gdu" "gdu" "gdu_linux_$(common_arch_tag deb)\\.tgz$" \
+            || echo "$WARN gdu unavailable (GitHub fallback failed)" ;;
+    esac
+    case " $apps " in *" bottom "*)
+        command -v btm >/dev/null 2>&1 \
+            || common_install_github_binary "ClementTsang/bottom" "btm" "bottom_$(common_arch_tag gnu)-unknown-linux-gnu\\.tar\\.gz$" \
+            || echo "$WARN bottom unavailable (GitHub fallback failed)" ;;
+    esac
+    case " $apps " in *" bandwhich "*)
+        command -v bandwhich >/dev/null 2>&1 \
+            || common_install_github_binary "imsnif/bandwhich" "bandwhich" "bandwhich-.*-$(common_arch_tag gnu)-unknown-linux-(gnu|musl)\\.tar\\.gz$" \
+            || echo "$WARN bandwhich unavailable (GitHub fallback failed)"
+        # It reads raw sockets, so it needs CAP_NET_RAW or sudo to actually run.
+        command -v bandwhich >/dev/null 2>&1 \
+            && echo "$INFO bandwhich needs elevated rights: run it with sudo, or grant CAP_NET_RAW once" ;;
+    esac
+    case " $apps " in *" gping "*)
+        command -v gping >/dev/null 2>&1 \
+            || common_install_github_binary "orf/gping" "gping" "gping-$(common_arch_tag gnu)-unknown-linux-(gnu|musl)\\.tar\\.gz$" \
+            || echo "$WARN gping unavailable (GitHub fallback failed)" ;;
+    esac
+    case " $apps " in *" btop "*)
+        command -v btop >/dev/null 2>&1 \
+            || common_install_github_binary "aristocratos/btop" "btop" "btop-$(common_arch_tag gnu)-linux-musl\\.tbz$" \
+            || echo "$WARN btop unavailable (not in apt and GitHub fallback failed)" ;;
+    esac
+    case " $apps " in *" duf "*)
+        command -v duf >/dev/null 2>&1 \
+            || common_install_github_binary "muesli/duf" "duf" "duf_.*_linux_$(common_arch_tag deb)\\.tar\\.gz$" \
+            || echo "$WARN duf unavailable (not in apt and GitHub fallback failed)" ;;
+    esac
+    ts_install_ai_clis "$apps"
 }
 
 # glow — Charm's terminal markdown renderer (`glow file.md`; `glow .` for the TUI browser).
@@ -151,6 +201,50 @@ common_install_glow() {
         | sudo tee /etc/apt/sources.list.d/charm.list >/dev/null
     sudo apt-get update -qq
     sudo apt-get install -y glow >/dev/null 2>&1 || echo "$WARN apt install glow failed (Charm repo)"
+}
+
+# GUI terminal emulators — native desktop Linux only. WSL never gets one (the
+# GUI lives on the Windows host) and neither does a headless server; the caller
+# gates the question, this gates the install as a second belt.
+#
+# Neither WezTerm channel is installed automatically. Upstream's own apt repo is
+# used rather than an AppImage because it is the only method with an update path
+# — `apt upgrade` keeps it current — and it carries BOTH channels, so switching
+# is a package swap. The install itself lives in _wezterm.sh (ts_wezterm_install),
+# shared with macOS and with `ts-config wezterm`.
+_ts_is_wsl() { [ -r /proc/version ] && grep -qi microsoft /proc/version 2>/dev/null; }
+
+
+common_install_terminals() {
+    local selected=" ${1:-} " channel
+    if ts_is_headless || _ts_is_wsl; then return 0; fi
+    if [ -z "${1:-}" ]; then echo "$INFO Terminal emulator: none selected — skipped."; return 0; fi
+    channel="$(ts_terminals_channel "${1:-}")"
+    if [ -n "$channel" ]; then
+        # A wezterm that no apt package owns was put there by hand; leave it be.
+        if command -v wezterm >/dev/null 2>&1 \
+           && ! dpkg -s wezterm >/dev/null 2>&1 \
+           && ! dpkg -s wezterm-nightly >/dev/null 2>&1; then
+            echo "$INFO WezTerm: already installed outside apt ($(command -v wezterm)); leaving it alone."
+        else
+            ts_wezterm_install "$channel"
+        fi
+    else
+        echo "$INFO WezTerm: not selected — skipped."
+    fi
+    case "$selected" in
+        *" ghostty "*)
+            if command -v ghostty >/dev/null 2>&1; then
+                echo "$INFO Ghostty: already installed ($(command -v ghostty))"
+            else
+                # Ghostty publishes no official Debian/Ubuntu repo, and this stack
+                # does not ship a guessed third-party one. Point at the source
+                # rather than run something that may not be what upstream means.
+                echo "$INFO Ghostty: no official Debian/Ubuntu package to install from here."
+                echo "      See https://ghostty.org/download for the current Linux options."
+            fi ;;
+        *) echo "$INFO Ghostty: not selected — skipped." ;;
+    esac
 }
 
 # neovim — current release via the official PPA. apt's neovim is too old on older
@@ -235,9 +329,9 @@ common_install_github_binary() {
 # Install eza and git-delta from upstream releases if apt didn't provide them.
 common_install_optional_binaries() {
     # eza: tar.gz with a single 'eza' binary at the root.
-    common_install_github_binary "eza-community/eza" "eza" "eza_x86_64-unknown-linux-gnu\\.tar\\.gz$" || true
+    common_install_github_binary "eza-community/eza" "eza" "eza_$(common_arch_tag gnu)-unknown-linux-gnu\\.tar\\.gz$" || true
     # git-delta: ships as 'delta'. Asset name pattern: delta-<version>-x86_64-unknown-linux-gnu.tar.gz.
-    common_install_github_binary "dandavison/delta" "delta" "delta-.*-x86_64-unknown-linux-gnu\\.tar\\.gz$" || true
+    common_install_github_binary "dandavison/delta" "delta" "delta-.*-$(common_arch_tag gnu)-unknown-linux-gnu\\.tar\\.gz$" || true
 }
 
 common_bat_symlink() {
@@ -245,6 +339,17 @@ common_bat_symlink() {
     if [ ! -e "$HOME/.local/bin/bat" ]; then
         echo "$INFO Symlinking ~/.local/bin/bat -> /usr/bin/batcat"
         ln -sf /usr/bin/batcat "$HOME/.local/bin/bat"
+    fi
+}
+
+# Debian/Ubuntu ship fd as the `fd-find` package with the binary named `fdfind`
+# (a name clash with an unrelated `fd` package). Same treatment as batcat: the
+# WezTerm sessionizer and everything else expect `fd` on PATH.
+common_fd_symlink() {
+    if [ -x /usr/bin/fdfind ] && [ ! -e "$HOME/.local/bin/fd" ]; then
+        mkdir -p "$HOME/.local/bin"
+        ln -sf /usr/bin/fdfind "$HOME/.local/bin/fd"
+        echo "$INFO linked fdfind -> ~/.local/bin/fd"
     fi
 }
 
@@ -392,8 +497,12 @@ common_git_include() {
 common_install_all() {
     common_apt_prereqs
     ts_confirm_headless
+    # Desktop Linux is asked which GUI terminal emulator it wants. WSL is not —
+    # the GUI lives on the Windows host — and neither is a headless server.
+    if ! ts_is_headless && ! _ts_is_wsl; then TS_WIZ_ASK_TERMINALS=1; fi
     ts_wizard_collect || return 1
     common_install_selected_apps "$TS_WIZ_APPS"
+    common_install_terminals "${TS_WIZ_TERMINALS:-}"
     common_oh_my_zsh
     common_login_shell_zsh
     common_chezmoi
@@ -401,4 +510,5 @@ common_install_all() {
     common_nerd_font_jetbrains
     common_git_include
     common_workspace_config
+    ts_report_installed_apps "$TS_WIZ_APPS"
 }

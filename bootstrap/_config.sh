@@ -17,16 +17,64 @@
 
 # shellcheck source=_cc_tts.sh
 . "$(dirname -- "${BASH_SOURCE[0]}")/_cc_tts.sh"
+# shellcheck source=_wezterm.sh
+. "$(dirname -- "${BASH_SOURCE[0]}")/_wezterm.sh"
 
 # ── App catalog ────────────────────────────────────────────────────────────────
 # Toggleable apps the wizard/picker offers. Required prerequisites (zsh, git,
 # curl, unzip, fontconfig, the Nerd Font, Starship, chezmoi) are always installed
 # by the common_* steps and are NOT listed here.
 #   TS_APPS_RECOMMENDED — pre-checked in the picker / installed by "recommended".
-#   TS_APPS_OPTIONAL    — unchecked by default (GUI editor, GPU/docker tools).
-TS_APPS_RECOMMENDED="tmux eza fzf bat delta ripgrep zoxide glow micro neovim gh ghq lazygit"
-TS_APPS_OPTIONAL="zed tldr nvtop lazydocker"
+#   TS_APPS_OPTIONAL    — unchecked by default (GUI editor, GPU/docker tools,
+#                         the agent CLIs — nothing here is installed unasked).
+TS_APPS_RECOMMENDED="tmux eza fzf bat fd tree delta ripgrep zoxide glow micro neovim gh ghq lazygit duf ncdu dust btop fnm python uv pipx ruff ipython claude codex cursor-agent grok gemini"
+TS_APPS_OPTIONAL="zed tldr nvtop lazydocker gdu bottom glances bandwhich gping node httpie poetry pre-commit"
 TS_APPS_ALL="$TS_APPS_RECOMMENDED $TS_APPS_OPTIONAL"
+
+# Groups exist for the picker only — the saved `apps` array stays flat, so this
+# adds no chezmoi [data] key and none of the 7-step blast radius that comes with
+# one (CLAUDE.md, docs/decisions.md §§ at :236 and :325). Every catalog id must
+# appear in exactly one group or it is unreachable from the group picker; a test
+# asserts the union equals TS_APPS_ALL.
+TS_APP_GROUPS="shell search disk system network git editors runtimes python ai"
+ts_app_group_desc() {
+    case "$1" in
+        shell)   echo "shell essentials" ;;
+        search)  echo "search and find" ;;
+        disk)    echo "disk usage" ;;
+        system)  echo "system monitors" ;;
+        network) echo "network" ;;
+        git)     echo "git tooling" ;;
+        editors) echo "editors and readers" ;;
+        runtimes) echo "language runtimes" ;;
+        python)  echo "Python tooling" ;;
+        ai)      echo "AI coding agents" ;;
+        *)       echo "" ;;
+    esac
+}
+ts_app_group_members() {
+    case "$1" in
+        shell)   echo "tmux eza bat tree zoxide fzf" ;;
+        search)  echo "ripgrep fd" ;;
+        disk)    echo "duf ncdu dust gdu" ;;
+        system)  echo "btop bottom glances nvtop lazydocker" ;;
+        network) echo "bandwhich gping" ;;
+        git)     echo "delta gh ghq lazygit" ;;
+        editors) echo "micro neovim glow zed tldr" ;;
+        runtimes) echo "fnm node" ;;
+        python)  echo "python uv pipx ruff ipython httpie poetry pre-commit" ;;
+        ai)      echo "claude codex cursor-agent grok gemini" ;;
+        *)       echo "" ;;
+    esac
+}
+# The group an id belongs to (empty when uncategorised).
+ts_app_group_of() {
+    local g
+    for g in $TS_APP_GROUPS; do
+        case " $(ts_app_group_members "$g") " in *" $1 "*) echo "$g"; return 0 ;; esac
+    done
+    echo ""
+}
 
 # Human-readable one-liners for the picker.
 ts_app_desc() {
@@ -48,6 +96,32 @@ ts_app_desc() {
         tldr)       echo "concise command examples";;
         nvtop)      echo "GPU process monitor (NVIDIA hosts)";;
         lazydocker) echo "docker TUI (docker hosts)";;
+        fd)         echo "fast, friendly find (the WezTerm sessionizer needs it)";;
+        tree)       echo "directory tree as text";;
+        duf)        echo "modern df — colourful disk free";;
+        ncdu)       echo "interactive disk usage TUI";;
+        dust)       echo "du with a tree view, sorted by size";;
+        gdu)        echo "very fast disk usage TUI (ncdu alternative)";;
+        btop)       echo "resource monitor (CPU, memory, disk, net, procs)";;
+        bottom)     echo "alternative system monitor (btm)";;
+        glances)    echo "cross-platform system monitor";;
+        bandwhich)  echo "which process is using the bandwidth";;
+        gping)      echo "ping with a live graph";;
+        claude)     echo "Claude Code CLI (cc/ccd wrappers drive it)";;
+        codex)      echo "OpenAI Codex CLI (cx/cy wrappers drive it)";;
+        cursor-agent) echo "Cursor's CLI agent";;
+        grok)       echo "xAI Grok CLI (standalone binary; no Node needed)";;
+        gemini)     echo "Google Gemini CLI";;
+        fnm)        echo "fast Node version manager (reads .nvmrc; ~10ms shell cost)";;
+        node)       echo "Node.js itself, without a version manager";;
+        python)     echo "Python 3 interpreter";;
+        uv)         echo "fast Python package/project manager";;
+        pipx)       echo "install Python CLI tools in isolated envs";;
+        ruff)       echo "Python linter + formatter, one fast binary";;
+        ipython)    echo "a far better Python REPL";;
+        httpie)     echo "friendly HTTP client (readable curl)";;
+        poetry)     echo "Python project/dependency manager";;
+        pre-commit) echo "run git hooks before every commit";;
         *)          echo "";;
     esac
 }
@@ -57,8 +131,27 @@ ts_app_bin() {
     case "$1" in
         ripgrep) echo rg ;;
         neovim)  echo nvim ;;
+        bottom)  echo btm ;;
+        python)  echo python3 ;;
+        # pre-commit's binary keeps the hyphen; listed for the reader, not a change.
+        pre-commit) echo pre-commit ;;
+        # Homebrew installs the gdu disk-usage TUI as `gdu-go` when coreutils is
+        # present, because GNU coreutils already ships a `gdu` (its g-prefixed
+        # du). Resolve to whichever is really there rather than reporting GNU du
+        # as if it were the TUI — and deliberately DON'T shadow coreutils' gdu
+        # with a symlink the way batcat/fdfind are handled: that name was theirs
+        # first and may well be in use.
+        gdu)     if command -v gdu-go >/dev/null 2>&1; then echo gdu-go; else echo gdu; fi ;;
         *)       echo "$1" ;;
     esac
+}
+
+# The agent CLIs do not come from a package manager, so they are installed by
+# ts_install_ai_cli rather than brew/apt/winget. Kept out of the package-manager
+# paths on purpose: a curl-pipe installer that fails must not look like an apt
+# failure, and none of them belong in TS_APPS_RECOMMENDED.
+ts_app_is_ai() {
+    case " $(ts_app_group_members ai) " in *" $1 "*) return 0 ;; *) return 1 ;; esac
 }
 
 # Apps this machine is expected to have but doesn't. Two sources, deliberately:
@@ -67,8 +160,19 @@ ts_app_bin() {
 # a machine configured before a tool joined the catalog would otherwise never
 # get it however many times ts-update ran, which is exactly how gh/ghq/lazygit
 # would have missed every existing install.
+# Global npm binaries live under whatever Node fnm has active, and fnm's PATH
+# entry is created per-shell — so a bash subshell (which is how ts-update calls
+# this) cannot see codex/gemini and would nag about them forever. Load fnm's env
+# first when it is available.
+ts_load_node_env() {
+    command -v fnm >/dev/null 2>&1 || return 0
+    case ":$PATH:" in *:*fnm_multishells*:*) return 0 ;; esac
+    eval "$(fnm env 2>/dev/null)" 2>/dev/null || true
+}
+
 ts_apps_pending() {
     local saved id seen="" out=""
+    ts_load_node_env
     saved="$(ts_data_get_apps 2>/dev/null || true)"
     for id in $saved $TS_APPS_RECOMMENDED; do
         case " $seen " in *" $id "*) continue ;; esac
@@ -117,7 +221,29 @@ ts_brew_install_apps() {
             lazygit)    formulae="$formulae lazygit" ;;
             tldr)       formulae="$formulae tldr" ;;
             lazydocker) formulae="$formulae lazydocker" ;;
+            fd)         formulae="$formulae fd" ;;
+            tree)       formulae="$formulae tree" ;;
+            duf)        formulae="$formulae duf" ;;
+            ncdu)       formulae="$formulae ncdu" ;;
+            dust)       formulae="$formulae dust" ;;
+            gdu)        formulae="$formulae gdu" ;;
+            btop)       formulae="$formulae btop" ;;
+            bottom)     formulae="$formulae bottom" ;;
+            glances)    formulae="$formulae glances" ;;
+            bandwhich)  formulae="$formulae bandwhich" ;;
+            gping)      formulae="$formulae gping" ;;
+            fnm)        formulae="$formulae fnm" ;;
+            node)       formulae="$formulae node" ;;
+            python)     formulae="$formulae python@3.14" ;;
+            uv)         formulae="$formulae uv" ;;
+            pipx)       formulae="$formulae pipx" ;;
+            ruff)       formulae="$formulae ruff" ;;
+            ipython)    formulae="$formulae ipython" ;;
+            httpie)     formulae="$formulae httpie" ;;
+            poetry)     formulae="$formulae poetry" ;;
+            pre-commit) formulae="$formulae pre-commit" ;;
             nvtop)      echo "==> nvtop is Linux-only; skipping on macOS" ;;
+            *)          ts_app_is_ai "$id" || echo "==> $id: no macOS package mapping; skipped" ;;
         esac
     done
     # shellcheck disable=SC2086
@@ -125,6 +251,121 @@ ts_brew_install_apps() {
     case " $apps " in *" zed "*)
         brew list --cask zed >/dev/null 2>&1 || brew install --cask zed ;;
     esac
+    ts_install_node_lts "$apps"
+    ts_install_ai_clis "$apps"
+}
+
+# fnm installs the manager, not a runtime — without this, `node` still does not
+# exist and every npm-based agent CLI below would decline. Idempotent: skipped
+# when a Node is already current enough.
+ts_install_node_lts() {
+    case " $1 " in *" fnm "*) ;; *) return 0 ;; esac
+    command -v fnm >/dev/null 2>&1 || return 0
+    if [ "$(ts_node_major)" -ge 20 ] 2>/dev/null; then
+        echo "==> node: $(node --version 2>/dev/null) already current"
+        return 0
+    fi
+    echo "==> node: installing the current LTS via fnm"
+    eval "$(fnm env 2>/dev/null)" || true
+    fnm install --lts >/dev/null 2>&1 && fnm default lts-latest >/dev/null 2>&1 \
+        || echo "!! fnm install --lts failed; run it by hand."
+    eval "$(fnm env 2>/dev/null)" || true
+    command -v node >/dev/null 2>&1 && echo "==> node: $(node --version)"
+}
+
+# ── Agent CLIs ─────────────────────────────────────────────────────────────────
+# Not package-manager installs, so they get their own path. Each is idempotent
+# (skips when already on PATH), never fatal, and only ever runs for an id the
+# user actually ticked — every one of them lives in TS_APPS_OPTIONAL.
+#
+# Deliberately native installers and release binaries rather than npm: the Node
+# on a machine is not the stack's to control (this was written on a Mac carrying
+# node 10 from 2018, on which `npm` refuses to run at all), and @openai/codex
+# needs Node 20+. Where npm really is the only channel, check the version and
+# warn rather than fail.
+ts_node_major() {
+    command -v node >/dev/null 2>&1 || { echo 0; return; }
+    node --version 2>/dev/null | sed -n 's/^v\([0-9][0-9]*\).*/\1/p' | head -1
+}
+
+ts_install_ai_cli() {
+    local id="$1" bin
+    bin="$(ts_app_bin "$id")"
+    if command -v "$bin" >/dev/null 2>&1; then
+        echo "==> $id: already installed ($(command -v "$bin"))"
+        return 0
+    fi
+    case "$id" in
+        claude)
+            echo "==> claude: installing via the official installer"
+            curl -fsSL https://claude.ai/install.sh | bash \
+                || echo "!! claude install failed; see https://docs.claude.com/en/docs/claude-code" ;;
+        cursor-agent)
+            echo "==> cursor-agent: installing via the official installer"
+            curl -fsS https://cursor.com/install | bash \
+                || echo "!! cursor-agent install failed; see https://cursor.com/cli" ;;
+        grok)
+            # xAI ship a standalone binary, so this needs no Node at all. The
+            # installer defaults to ~/.grok/bin and APPENDS a PATH line to
+            # ~/.zshrc — which this stack owns whole-file, so chezmoi would wipe
+            # it on the next apply. GROK_BIN_DIR puts the symlink somewhere
+            # already on PATH and sidesteps that entirely.
+            echo "==> grok: installing via the official installer"
+            GROK_BIN_DIR="$HOME/.local/bin" bash -c \
+                'curl -fsSL https://x.ai/cli/install.sh | bash' \
+                || echo "!! grok install failed; see https://x.ai/build" ;;
+        codex|gemini)
+            # npm-only. @openai/codex wants Node >= 16, @google/gemini-cli >= 20.
+            local pkg want major
+            case "$id" in
+                codex)  pkg="@openai/codex";     want=16 ;;
+                gemini) pkg="@google/gemini-cli"; want=20 ;;
+            esac
+            major="$(ts_node_major)"
+            if [ "${major:-0}" -ge "$want" ] 2>/dev/null && command -v npm >/dev/null 2>&1; then
+                echo "==> $id: installing $pkg via npm"
+                npm install -g "$pkg" || echo "!! $id install failed."
+            else
+                # Deliberately no brew fallback for gemini: the `gemini-cli`
+                # formula is deprecated upstream and scheduled for removal on
+                # 2026-12-18, so installing from it would hand you a dead end.
+                # Node is the supported path, and `fnm` in the runtimes group
+                # is how you get one.
+                echo "!! $id needs Node $want+ to install from npm (found: ${major:-none})."
+                echo "   Install the runtime first: ts-config apps fnm   (then: fnm install --lts)"
+            fi ;;
+        *)
+            echo "!! $id: no agent-CLI installer defined" ;;
+    esac
+}
+
+ts_install_ai_clis() {
+    local id
+    for id in $1; do
+        ts_app_is_ai "$id" && ts_install_ai_cli "$id"
+    done
+    return 0
+}
+
+# Print what each selected app resolved to, so a curl-pipe installer that failed
+# quietly is visible rather than assumed.
+ts_report_installed_apps() {
+    local id bin path ver
+    ts_load_node_env
+    [ -z "${1:-}" ] && return 0
+    echo
+    echo "==> Installed tools:"
+    for id in $1; do
+        bin="$(ts_app_bin "$id")"
+        if path="$(command -v "$bin" 2>/dev/null)"; then
+            # Strip ANSI: btop and friends colour their own --version output.
+            ver="$("$bin" --version 2>/dev/null | head -1 | sed $'s/\033\\[[0-9;]*m//g' | cut -c1-40)"
+            printf '    %-14s %s\n' "$id" "${ver:-$path}"
+        else
+            printf '    %-14s %s\n' "$id" "NOT FOUND on PATH"
+        fi
+    done
+    echo "    (run 'exec zsh' to pick up shell integrations for newly installed tools)"
 }
 
 # ── chezmoi helpers ─────────────────────────────────────────────────────────────

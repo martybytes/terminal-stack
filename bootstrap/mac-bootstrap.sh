@@ -45,47 +45,51 @@ fi
 # 2. Wizard — collect leader/theme/app choices (env vars skip prompts), then
 # install the required formulae plus the selected toggleable apps.
 ts_confirm_headless
-# macOS is the only POSIX target that installs WezTerm (WSL/Linux use the
-# host's GUI), so it is the only one that asks.
-ts_is_headless || TS_WIZ_ASK_WEZTERM=1
+# macOS installs GUI terminal emulators (WSL uses the host's; desktop Linux asks
+# too, from linux-bootstrap.sh). A headless Mac has no window server, so it is
+# never asked and never gets one.
+ts_is_headless || TS_WIZ_ASK_TERMINALS=1
 ts_wizard_collect || exit 0
 echo "$INFO Installing required brew formulae (zsh, git, starship, chezmoi)"
 brew install zsh git starship chezmoi
 ts_brew_install_apps "$TS_WIZ_APPS"
 
-# 3. WezTerm + Nerd Font (casks) — GUI only. Skip on a headless Mac (e.g. a CI
-# runner or a Mac server reached over ssh): no window server to render either.
+# 3. Terminal emulators + Nerd Font (casks) — GUI only. Skip on a headless Mac
+# (e.g. a CI runner or a Mac server reached over ssh): no window server to render
+# either.
 if ts_is_headless; then
-    echo "$INFO Headless Mac — skipping WezTerm + Nerd Font casks (no GUI here)."
+    echo "$INFO Headless Mac — skipping terminal emulator + Nerd Font casks (no GUI here)."
 else
-    # WezTerm, matching the Windows side. The plain `wezterm` cask is pinned to
-    # the stale 20240203 stable; this stack expects a current build, so nightly
-    # is the default — but it is a choice (see ts_prompt_wezterm), and a nightly
-    # that won't install falls back to stable rather than failing the bootstrap.
-    case "${TS_WIZ_WEZTERM:-nightly}" in
-        skip)
-            echo "$INFO WezTerm: skipped"
-            ;;
-        stable)
-            if ! brew list --cask wezterm >/dev/null 2>&1; then
-                echo "$INFO Installing WezTerm stable cask"
-                brew install --cask wezterm || echo "$WARN WezTerm cask install failed; install it by hand later."
-            else
-                echo "$INFO WezTerm cask already installed"
-            fi
-            ;;
-        *)
-            if ! brew list --cask wezterm@nightly >/dev/null 2>&1; then
-                echo "$INFO Installing WezTerm nightly cask"
-                if ! brew install --cask wezterm@nightly; then
-                    echo "$WARN nightly unavailable; falling back to WezTerm stable"
-                    brew install --cask wezterm || echo "$WARN WezTerm cask install failed; install it by hand later."
-                fi
-            else
-                echo "$INFO WezTerm nightly cask already installed"
-            fi
-            ;;
-    esac
+    # Neither channel is installed automatically: TS_WIZ_TERMINALS is whatever
+    # the wizard was told, and ts_wezterm_install removes the other channel first
+    # (both casks own /Applications/WezTerm.app, so they cannot coexist).
+    # docs/decisions.md § "Why the WezTerm channel is a question, and why it is
+    # not a saved setting" covers why nightly is offered and pre-selected.
+    ts_install_cask_latest() {
+        local cask="$1" name="$2"
+        if brew list --cask "$cask" >/dev/null 2>&1; then
+            echo "$INFO $name: installed; checking for an upgrade"
+            brew upgrade --cask "$cask" 2>/dev/null || echo "$INFO $name: already at the latest."
+        else
+            echo "$INFO $name: installing the latest"
+            brew install --cask "$cask" || echo "$WARN $name install failed; install it by hand later."
+        fi
+    }
+
+    if [ -z "${TS_WIZ_TERMINALS:-}" ]; then
+        echo "$INFO Terminal emulator: none selected — skipped."
+    else
+        local_channel="$(ts_terminals_channel "$TS_WIZ_TERMINALS")"
+        if [ -n "$local_channel" ]; then
+            ts_wezterm_install "$local_channel"
+        else
+            echo "$INFO WezTerm: not selected — skipped."
+        fi
+        case " $TS_WIZ_TERMINALS " in
+            *" ghostty "*) ts_install_cask_latest ghostty 'Ghostty' ;;
+            *)             echo "$INFO Ghostty: not selected — skipped." ;;
+        esac
+    fi
     # JetBrainsMono Nerd Font cask (font casks moved into homebrew/cask in 2024).
     if ! brew list --cask font-jetbrains-mono-nerd-font >/dev/null 2>&1; then
         echo "$INFO Installing JetBrainsMono Nerd Font cask"
@@ -193,6 +197,8 @@ else
         echo "$INFO Wrote WORKSPACE_DIR=$WS_CHOICE to $RC"
     fi
 fi
+
+ts_report_installed_apps "$TS_WIZ_APPS"
 
 echo ""
 echo "$INFO macOS bootstrap done."

@@ -9,7 +9,7 @@
 
 # ── App catalog (winget ids) ─────────────────────────────────────────────────────
 # Required prerequisites (Nerd Font, Starship, chezmoi, Git) are always installed
-# and not listed here. WezTerm is a wizard choice (Read-TsWezterm), not a
+# and not listed here. Terminal emulators are a wizard choice (Read-TsTerminals), not a
 # prerequisite. tmux/tldr/nvtop/lazydocker are WSL/Linux-only.
 $script:TsWingetIds = @{
     eza        = 'eza-community.eza'
@@ -26,16 +26,61 @@ $script:TsWingetIds = @{
     ghq        = 'x-motemen.ghq'
     lazygit    = 'JesseDuffield.lazygit'
     prettymark = 'Eagle1.PrettyMark'
+    fd         = 'sharkdp.fd'
+    duf        = 'muesli.duf'
+    dust       = 'bootandy.dust'
+    gdu        = 'dundee.gdu'
+    btop       = 'aristocratos.btop4win'
+    bottom     = 'Clement.bottom'
+    glances    = 'nicolargo.glances'
+    gping      = 'orf.gping'
+    fnm        = 'Schniz.fnm'
+    node       = 'OpenJS.NodeJS'
+    python     = 'Python.Python.3.13'
+    uv         = 'astral-sh.uv'
+    pipx       = 'pypa.pipx'
+    ruff       = 'astral-sh.ruff'
+    poetry     = 'Python-Poetry.Poetry'
+    # Deliberately absent: ncdu, bandwhich and tree have no reliable winget id
+    # (or, for bandwhich, no Windows build). An id that always fails is worse
+    # than an honest "not available on this platform" — Get-TsAppsPending skips
+    # anything not in this table, so they simply never nag on Windows.
 }
-$script:TsAppsRecommended = @('eza','fzf','bat','delta','ripgrep','zoxide','glow','micro','neovim','gh','ghq','lazygit','prettymark')
-$script:TsAppsOptional    = @('zed')
+$script:TsAppsRecommended = @('eza','fzf','bat','fd','delta','ripgrep','zoxide','glow','micro','neovim','gh','ghq','lazygit','prettymark','duf','dust','btop','fnm','python','uv','pipx','ruff','ipython','claude','codex','cursor-agent','grok','gemini')
+$script:TsAppsOptional    = @('zed','gdu','bottom','glances','gping','node','httpie','poetry','pre-commit')
 $script:TsAppsAll         = $script:TsAppsRecommended + $script:TsAppsOptional
+
+# Groups exist for the picker only — the saved `apps` array stays flat, so this
+# adds no chezmoi [data] key. Twin of ts_app_group_* in bootstrap/_config.sh;
+# ids absent on Windows are simply not in $TsWingetIds and are skipped.
+$script:TsAppGroups = [ordered]@{
+    shell   = @{ Desc = 'shell essentials';    Members = @('tmux','eza','bat','tree','zoxide','fzf') }
+    search  = @{ Desc = 'search and find';     Members = @('ripgrep','fd') }
+    disk    = @{ Desc = 'disk usage';          Members = @('duf','ncdu','dust','gdu') }
+    system  = @{ Desc = 'system monitors';     Members = @('btop','bottom','glances','nvtop','lazydocker') }
+    network = @{ Desc = 'network';             Members = @('bandwhich','gping') }
+    git     = @{ Desc = 'git tooling';         Members = @('delta','gh','ghq','lazygit') }
+    editors = @{ Desc = 'editors and readers'; Members = @('micro','neovim','glow','zed','tldr','prettymark') }
+    runtimes = @{ Desc = 'language runtimes';  Members = @('fnm','node') }
+    python  = @{ Desc = 'Python tooling';      Members = @('python','uv','pipx','ruff','ipython','httpie','poetry','pre-commit') }
+    ai      = @{ Desc = 'AI coding agents';    Members = @('claude','codex','cursor-agent','grok','gemini') }
+}
+function Get-TsAppGroupOf([string]$id) {
+    foreach ($g in $script:TsAppGroups.Keys) {
+        if ($script:TsAppGroups[$g].Members -contains $id) { return $g }
+    }
+    return ''
+}
+function Test-TsAppIsAi([string]$id) { return ($script:TsAppGroups['ai'].Members -contains $id) }
 
 # The binary an app id actually puts on PATH. Mostly identity; a few differ.
 function Get-TsAppBin([string]$id) {
     switch ($id) {
         'ripgrep' { 'rg' }
         'neovim'  { 'nvim' }
+        'bottom'  { 'btm' }
+        'python'  { 'python3' }
+        'cursor-agent' { 'cursor-agent' }
         default   { $id }
     }
 }
@@ -362,6 +407,84 @@ function Read-TsChoice {
     return $Default
 }
 
+# Map one typed answer onto a set of 1-based indices to toggle; $null when it
+# matches nothing. Split out from the prompt loop for the same reason as
+# Resolve-TsChoiceAnswer — the matching rules stay testable without a terminal.
+# Note it splits on whitespace AND commas: "1 3" and "1,3" both toggle two items.
+# Deliberately NOT ts_prompt_choice's strip-all-whitespace, which would fuse them.
+function Resolve-TsMultiAnswer {
+    param([Parameter(Mandatory)][int]$Count, [string]$Answer)
+    $tokens = @("$Answer" -split '[,\s]+' | Where-Object { $_ })
+    if (-not $tokens) { return $null }
+    $out = @()
+    foreach ($t in $tokens) {
+        if ($t -notmatch '^\d+$') { return $null }
+        $i = [int]$t
+        if ($i -lt 1 -or $i -gt $Count) { return $null }
+        $out += $i
+    }
+    return $out
+}
+
+# The tick-list prompt for questions with more than one answer. $Options is an
+# ordered list of @{ Key; Label; Note }; $Preticked is the list of Keys that
+# start ticked. Returns the selected Keys.
+# Twin of bootstrap/_wizard.sh ts_prompt_multi — keep the rendered output
+# identical (parse-time isolation forces the copy).
+function Read-TsMulti {
+    param(
+        [Parameter(Mandatory)][string]$Title,
+        [Parameter(Mandatory)][object[]]$Options,
+        [string[]]$Preticked = @(),
+        [string[]]$Intro = @()
+    )
+    $ticks = @($Options | ForEach-Object { [bool]($Preticked -contains $_.Key) })
+    $render = {
+        Write-Host ''
+        Write-Host $Title
+        foreach ($line in $Intro) { Write-Host $line }
+        for ($i = 0; $i -lt $Options.Count; $i++) {
+            $o = $Options[$i]
+            $note = $o['Note']   # index, not dot: Note is optional and dot access throws under strictness
+            $suffix = if ($note) { "  ($note)" } else { '' }
+            $mark = if ($ticks[$i]) { 'x' } else { ' ' }
+            Write-Host ("  [{0}] {1,2}) {2}{3}" -f $mark, ($i + 1), $o.Label, $suffix)
+        }
+    }
+    $emit = { @(for ($i = 0; $i -lt $Options.Count; $i++) { if ($ticks[$i]) { $Options[$i].Key } }) }
+
+    & $render
+    if (-not (Test-TsInteractive)) {
+        Write-Host 'Toggle a number, [a]ll, [n]one, Enter to continue, [s]kip: (non-interactive — keeping the defaults)'
+        return (& $emit)
+    }
+    while ($true) {
+        $ans = "$(Read-Host 'Toggle a number, [a]ll, [n]one, Enter to continue, [s]kip')".Trim()
+        if (-not $ans) { break }
+        if ($ans -imatch '^(s|skip)$') {
+            for ($i = 0; $i -lt $Options.Count; $i++) { $ticks[$i] = $false }
+            break
+        }
+        if ($ans -imatch '^(a|all)$') {
+            for ($i = 0; $i -lt $Options.Count; $i++) { $ticks[$i] = $true }
+            & $render; continue
+        }
+        if ($ans -imatch '^(n|no|none)$') {
+            for ($i = 0; $i -lt $Options.Count; $i++) { $ticks[$i] = $false }
+            & $render; continue
+        }
+        $picks = Resolve-TsMultiAnswer -Count $Options.Count -Answer $ans
+        if ($picks) {
+            foreach ($i in $picks) { $ticks[$i - 1] = -not $ticks[$i - 1] }
+        } else {
+            Write-Host "  ? enter a number 1-$($Options.Count) (several are fine), a, n, s, or Enter"
+        }
+        & $render
+    }
+    return (& $emit)
+}
+
+
 function Read-TsLeader {
     if ($env:TS_LEADER) { return $env:TS_LEADER }
     $c = Read-TsChoice -Title 'Leader key (WezTerm) — prefix for pane / tab / workspace commands:' -Default 'ctrl-space' -Options @(
@@ -385,27 +508,301 @@ function Read-TsTheme {
     )
 }
 
-# WezTerm used to be an unconditional install. It isn't universal (Windows
-# Terminal users, machines that already have it), and the nightly winget
-# manifest goes stale often enough that the install failed outright in the
-# field — so it is a choice now, and a stale nightly falls back to stable.
-function Read-TsWezterm {
-    if ($env:TS_WEZTERM) { return $env:TS_WEZTERM }
-    if (Get-Command wezterm -ErrorAction SilentlyContinue) {
-        Read-TsChoice -Title 'Terminal emulator (WezTerm):' -Default 'skip' -Intro @(
-            "  Found: $((Get-Command wezterm).Source)"
-        ) -Options @(
-            @{ Key = 'skip';    Label = 'keep the installed WezTerm' },
-            @{ Key = 'nightly'; Label = 'reinstall/upgrade to nightly'; Note = 'what this config targets' },
-            @{ Key = 'stable';  Label = 'reinstall/upgrade to stable' }
-        )
-    } else {
-        Read-TsChoice -Title 'Terminal emulator (WezTerm):' -Default 'nightly' -Options @(
-            @{ Key = 'nightly'; Label = 'WezTerm nightly'; Note = 'what this config targets' },
-            @{ Key = 'stable';  Label = 'WezTerm stable';  Note = 'winget wez.wezterm' },
-            @{ Key = 'skip';    Label = "skip — I'll use Windows Terminal or install it myself" }
-        )
+
+# ── WezTerm channel facts ───────────────────────────────────────────────────────
+# POSIX twin: bootstrap/_wezterm.sh — keep the reported facts and the switching
+# rules identical. Neither channel is ever installed automatically: the wizard
+# asks, ts-update offers, ts-config wezterm changes it. Upstream's newest stable
+# is 20240203 (February 2024, no cut since), which is why nightly is the
+# pre-selected answer rather than the forced one.
+#
+# The channel is NOT a saved setting — it is read back from winget, which cannot
+# drift out of sync with what is actually installed.
+$script:TsWezRepo = 'wezterm/wezterm'
+$script:TsWezNetTimeout = 5
+
+# Parse a `wezterm --version` line into @{Version;Date;Hash}. Releases are named
+# <YYYYMMDD>-<HHMMSS>-<githash>, so the build date needs no network call.
+function Get-TsWezVersionParts([string]$Raw) {
+    if ($Raw -match '(\d{8})-(\d{6})-([0-9a-f]+)') {
+        return @{ Version = "$($Matches[1])-$($Matches[2])-$($Matches[3])"; Date = $Matches[1]; Hash = $Matches[3] }
     }
+    return $null
+}
+
+function Get-TsWezInstalled {
+    $cmd = Get-Command wezterm -CommandType Application -ErrorAction SilentlyContinue
+    if (-not $cmd) { return $null }
+    try { $raw = & wezterm --version 2>$null } catch { return $null }
+    return (Get-TsWezVersionParts "$raw")
+}
+
+function Format-TsWezDate([string]$Ymd) {
+    if ($Ymd -match '^\d{8}$') { return "{0}-{1}-{2}" -f $Ymd.Substring(0,4), $Ymd.Substring(4,2), $Ymd.Substring(6,2) }
+    return $Ymd
+}
+
+# stable | nightly | unknown | none — from winget, never stored. "unknown" means
+# wezterm is on PATH but winget does not own it: report it, never replace it.
+function Get-TsWezChannel {
+    if (Get-Command winget -ErrorAction SilentlyContinue) {
+        $n = & winget list --id 'wez.wezterm.nightly' --exact 2>&1
+        if ($LASTEXITCODE -eq 0 -and ($n -match 'wez\.wezterm\.nightly')) { return 'nightly' }
+        $st = & winget list --id 'wez.wezterm' --exact 2>&1
+        if ($LASTEXITCODE -eq 0 -and ($st -match 'wez\.wezterm')) { return 'stable' }
+    }
+    if (Get-Command wezterm -CommandType Application -ErrorAction SilentlyContinue) { return 'unknown' }
+    return 'none'
+}
+
+# One place for the API call. gh is authenticated (5000/hr) where present; the
+# bare REST endpoint is 60/hr per IP. Fails open — callers treat $null as offline.
+function Invoke-TsGhApi([string]$Path) {
+    if (Get-Command gh -ErrorAction SilentlyContinue) {
+        try {
+            $out = & gh api $Path 2>$null
+            if ($LASTEXITCODE -eq 0 -and $out) { return ($out | ConvertFrom-Json) }
+        } catch {}
+    }
+    try {
+        return Invoke-RestMethod -Uri "https://api.github.com/$Path" -TimeoutSec $script:TsWezNetTimeout `
+            -Headers @{ 'Accept' = 'application/vnd.github+json'; 'User-Agent' = 'terminal-stack' }
+    } catch { return $null }
+}
+
+function Get-TsWezLatestStable {
+    $d = Invoke-TsGhApi "repos/$($script:TsWezRepo)/releases/latest"
+    if (-not $d -or -not $d.tag_name) { return $null }
+    return @{ Tag = $d.tag_name; Date = "$($d.published_at)".Substring(0,10) }
+}
+
+# The rolling nightly tag's own published_at is stuck in 2019; each ASSET's
+# updated_at is the real build time, and it differs per platform.
+function Get-TsWezLatestNightly {
+    $d = Invoke-TsGhApi "repos/$($script:TsWezRepo)/releases/tags/nightly"
+    if (-not $d) { return $null }
+    $best = ''
+    foreach ($a in $d.assets) { if ($a.name -eq 'WezTerm-nightly-setup.exe') { $best = "$($a.updated_at)".Substring(0,10) } }
+    if (-not $best) { foreach ($a in $d.assets) { $u = "$($a.updated_at)"; if ($u -and $u.Substring(0,10) -gt $best) { $best = $u.Substring(0,10) } } }
+    if (-not $best) { return $null }
+    return $best
+}
+
+function Get-TsWezCommitsSince([string]$Hash) {
+    if (-not $Hash) { return $null }
+    $d = Invoke-TsGhApi "repos/$($script:TsWezRepo)/compare/$Hash...main"
+    if (-not $d -or -not $d.total_commits) { return $null }
+    return $d.total_commits
+}
+
+# Upstream's own docs/changelog.md, sliced at the heading matching the installed
+# version. raw.githubusercontent.com has no API rate limit; cached because it is
+# ~225 KB. Returns the markdown slice, or $null.
+function Get-TsWezChangesText([string]$Version) {
+    $dir = Join-Path $env:LOCALAPPDATA 'terminal-stack'
+    $file = Join-Path $dir 'wezterm-changelog.md'
+    $fresh = (Test-Path $file) -and ((Get-Date) - (Get-Item $file).LastWriteTime).TotalSeconds -lt 3600
+    if (-not $fresh) {
+        try {
+            New-Item -ItemType Directory -Force -Path $dir | Out-Null
+            Invoke-WebRequest -Uri "https://raw.githubusercontent.com/$($script:TsWezRepo)/main/docs/changelog.md" `
+                -TimeoutSec $script:TsWezNetTimeout -UseBasicParsing -OutFile $file
+        } catch {}
+    }
+    if (-not (Test-Path $file)) { return $null }
+    $lines = Get-Content -LiteralPath $file
+    $start = -1
+    for ($i = 0; $i -lt $lines.Count; $i++) { if ($lines[$i] -like '## Changes*') { $start = $i + 1; break } }
+    if ($start -lt 0) { return $null }
+    $end = $lines.Count
+    if ($Version) {
+        for ($i = $start; $i -lt $lines.Count; $i++) {
+            if ($lines[$i].StartsWith('### ') -and $lines[$i].Contains($Version)) { $end = $i; break }
+        }
+    }
+    return ($lines[$start..($end - 1)] -join "`n").Trim()
+}
+
+# "Changed 20  New 32  Fixed 74  Updated 9", or '' when unavailable.
+function Get-TsWezChangesTally([string]$Version) {
+    $text = Get-TsWezChangesText $Version
+    if (-not $text) { return '' }
+    $section = $null; $counts = [ordered]@{}
+    foreach ($line in ($text -split "`n")) {
+        if ($line -match '^#### +(.+?)\s*$') { $section = $Matches[1]; if (-not $counts.Contains($section)) { $counts[$section] = 0 }; continue }
+        if ($section -and $line -match '^\* ') { $counts[$section] = $counts[$section] + 1 }
+    }
+    return (@($counts.Keys | Where-Object { $counts[$_] } | ForEach-Object { "$_ $($counts[$_])" }) -join '  ')
+}
+
+function Show-TsWezStatus {
+    $inst = Get-TsWezInstalled
+    $channel = Get-TsWezChannel
+    Write-Host '==> WezTerm'
+    if (-not $inst) {
+        Write-Host '    Installed : not installed'
+    } else {
+        Write-Host ("    Installed : {0}  ({1}, {2})" -f $inst.Version, $channel, (Format-TsWezDate $inst.Date))
+        if ($channel -eq 'unknown') {
+            Write-Host '                not from a package manager here — left alone by install/upgrade'
+        }
+    }
+    $st = Get-TsWezLatestStable
+    $ni = Get-TsWezLatestNightly
+    if (-not $st -and -not $ni) { Write-Host '    Latest    : (offline — could not reach GitHub)'; return }
+    if ($ni) { Write-Host "    nightly   : built $ni" }
+    if ($st) {
+        $line = "    stable    : {0}  ({1})" -f $st.Tag, $st.Date
+        if ($inst -and $st.Tag -eq $inst.Version) { $line += '  — you are on it' }
+        Write-Host $line
+    }
+    if ($inst) {
+        $tally = Get-TsWezChangesTally $inst.Version
+        $commits = Get-TsWezCommitsSince $inst.Hash
+        if ($commits -or $tally) {
+            $line = '    Since your build:'
+            if ($commits) { $line += " $commits commits" }
+            if ($commits -and $tally) { $line += ' —' }
+            if ($tally) { $line += " $tally" }
+            Write-Host $line
+            if ($tally) { Write-Host '    Full notes: ts-config wezterm changes' }
+        }
+    }
+}
+
+# A newer build on the channel you are already on? One line when yes, nothing
+# otherwise — ts-update gates its offer on this, so silence is the common case.
+function Get-TsWezUpdateAvailable {
+    $inst = Get-TsWezInstalled
+    if (-not $inst) { return '' }
+    switch (Get-TsWezChannel) {
+        'stable' {
+            $st = Get-TsWezLatestStable
+            if (-not $st -or $st.Tag -eq $inst.Version) { return '' }
+            return "stable $($st.Tag) ($($st.Date)) is newer than your $($inst.Version)"
+        }
+        'nightly' {
+            $ni = Get-TsWezLatestNightly
+            if (-not $ni) { return '' }
+            if (($ni -replace '-','') -le $inst.Date) { return '' }
+            return "a nightly built $ni is newer than your $(Format-TsWezDate $inst.Date) build"
+        }
+        default { return '' }
+    }
+}
+
+# Install/switch channel. Switching means removing the other package first: the
+# two winget packages both install WezTerm to the same place.
+function Install-TsWezterm([string]$Channel) {
+    if ($Channel -notin 'stable', 'nightly') { Write-Warning 'Install-TsWezterm: expected stable|nightly'; return }
+    if ((Get-TsWezChannel) -eq 'unknown') {
+        Write-Host '==> WezTerm: installed outside winget; leaving it alone.'
+        return
+    }
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) { Write-Warning 'winget not available.'; return }
+    $want  = if ($Channel -eq 'nightly') { 'wez.wezterm.nightly' } else { 'wez.wezterm' }
+    $other = if ($Channel -eq 'nightly') { 'wez.wezterm' } else { 'wez.wezterm.nightly' }
+    $o = & winget list --id $other --exact 2>&1
+    if ($LASTEXITCODE -eq 0 -and ($o -match [regex]::Escape($other))) {
+        Write-Host "==> WezTerm: removing $other (switching channel)"
+        & winget uninstall --id $other --exact --silent 2>&1 | Select-Object -Last 2
+    }
+    if (Get-Command Install-WingetPackage -ErrorAction SilentlyContinue) {
+        Install-WingetPackage -Id $want -Because "terminal emulator ($Channel)" | Out-Null
+    } else {
+        Write-Host "==> winget install $want"
+        & winget install --id $want --exact --silent --accept-source-agreements --accept-package-agreements 2>&1 |
+            Select-Object -Last 2
+    }
+}
+
+function Update-TsWezterm {
+    switch (Get-TsWezChannel) {
+        'stable'  { Install-TsWezterm 'stable' }
+        'nightly' { Install-TsWezterm 'nightly' }
+        'unknown' { Write-Host '==> WezTerm: installed outside winget; upgrade it the way you installed it.' }
+        default   { Write-Host "==> WezTerm: not installed. 'ts-config wezterm install nightly' to add it." }
+    }
+}
+
+# Which GUI terminal emulators to install — a tick-list, so each is individually
+# opt-in and "none" is one keystroke away. WezTerm appears TWICE, once per
+# channel: upstream's newest stable is 20240203 (February 2024, no cut since),
+# so nightly is what this stack's Lua config targets and is the pre-selected
+# answer — but it is never automatic, and the intro shows the real build dates
+# so the choice is made on facts rather than on a default nobody read.
+# Twin of bootstrap/_wizard.sh ts_prompt_terminals — keep the rendering identical.
+$script:TsTerminalCandidates = @(
+    @{ Key = 'wezterm-nightly'; Label = 'WezTerm nightly'; Note = 'current builds; what this stack configures' }
+    @{ Key = 'wezterm-stable';  Label = 'WezTerm stable';  Note = '20240203 — upstream has not cut one since' }
+    # Ghostty ships no Windows build, so it is offered on macOS/Linux only. If
+    # that changes, add it here AND to $script:TsTerminalWingetIds below.
+)
+$script:TsTerminalWingetIds = @{ 'wezterm-nightly' = 'wez.wezterm.nightly'; 'wezterm-stable' = 'wez.wezterm' }
+
+# The WezTerm channel a selection names, or '' when WezTerm was not picked.
+function Get-TsTerminalsChannel([string[]]$Selected) {
+    if ($Selected -contains 'wezterm-nightly') { return 'nightly' }
+    if ($Selected -contains 'wezterm-stable')  { return 'stable' }
+    return ''
+}
+
+function Read-TsTerminals {
+    # TS_TERMINALS=wezterm-nightly,ghostty | wezterm-stable | none.
+    # TS_WEZTERM is the older spelling and still maps across, so an unattended
+    # install neither breaks nor silently gets a channel it did not ask for.
+    $value = $env:TS_TERMINALS
+    if (-not $value -and $env:TS_WEZTERM) {
+        switch -Regex ($env:TS_WEZTERM) {
+            '^(skip|none)$' { $value = 'none' }
+            '^stable$'      { $value = 'wezterm-stable' }
+            default         { $value = 'wezterm-nightly' }
+        }
+    }
+    if ($value) {
+        if ($value -ieq 'none') { return @() }
+        # `wezterm` on its own has never named a channel; take the default one.
+        return @($value -split '[,\s]+' | Where-Object { $_ } |
+                 ForEach-Object { if ($_ -eq 'wezterm') { 'wezterm-nightly' } else { $_ } })
+    }
+
+    # Whatever is installed starts ticked, on its detected channel.
+    $preticked = switch (Get-TsWezChannel) {
+        'nightly' { @('wezterm-nightly') }
+        'stable'  { @('wezterm-stable') }
+        'unknown' { @() }              # not ours to replace; leave both unticked
+        default   { @('wezterm-nightly') }   # nothing installed: the default
+    }
+
+    $intro = @()
+    $inst = Get-TsWezInstalled
+    if ($inst) { $intro += "  Installed: WezTerm $($inst.Version) ($(Get-TsWezChannel), $(Format-TsWezDate $inst.Date))" }
+    $st = Get-TsWezLatestStable
+    $ni = Get-TsWezLatestNightly
+    if ($st -or $ni) {
+        $line = '  Latest:   '
+        if ($ni) { $line += " nightly built $ni" }
+        if ($st -and $ni) { $line += '  |' }
+        if ($st) { $line += " stable $($st.Tag) ($($st.Date))" }
+        $intro += $line
+    }
+    if ($inst) {
+        $tally = Get-TsWezChangesTally $inst.Version
+        if ($tally) { $intro += "  Since your build: $tally" }
+    }
+
+    $chosen = @(Read-TsMulti -Title 'Terminal emulator:' -Options $script:TsTerminalCandidates `
+        -Preticked $preticked -Intro $intro)
+
+    # One WezTerm, one channel: the two packages install to the same place, so
+    # both ticked is impossible to honour. Resolved here rather than teaching
+    # Read-TsMulti radio-group semantics — it is a byte-identical twin of
+    # ts_prompt_multi, and forking it would cost more than it is worth.
+    if (($chosen -contains 'wezterm-nightly') -and ($chosen -contains 'wezterm-stable')) {
+        Write-Warning 'both WezTerm channels ticked — installing nightly (they cannot coexist).'
+        $chosen = @($chosen | Where-Object { $_ -ne 'wezterm-stable' })
+    }
+    return $chosen
 }
 
 # The multiplexer domain (ts-mux). Default off: it changes how every pane is
@@ -476,15 +873,36 @@ function Read-TsApps {
     ) -Options @(
         @{ Key = 'recommended'; Label = 'install the recommended set' },
         @{ Key = 'all';         Label = 'install everything'; Note = 'recommended + ' + ($script:TsAppsOptional -join ', ') },
-        @{ Key = 'customize';   Label = 'choose which ones' },
+        @{ Key = 'groups';      Label = 'choose whole groups'; Note = ($script:TsAppGroups.Keys -join ', ') },
+        @{ Key = 'customize';   Label = 'choose individual tools' },
         @{ Key = 'none';        Label = 'skip all optional apps' }
     )
     switch ($choice) {
         'all'  { return $script:TsAppsAll }
         'none' { return @() }
+        'groups'    { return (Read-TsAppGroups) }
         'customize' { return (Read-TsAppsCustom) }
         default { return $script:TsAppsRecommended }
     }
+}
+
+# Tier 2: tick whole groups; every member of a ticked group is selected. Ids this
+# platform cannot install are filtered out at the end rather than hidden from the
+# menu, so the two platforms' group listings stay the same shape.
+# Twin of bootstrap/_wizard.sh ts_pick_app_groups.
+function Read-TsAppGroups {
+    $opts = @()
+    $preticked = @()
+    foreach ($g in $script:TsAppGroups.Keys) {
+        $opts += @{ Key = $g; Label = $script:TsAppGroups[$g].Desc; Note = ($script:TsAppGroups[$g].Members -join ' ') }
+        # Every group starts ticked, the agent CLIs included — they are still a
+        # question, and every tool inside is still individually untickable.
+        $preticked += $g
+    }
+    $chosen = Read-TsMulti -Title '  Tool groups:' -Options $opts -Preticked $preticked
+    $sel = @()
+    foreach ($g in $chosen) { $sel += $script:TsAppGroups[$g].Members }
+    return @($sel | Where-Object { $script:TsAppsAll -contains $_ })
 }
 
 # Customize: a single comma-separated line, or Enter to walk the list one by
@@ -493,7 +911,7 @@ function Read-TsApps {
 function Read-TsAppsCustom {
     Write-Host ''
     Write-Host ('  Available: ' + ($script:TsAppsAll -join ', '))
-    $csv = Read-Host '  Type a comma-separated list, or Enter to be asked one at a time'
+    $csv = Read-Host '  Type a comma-separated list, or Enter to pick from a list'
     if ($csv) {
         $want = @($csv -split ',' | ForEach-Object { $_.Trim().ToLower() } | Where-Object { $_ })
         $sel = @($script:TsAppsAll | Where-Object { $want -contains $_.ToLower() })
@@ -502,32 +920,158 @@ function Read-TsAppsCustom {
         Write-Host ('  Selected: ' + $(if ($sel.Count) { $sel -join ', ' } else { '<none>' }))
         return $sel
     }
+    # Thirty consecutive Y/n prompts is a lot to sit through, so the walk is a
+    # tick-list per group rather than one question per tool.
+    # Twin of bootstrap/_wizard.sh ts_pick_apps_by_item.
     $sel = @()
-    foreach ($id in $script:TsAppsAll) {
-        $def = if ($script:TsAppsRecommended -contains $id) { 'Y' } else { 'n' }
-        $a = Read-Host ('  install {0} — {1}? [{2}]' -f $id, (Get-TsAppDesc $id), $def)
-        if (-not $a) { $a = $def }
-        if ($a -match '^(y|yes)$') { $sel += $id }
+    foreach ($g in $script:TsAppGroups.Keys) {
+        $opts = @()
+        foreach ($id in $script:TsAppGroups[$g].Members) {
+            if ($script:TsAppsAll -notcontains $id) { continue }
+            $opts += @{ Key = $id; Label = $id; Note = (Get-TsAppDesc $id) }
+        }
+        if (-not $opts.Count) { continue }
+        $sel += Read-TsMulti -Title ('  ' + $script:TsAppGroups[$g].Desc + ':') -Options $opts `
+            -Preticked $script:TsAppsRecommended
     }
-    return $sel
+    return @($sel)
 }
 
 # Install the selected toggleable apps via winget (catalog id -> winget id).
+# The whole install questionnaire, in one place so both the bootstrap and
+# `ts-config wizard` ask exactly the same questions in the same order. POSIX
+# twin: ts_wizard_ask / ts_wizard_collect in bootstrap/_wizard.sh.
+function Read-TsWizard {
+    $w = [ordered]@{
+        Leader    = (Read-TsLeader)
+        Theme     = (Read-TsTheme)
+        Terminals = (Read-TsTerminals)
+        WezMux    = (Read-TsWeztermMux)
+        WezRestore = (Read-TsWeztermRestore)
+        Apps      = @(Read-TsApps)
+        CcTts     = (Read-TsCcTts)
+        Headroom  = (Read-TsAgentToggle TS_HEADROOM 'Headroom prompt compression and monitoring?' @(
+            '  Expects docker-local on 127.0.0.1:8787 and its MCP sidecar on 8788.',
+            '  This installer never manages those containers.'
+        ))
+        Caveman   = (Read-TsAgentToggle TS_CAVEMAN 'Caveman terse output for all projects?' @(
+            '  Installs the pinned user-scope plugin/skill; no project files are changed.'
+        ))
+        Agentmemory = (Read-TsAgentToggle TS_AGENTMEMORY 'AgentMemory for all projects?' @(
+            '  Expects docker-local on 127.0.0.1:3111; terminal-stack owns only agent wiring.'
+        ))
+        Workspace = (Read-TsWorkspaceDir)
+    }
+    # Tray daemon follow-up only makes sense when TTS itself was enabled.
+    $w.CcTtsDaemon = if ($w.CcTts -eq 'on') { Read-TsCcTtsDaemon } else { 'off' }
+    $w.HeadroomCursor = if ($w.Headroom -eq 'on') { Read-TsHeadroomCursorMode } else { 'mcp' }
+    return $w
+}
+
+function Install-TsTerminals {
+    param([string[]]$Selected)
+
+    if (-not $Selected) { Write-Host '==> Terminal emulator: none selected — skipped'; return }
+    $channel = Get-TsTerminalsChannel $Selected
+    if ($channel) {
+        # Install-TsWezterm removes the other channel first; nothing is removed
+        # when WezTerm was not selected at all.
+        Install-TsWezterm $channel
+    } else {
+        Write-Host '==> WezTerm: not selected — skipped'
+    }
+    if ($Selected -contains 'ghostty') {
+        Write-Host '==> Ghostty: no Windows build available — skipped'
+    }
+}
+
 function Install-TsApps([string[]]$Apps) {
     if (-not $Apps -or $Apps.Count -eq 0) {
         Write-Host '==> No optional apps selected; skipping app install'
         return
     }
-    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+    if (Get-Command winget -ErrorAction SilentlyContinue) {
+        foreach ($id in $Apps) {
+            if (Test-TsAppIsAi $id) { continue }   # handled by Install-TsAiCli below
+            if ($script:TsWingetIds.ContainsKey($id)) {
+                $wid = $script:TsWingetIds[$id]
+                Write-Host "==> winget install $wid"
+                & winget install --id $wid --exact --silent --accept-source-agreements --accept-package-agreements 2>&1 |
+                    Select-Object -Last 2
+            } else {
+                Write-Host "==> ${id}: no Windows package available; skipped"
+            }
+        }
+    } else {
         Write-Warning 'winget not available; recorded selection only.'
-        return
     }
+    foreach ($id in $Apps) { if (Test-TsAppIsAi $id) { Install-TsAiCli $id } }
+}
+
+# The agent CLIs do not come from winget, so they get their own path. Idempotent
+# (skips when already on PATH), never fatal, and only ever runs for an id that
+# was actually ticked — every one of them is in $TsAppsOptional.
+# Twin of ts_install_ai_cli in bootstrap/_config.sh.
+function Install-TsAiCli([string]$id) {
+    $bin = Get-TsAppBin $id
+    $existing = Get-Command $bin -CommandType Application -ErrorAction SilentlyContinue
+    if ($existing) { Write-Host "==> ${id}: already installed ($($existing.Source))"; return }
+    switch ($id) {
+        'claude' {
+            Write-Host '==> claude: installing via the official installer'
+            try { & powershell -NoProfile -Command "irm https://claude.ai/install.ps1 | iex" }
+            catch { Write-Warning 'claude install failed; see https://docs.claude.com/en/docs/claude-code' }
+        }
+        'grok' {
+            # xAI ship a standalone binary, so this needs no Node at all.
+            Write-Host '==> grok: installing via the official installer'
+            try { & powershell -NoProfile -Command "irm https://x.ai/cli/install.ps1 | iex" }
+            catch { Write-Warning 'grok install failed; see https://x.ai/build' }
+        }
+        { $_ -in 'codex', 'gemini' } {
+            # npm-only. @openai/codex wants Node >= 16, @google/gemini-cli >= 20.
+            # No brew/winget fallback for gemini: the `gemini-cli` formula is
+            # deprecated upstream and scheduled for removal on 2026-12-18.
+            $pkg  = if ($id -eq 'codex') { '@openai/codex' } else { '@google/gemini-cli' }
+            $want = if ($id -eq 'codex') { 16 } else { 20 }
+            $node = Get-Command node -CommandType Application -ErrorAction SilentlyContinue
+            $major = 0
+            if ($node) { $major = [int]((& node --version) -replace '^v(\d+).*', '$1') }
+            if ($major -ge $want -and (Get-Command npm -ErrorAction SilentlyContinue)) {
+                Write-Host "==> ${id}: installing $pkg via npm"
+                & npm install -g $pkg
+                if ($LASTEXITCODE -ne 0) { Write-Warning "$id install failed." }
+            } else {
+                Write-Warning "$id needs Node $want+ to install from npm (found: $(if ($major) { $major } else { 'none' }))."
+                Write-Host '   Install the runtime first: ts-config apps fnm   (then: fnm install --lts)'
+            }
+        }
+        'cursor-agent' {
+            Write-Warning 'cursor-agent has no Windows installer this stack can call; install it inside WSL, or see https://cursor.com/cli'
+        }
+        default { Write-Warning "${id}: no agent-CLI installer defined" }
+    }
+}
+
+# Print what each selected app resolved to, so an installer that failed quietly
+# is visible rather than assumed.
+# Twin of ts_report_installed_apps in bootstrap/_config.sh.
+function Show-TsInstalledApps([string[]]$Apps) {
+    if (-not $Apps -or $Apps.Count -eq 0) { return }
+    Write-Host ''
+    Write-Host '==> Installed tools:'
     foreach ($id in $Apps) {
-        if ($script:TsWingetIds.ContainsKey($id)) {
-            $wid = $script:TsWingetIds[$id]
-            Write-Host "==> winget install $wid"
-            & winget install --id $wid --exact --silent --accept-source-agreements --accept-package-agreements 2>&1 |
-                Select-Object -Last 2
+        $bin = Get-TsAppBin $id
+        $cmd = Get-Command $bin -CommandType Application -ErrorAction SilentlyContinue
+        if ($cmd) {
+            $ver = ''
+            try { $ver = (& $bin --version 2>$null | Select-Object -First 1) } catch {}
+            if (-not $ver) { $ver = $cmd.Source }
+            Write-Host ("    {0,-14} {1}" -f $id, ("$ver" -replace '\e\[[0-9;]*m', '').Substring(0, [Math]::Min(40, "$ver".Length)))
+        } elseif ($script:TsAppFixedPaths.ContainsKey($id) -and (Test-Path $script:TsAppFixedPaths[$id])) {
+            Write-Host ("    {0,-14} {1}" -f $id, $script:TsAppFixedPaths[$id])
+        } else {
+            Write-Host ("    {0,-14} {1}" -f $id, 'NOT FOUND on PATH')
         }
     }
 }

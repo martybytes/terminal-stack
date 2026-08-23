@@ -9,7 +9,9 @@
 # choices with ts_save_config (from _config.sh). Env vars skip each prompt:
 #   TS_LEADER=ctrl-a   TS_THEME=dark|light|follow   TS_TMUX=ctrl-b
 #   TS_APPS=recommended|all|none|id,id,...   (none or "skip all" = no optional apps)
-#   TS_WEZTERM=nightly|stable|skip           (macOS only; WSL/Linux never install it)
+#   TS_TERMINALS=wezterm-nightly,wezterm-stable,ghostty|none
+#                                            (macOS/desktop Linux; WSL uses the host's)
+#     (TS_WEZTERM=nightly|stable|skip is the older spelling and still maps across)
 #   TS_WEZ_MUX=on|off                        WezTerm multiplexer domain (ts-mux)
 #   TS_WEZ_RESTORE=on|off                    reopen the last session at startup
 #   TS_CC_TTS=on|off|skip   Claude Code Kokoro TTS at install
@@ -122,23 +124,86 @@ ts_prompt_theme() {
         'follow|follow OS appearance|WezTerm switches live'
 }
 
-# WezTerm used to be an unconditional cask install on macOS. It isn't universal
-# (iTerm/Ghostty users, machines that already have it), so it is a choice now.
-# WSL and native Linux never install WezTerm — the GUI lives on the host.
-ts_prompt_wezterm() {
-    if [ -n "${TS_WEZTERM:-}" ]; then printf '%s\n' "$TS_WEZTERM"; return 0; fi
-    if command -v wezterm >/dev/null 2>&1; then
-        ts_prompt_choice skip 'Terminal emulator (WezTerm):' \
-            "  Found: $(command -v wezterm)" \
-            'skip|keep the installed WezTerm' \
-            'nightly|reinstall/upgrade to nightly|what this config targets' \
-            'stable|reinstall/upgrade to stable'
-    else
-        ts_prompt_choice nightly 'Terminal emulator (WezTerm):' '' \
-            'nightly|WezTerm nightly|what this config targets' \
-            'stable|WezTerm stable|brew cask wezterm' \
-            'skip|skip — I use a different terminal'
+# Which GUI terminal emulators to install — a tick-list, so each is individually
+# opt-in and "none" is one keystroke away. WezTerm appears TWICE, once per
+# channel: upstream's newest stable is 20240203 (February 2024, no cut since),
+# so nightly is what this stack's Lua config targets and is the pre-selected
+# answer — but it is never automatic, and the intro shows the real build dates
+# so the choice is made on facts rather than on a default nobody read.
+# WSL and native Linux headless hosts never install one — the GUI lives elsewhere.
+# See docs/decisions.md § "Why the WezTerm channel is a question, and why it is
+# not a saved setting".
+ts_terminal_candidates() {
+    printf '%s\n' \
+        'wezterm-nightly|WezTerm nightly|current builds; what this stack configures' \
+        'wezterm-stable|WezTerm stable|20240203 — upstream has not cut one since' \
+        'ghostty|Ghostty|GPU-accelerated, platform-native UI'
+}
+
+ts_prompt_terminals() {
+    # TS_TERMINALS=wezterm-nightly,ghostty | wezterm-stable | none.
+    # TS_WEZTERM is the older spelling and still maps across, so an unattended
+    # install neither breaks nor silently gets a channel it did not ask for.
+    local value="${TS_TERMINALS:-}"
+    if [ -z "$value" ] && [ -n "${TS_WEZTERM:-}" ]; then
+        case "$TS_WEZTERM" in
+            skip|none) value=none ;;
+            stable)    value=wezterm-stable ;;
+            nightly)   value=wezterm-nightly ;;
+            *)         value=wezterm-nightly ;;
+        esac
     fi
+    if [ -n "$value" ]; then
+        if [ "$value" = none ]; then printf '\n'; return 0; fi
+        # `wezterm` on its own has never named a channel; take the default one.
+        # Done token by token: BSD sed has no \b, and a substring match would
+        # also mangle wezterm-nightly.
+        local tok out=""
+        for tok in $(printf '%s' "$value" | tr ',' ' '); do
+            [ "$tok" = wezterm ] && tok=wezterm-nightly
+            out="$out $tok"
+        done
+        printf '%s\n' "${out# }"
+        return 0
+    fi
+
+    local entry id preticked="" chosen intro
+    local -a opts=()
+    while IFS= read -r entry; do
+        [ -n "$entry" ] || continue
+        opts+=("$entry")
+    done < <(ts_terminal_candidates)
+
+    # Whatever is installed starts ticked, on its detected channel.
+    case "$(ts_wezterm_channel 2>/dev/null || echo none)" in
+        nightly) preticked="wezterm-nightly" ;;
+        stable)  preticked="wezterm-stable" ;;
+        unknown) preticked="" ;;          # not ours to replace; leave both unticked
+        *)       preticked="wezterm-nightly" ;;   # nothing installed: the default
+    esac
+    command -v ghostty >/dev/null 2>&1 && preticked="$preticked ghostty"
+
+    intro="$(ts_wezterm_prompt_intro 2>/dev/null || true)"
+    if command -v ghostty >/dev/null 2>&1; then
+        intro="${intro:+$intro
+}  Ghostty:  $(ghostty --version 2>/dev/null | head -1)"
+    fi
+
+    chosen="$(ts_prompt_multi "${preticked# }" 'Terminal emulator:' "$intro" "${opts[@]}")"
+
+    # One WezTerm, one channel. Both casks own /Applications/WezTerm.app and the
+    # two apt packages own /usr/bin/wezterm, so installing both is impossible —
+    # resolve it here rather than teaching ts_prompt_multi radio-group semantics
+    # (it is a byte-identical twin of Read-TsMulti; forking it to handle this
+    # would cost more than it is worth).
+    case " $chosen " in
+        *" wezterm-nightly "*)
+            case " $chosen " in *" wezterm-stable "*)
+                printf 'note: both WezTerm channels ticked — installing nightly (they cannot coexist).\n' >&2
+                chosen="$(printf '%s' "$chosen" | tr ' ' '\n' | grep -v '^wezterm-stable$' | tr '\n' ' ')" ;;
+            esac ;;
+    esac
+    printf '%s\n' "$(printf '%s' "$chosen" | tr -s ' ' | sed 's/^ //; s/ $//')"
 }
 
 # The multiplexer domain (ts-mux). Asked wherever a WezTerm GUI actually runs —
@@ -177,6 +242,86 @@ ts_prompt_wezterm_restore() {
         'on|on|reopen the last session'
 }
 
+# The tick-list prompt for questions with more than one answer. Same rendering as
+# ts_cleanup_menu's checklist, which is the house style for a multi-select; the
+# note suffix follows ts_prompt_choice. Menu goes to /dev/tty, the chosen keys go
+# to stdout space-separated, so callers capture with $( ) — which is also why
+# TS_WIZ_ASKED must be tallied by the caller, never in here.
+#
+# usage: ts_prompt_multi <preticked-space-list> <title> <intro-or-empty> "key|label|note"...
+# Twin of bootstrap/_config.ps1 Read-TsMulti — keep the rendered output identical.
+ts_prompt_multi() {
+    local preticked=" $1 " title="$2" intro="$3"; shift 3
+    local -a keys=() labels=() notes=() ticks=()
+    local opt key rest label note i n ans tok idx
+
+    for opt in "$@"; do
+        key="${opt%%|*}"; rest="${opt#*|}"
+        label="${rest%%|*}"; note="${rest#*|}"
+        [ "$note" = "$label" ] && note=""
+        keys+=("$key"); labels+=("$label"); notes+=("$note")
+        case "$preticked" in *" $key "*) ticks+=(1) ;; *) ticks+=(0) ;; esac
+    done
+    n=${#keys[@]}
+    [ "$n" -eq 0 ] && { printf '\n'; return 0; }
+
+    render() {
+        {
+            printf '\n%s\n' "$title"
+            [ -n "$intro" ] && printf '%s\n' "$intro"
+            for i in $(seq 0 $((n - 1))); do
+                local mark=" " suffix=""
+                [ "${ticks[$i]}" = "1" ] && mark="x"
+                [ -n "${notes[$i]}" ] && suffix="  (${notes[$i]})"
+                printf '  [%s] %2d) %s%s\n' "$mark" "$((i + 1))" "${labels[$i]}" "$suffix"
+            done
+        } > /dev/tty 2>/dev/null
+    }
+
+    emit() {
+        local out=""
+        for i in $(seq 0 $((n - 1))); do
+            [ "${ticks[$i]}" = "1" ] && out="$out ${keys[$i]}"
+        done
+        printf '%s\n' "${out# }"
+    }
+
+    render
+    if ! ts_is_interactive; then
+        printf 'Toggle a number, [a]ll, [n]one, Enter to continue, [s]kip: (non-interactive — keeping the defaults)\n' \
+            > /dev/tty 2>/dev/null
+        emit; unset -f render emit 2>/dev/null; return 0
+    fi
+
+    while true; do
+        ans="$(ts_tty_prompt 'Toggle a number, [a]ll, [n]one, Enter to continue, [s]kip: ')"
+        case "$ans" in
+            "")        break ;;
+            s|S|skip)  for i in $(seq 0 $((n - 1))); do ticks[$i]=0; done; break ;;
+            a|A|all)   for i in $(seq 0 $((n - 1))); do ticks[$i]=1; done; render; continue ;;
+            n|N|no|none) for i in $(seq 0 $((n - 1))); do ticks[$i]=0; done; render; continue ;;
+        esac
+        # Several toggles in one answer: "1 3" and "1,3" both work. Deliberately
+        # NOT ts_prompt_choice's `tr -d [:space:]` — that would fuse 1 2 into 12.
+        local bad=0
+        for tok in $(printf '%s' "$ans" | tr ',' ' '); do
+            case "$tok" in
+                ''|*[!0-9]*) bad=1; continue ;;
+            esac
+            idx=$((tok - 1))
+            if [ "$idx" -ge 0 ] && [ "$idx" -lt "$n" ]; then
+                [ "${ticks[$idx]}" = "1" ] && ticks[$idx]=0 || ticks[$idx]=1
+            else
+                bad=1
+            fi
+        done
+        [ "$bad" = "1" ] && printf '  ? enter a number 1-%s (several are fine), a, n, s, or Enter\n' "$n" > /dev/tty 2>/dev/null
+        render
+    done
+    emit
+    unset -f render emit 2>/dev/null
+}
+
 # Expand a TS_APPS env value (recommended|all|none|csv) to a space list.
 ts_expand_apps() {
     case "$1" in
@@ -191,9 +336,9 @@ ts_expand_apps() {
 # one. Fourteen consecutive Y/n prompts is a lot to sit through when you already
 # know you want three of them.
 ts_pick_apps() {
-    local selected="" id def a csv want unknown=""
+    local selected="" id csv want unknown=""
     printf '\n  Available: %s\n' "$TS_APPS_ALL" > /dev/tty 2>/dev/null
-    csv="$(ts_tty_prompt '  Type a comma-separated list, or Enter to be asked one at a time: ')"
+    csv="$(ts_tty_prompt '  Type a comma-separated list, or Enter to pick from a list: ')"
     if [ -n "$csv" ]; then
         want=" $(printf '%s' "$csv" | tr ',' ' ' | tr 'A-Z' 'a-z') "
         for id in $TS_APPS_ALL; do
@@ -207,12 +352,47 @@ ts_pick_apps() {
         echo "${selected# }"
         return 0
     fi
-    for id in $TS_APPS_ALL; do
-        case " $TS_APPS_RECOMMENDED " in *" $id "*) def=Y ;; *) def=n ;; esac
-        a="$(ts_tty_prompt "  install $id — $(ts_app_desc "$id")? [$def]: ")"
-        a="${a:-$def}"
-        case "$a" in y|Y|yes|YES) selected="$selected $id" ;; esac
+    # Thirty consecutive Y/n prompts is a lot to sit through, so the walk is a
+    # tick-list per group rather than one question per tool.
+    ts_pick_apps_by_item
+}
+
+# Build the "key|label|note" option list for a group, labelling with the id so the
+# saved selection and the menu use the same words.
+_ts_app_options_for_group() {
+    local id
+    for id in $(ts_app_group_members "$1"); do
+        printf '%s|%s|%s\n' "$id" "$id" "$(ts_app_desc "$id")"
     done
+}
+
+# Tier 3: walk the groups, tick-list within each. Pre-ticked = whatever is in
+# TS_APPS_RECOMMENDED, so Enter through the lot lands on the recommended set.
+ts_pick_apps_by_item() {
+    local g selected="" chosen
+    local -a opts
+    for g in $TS_APP_GROUPS; do
+        opts=()
+        while IFS= read -r line; do [ -n "$line" ] && opts+=("$line"); done < <(_ts_app_options_for_group "$g")
+        [ ${#opts[@]} -eq 0 ] && continue
+        chosen="$(ts_prompt_multi "$TS_APPS_RECOMMENDED" "  $(ts_app_group_desc "$g"):" '' "${opts[@]}")"
+        [ -n "$chosen" ] && selected="$selected $chosen"
+    done
+    echo "${selected# }"
+}
+
+# Tier 2: tick whole groups; every member of a ticked group is selected.
+ts_pick_app_groups() {
+    local g selected="" chosen preticked=""
+    local -a opts=()
+    for g in $TS_APP_GROUPS; do
+        opts+=("$g|$(ts_app_group_desc "$g")|$(ts_app_group_members "$g")")
+        # Every group starts ticked, the agent CLIs included — they are still a
+        # question, and every tool inside is still individually untickable.
+        preticked="$preticked $g"
+    done
+    chosen="$(ts_prompt_multi "${preticked# }" '  Tool groups:' '' "${opts[@]}")"
+    for g in $chosen; do selected="$selected $(ts_app_group_members "$g")"; done
     echo "${selected# }"
 }
 
@@ -228,11 +408,13 @@ ts_prompt_apps() {
         'Optional CLI tools (font, Starship, chezmoi, zsh — always installed):' "$intro" \
         'recommended|install the recommended set' \
         "all|install everything|recommended + $(echo "$TS_APPS_OPTIONAL" | tr ' ' ',' | sed 's/,/, /g')" \
-        'customize|choose which ones' \
+        "groups|choose whole groups|$(echo "$TS_APP_GROUPS" | tr ' ' ',' | sed 's/,/, /g')" \
+        'customize|choose individual tools' \
         'none|skip all optional apps')"
     case "$choice" in
         all)       echo "$TS_APPS_ALL" ;;
         none)      echo "" ;;
+        groups)    ts_pick_app_groups ;;
         customize) ts_pick_apps ;;
         *)         echo "$TS_APPS_RECOMMENDED" ;;
     esac
@@ -267,7 +449,7 @@ ts_wizard_review() {
     printf '\n%s Review\n' "$INFO"
     printf '    Leader           %s\n' "$TS_WIZ_LEADER"
     printf '    Theme            %s\n' "$theme_label"
-    [ -n "${TS_WIZ_WEZTERM:-}" ] && printf '    WezTerm          %s\n' "$TS_WIZ_WEZTERM"
+    [ "${TS_WIZ_ASK_TERMINALS:-0}" = "1" ] && printf '    Terminals        %s\n' "${TS_WIZ_TERMINALS:-<none>}"
     printf '    WezTerm mux      %s\n' "${TS_WIZ_WEZ_MUX:-off}"
     printf '    Session restore  %s\n' "${TS_WIZ_WEZ_RESTORE:-off}"
     printf '    tmux prefix      %s\n' "$TS_WIZ_TMUX"
@@ -301,9 +483,9 @@ ts_wizard_ask() {
     else TS_WIZ_THEME="$(ts_prompt_theme)"; TS_WIZ_ASKED=$((TS_WIZ_ASKED + 1)); fi
 
     # Only asked where the installer can actually install it (macOS).
-    if [ "${TS_WIZ_ASK_WEZTERM:-0}" = "1" ]; then
-        TS_WIZ_WEZTERM="$(ts_prompt_wezterm)"
-        [ -n "${TS_WEZTERM:-}" ] || TS_WIZ_ASKED=$((TS_WIZ_ASKED + 1))
+    if [ "${TS_WIZ_ASK_TERMINALS:-0}" = "1" ]; then
+        TS_WIZ_TERMINALS="$(ts_prompt_terminals)"
+        { [ -n "${TS_TERMINALS:-}" ] || [ -n "${TS_WEZTERM:-}" ]; } || TS_WIZ_ASKED=$((TS_WIZ_ASKED + 1))
     fi
 
     # The mux only matters where a WezTerm GUI runs; a headless server has none,
@@ -381,7 +563,7 @@ ts_wizard_collect() {
         esac
     done
 
-    export TS_WIZ_LEADER TS_WIZ_THEME TS_WIZ_APPS TS_WIZ_TMUX TS_WIZ_CC_TTS TS_WIZ_CC_TTS_DAEMON TS_WIZ_WEZTERM TS_WIZ_WEZ_MUX TS_WIZ_WEZ_RESTORE TS_WIZ_HEADROOM TS_WIZ_HEADROOM_CURSOR TS_WIZ_CAVEMAN TS_WIZ_AGENTMEMORY
+    export TS_WIZ_LEADER TS_WIZ_THEME TS_WIZ_APPS TS_WIZ_TMUX TS_WIZ_CC_TTS TS_WIZ_CC_TTS_DAEMON TS_WIZ_TERMINALS TS_WIZ_WEZ_MUX TS_WIZ_WEZ_RESTORE TS_WIZ_HEADROOM TS_WIZ_HEADROOM_CURSOR TS_WIZ_CAVEMAN TS_WIZ_AGENTMEMORY
     echo "$INFO Config: leader=$TS_WIZ_LEADER theme=$TS_WIZ_THEME tmux-prefix=$TS_WIZ_TMUX wez-mux=${TS_WIZ_WEZ_MUX:-off} wez-restore=${TS_WIZ_WEZ_RESTORE:-off} cc-tts=${TS_WIZ_CC_TTS:-off} headroom=${TS_WIZ_HEADROOM:-off} caveman=${TS_WIZ_CAVEMAN:-off} agentmemory=${TS_WIZ_AGENTMEMORY:-off}"
     echo "$INFO Apps: ${TS_WIZ_APPS:-<none>}"
 }
