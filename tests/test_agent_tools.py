@@ -23,6 +23,14 @@ def test_manifest_pins_reviewed_versions_and_local_endpoints():
     assert cfg["headroom"]["version"] == "0.36.5"
     assert cfg["headroom"]["dockerImage"] == "ghcr.io/headroomlabs-ai/headroom:0.36.5"
     assert cfg["headroom"]["proxyUrl"] == "http://127.0.0.1:8787"
+    # 8788/mcp is CORRECT and must not be "fixed". Verified 2026-08-23 against
+    # the upstream checkout: headroom/cli/mcp.py sets DEFAULT_HTTP_PORT = 8788
+    # and DEFAULT_HTTP_PATH = "/mcp" for `headroom mcp serve --transport http`.
+    # It looks dead because nothing STARTS that server — docker-local's compose
+    # runs only the proxy on 8787, and `mcp serve` defaults to stdio transport.
+    # That is an operational gap in docker-local, not a wrong URL here. (8788
+    # also appears in headroom's RUST_DEV.md as an unrelated internal port for a
+    # Rust-proxy dev setup, which is what makes this look like a typo.)
     assert cfg["headroom"]["mcpUrl"] == "http://127.0.0.1:8788/mcp"
     assert cfg["caveman"]["version"] == "2.2.0"
     assert cfg["caveman"]["source"].endswith("#v2.2.0")
