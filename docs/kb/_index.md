@@ -2,6 +2,9 @@
 
 Personal command runbooks, rendered by **glow**. Browse with the `doc` command:
 
+**Something broken?** Start at `doc troubleshooting` — it is keyed by symptom, and
+every row names the command that diagnoses it.
+
 | Command | Does |
 |---|---|
 | `doc` | fuzzy-find a topic (live glow preview) → open in the reader |
@@ -18,12 +21,13 @@ edits the highlighted topic. The reader is `less`: `/pattern` searches, `q` quit
 
 ## Layout
 
-- `common/` — cross-OS (git, ssh, tmux, clipboard, the stack itself, workspace navigation and the `wso` organizer, SMB shares via `ts-smb`, …)
+- `common/` — cross-OS (git, ssh, tmux, clipboard, the stack itself, workspace navigation and the `wso` organizer, SMB shares via `ts-smb`, troubleshooting, …)
+- `common/services.md` + `common/{agentmemory,agentmemory-console,headroom,playwright}.md` — the local Docker services the memory, compression and voice features run on (`doc services`, `doc agentmemory`, …). Long-form reference lives beside each compose file in `services/stacks/<stack>/README.md`
 - `common/tools/` — per-tool cheat-sheets (eza, fzf, bat, fd, tree, ripgrep, zoxide, atuin, yazi, delta, starship, chezmoi, micro, glow, neovim, zed, cursor, wezterm, ghostty, grok, gemini, pi, llmfit, node-python, tailscale, rclone, and disk/network monitors) — `doc eza`, `doc tailscale`, …
 - `common/codex.md` / `common/claude-code.md` — AI coding-agent shortcuts and footer configuration (`doc codex`, `doc claude-code`); `common/tools/{grok,gemini}.md` cover the other two agents, and `common/tools/node-python.md` the runtimes they need
-- `linux/` — apt, VeraCrypt, ssh permissions, systemd, docker
-- `macos/` — Homebrew, macOS WezTerm toggles
-- `windows/` — pwsh, winget, the TTS tray daemon
+- `linux/` — apt, VeraCrypt, ssh permissions, systemd, docker (engine install + NVIDIA toolkit)
+- `macos/` — Homebrew, macOS WezTerm toggles, Docker Desktop
+- `windows/` — pwsh, winget, the TTS tray daemon, Docker Desktop
 - `wezterm/` — WezTerm keybindings + dev workflow (all OSes)
 - `_style/` — glamour style JSONs; dark/light follows your baked theme, `$DOC_STYLE` overrides
 

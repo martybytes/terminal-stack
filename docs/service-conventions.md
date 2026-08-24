@@ -264,7 +264,7 @@ the OpenAI wire protocol — the variable is named for the protocol, not the ven
 file *after* `agentmemory/.env`, so it is the only place the credential can win; switching providers
 means editing the root file. The companion console receives display-only provider metadata and never
 the key. Stack-local `agentmemory/.env` contains non-secret provider settings — endpoint, model, and
-prompt bounds — plus a rollback-only lambda-dual Ollama placeholder.
+prompt bounds — plus a rollback-only <your-llm-host> Ollama placeholder.
 
 A **masked fingerprint is not a secret, and a generated file is not a tracked one.** The console
 displays which key is live via `LLM_API_KEY_HINT` / `LLM_ADMIN_KEY_HINT` — the key's `sk-<role>-`

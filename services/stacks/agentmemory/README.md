@@ -545,7 +545,7 @@ evidence — never the exit code.
 Embeddings remain local. Change-aware session summarization, bounded incremental graph extraction,
 and consolidation run against a remote chat-completions endpoint. AgentMemory speaks the OpenAI wire
 protocol, so the provider is a configuration choice rather than a code path: today that endpoint is
-**vLLM on lambda-dual**, and the OpenAI API remains a supported one-file rollback.
+**vLLM on <your-llm-host>**, and the OpenAI API remains a supported one-file rollback.
 
 | | Runs on | Needs network? |
 |---|---|---|
@@ -556,11 +556,11 @@ That split is deliberate. Embeddings run on *every* write, so search remains ava
 the persisted 384-dimension index does not change. LLM features are durable background work and
 resume after connectivity returns.
 
-### vLLM on lambda-dual (current provider)
+### vLLM on <your-llm-host> (current provider)
 
 | | |
 |---|---|
-| Endpoint | `http://<tailnet-ip>:8000/v1` — over **Tailscale**, `VLLM_BASE_URL` in the repo-root `.env`. Find it with `tailscale ip -4 lambda-dual`. |
+| Endpoint | `http://<tailnet-ip>:8000/v1` — over **Tailscale**, `VLLM_BASE_URL` in the repo-root `.env`. Find it with `tailscale ip -4 <your-llm-host>`. |
 | Model | `qwen3-8b-awq` (`Qwen/Qwen3-8B-AWQ`, AWQ-quantized, tensor-parallel across two A4000s) |
 | Context | **16,384 tokens** — every prompt bound in this stack is sized against this, not against cost |
 | Served by | vLLM 0.15.0, native `vllm.service` under systemd, `Restart=always`, enabled at boot |
@@ -575,7 +575,7 @@ consolidation. `AGENTMEMORY_COMPRESSION_MODEL` is left unset so the provider fal
 first and `../.env` second, so the root file is the only place an `OPENAI_API_KEY` can win. The vLLM
 key goes in under that name — the variable is named for the wire protocol, not the vendor.
 
-Managing vLLM and its models is out of scope for this repo; it lives on lambda-dual. The documented
+Managing vLLM and its models is out of scope for this repo; it lives on <your-llm-host>. The documented
 reversal there is `sudo systemctl stop vllm && sudo systemctl enable --now ollama` (Ollama's config
 and models are preserved but its service is stopped and disabled).
 
@@ -641,7 +641,7 @@ logs what it dropped.
 A fifth thing to watch is model-side rather than config-side: Qwen3 is a hybrid-reasoning model, and
 if the served chat template defaults to thinking mode, replies arrive wrapped in `<think>…</think>`,
 which burns the output budget and can break the XML-shaped summary and graph parsing. That is a vLLM
-flag on lambda-dual, not a setting here. Verified clean on this deployment — summaries come back as
+flag on <your-llm-host>, not a setting here. Verified clean on this deployment — summaries come back as
 well-formed title/narrative/decisions/files with no reasoning tags.
 
 #### Per-observation compression
@@ -852,13 +852,13 @@ re-downloads on every container recreate and can't start at all with no internet
 `GEMINI → OPENAI → VOYAGE → COHERE → OPENROUTER`. Because `OPENAI_API_KEY` and `OPENAI_BASE_URL` are
 both set for the *chat* LLM, detection would otherwise pick the **openai** embedding provider. On the
 OpenAI API that silently changed the vector model and persisted dimension. Against the current vLLM
-endpoint it is worse and louder: lambda-dual serves one **chat** model and no embedding model, so
+endpoint it is worse and louder: <your-llm-host> serves one **chat** model and no embedding model, so
 every embedding request would 404 and writes would stop being searchable. Pin it explicitly.
 
 The provider credential has one untracked source: repo-root `.env`. Compose loads `agentmemory/.env`
 first and `../.env` second, so the root `OPENAI_API_KEY` wins — which is why switching providers
 means editing that file, not the stack one. The console receives display-only provider metadata and
-masked key fingerprints, never the key itself. `LAMBDA_DUAL_BEARER_TOKEN` remains in the stack-local
+masked key fingerprints, never the key itself. `LLM_HOST_BEARER_TOKEN` remains in the stack-local
 file only as an Ollama-era rollback credential and is unused while vLLM is serving.
 
 ### Embedding dimension is a one-way door
@@ -872,7 +872,7 @@ live observations. Decide before you accumulate memories, not after.
 
 ### Local-provider rollback baseline
 
-Before the OpenAI migration, an idle lambda-dual running
+Before the OpenAI migration, an idle <your-llm-host> running
 `qwen3:30b-a3b-instruct-2507-q4_K_M` measured:
 
 - **2.2s** for an 83-token compression prompt and 189-token response
@@ -981,7 +981,7 @@ graph handlers use current memory state as their source of truth. Preview the st
 
 The preview reports current queue families, raw observations, due summaries and graph sessions,
 projected Terra calls, and estimated cost without writing anything. `-Apply` stops the stack, writes
-a cold full-volume backup below `C:\DATA\Backups\agentmemory`, moves the exact `/data/queue_store`
+a cold full-volume backup below `%LOCALAPPDATA%\terminal-stack\stack-backups`, moves the exact `/data/queue_store`
 directory to a timestamped quarantine directory, starts with a clean queue, and lets the existing
 startup reconciliation enqueue only work that durable state still needs. It never deletes the old
 queue and never invokes iii's bulk DLQ redrive. The default safety guards refuse more than 25 planned
@@ -1077,7 +1077,7 @@ Preview the complete cold-backup/deploy/migrate/verify workflow, then apply it:
 ```
 
 The script stops both stack services, writes a timestamped volume archive under
-`C:\DATA\Backups\agentmemory`, rebuilds, waits up to ten minutes for the authenticated migration
+`%LOCALAPPDATA%\terminal-stack\stack-backups`, rebuilds, waits up to ten minutes for the authenticated migration
 status, requeues raw observations, reconciles session counts, checks the DLQ, and verifies ports
 3110, 3111, and 3114. Migration copies indexed and orphan graph records, rebuilds lookup indexes,
 validates node/edge counts, writes a compact snapshot, and only then switches the running worker to

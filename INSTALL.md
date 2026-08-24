@@ -344,6 +344,48 @@ Lands via `chezmoi apply`: zsh `ccs` / `ssht`, enhanced interactive `codex`,
 three-line dashboard and Stop TTS. See `doc codex` for the dashboard, one-time
 hook trust, and the security trade-off of `--yolo`.
 
+### Phase 6a — Docker and the local services
+
+The memory, prompt-compression and voice features are a client talking to a
+server on `127.0.0.1`. Those servers ship in this repo under `services/`.
+
+**1. A container engine.** Windows: `winget install --id Docker.DockerDesktop
+--exact`, then enable WSL Integration for your distro (Settings → Resources) —
+without it `docker` still exists inside WSL as Docker Desktop's stub, which exits
+1 for every command and says so on *stdout*. macOS: `brew install --cask docker`,
+or `brew install colima && colima start`. Linux: `curl -fsSL https://get.docker.com
+| sh` then `sudo usermod -aG docker "$USER"` **and log out and back in** — the
+group change does not affect the shell that ran it. Full notes:
+`doc docker-desktop` (Windows/macOS), `doc docker` (Linux).
+
+**2. First-run setup.**
+
+```sh
+ts-stack bootstrap
+```
+
+Seeds every `services/stacks/*/.env` from its tracked `.env.example`, **generates**
+Headroom's `HEADROOM_PROXY_TOKEN` and `NEO4J_PASSWORD` (both are `:?`-required, so
+a missing one fails at `docker compose config` rather than starting an open data
+plane), and creates the two `external: true` volumes that compose will not create
+for you. Idempotent: a re-run never rotates a value you set.
+
+**3. Pick the kokoro profile** if you have a GPU — `services/stacks/kokoro/.env`.
+On an RTX 50-series card it must be the `cu128` image; `:latest` is `cu126`, which
+starts happily and then crash-loops. On a Mac there is no GPU step at all.
+
+**4. Bring them up and prove it.**
+
+```sh
+ts-stack up
+ts-stack test
+```
+
+`test` takes everything down, brings it back up, and checks the things "Up
+(healthy)" does not: that Headroom's token is enforced, that a memory can be
+written and read back, that Kokoro synthesises audio, and that every published
+port still binds `127.0.0.1`.
+
 ### Phase 6b — Per-computer coding-agent tools
 
 The wizard optionally enables Headroom, Caveman, and AgentMemory at user scope.
@@ -357,8 +399,11 @@ TS_CAVEMAN=on|off
 TS_AGENTMEMORY=on|off
 ```
 
-Terminal-stack never manages the containers. Headroom expects the docker-local
-proxy/dashboard on `127.0.0.1:8787` and its HTTP MCP sidecar on `8788`; AgentMemory
+Phase 6a started the containers; this phase points the agents at them.
+**`ts-config agents` never touches Docker — `ts-stack` is the only thing that
+does**, and a test enforces that. Headroom expects the proxy/dashboard on
+`127.0.0.1:8787` and its HTTP MCP sidecar on `8788` (a separate
+`headroom mcp serve` process, which the compose file does not start); AgentMemory
 expects its REST service on `3111` and viewer on `3113`. Cursor `mcp` keeps
 subscription-model traffic direct. `byok` requires a provider API key, separate
 provider billing, and a one-time global Cursor provider base URL. Change anything

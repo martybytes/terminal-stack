@@ -2,7 +2,7 @@
 .NAME        reconcile-llm-queue
 .SYNOPSIS    Quarantine stale durable LLM queue records and run one bounded, state-driven recovery pass.
 .PLATFORM    windows
-.USAGE       .\reconcile-llm-queue.ps1 [-Apply] [-BackupRoot C:\DATA\Backups\agentmemory]
+.USAGE       .\reconcile-llm-queue.ps1 [-Apply] [-BackupRoot %LOCALAPPDATA%\terminal-stack\stack-backups]
 .WHEN        Queue telemetry is stuck with old active jobs or a historical DLQ after provider recovery.
 .NOTE        Preview-only unless -Apply is passed. Apply takes a cold full-volume backup, moves the
              exact /data/queue_store directory to a timestamped quarantine directory, starts with a
@@ -12,7 +12,7 @@
 #>
 param(
     [switch]$Apply,
-    [string]$BackupRoot = 'C:\DATA\Backups\agentmemory',
+    [string]$BackupRoot = '%LOCALAPPDATA%\terminal-stack\stack-backups',
     [ValidateRange(1, 1000)]
     [int]$MaxPlannedTerraCalls = 25,
     [ValidateRange(0.01, 1000)]

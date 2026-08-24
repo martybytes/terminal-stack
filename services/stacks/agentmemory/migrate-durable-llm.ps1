@@ -2,12 +2,12 @@
 .NAME        migrate-durable-llm
 .SYNOPSIS    Back up AgentMemory, deploy the durable LLM queue + graph v2 state, and verify it. Preview-only unless -Apply is passed.
 .PLATFORM    windows
-.USAGE       .\migrate-durable-llm.ps1 [-Apply] [-BackupRoot C:\DATA\Backups\agentmemory]
+.USAGE       .\migrate-durable-llm.ps1 [-Apply] [-BackupRoot %LOCALAPPDATA%\terminal-stack\stack-backups]
 .WHEN        First deployment of the AgentMemory 0.9.29 durable-queue compatibility layer. Safe to re-run after graph v2 is active.
 #>
 param(
     [switch]$Apply,
-    [string]$BackupRoot = 'C:\DATA\Backups\agentmemory'
+    [string]$BackupRoot = '%LOCALAPPDATA%\terminal-stack\stack-backups'
 )
 
 $ErrorActionPreference = 'Stop'

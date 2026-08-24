@@ -85,3 +85,25 @@ The WSL bootstrap (`bootstrap/wsl-bootstrap.sh`) prompts for the Windows usernam
 Every overwrite of a user file (not chezmoi-managed apply, but human-or-script overwrites) writes a `.bak.YYYYMMDD` first. If multiple overwrites happen in one day, they get `.1` / `.2` / etc. suffixes — the same-day backup is never clobbered. The `run_after_90-sync-windows.sh` script implements this; `scripts/sync-windows.ps1` (the PowerShell-native equivalent used by `install.ps1` / `Update-TerminalStack`) and the bootstrap scripts follow the same convention.
 
 See `docs/decisions.md` § "Why two backups" for the incident that motivated the `.N` suffix collision guard.
+
+## Two halves: config and services
+
+chezmoi owns `$HOME`. `ts-stack` owns Docker. They meet in exactly two places: a
+published loopback port, and `bootstrap/agent-tools.json`, the single file where
+a port, URL, image tag or version pin is written down.
+
+```
+services/                        outside services/
+  compose files, images,   <->   ~/.claude, ~/.codex, ~/.cursor,
+  in-container patches           the shells, the prompt
+  ts-stack                       ts-config agents / ts-agentmemory
+```
+
+The line used to be a repository boundary, which enforced itself — you could not
+accidentally put a hook installer in the Docker repo, because it was a different
+clone. Absorbing that repo removes the enforcement, so the rule is written down
+and tested instead: `tests/test_agent_tools.py` asserts that `docker compose`,
+`docker rm` and `restart: unless-stopped` appear nowhere in
+`bootstrap/ts-agents.{sh,ps1}` — as a case-insensitive match over the whole file,
+so even a comment naming the compose command fails it. When a probe fails,
+`ts-agents` prints the *verb* (`ts-stack up playwright`), never the command.

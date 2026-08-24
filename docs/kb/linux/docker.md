@@ -33,3 +33,38 @@ sudo (`sudo usermod -aG docker $USER`, then log back in).
 
 Restart policies: `no` (default), `on-failure`, `always`, `unless-stopped` —
 set at run time (`--restart`) or per-service in compose (`restart:`).
+
+## Install the engine
+
+Docker's own repository, not the distro's `docker.io` package — the latter lags
+and its compose plugin is often missing:
+
+```sh
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker "$USER"
+```
+
+**The group change does not affect the shell that ran it.** Log out and back in
+(or `newgrp docker` for one shell). Until then every docker command fails with
+`permission denied while trying to connect`, which is not a stopped daemon and
+`ts-stack doctor` says so.
+
+```sh
+systemctl is-active docker         # rootful
+systemctl --user is-active docker  # rootless
+```
+
+## NVIDIA Container Toolkit
+
+Only needed for kokoro's GPU profile. A working `nvidia-smi` on the host proves
+nothing about containers — what matters is whether the runtime is registered:
+
+```sh
+docker info --format '{{.Runtimes}}'       # must list nvidia
+docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi
+```
+
+Install per NVIDIA's instructions for your distro, then
+`sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker`.
+
+See also: `doc services` · `doc troubleshooting`

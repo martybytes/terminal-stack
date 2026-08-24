@@ -335,3 +335,50 @@ def test_line_endings_and_bom_are_scoped_to_the_service_tree():
         raw = f.read_bytes()
         assert not raw.startswith(b"\xef\xbb\xbf"), f"{f.name}: must not carry a BOM"
         assert b"\r" not in raw, f"{f.name}: must be LF"
+
+
+# ── documentation ─────────────────────────────────────────────────────────────
+def test_the_services_are_findable_by_name():
+    """`doc agentmemory`, `doc headroom` and `doc playwright` all matched ZERO
+    topics: the material was a 1167-line repo README with no `doc` label at all.
+    Same failure mode as ts-config once being buried inside common/stack.md."""
+    for page in ("services.md", "troubleshooting.md", "agentmemory.md",
+                 "agentmemory-console.md", "headroom.md", "playwright.md"):
+        assert (ROOT / "docs/kb/common" / page).exists(), page
+    assert (ROOT / "docs/kb/windows/docker-desktop.md").exists()
+    assert (ROOT / "docs/kb/macos/docker-desktop.md").exists()
+    idx = (ROOT / "docs/kb/_index.md").read_text(encoding="utf-8")
+    assert "doc troubleshooting" in idx, "_index.md must advertise the entry point"
+    # The windows/ bullet is pinned to one line by an existing test; both words
+    # have to survive on it.
+    win = idx.split("`windows/`")[1].split("\n")[0]
+    assert "TTS" in win and "Docker" in win
+
+
+def test_no_tracked_file_carries_personal_infrastructure():
+    """This repo is public, and is now somebody else's onboarding path. History
+    is exempt: rewriting it to hide a hostname makes the record dishonest."""
+    import subprocess
+    # This file names the strings it forbids, and CHANGELOG/decisions are history.
+    exempt = {"CHANGELOG.md", "docs/decisions.md", "LICENSE", "tests/test_stack.py"}
+    files = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, text=True).stdout.split()
+    for rel in files:
+        if rel in exempt or rel.startswith("services/console/public/"):
+            continue
+        f = ROOT / rel
+        try:
+            text = f.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        assert "lambda-dual" not in text, f"{rel} names a private host"
+        assert "10.30.1." not in text, f"{rel} names a private address"
+
+
+def test_install_documents_docker_before_the_agent_toggles():
+    """Phase 6b enables agents against services that Phase 6a has to have
+    started -- `ts-agents headroom on` refuses to persist until the proxy
+    answers, so the order is not cosmetic."""
+    ins = (ROOT / "INSTALL.md").read_text(encoding="utf-8")
+    assert "Phase 6a" in ins and ins.index("Phase 6a") < ins.index("Phase 6b")
+    assert "ts-stack bootstrap" in ins
+    assert "Terminal-stack never manages the containers" not in ins
