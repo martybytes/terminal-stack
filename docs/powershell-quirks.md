@@ -415,3 +415,36 @@ TTS hook senders, recorded so they don't get "simplified" away:
 - **Per-app mixer volume persists across app restarts.** Anything that lowers a
   session volume must write its restore data to disk *first* — see
   `state\duck-snapshot.json` and docs/decisions.md § ducking snapshots.
+
+## `Add-Type` compiles every session, and `Invoke-Expression` parses slower than a file
+
+Two costs that only show up when you measure a profile rather than read it.
+
+**`Add-Type -MemberDefinition` runs the C# compiler at every shell start.**
+PowerShell caches the result for the life of the session and nothing beyond it,
+so the console-codepage P/Invoke cost ~340ms per pane. Compile it once with
+`-OutputAssembly` and load that with `Add-Type -Path` (~25ms):
+
+```powershell
+if (-not (Test-Path -LiteralPath $dll)) {
+    $tmp = "$dll.$PID.tmp"      # never compile onto the target: another pane may have it loaded
+    Add-Type -Namespace Native -Name ConsoleCP -MemberDefinition $src -OutputAssembly $tmp -ErrorAction Stop
+    Move-Item -LiteralPath $tmp -Destination $dll -Force
+}
+Add-Type -Path $dll
+```
+
+Keep the in-memory compile as a fallback, so an unwritable cache costs what it
+used to instead of losing the type.
+
+**Dot-sourcing a file beats `Invoke-Expression` on a string.** Same 10KB of
+`starship init` output: 427ms dot-sourced, 612ms through `Invoke-Expression`
+(medians of 5, alternating). If you are evaluating generated shell code, write it
+to a file and dot-source it — and dot-source it from the profile's own scope, not
+from inside a function, or `New-Module` and `function global:` definitions land
+out of the prompt's reach.
+
+**`<tool> init powershell` may spawn the tool twice.** `starship init powershell`
+prints a bootstrap that re-runs `starship ... --print-full-init`. On a machine
+where a spawn costs 300ms-2s (antivirus scanning each exec) that is worth
+knowing: request `--print-full-init` yourself.

@@ -111,6 +111,58 @@ def test_headroom_enable_requires_authenticated_proxy_and_disable_restores_direc
     assert 'off) run_agent_adapter "$tool" off; ts_agent_set "$key" off' in config
 
 
+def test_pwsh_profile_caches_tool_init_instead_of_respawning():
+    """A WezTerm pane spent most of a second spawning starship (twice), zoxide and
+    the C# compiler before it drew a prompt. The generated init only changes when
+    the binary does, so it is cached and dot-sourced."""
+    ps = (ROOT / "windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1").read_text(encoding="utf-8")
+    assert "function Get-TsToolInit" in ps
+    # Keyed on the producing binary, or an upgrade would keep serving stale init.
+    helper = ps[ps.index("function Get-TsToolInit"):ps.index("# ---- shell-init-cache-end ----")]
+    assert "LastWriteTimeUtc.Ticks" in helper and ".Length" in helper
+    # Hands back a file; the CALLER dot-sources it. Doing that inside the helper
+    # would put starship's New-Module and zoxide's `function global:` in a scope
+    # the prompt never sees.
+    assert "[pscustomobject]@{ Path" in helper
+    assert "\n    . $cache" not in helper and "\n        . $cache" not in helper
+    # starship's own bootstrap re-runs starship; ask for the full init directly.
+    assert "init powershell --print-full-init" in ps
+    assert "Invoke-Expression (&starship init powershell)" not in ps
+    assert "Invoke-Expression (& { (zoxide init powershell | Out-String) })" not in ps
+    for tool in ("starship", "zoxide"):
+        call = ps[ps.index(f"-Name {tool} -Exe"):]
+        call = call[:call.index("\n") + 200]
+        assert ". $tsInit.Path" in call, f"{tool} init is not dot-sourced from the cache"
+    # fnm must NOT be cached: its output embeds a per-shell FNM_MULTISHELL_PATH.
+    assert "-Name fnm -Exe" not in ps
+
+
+def test_console_codepage_helper_is_compiled_once_not_per_shell():
+    """Add-Type runs the C# compiler every session (~340ms per pane) and caches
+    nothing between them, so the P/Invoke is precompiled to an assembly."""
+    ps = (ROOT / "windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1").read_text(encoding="utf-8")
+    block = ps[ps.index("if (-not ('Native.ConsoleCP' -as [type])) {"):ps.index("[Native.ConsoleCP]::SetConsoleOutputCP(65001)")]
+    assert "-OutputAssembly" in block and "Add-Type -Path" in block
+    # Never compile straight onto the target: another pane may have it loaded.
+    assert '$tsCpTmp = "$tsCpDll.$PID.tmp"' in block and "Move-Item" in block
+    # And the in-memory compile stays as the fallback.
+    assert block.count("-MemberDefinition $tsCpSrc") == 2
+
+
+def test_fnm_ignores_package_json_engines_in_both_shells():
+    """engines.node made every `cd` into a JS repo spawn fnm (738ms measured), and
+    an engines range no fnm-INSTALLED version satisfies turned the cd into an
+    interactive install prompt -- with a system node that already satisfied it."""
+    zsh = (ROOT / "dot_zshrc").read_text(encoding="utf-8")
+    ps = (ROOT / "windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1").read_text(encoding="utf-8")
+    for name, text in (("dot_zshrc", zsh), ("$PROFILE", ps)):
+        assert "--resolve-engines=false" in text, f"{name} still resolves package.json engines"
+    # fnm before 1.36 has no such flag and exits non-zero; an empty eval would
+    # leave fnm unwired with nothing printed, so both sides keep a fallback.
+    assert '_ts_fnm_env="$(fnm env --use-on-cd --shell zsh 2>/dev/null)"' in zsh
+    assert "if (-not $tsFnmEnv.Trim()) { $tsFnmEnv = fnm env --use-on-cd --shell powershell | Out-String }" in ps
+
+
 def test_headroom_auth_probe_retries_and_names_the_failure():
     """A single 2s probe called a cold proxy broken, and `on`/`repair` gate on it,
     so a slow first hit printed "registrations were not changed" with no cause -
@@ -776,7 +828,7 @@ def test_fnm_is_wired_into_both_shells():
     assert "fnm env --use-on-cd --shell zsh" in zsh
     assert "fnm env --use-on-cd --shell powershell" in ps
     # Guarded, so a machine without fnm is unaffected.
-    assert 'command -v fnm    >/dev/null && eval "$(fnm env' in zsh
+    assert 'if command -v fnm >/dev/null; then' in zsh
     assert "if (Get-Command fnm -ErrorAction SilentlyContinue) {" in ps
     # grok's completions are carried by us, because its installer's ~/.zshrc edit
     # is reverted by the next chezmoi apply.
