@@ -63,8 +63,17 @@ change — hooks read their environment at process start.
 
 `ts-config agents headroom on` registers the user-scope HTTP MCP server and makes
 the shell's `claude` wrapper use `http://127.0.0.1:8787` only when the proxy is
-healthy. A stopped proxy produces one warning and a direct launch; `claude-stock`
-always bypasses Headroom. The monitor is `ts-config agents headroom dashboard`.
+authenticated and usable. Claude's provider OAuth stays in `Authorization`; the
+separate `X-Headroom-Proxy-Token` header authenticates to Headroom. A stopped,
+misconfigured, or unauthorized proxy produces one warning and a direct launch;
+`claude-stock` always bypasses Headroom. The monitor is
+`ts-config agents headroom dashboard`.
+
+Use `ts-config agents headroom off` for immediate direct mode without stopping
+Docker or deleting data. Use `ts-config agents headroom on` to return: it checks
+authenticated `/stats` access before saving the enabled state. `repair` performs
+the same preflight and repairs registrations. The 8788 MCP sidecar is optional
+and reported independently.
 
 `ts-config agents caveman on` installs the pinned user-scope Claude plugin. Its
 hooks make terse output always-on without replacing this stack's status line.

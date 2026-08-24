@@ -54,8 +54,34 @@ def test_launch_wrappers_are_process_local_and_have_stock_escape_hatches():
     assert "claude-stock()" in zsh and "codex-stock()" in zsh
     assert "finally" in ps and "$env:ANTHROPIC_BASE_URL = $savedBase" in ps
     assert "ANTHROPIC_BASE_URL=http://127.0.0.1:8787" in zsh
+    assert "ANTHROPIC_CUSTOM_HEADERS=\"$custom_headers\"" in zsh
+    assert "http://127.0.0.1:8787/stats" in zsh
+    assert "X-Headroom-Proxy-Token" in zsh
+    assert 'model_provider="headroom"' in zsh
+    assert "model_providers.headroom.env_http_headers.X-Headroom-Proxy-Token" in zsh
+    assert "model_providers.openai" not in zsh
+    assert 'model_provider=\"headroom\"' in ps
+    assert "model_providers.headroom.env_http_headers.X-Headroom-Proxy-Token" in ps
+    assert "model_providers.openai" not in ps
     assert "openai_base_url=\"http://127.0.0.1:8787/v1\"" in ps
     assert "openai_base_url=\"http://127.0.0.1:8787/v1\"" in zsh
+
+
+def test_headroom_enable_requires_authenticated_proxy_and_disable_restores_direct_mode():
+    adapter = (ROOT / "bootstrap/ts-agents.sh").read_text(encoding="utf-8")
+    ps_adapter = PS_ADAPTER.read_text(encoding="utf-8")
+    config = (ROOT / "bootstrap/ts-config.sh").read_text(encoding="utf-8")
+    assert 'X-Headroom-Proxy-Token: $token' in adapter
+    assert '"$proxy/stats"' in adapter
+    assert "headroom_status && headroom_apply && headroom_status" in adapter
+    assert "function Test-TsHeadroomAuth" in ps_adapter
+    assert "if (-not (Test-TsHeadroomAuth))" in ps_adapter
+    assert "MCP sidecar not reachable" in ps_adapter and "optional separate process" in ps_adapter
+    assert 'off) run_agent_adapter "$tool" off; ts_agent_set "$key" off' in config
+
+
+def test_claude_instructions_fit_claude_code_limit():
+    assert (ROOT / "CLAUDE.md").stat().st_size <= 40_000
 
 
 def test_updates_reconcile_only_enabled_tools():

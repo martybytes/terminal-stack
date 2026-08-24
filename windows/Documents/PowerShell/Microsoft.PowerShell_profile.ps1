@@ -261,17 +261,30 @@ function Get-TsAgentRuntimeSetting([string]$Name, [string]$Default = 'off') {
 $script:TsHeadroomProbeAt = [datetime]::MinValue
 $script:TsHeadroomProbeOk = $false
 $script:TsHeadroomWarned = $false
+function Get-TsHeadroomToken {
+    if ($env:HEADROOM_PROXY_TOKEN) { return $env:HEADROOM_PROXY_TOKEN }
+    $file = $env:HEADROOM_ENV_FILE
+    if (-not $file) {
+        $root = Get-TsWorkspace
+        if ($root) { $file = Join-Path $root 'src\github.com\martybytes\docker-local\headroom\.env' }
+    }
+    if (-not $file -or -not (Test-Path -LiteralPath $file)) { return $null }
+    $line = Get-Content -LiteralPath $file | Where-Object { $_ -match '^HEADROOM_PROXY_TOKEN=' } | Select-Object -First 1
+    if ($line) { return ($line -replace '^HEADROOM_PROXY_TOKEN=', '') }
+    return $null
+}
 function Test-TsHeadroomRuntime {
     if ((Get-TsAgentRuntimeSetting headroomEnabled) -ne 'on') { return $false }
     if (((Get-Date) - $script:TsHeadroomProbeAt).TotalSeconds -lt 5) { return $script:TsHeadroomProbeOk }
     $script:TsHeadroomProbeAt = Get-Date
     $script:TsHeadroomProbeOk = $false
-    foreach ($path in @('readyz','health')) {
-        try {
-            $r = Invoke-WebRequest -Uri "http://127.0.0.1:8787/$path" -TimeoutSec 1 -UseBasicParsing
-            if ($r.StatusCode -ge 200 -and $r.StatusCode -lt 500) { $script:TsHeadroomProbeOk = $true; break }
-        } catch {}
-    }
+    $token = Get-TsHeadroomToken
+    if (-not $token) { return $false }
+    try {
+        $r = Invoke-WebRequest -Uri 'http://127.0.0.1:8787/stats' -TimeoutSec 2 -UseBasicParsing `
+            -Headers @{ 'X-Headroom-Proxy-Token' = $token }
+        $script:TsHeadroomProbeOk = ($r.StatusCode -ge 200 -and $r.StatusCode -lt 300)
+    } catch {}
     return $script:TsHeadroomProbeOk
 }
 
@@ -328,15 +341,19 @@ function claude {
     $savedBase = $env:ANTHROPIC_BASE_URL
     $savedSearch = $env:ENABLE_TOOL_SEARCH
     $savedProject = $env:HEADROOM_PROJECT
+    $savedHeaders = $env:ANTHROPIC_CUSTOM_HEADERS
     try {
         $env:ANTHROPIC_BASE_URL = 'http://127.0.0.1:8787'
         if (-not $env:ENABLE_TOOL_SEARCH) { $env:ENABLE_TOOL_SEARCH = 'true' }
         $env:HEADROOM_PROJECT = Split-Path -Leaf $PWD
+        $header = 'X-Headroom-Proxy-Token: ' + (Get-TsHeadroomToken)
+        $env:ANTHROPIC_CUSTOM_HEADERS = if ($savedHeaders) { "$savedHeaders`n$header" } else { $header }
         & $bin @args
     } finally {
         $env:ANTHROPIC_BASE_URL = $savedBase
         $env:ENABLE_TOOL_SEARCH = $savedSearch
         $env:HEADROOM_PROJECT = $savedProject
+        $env:ANTHROPIC_CUSTOM_HEADERS = $savedHeaders
     }
 }
 
@@ -429,6 +446,7 @@ function Invoke-TsCodex {
     $previousParent = $env:TS_CODEX_PARENT_PANE
     $previousOpenAiBase = $env:OPENAI_BASE_URL
     $previousHeadroomProject = $env:HEADROOM_PROJECT
+    $previousHeadroomToken = $env:HEADROOM_PROXY_TOKEN
     $env:TS_CODEX_PARENT_PANE = $parent
     $exitCode = 0
     try {
@@ -436,7 +454,16 @@ function Invoke-TsCodex {
             if (Test-TsHeadroomRuntime) {
                 $env:OPENAI_BASE_URL = 'http://127.0.0.1:8787/v1'
                 $env:HEADROOM_PROJECT = Split-Path -Leaf $PWD
-                $codexArgs += @('--config', 'openai_base_url="http://127.0.0.1:8787/v1"')
+                $env:HEADROOM_PROXY_TOKEN = Get-TsHeadroomToken
+                $codexArgs += @(
+                    '--config', 'model_provider="headroom"',
+                    '--config', 'openai_base_url="http://127.0.0.1:8787/v1"',
+                    '--config', 'model_providers.headroom.name="OpenAI via Headroom proxy"',
+                    '--config', 'model_providers.headroom.base_url="http://127.0.0.1:8787/v1"',
+                    '--config', 'model_providers.headroom.supports_websockets=true',
+                    '--config', 'model_providers.headroom.requires_openai_auth=true',
+                    '--config', 'model_providers.headroom.env_http_headers.X-Headroom-Proxy-Token="HEADROOM_PROXY_TOKEN"'
+                )
             } elseif (-not $script:TsHeadroomWarned) {
                 Write-Warning 'Headroom is enabled but unavailable on 127.0.0.1:8787; this Codex launch is going direct.'
                 $script:TsHeadroomWarned = $true
@@ -454,6 +481,7 @@ function Invoke-TsCodex {
         $env:TS_CODEX_PARENT_PANE = $previousParent
         $env:OPENAI_BASE_URL = $previousOpenAiBase
         $env:HEADROOM_PROJECT = $previousHeadroomProject
+        $env:HEADROOM_PROXY_TOKEN = $previousHeadroomToken
     }
     $global:LASTEXITCODE = $exitCode
 }

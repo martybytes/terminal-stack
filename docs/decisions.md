@@ -1311,12 +1311,23 @@ shell wrappers, and merge-safe hook entries. That boundary is why `off` and
 `uninstall` never issue a Docker command.
 
 Headroom model routing stays out of permanent Claude/Codex provider config. The
-shell wrapper probes the proxy briefly, injects the base URL into only the child
-process, restores the previous environment in `finally`/function scope, and goes
-direct when the proxy is down. This preserves Codex provider identity/history and
-avoids turning a Docker outage into an agent outage. Cursor has no supported
+shell wrapper probes authenticated `/stats`, injects the base URL and dedicated
+proxy token into only the child process, restores the previous environment in
+`finally`/function scope, and goes direct when the proxy is down or unauthorized.
+Claude keeps provider OAuth in `Authorization` and sends the proxy credential as
+`X-Headroom-Proxy-Token`. Codex uses a session-local custom `headroom` provider;
+the built-in `openai` provider is reserved and cannot be extended with proxy
+headers. No provider is persisted. This preserves provider identity/history and
+avoids turning a Docker or credential outage into an agent outage. Cursor has no supported
 equivalent launch override, so its choice is explicit: MCP-only (subscription
 models direct), BYOK (manual global provider URL and separate billing), or off.
+
+The lifecycle command is also the recovery boundary. `headroom off` saves direct
+mode and removes terminal-stack-owned MCP registrations without touching Docker
+or data. `on` and `repair` validate authenticated model-proxy access before they
+change registrations or save on. Health endpoints cannot serve as that preflight:
+Headroom intentionally exempts them from authentication. The independently-run
+MCP sidecar is diagnostic only and does not make a working model proxy fail.
 
 Pins live together in `bootstrap/agent-tools.json`; upgrades change there through
 review rather than following `latest` service images. `ts-update` checks only tools

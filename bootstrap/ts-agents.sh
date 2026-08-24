@@ -66,24 +66,44 @@ with open(path, "w", encoding="utf-8") as f: json.dump(cfg, f, indent=2); f.writ
 PY
 }
 
+headroom_token() {
+    if [ -n "${HEADROOM_PROXY_TOKEN:-}" ]; then printf '%s' "$HEADROOM_PROXY_TOKEN"; return 0; fi
+    local file root
+    if [ -n "${HEADROOM_ENV_FILE:-}" ]; then
+        file="$HEADROOM_ENV_FILE"
+    else
+        for root in "${WORKSPACE_DIR:-}" "$HOME/Documents/Workspace" "$HOME/workspace" "$HOME/Workspace" /mnt/c/DATA/Workspace; do
+            [ -n "$root" ] || continue
+            file="$root/src/github.com/martybytes/docker-local/headroom/.env"
+            [ -r "$file" ] && break
+        done
+    fi
+    [ -r "${file:-}" ] || return 1
+    sed -n 's/^HEADROOM_PROXY_TOKEN=//p' "$file" | head -1
+}
+
 headroom_status() {
-    local proxy mcp ok=1
+    local proxy mcp token proxy_ok=0
     proxy="$(json_get headroom.proxyUrl)"; mcp="$(json_get headroom.mcpUrl)"
     echo "Headroom:"
-    if curl -fsS --max-time 1 "$proxy/readyz" >/dev/null 2>&1 \
-        || curl -fsS --max-time 1 "$proxy/health" >/dev/null 2>&1; then
-        echo "  ok  proxy reachable at $proxy"
-    else echo "  !!  proxy not reachable at $proxy (docker-local owns it)"; ok=0; fi
+    token="$(headroom_token)" || token=""
+    if [ -n "$token" ] && curl -fsS --max-time 2 -H "X-Headroom-Proxy-Token: $token" "$proxy/stats" >/dev/null 2>&1; then
+        echo "  ok  proxy authentication works at $proxy"
+        proxy_ok=1
+    elif [ -z "$token" ]; then
+        echo "  !!  proxy token unavailable; set HEADROOM_PROXY_TOKEN or HEADROOM_ENV_FILE"
+    else
+        echo "  !!  proxy authentication failed at $proxy (docker-local owns it)"
+    fi
     if am_probe "$mcp" >/dev/null 2>&1; then echo "  ok  MCP reachable at $mcp"
     else
         # Not a fault in this stack: `headroom mcp serve` is a SEPARATE process
         # (default 127.0.0.1:8788) that docker-local's compose does not start.
         echo "  !!  MCP not reachable at $mcp"
         echo "      start it with: headroom mcp serve --transport http"
-        ok=0
     fi
     echo "  dashboard: $(json_get headroom.dashboardUrl)"
-    [ "$ok" = 1 ]
+    [ "$proxy_ok" = 1 ]
 }
 
 headroom_apply() {
@@ -168,7 +188,7 @@ run_one() {
     case "$1:$action" in
         headroom:status) headroom_status ;;
         headroom:dashboard) command -v open >/dev/null 2>&1 && open "$(json_get headroom.dashboardUrl)" || command -v xdg-open >/dev/null 2>&1 && xdg-open "$(json_get headroom.dashboardUrl)" ;;
-        headroom:on|headroom:repair) headroom_apply; headroom_status ;;
+        headroom:on|headroom:repair) headroom_status && headroom_apply && headroom_status ;;
         headroom:off|headroom:uninstall) headroom_apply_remove; echo 'Headroom client routing removed; Docker was not changed.' ;;
         caveman:status) echo "Caveman: pinned $(json_get caveman.version)"; grep -q 'terminal-stack-caveman-start' "${CODEX_HOME:-$HOME/.codex}/AGENTS.md" 2>/dev/null ;;
         caveman:on|caveman:repair) caveman_apply ;;

@@ -224,14 +224,28 @@ PY
 typeset -gi _TS_HEADROOM_PROBE_AT=0
 typeset -gi _TS_HEADROOM_PROBE_OK=0
 typeset -gi _TS_HEADROOM_WARNED=0
+_ts_headroom_token() {
+  local token="${HEADROOM_PROXY_TOKEN:-}" env_file="${HEADROOM_ENV_FILE:-}"
+  if [[ -z "$token" ]]; then
+    [[ -n "$env_file" ]] || env_file="$(_ts_workspace 2>/dev/null)/src/github.com/martybytes/docker-local/headroom/.env"
+    [[ -r "$env_file" ]] || return 1
+    token="$(sed -n 's/^HEADROOM_PROXY_TOKEN=//p' "$env_file" | head -1)"
+  fi
+  [[ -n "$token" ]] || return 1
+  print -r -- "$token"
+}
 _ts_headroom_healthy() {
   [[ "$(_ts_agent_setting headroomEnabled)" == on ]] || return 1
+  local token
+  token="$(_ts_headroom_token)" || return 1
   local now="$(date +%s)"
   if (( now - _TS_HEADROOM_PROBE_AT < 5 )); then (( _TS_HEADROOM_PROBE_OK )); return; fi
   _TS_HEADROOM_PROBE_AT=$now; _TS_HEADROOM_PROBE_OK=0
-  curl -fsS --max-time 1 http://127.0.0.1:8787/readyz >/dev/null 2>&1 \
-    || curl -fsS --max-time 1 http://127.0.0.1:8787/health >/dev/null 2>&1 \
-    || return 1
+  # Probe an authenticated data-plane-adjacent endpoint. /readyz and /health
+  # deliberately bypass proxy auth, so they can be green while every agent
+  # request receives Headroom's own 401 response.
+  curl -fsS --max-time 1 -H "X-Headroom-Proxy-Token: $token" \
+    http://127.0.0.1:8787/stats >/dev/null 2>&1 || return 1
   _TS_HEADROOM_PROBE_OK=1
 }
 
@@ -268,6 +282,7 @@ claude-stock() {
   "$_TS_CLAUDE_BIN" "$@"
 }
 claude() {
+  local token custom_headers="${ANTHROPIC_CUSTOM_HEADERS:-}"
   _ts_claude_bin || return 127
   if [[ "$(_ts_agent_setting headroomEnabled)" != on ]]; then "$_TS_CLAUDE_BIN" "$@"; return; fi
   if ! _ts_headroom_healthy; then
@@ -277,7 +292,10 @@ claude() {
     fi
     "$_TS_CLAUDE_BIN" "$@"; return
   fi
+  token="$(_ts_headroom_token)" || { "$_TS_CLAUDE_BIN" "$@"; return; }
+  custom_headers+="${custom_headers:+$'\n'}X-Headroom-Proxy-Token: $token"
   ANTHROPIC_BASE_URL=http://127.0.0.1:8787 \
+    ANTHROPIC_CUSTOM_HEADERS="$custom_headers" \
     ENABLE_TOOL_SEARCH="${ENABLE_TOOL_SEARCH:-true}" HEADROOM_PROJECT="${PWD:t}" \
     "$_TS_CLAUDE_BIN" "$@"
 }
@@ -338,6 +356,7 @@ _ts_codex() {
   local parent="${WEZTERM_PANE:-}" sidecar="" launched
   local -a command status_command
   local OPENAI_BASE_URL="${OPENAI_BASE_URL:-}" HEADROOM_PROJECT="${HEADROOM_PROJECT:-}"
+  local HEADROOM_PROXY_TOKEN="${HEADROOM_PROXY_TOKEN:-}"
   # Resolve before building the command line — the old order populated
   # command=() from the cached variable and only checked it was set afterwards.
   _ts_codex_bin || return 127
@@ -353,10 +372,17 @@ _ts_codex() {
 
   if [[ "$(_ts_agent_setting headroomEnabled)" == on ]]; then
     if _ts_headroom_healthy; then
+      HEADROOM_PROXY_TOKEN="$(_ts_headroom_token)" || return 1
       OPENAI_BASE_URL=http://127.0.0.1:8787/v1
       HEADROOM_PROJECT="${PWD:t}"
-      export OPENAI_BASE_URL HEADROOM_PROJECT
-      command+=(--config 'openai_base_url="http://127.0.0.1:8787/v1"')
+      export OPENAI_BASE_URL HEADROOM_PROJECT HEADROOM_PROXY_TOKEN
+      command+=(--config 'model_provider="headroom"'
+        --config 'openai_base_url="http://127.0.0.1:8787/v1"'
+        --config 'model_providers.headroom.name="OpenAI via Headroom proxy"'
+        --config 'model_providers.headroom.base_url="http://127.0.0.1:8787/v1"'
+        --config 'model_providers.headroom.supports_websockets=true'
+        --config 'model_providers.headroom.requires_openai_auth=true'
+        --config 'model_providers.headroom.env_http_headers.X-Headroom-Proxy-Token="HEADROOM_PROXY_TOKEN"')
     elif (( ! _TS_HEADROOM_WARNED )); then
       print -u2 'warning: Headroom is enabled but unavailable on 127.0.0.1:8787; this Codex launch is going direct.'
       _TS_HEADROOM_WARNED=1

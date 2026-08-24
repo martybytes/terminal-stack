@@ -52,6 +52,33 @@ function Test-TsHttp([string]$Url) {
     } catch { return $false }
 }
 
+function Get-TsHeadroomToken {
+    if ($env:HEADROOM_PROXY_TOKEN) { return $env:HEADROOM_PROXY_TOKEN }
+    $file = $env:HEADROOM_ENV_FILE
+    if (-not $file) {
+        $roots = @($env:WORKSPACE_DIR, 'C:\DATA\Workspace', (Join-Path $HOME 'Documents\Workspace'),
+            (Join-Path $HOME 'workspace'), (Join-Path $HOME 'Workspace')) | Where-Object { $_ }
+        foreach ($root in $roots) {
+            $candidate = Join-Path $root 'src\github.com\martybytes\docker-local\headroom\.env'
+            if (Test-Path -LiteralPath $candidate) { $file = $candidate; break }
+        }
+    }
+    if (-not $file -or -not (Test-Path -LiteralPath $file)) { return $null }
+    $line = Get-Content -LiteralPath $file | Where-Object { $_ -match '^HEADROOM_PROXY_TOKEN=' } | Select-Object -First 1
+    if ($line) { return ($line -replace '^HEADROOM_PROXY_TOKEN=', '') }
+    return $null
+}
+
+function Test-TsHeadroomAuth {
+    $token = Get-TsHeadroomToken
+    if (-not $token) { return $false }
+    try {
+        $r = Invoke-WebRequest -Uri 'http://127.0.0.1:8787/stats' -TimeoutSec 2 -UseBasicParsing `
+            -Headers @{ 'X-Headroom-Proxy-Token' = $token }
+        return ($r.StatusCode -ge 200 -and $r.StatusCode -lt 300)
+    } catch { return $false }
+}
+
 function Test-TsTcp([string]$HostName, [int]$Port) {
     $client = [Net.Sockets.TcpClient]::new()
     try {
@@ -128,13 +155,10 @@ function Invoke-TsMcpRegistration([ValidateSet('add','remove')][string]$Verb) {
 function Show-TsHeadroomStatus {
     Write-Host 'Headroom:'
     $proxy = [string]$manifest.headroom.proxyUrl
-    $healthy = $false
-    foreach ($path in @($manifest.headroom.healthPaths)) {
-        if (Test-TsHttp ($proxy.TrimEnd('/') + $path)) { $healthy = $true; break }
-    }
-    if ($healthy) { Good "proxy reachable at $proxy" } else { Bad "proxy not reachable at $proxy (docker-local owns the service)" }
+    if (Test-TsHeadroomAuth) { Good "proxy authentication works at $proxy" }
+    else { Bad "proxy unusable at $proxy (unreachable, missing token, or unauthorized)" }
     if (Test-TsTcp '127.0.0.1' 8788) { Good "MCP sidecar reachable at $($manifest.headroom.mcpUrl)" }
-    else { Bad "MCP sidecar not reachable at $($manifest.headroom.mcpUrl)" }
+    else { Info "MCP sidecar not reachable at $($manifest.headroom.mcpUrl) (optional separate process)" }
     $mcpUrl = [string]$manifest.headroom.mcpUrl
     $claudeJson = Join-Path $env:USERPROFILE '.claude.json'
     try {
@@ -168,8 +192,8 @@ function Invoke-TsHeadroom {
     switch ($Action) {
         'dashboard' { Start-Process ([string]$manifest.headroom.dashboardUrl); return }
         'status' { Show-TsHeadroomStatus; return }
-        'on' { Invoke-TsMcpRegistration add; Show-TsHeadroomStatus; return }
-        'repair' { Invoke-TsMcpRegistration add; Show-TsHeadroomStatus; return }
+        'on' { if (-not (Test-TsHeadroomAuth)) { Bad 'Headroom proxy authentication failed; leaving direct mode unchanged.'; return }; Invoke-TsMcpRegistration add; Show-TsHeadroomStatus; return }
+        'repair' { if (-not (Test-TsHeadroomAuth)) { Bad 'Headroom proxy authentication failed; registrations were not changed.'; return }; Invoke-TsMcpRegistration add; Show-TsHeadroomStatus; return }
         'off' { Invoke-TsMcpRegistration remove; Info 'Headroom routing and MCP registrations removed; Docker was not changed.'; return }
         'uninstall' { Invoke-TsMcpRegistration remove; Info 'Terminal-stack Headroom registrations removed; Docker was not changed.'; return }
     }

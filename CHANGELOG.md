@@ -54,6 +54,12 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **Headroom authentication, recovery, and Codex routing are now end-to-end safe (08/23/2026).** `/readyz` could succeed while every real request returned Headroom's own 401 because health endpoints bypass proxy authentication. Wrappers now authenticate `/stats` and go direct on failure. Claude preserves provider OAuth and sends `X-Headroom-Proxy-Token` separately. Codex uses a process-local custom `headroom` provider; targeting reserved built-in id `openai` had made every `cy`/`cyr` launch fail during config parsing. Nothing is persisted to provider config.
+
+  `ts-config agents headroom off` immediately restores direct launches and removes terminal-stack-owned MCP registrations without touching Docker or data. `on` and `repair` require authenticated proxy access before enabling; the optional 8788 MCP sidecar is diagnostic only. Live Claude and Codex requests completed through Headroom after reboot, and regression tests cover the provider id, token mapping, authenticated gate, and off switch.
+
+- **`CLAUDE.md` is below Claude Code's 40 KB project-instruction ceiling (08/23/2026).** It had reached 49,309 bytes by duplicating subsystem narratives already maintained in `docs/decisions.md` and `doc`. Those sections are now concise invariants plus canonical links; the file is 38,247 bytes and a regression test enforces a 40,000-byte maximum.
+
 - **`self` voice summaries now work off Windows, and macOS TTS can no longer be silently silent (08/23/2026).** Two independent macOS gaps in the same feature.
 
   `self` — the mode where the agent writes its own one-line announcement — was implemented only in `ttsd/summarize.py`, which runs inside the Windows-only EXE. On macOS and native Linux it was accepted, persisted, and never read — while `ts-config tts summarizer self` **still** appended the marker block to `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md`, so the agent dutifully emitted `<!-- speak: … -->` comments that nothing consumed. Ported to the shell path (`cc_tts_self_summary`), marker-first then a one-sentence fallback capped at 15 words, applied to the *done* event only exactly as the Python does. A test drives both implementations on the same six fixtures and requires identical output. The marker is also stripped from the speech text now: in `hook` message mode the raw final message *is* what gets spoken, so the comment would otherwise have been read out loud.

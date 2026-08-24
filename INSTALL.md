@@ -365,6 +365,13 @@ provider billing, and a one-time global Cursor provider base URL. Change anythin
 later with `ts-config agents`; `off` removes active client wiring while preserving
 service data, and `uninstall` also removes terminal-stack-owned client packages.
 
+Headroom enable/repair validates the authenticated data plane at `/stats` before
+saving `on`; `/readyz` and `/health` alone do not prove agent requests will work.
+If the proxy or token breaks, restore direct launches immediately with
+`ts-config agents headroom off`. Re-enable with `ts-config agents headroom on`
+only after its preflight succeeds. `claude-stock` and `codex-stock` are always
+direct one-launch escape hatches.
+
 Verify the client seam after the Docker services are running:
 
 ```powershell

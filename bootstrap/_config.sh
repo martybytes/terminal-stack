@@ -254,12 +254,24 @@ ts_docker_ports() {
 # (`headroom mcp serve`, default 127.0.0.1:8788) that docker-local's compose does
 # not start — so the proxy being up says nothing about MCP being up.
 ts_probe_headroom() {
-    local proxy="${1:-http://127.0.0.1:8787}" mcp="${2:-http://127.0.0.1:8788/mcp}" rc=1
-    if ts_probe_http_ok "$proxy/readyz" || ts_probe_http_ok "$proxy/health"; then
-        printf '  Proxy:  reachable at %s\n' "$proxy"
+    local proxy="${1:-http://127.0.0.1:8787}" mcp="${2:-http://127.0.0.1:8788/mcp}" rc=1 token="" file="" root
+    token="${HEADROOM_PROXY_TOKEN:-}"
+    if [ -z "$token" ]; then
+        file="${HEADROOM_ENV_FILE:-}"
+        if [ -z "$file" ]; then
+            for root in "${WORKSPACE_DIR:-}" "$HOME/Documents/Workspace" "$HOME/workspace" "$HOME/Workspace" /mnt/c/DATA/Workspace; do
+                [ -n "$root" ] || continue
+                file="$root/src/github.com/martybytes/docker-local/headroom/.env"
+                [ -r "$file" ] && break
+            done
+        fi
+        [ -r "$file" ] && token="$(sed -n 's/^HEADROOM_PROXY_TOKEN=//p' "$file" | head -1)"
+    fi
+    if [ -n "$token" ] && curl -fsS --max-time 2 -H "X-Headroom-Proxy-Token: $token" "$proxy/stats" >/dev/null 2>&1; then
+        printf '  Proxy:  authenticated at %s\n' "$proxy"
         rc=0
     else
-        printf '  Proxy:  NOT reachable at %s\n' "$proxy"
+        printf '  Proxy:  NOT usable at %s (unreachable, missing token, or unauthorized)\n' "$proxy"
         local seen; seen="$(ts_docker_ports headroom 2>/dev/null || true)"
         [ -n "$seen" ] && printf '          docker shows: %s\n' "$(printf '%s' "$seen" | tr '\n' ';')"
     fi

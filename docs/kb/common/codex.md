@@ -67,10 +67,26 @@ Codex is the awkward host, for two reasons:
 ## Headroom and Caveman
 
 With `ts-config agents headroom on`, enhanced interactive launches get a
-session-local `OPENAI_BASE_URL` plus matching `openai_base_url` CLI override. Both
-are scoped to the wrapper and disappear when Codex exits; no provider is written
-to `~/.codex/config.toml`, preserving provider identity and history. An unavailable
-proxy fails open to the direct provider. `codex-stock` always bypasses Headroom.
+session-local custom provider named `headroom`. The wrapper passes its base URL,
+maps `HEADROOM_PROXY_TOKEN` to `X-Headroom-Proxy-Token`, and selects that provider
+only for the child process; it never overrides Codex's reserved built-in `openai`
+provider or writes provider state to `~/.codex/config.toml`. An unavailable or
+unauthorized proxy fails open to the direct provider. `codex-stock` always
+bypasses Headroom.
+
+Recovery is explicit and reversible:
+
+```text
+ts-config agents headroom off     # direct mode; remove Headroom MCP registrations
+ts-config agents headroom on      # authenticate first, then enable and register
+ts-config agents headroom repair  # re-check and repair registrations
+```
+
+`on` and `repair` must receive a successful authenticated `/stats` response.
+Public `/readyz` and `/health` responses are insufficient because Headroom keeps
+them available even when data-plane authentication would reject every request.
+The optional MCP sidecar on 8788 is reported separately and does not decide
+whether model routing is usable.
 
 Caveman installs only the pinned global `caveman` skill and a marked block in the
 active global `~/.codex/AGENTS.md`. The rest of Caveman's skill collection is not
