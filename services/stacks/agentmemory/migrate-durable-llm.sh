@@ -17,8 +17,22 @@ while [ -L "$_self" ]; do
     case "$_self" in /*) ;; *) _self="$_d/$_self" ;; esac
 done
 SCRIPT_DIR="$(cd -- "$(dirname -- "$_self")" && pwd -P)"
-# shellcheck source=../_common.sh
-. "$SCRIPT_DIR/../_common.sh"
+# shellcheck source=../../_stack.sh
+. "$SCRIPT_DIR/../../_stack.sh"
+
+# The console lives in its OWN compose project (ts-agent007memory) since the
+# split, so `docker compose stop console` from this directory stops nothing and
+# says nothing -- it would have left the console reading a volume this script is
+# about to move. Stop it where it actually lives, and only if it is there.
+am_console() {                            # stop | up
+    local dir="$stack_dir/../agent007memory"
+    [ -f "$dir/docker-compose.yml" ] || return 0
+    case "$1" in
+        stop) ( cd "$dir" && docker compose stop ) ;;
+        up)   ( cd "$dir" && docker compose up -d ) ;;
+    esac
+}
+
 
 backup_root="$(tss_backup_root)"
 while [ $# -gt 0 ]; do
@@ -66,7 +80,8 @@ if [ "$TSS_APPLY" = 1 ]; then
     tss_assert_within "$backup_root_full" "$resolved_backup" \
         || die "resolved backup directory escaped backup root: $resolved_backup"
 
-    docker compose stop console agentmemory || die 'failed to stop stack for backup'
+    am_console stop || die 'failed to stop the console'
+    docker compose stop agentmemory || die 'failed to stop stack for backup'
 
     # Derive the image rather than hardcoding agentmemory-agentmemory:latest,
     # which is right only because the compose project name happens to match the
@@ -90,6 +105,7 @@ step 'build the patched AgentMemory image and recreate the stack'
 if [ "$TSS_APPLY" = 1 ]; then
     docker compose build agentmemory console || die 'image build failed'
     docker compose up -d || die 'stack start failed'
+    am_console up || die 'console start failed'
 fi
 
 section 'Verify graph migration'

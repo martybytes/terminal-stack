@@ -27,6 +27,17 @@ server {
         proxy_set_header X-Headroom-Proxy-Token ${HEADROOM_PROXY_TOKEN};
     }
 
+    # The dashboard is served at /dashboard, so a bare http://localhost:8788/
+    # used to 404 and read as a broken container. One redirect, and the
+    # catch-all below still refuses everything else.
+    location = / {
+        # absolute_redirect off, or nginx rebuilds the Location from $host --
+        # which carries NO port -- and sends the browser to http://127.0.0.1/
+        # on port 80. Relative Location keeps whatever port the tab is on.
+        absolute_redirect off;
+        return 302 /dashboard;
+    }
+
     location / {
         return 404;
     }

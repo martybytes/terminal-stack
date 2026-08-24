@@ -91,7 +91,12 @@ _ts_gh_api() {
         "https://api.github.com/$path" 2>/dev/null
 }
 
-_ts_wez_py() { command -v python3 >/dev/null 2>&1 && python3 "$@"; }
+# PYTHONIOENCODING is not optional. WezTerm's changelog is full of box-drawing
+# and other non-Latin-1 characters, and on Windows python3 defaults stdout to
+# the ANSI code page (cp1252), where printing one raises UnicodeEncodeError and
+# takes the whole tally with it. Nothing about the slice is locale-dependent, so
+# the encoding is pinned rather than detected.
+_ts_wez_py() { command -v python3 >/dev/null 2>&1 && PYTHONIOENCODING=utf-8 python3 "$@"; }
 
 # "tag|YYYY-MM-DD" for the newest stable release.
 ts_wezterm_latest_stable() {

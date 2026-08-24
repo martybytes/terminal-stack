@@ -73,7 +73,8 @@ tracked `.env.example`:
 
 | stack | what varies |
 |---|---|
-| `agentmemory` | which compose files merge (`COMPOSE_FILE`), the optional LLM provider, prompt bounds |
+| `agentmemory` | the optional LLM provider, prompt bounds |
+| `agent007memory` | normally empty: it reads the agentmemory stack's `.env` for display values through `ts-envfiles` |
 | `headroom` | the two generated secrets, ports, Neo4j heap and page cache |
 | `kokoro` | the hardware profile: which image, and whether the GPU overlay merges |
 
@@ -96,7 +97,8 @@ Everything this tree creates is prefixed `ts-`, so it is obvious in `docker ps`
 which containers belong to terminal-stack and which are your own work:
 
 ```
-ts-agentmemory   ts-agentmemory-server, ts-agentmemory-console
+ts-agentmemory     ts-agentmemory-server
+ts-agent007memory  ts-agent007memory
 ts-headroom      ts-headroom-proxy, -dashboard, -qdrant, -neo4j
 ts-kokoro        ts-kokoro-tts
 ts-playwright    ts-playwright-mcp

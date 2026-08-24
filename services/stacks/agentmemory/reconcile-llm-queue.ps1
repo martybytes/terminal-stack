@@ -55,6 +55,19 @@ function Step([string]$Text) {
 function Info([string]$Text) { Write-Host "       $Text" -ForegroundColor DarkGray }
 function Warn([string]$Text) { Write-Host "  !    $Text" -ForegroundColor Yellow }
 
+# The console lives in its OWN compose project (ts-agent007memory) since the
+# split, so `docker compose stop console` from this directory stops nothing and
+# reports nothing -- it would have left the console reading a volume this script
+# is about to move. Stop it where it actually lives, and only if it is there.
+function Invoke-AmConsole([ValidateSet('stop', 'up')][string]$Action) {
+    $dir = Join-Path (Split-Path -Parent $stackDir) 'agent007memory'
+    if (-not (Test-Path -LiteralPath (Join-Path $dir 'docker-compose.yml'))) { return }
+    Push-Location $dir
+    try {
+        if ($Action -eq 'stop') { & docker compose stop } else { & docker compose up -d }
+    } finally { Pop-Location }
+}
+
 function Invoke-Compose {
     param(
         [Parameter(Mandatory)]
@@ -322,7 +335,8 @@ try {
             throw "resolved backup directory escaped backup root: $resolvedBackup"
         }
 
-        Invoke-Compose -Arguments @('stop', 'console', 'agentmemory')
+        Invoke-AmConsole stop
+        Invoke-Compose -Arguments @('stop', 'agentmemory')
         & docker run --rm --entrypoint sh -v "${volumeName}:/source:ro" -v "${resolvedBackup}:/backup" $image -c 'tar -C /source -czf /backup/agentmemory-volume.tgz .'
         if ($LASTEXITCODE -ne 0) { throw 'volume backup failed; stack remains stopped and queue is unchanged' }
         $archive = Join-Path $resolvedBackup 'agentmemory-volume.tgz'
@@ -362,6 +376,7 @@ sync
     Step "enforce Terra provider-call limit $MaxPlannedTerraCalls and estimated-cost limit `$$MaxEstimatedCostUsd"
     if ($Apply) {
         Invoke-Compose -Arguments @('up', '-d')
+        Invoke-AmConsole up
         Wait-ForHttp200 -Uri "$api/livez" -TimeoutSeconds 180
         Wait-ForHttp200 -Uri 'http://127.0.0.1:3114/healthz' -TimeoutSeconds 180
         Start-Sleep -Seconds 15
@@ -380,7 +395,8 @@ sync
 
             if ($terraCalls -gt $MaxPlannedTerraCalls -or $actualCost -gt $MaxEstimatedCostUsd -or
                 $lastTelemetry.queue.dlq_depth -gt 0 -or $circuit -eq 'open') {
-                Invoke-Compose -Arguments @('stop', 'console', 'agentmemory')
+                Invoke-AmConsole stop
+        Invoke-Compose -Arguments @('stop', 'agentmemory')
                 throw 'recovery safety guard tripped; stack stopped, new queue preserved, quarantine and backup untouched'
             }
             if ($lastTelemetry.queue.depth -eq 0 -and $lastTelemetry.queue.dlq_depth -eq 0 -and $lastTelemetry.activeJobs -eq 0) {
@@ -395,7 +411,8 @@ sync
             Start-Sleep -Seconds 5
         }
         if ($null -eq $settledAt -or ([DateTimeOffset]::UtcNow - $settledAt).TotalSeconds -lt $PostRecoverySoakSeconds) {
-            Invoke-Compose -Arguments @('stop', 'console', 'agentmemory')
+            Invoke-AmConsole stop
+        Invoke-Compose -Arguments @('stop', 'agentmemory')
             throw "recovery did not settle within $RecoveryTimeoutSeconds seconds; stack stopped for inspection"
         }
 

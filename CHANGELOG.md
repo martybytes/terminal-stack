@@ -4,6 +4,38 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+### Fixed
+
+- **AgentMemory's LLM credential never reached the container, and nothing said so (08/24/2026).** Absorbing the Docker stacks moved them one directory deeper, and the agentmemory compose file kept loading the shared credential from `../.env` — which now resolves to `services/stacks/.env`, a file that has never existed. Both env files are `required: false` so a fresh clone starts in degraded no-LLM mode, and compose says *nothing at all* about an optional `env_file` it cannot find: no warning, no non-zero exit, nothing in `docker compose config`.
+
+  What that looked like: `"outcome":"success"` with `providerLatencyMs: 0`, then `Failed to parse compression XML`, a retry, and a dead letter. With no usable provider AgentMemory returns an empty completion instead of raising, so the job "succeeds" without any HTTP request happening. **52,570 compression jobs dead-lettered that way**, over weeks, while capture, search and local embeddings kept working perfectly — which is exactly why nobody looked. The path is now `../../.env`, a test asserts every `env_file` path resolves next to a *tracked* `.env.example`, and `ts-verify.sh` asks the provider **from inside the container** with the container's own credentials (an unset base URL is a skip — no chat provider is a supported configuration; one that refuses is a failure).
+
+- **Seven maintenance scripts died on their first executable line (08/24/2026).** The same merge renamed `_common.sh` to `_stack.sh` and moved it a level up. The sweep rewrote every `dl_` call *inside* `reconcile-llm-queue`, `migrate-durable-llm`, `migrate-memory-projects`, `configure-openai-billing`, `check-capture`, `setup-kokoro-docker` and `check-playwright`, and missed the `. "$SCRIPT_DIR/../_common.sh"` line in each. Nothing caught it because these are the scripts you reach for only when something is already wrong. A test now checks every dot-sourced path exists.
+
+- **`reconcile-llm-queue` could not run against a real backlog (08/24/2026).** It passed the whole telemetry blob to node on **argv**, so with a large dead-letter queue `execve` failed with "Argument list too long", node never ran, the projected cost came back empty — and an empty value fell through the cost gate as *exceeded*, refusing to reconcile with a blank figure: `projected cost $ exceeds safety limit $1.00`. Telemetry now goes over stdin (as the neighbouring `metrics()` already did), and no output is treated as "the estimator died", not as a number. Its OpenAI-priced call and cost limits are also skipped, loudly and with the reason stated, when `OPENAI_BASE_URL` is not OpenAI — list prices for models a self-hosted endpoint does not serve were blocking a reconcile on a machine that cannot be billed for anything.
+
+- **`ts-doctor` reported kokoro unreachable on every run, whatever the truth (08/24/2026).** `ts_cc_tts_probe | grep -q` looks right and is not: `grep -q` exits at the first match, closing the pipe, so the producer takes SIGPIPE and exits 141 — which `pipefail` makes the pipeline's status. A match was reported as a failure. Captured first, matched in the shell. The severity is engine-keyed now too: kokoro down while it *is* the chosen TTS engine is a failure, not a note, because voice notifications are silently gone.
+
+- **The `ts-stack` port check could not tell "absent" from "exposed" (08/24/2026).** Docker collapses contiguous published ports into a range (`127.0.0.1:3112-3113->3112-3113/tcp`), so a literal `:3113->` matched nothing and the check reported "not loopback-only" about a port that was fine. Three outcomes now, and the loopback audit is scoped to `ts-` containers: it was failing on the operator's own unrelated projects, and noise is how the one check that must never be skipped gets ignored.
+
+- **The pwsh headroom check could not read an error body (08/24/2026).** PowerShell 7 throws on 4xx with the response stream already consumed, so `GetResponseStream()` threw and the body read as empty — reporting "a refused connection, not a refusal" against a proxy that had just answered `401 {"error":"unauthorized"}`. `$_.ErrorDetails.Message` first, the stream as the 5.1 fallback.
+
+- **`playwrightEnabled` was a toggle nothing could set (08/24/2026).** `ts_agent_get` rejected the key outright, so `ts-stack` reported the stack running with its toggle off, permanently.
+
+- **AgentMemory's healthcheck failed while it was working (08/24/2026).** A 5s timeout against a single-threaded Node process chewing through a compression backlog (3-18s of provider latency per call, several in flight) goes unhealthy while `livez` answers a direct request in 260ms. 15s and five retries now. The console `depends_on` it being healthy, so this was one busy afternoon away from blocking a bring-up.
+
+- **`ts_wez_changes_tally` died on WezTerm's own changelog on Windows (08/24/2026).** python3 defaults stdout to the ANSI code page there, and the changelog is full of box-drawing characters, so printing the slice raised `UnicodeEncodeError`. `PYTHONIOENCODING=utf-8` is pinned rather than detected.
+
+### Changed
+
+- **agent007memory is its own compose project (08/24/2026).** The console was an overlay merged into the agentmemory project, so Docker listed it as a second row under someone else's name. It is now `services/stacks/agent007memory/` — project `ts-agent007memory`, container `ts-agent007memory`, image `ts-agent007memory:local` — a stack `ts-stack` starts, stops, checks and verifies on its own. It joins `ts-agentmemory-net` (named, not left as a project-derived default, because anything reaching across projects has to be pinned) and mounts agentmemory's data volume read-only for the HMAC secret.
+
+  Two mechanisms came with it, both discovered rather than registered. `ts-after` names the stacks a stack must follow: lexical order puts `agent007memory` *first* (`0` sorts before `m`) and an external network cannot be joined before it exists, so without it every fresh `up` failed with "network not found". `ts-envfiles` names extra `--env-file` interpolation sources: the console displays which model and endpoint AgentMemory is configured for, and the authority on that is the agentmemory stack's `.env`. That file is an interpolation source and never an `env_file:` entry — the distinction is what keeps `OPENAI_API_KEY` out of the console, and a test enforces it.
+
+  `down` and `restart` now walk the stacks in reverse start order, and `restart` takes everything down before bringing anything up: restarting agentmemory while the console still held its network left the console pointed at a container that no longer existed. The billing helpers (`configure-openai-billing.*`, `.billing.env`, `docker-compose.billing.yml`) moved with the console, since they only ever configured it.
+
+- **`http://localhost:8788/` redirects to the dashboard (08/24/2026).** It used to 404, because the dashboard is served at `/dashboard` and the gateway is deliberately not a general reverse proxy. The redirect is relative (`absolute_redirect off`) — nginx otherwise rebuilds the `Location` from `$host`, which carries no port, and sends the browser to port 80.
+
 ### Added
 
 - **The Docker services live here now (08/24/2026).** agentmemory, Headroom, Kokoro TTS and the Playwright MCP browser were a separate private repo, and the agentmemory console was a *third* repo that the second built from a pinned commit SHA. Three clones, two remotes, and a push-then-re-pin-then-rebuild loop for a one-line console change. They are all under `services/` now, with `ts-stack` driving them.

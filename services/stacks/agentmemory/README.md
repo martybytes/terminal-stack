@@ -4,8 +4,10 @@ Local [agentmemory](https://github.com/rohitg00/agentmemory) server — persiste
 coding agents, backing the `agentmemory` MCP server.
 
 **The agent007memory console is a selectable profile, not always-on.** `docker-compose.yml` is
-agentmemory alone — the smallest common case. `docker-compose.console.yml` adds the console
-service; `agentmemory/.env`'s `COMPOSE_FILE` picks which profile is active (same mechanism as
+agentmemory alone. The agent007memory console that used to merge in here as an overlay is now
+its own stack and its own compose project, `services/stacks/agent007memory/` — it joins this
+stack's network (`ts-agentmemory-net`) and mounts this stack's data volume read-only for the
+HMAC secret. (The overlay mechanism itself is unchanged and still used by kokoro, same as
 `../kokoro`'s hardware profile). **With console** (default, in `.env.example`) is what most setups
 want. **Without console**: agentmemory is still fully usable, just without the proxy/UI — see the
 table below for exactly what moves. No local clone of `agent007memory` is needed either way; Docker
@@ -57,7 +59,7 @@ is pinned by a git commit SHA in its build context. Nothing floats on `:latest`:
 | `AGENTMEMORY_VERSION` | `0.9.29` | the npm package `@agentmemory/agentmemory` |
 | `III_VERSION` | `0.11.2` | the `iiidev/iii` image the `iii` engine binary is copied out of |
 | `III_SDK_VERSION` | `0.11.2` | the `iii-sdk` npm package |
-| console `build.context` SHA | see `docker-compose.console.yml` | [martybytes/agent007memory](https://github.com/martybytes/agent007memory) — bump with `./update-console.sh [--apply]` / `.\update-console.ps1 [-Apply]`, which pushes if needed, rewrites the pin, rebuilds, and verifies. `-Local` builds from a checkout without pushing (see `docker-compose.console-local.yml`). Requires the console profile to be active in `.env` — see the top of this README. |
+| console image | `services/stacks/agent007memory/` | the console is its own stack now, built from `services/console/` in this repo. `ts-stack up agent007memory --build` rebuilds it. |
 
 The `iii-sdk` pin is the non-obvious one. `Dockerfile:18` writes a `package.json` at build time
 containing an npm `overrides` block, purely to force `iii-sdk` to `III_SDK_VERSION` — otherwise npm
@@ -735,7 +737,7 @@ variable.
 Create the Admin key file (`~/.config/openai-admin.key`, or `C:\Temp\openai-admin.key` on Windows) with only the raw `sk-admin-...` secret on one line. Do not include
 `OPENAI_API_KEY=`, `export`, quotes, or another line. The helper rejects those formats without
 printing the secret. If an inference key is staged in its own `.key` file during rotation, that file
-uses the same raw-only format; docker-local's root `.env` still uses `OPENAI_API_KEY=...`. Validate
+uses the same raw-only format; the services-root `.env` (`services/.env`) still uses `OPENAI_API_KEY=...`. Validate
 the active project and Costs access, then write the non-secret settings:
 
 ```powershell
@@ -747,9 +749,13 @@ cd agentmemory
   -AdminKeyFile C:\path\openai-admin.key `
   -ProjectId proj_... -Apply
 
-docker compose --env-file .env --env-file .billing.env `
-  -f docker-compose.yml -f docker-compose.console.yml -f docker-compose.billing.yml up -d
+ts-stack up agent007memory
 ```
+
+**Billing configuration moved with the console**, to
+`services/stacks/agent007memory/` — `configure-openai-billing.sh` / `.ps1`, `.billing.env` and
+`docker-compose.billing.yml` are all there, and `ts-stack` assembles the env-file list for you. The
+rule below is why that assembly exists, and it has not changed.
 
 **Pass both env files, stack `.env` first.** These are compose's *interpolation* source, which is a
 different mechanism from the `env_file:` keys inside the service definitions. A lone
@@ -814,8 +820,7 @@ only to refresh the fingerprint.
 cd agentmemory
 .\configure-openai-billing.ps1 -RefreshHints            # preview both fingerprints
 .\configure-openai-billing.ps1 -RefreshHints -Apply
-docker compose --env-file .env --env-file .billing.env `
-  -f docker-compose.yml -f docker-compose.console.yml -f docker-compose.billing.yml up -d
+ts-stack up agent007memory
 ```
 
 Verify the new inference key actually authenticates in-process, rather than trusting `Up`:

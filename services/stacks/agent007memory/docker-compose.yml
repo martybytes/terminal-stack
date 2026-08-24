@@ -1,21 +1,29 @@
-# Console overlay — merged on top of docker-compose.yml when .env sets
-#   COMPOSE_FILE=docker-compose.yml:docker-compose.console.yml
+# agent007memory — the console and transparent proxy in front of AgentMemory.
+# https://github.com/martybytes/agent007memory (its source is services/console/)
 #
-# Adds the agent007memory companion console (https://github.com/martybytes/agent007memory):
-# a transparent proxy publishing host 3111 in front of agentmemory (live request
-# feed, per-host agent attribution) and the console UI + /api + /ws + /healthz
-# on 3114. No agentmemory changes — it talks only to the REST API and the
-# mem-live stream over the compose network.
+# Its OWN compose project, deliberately. It is a separate application with a
+# separate lifecycle -- a UI you rebuild while the memory server keeps running --
+# and as an overlay on the agentmemory project it showed up in Docker as a
+# second row under someone else's name. Now `docker ps`, Docker Desktop and
+# `ts-stack status` all name it for what it is.
 #
-# Kept separate so agentmemory can run alone: the base file is the smallest
-# common case (see ../docs/conventions.md, "Per-machine variation"). Without
-# this overlay, MCP clients hit agentmemory directly on the bypass port 3110
-# instead of 3111, and there is no console UI, per-host /_agent/<name>
-# tagging, or OpenAI billing sync — see agentmemory/README.md.
+# What it does: a transparent proxy on host 3111 in front of agentmemory (live
+# request feed, per-host /_agent/<name> attribution) and the console UI + /api +
+# /ws + /healthz on 3114. It changes nothing about agentmemory: it talks only to
+# the REST API and the mem-live stream. Without it running, MCP clients hit the
+# server directly on the bypass port 3110 and there is no UI.
+#
+# Two couplings to the agentmemory stack, both explicit below: it joins that
+# stack's network to reach the server by name, and it reads agentmemory's HMAC
+# secret from that stack's data volume, read-only. `ts-after` makes ts-stack
+# start agentmemory first, because an external network cannot be joined before
+# it exists.
+name: ts-agent007memory
+
 services:
   console:
-    container_name: ts-agentmemory-console
-    image: ts-agentmemory-console:local
+    container_name: ts-agent007memory
+    image: ts-agent007memory:local
     build:
       # The console's source is in this repo, so the build context is a relative
       # path and what runs is always what you have checked out. It used to be a
@@ -26,9 +34,10 @@ services:
       context: ../../console
       dockerfile: Dockerfile
     restart: unless-stopped
-    depends_on:
-      agentmemory:
-        condition: service_healthy
+    # No depends_on: it cannot reach across compose projects. `ts-after` makes
+    # ts-stack start agentmemory first, and the proxy tolerates an upstream that
+    # is not answering yet -- it returns errors until it is, and recovers on its
+    # own, which is what `restart: unless-stopped` is for.
     ports:
       - "127.0.0.1:3111:3111"   # transparent proxy -> agentmemory:3111 (what MCP clients hit)
       - "127.0.0.1:3114:3114"   # console UI + /api + /ws + /healthz
@@ -47,8 +56,12 @@ services:
       # unreachable through any port mapping, on any platform. The host side
       # stays loopback-only via the ports: mappings.
       HOST: "0.0.0.0"
-      UPSTREAM_HTTP: "http://agentmemory:3111"
-      UPSTREAM_WS: "ws://agentmemory:3112"
+      # The container NAME, not the service name. `agentmemory` is a network
+      # alias compose attaches within its own project; the container name is the
+      # alias that is guaranteed to resolve from another project on the same
+      # network, which is what this now is.
+      UPSTREAM_HTTP: "http://ts-agentmemory-server:3111"
+      UPSTREAM_WS: "ws://ts-agentmemory-server:3112"
       # Safe, display-only mirrors for the LLM Calls page. Deliberately do not
       # pass OPENAI_API_KEY (or any provider secret) into the console.
       #
@@ -56,9 +69,8 @@ services:
       # as the env_file: keys above: passing only `--env-file .billing.env`
       # replaces .env as the interpolation source and every mirror below
       # resolves to "". Always deploy with both, .env first:
-      #   docker compose --env-file .env --env-file .billing.env \
-      #     -f docker-compose.yml -f docker-compose.console.yml -f docker-compose.billing.yml up -d
-      # update-console.ps1 does this for you.
+      # `ts-stack` assembles that list for you from `ts-envfiles` and any
+      # .billing.env present, always with the interpolation sources in order.
       #
       # The masked key fingerprints the console displays (LLM_API_KEY_HINT,
       # LLM_ADMIN_KEY_HINT) are not listed here — they come from .billing.env,
@@ -115,8 +127,24 @@ services:
         max-size: "10m"
         max-file: "3"
 
+networks:
+  # The agentmemory stack's network, joined rather than created: this container
+  # has to resolve ts-agentmemory-server by name. External means compose will
+  # NOT create it -- if agentmemory has never been up, `up` fails here with a
+  # clear "network not found" rather than starting a console that can reach
+  # nothing. ts-after handles the ordering for `ts-stack up`.
+  default:
+    name: ts-agentmemory-net
+    external: true
+
 volumes:
-  # Console-owned aggregate reporting database. External protects the history
-  # from `docker compose down -v` and keeps the same name on every machine.
+  # agentmemory's data volume, mounted READ-ONLY for one file: the HMAC secret
+  # at /upstream-data/.hmac. No secret in any tracked file or .env, and rotation
+  # self-heals because the console re-reads on a 401.
+  ts-agentmemory-data:
+    external: true
+  # Console-owned aggregate reporting database. Kept under its agentmemory-era
+  # name: renaming it would mean migrating a year of reporting history to buy
+  # nothing. External protects it from `docker compose down -v`.
   ts-agentmemory-console-history:
     external: true

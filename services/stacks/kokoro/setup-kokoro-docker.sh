@@ -21,8 +21,8 @@ while [ -L "$_self" ]; do
     case "$_self" in /*) ;; *) _self="$_d/$_self" ;; esac
 done
 SCRIPT_DIR="$(cd -- "$(dirname -- "$_self")" && pwd -P)"
-# shellcheck source=../_common.sh
-. "$SCRIPT_DIR/../_common.sh"
+# shellcheck source=../../_stack.sh
+. "$SCRIPT_DIR/../../_stack.sh"
 
 use_cpu=0
 gpu_tag='v0.8.0-cu128'

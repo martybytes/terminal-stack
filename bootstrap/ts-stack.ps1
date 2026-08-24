@@ -94,9 +94,40 @@ function Section([string]$m) { Write-Host ''; Write-Host "=== $m ===" -Foregroun
 
 # ── stacks ──────────────────────────────────────────────────────────────────────
 function Get-TsStackList {
-    Get-ChildItem -LiteralPath $STACK_ROOT -Directory -ErrorAction SilentlyContinue |
+    $names = @(Get-ChildItem -LiteralPath $STACK_ROOT -Directory -ErrorAction SilentlyContinue |
         Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'docker-compose.yml') } |
-        Select-Object -ExpandProperty Name | Sort-Object
+        Select-Object -ExpandProperty Name | Sort-Object)
+    return ,(Get-TsStackOrder $names)
+}
+
+# Twin of tss_stack_order. Start order, because lexical order is wrong the
+# moment one stack joins another's network: agent007memory sorts BEFORE
+# agentmemory ('0' < 'm') and an external network cannot be joined before it
+# exists. A stack declares what it must follow in an optional `ts-after` file,
+# one stack name per line. Repeated passes, not a real topological sort: a
+# handful of stacks, and a cycle degrades to "leave the order alone".
+function Get-TsStackOrder([string[]]$Names) {
+    $order = [System.Collections.Generic.List[string]]::new()
+    foreach ($n in $Names) { [void]$order.Add($n) }
+    for ($pass = 0; $pass -lt 5; $pass++) {
+        $moved = $false
+        foreach ($name in @($order)) {
+            $file = Join-Path (Get-TsStackDir $name) 'ts-after'
+            if (-not (Test-Path -LiteralPath $file)) { continue }
+            foreach ($after in (Get-Content -LiteralPath $file)) {
+                $after = $after.Trim()
+                if (-not $after -or $after.StartsWith('#')) { continue }
+                $ai = $order.IndexOf($after)
+                $ni = $order.IndexOf($name)
+                if ($ai -lt 0 -or $ai -lt $ni) { continue }
+                $order.RemoveAt($ni)
+                $order.Insert($order.IndexOf($after) + 1, $name)
+                $moved = $true
+            }
+        }
+        if (-not $moved) { break }
+    }
+    return ,$order.ToArray()
 }
 function Get-TsStackDir([string]$Name) { Join-Path $STACK_ROOT $Name }
 
@@ -105,6 +136,10 @@ function Get-TsStackDir([string]$Name) { Join-Path $STACK_ROOT $Name }
 function Get-TsStackToggle([string]$Name) {
     switch ($Name) {
         'agentmemory' { 'agentmemoryEnabled' }
+        # The console is part of the agentmemory feature, not a separate choice:
+        # a machine that wants memories wants the proxy every client is pointed
+        # at. Separate PROJECT, same switch.
+        'agent007memory' { 'agentmemoryEnabled' }
         'headroom'    { 'headroomEnabled' }
         'playwright'  { 'playwrightEnabled' }
         'kokoro'      { 'ccTts' }
@@ -384,11 +419,33 @@ function Copy-TsVolume([string]$From, [string]$To) {
 # silently resolves to ''), and -DryRun prints the argv and runs nothing.
 # NB: not $Args — that is an automatic variable, so a parameter of that name is
 # never bound and every compose call silently loses its arguments.
+# Twin of tss_env_file_list. The --env-file list, in order. These are compose
+# INTERPOLATION sources; nothing here is injected into a container. Extras from
+# `ts-envfiles` come first so the stack's own .env always wins.
+function Get-TsStackEnvFiles([string]$Dir) {
+    $list = @()
+    $extra = Join-Path $Dir 'ts-envfiles'
+    if (Test-Path -LiteralPath $extra) {
+        foreach ($line in (Get-Content -LiteralPath $extra)) {
+            $line = $line.Trim()
+            if (-not $line -or $line.StartsWith('#')) { continue }
+            if (Test-Path -LiteralPath (Join-Path $Dir $line)) { $list += $line }
+        }
+    }
+    if (Test-Path -LiteralPath (Join-Path $Dir '.env'))         { $list += '.env' }
+    if (Test-Path -LiteralPath (Join-Path $Dir '.billing.env')) { $list += '.billing.env' }
+    return ,$list
+}
+
 function Invoke-TsStackCompose([string]$Name, [string[]]$ComposeArgs) {
     $dir = Get-TsStackDir $Name
     $pre = @()
-    if (Test-Path -LiteralPath (Join-Path $dir '.billing.env')) {
-        $pre = @('--env-file', '.env', '--env-file', '.billing.env')
+    # Only pass --env-file at all when there is something beyond the default
+    # .env: compose reads .env on its own, and naming it for every stack would
+    # be noise in the dry-run argv this is all inspected by.
+    if ((Test-Path -LiteralPath (Join-Path $dir 'ts-envfiles')) -or
+        (Test-Path -LiteralPath (Join-Path $dir '.billing.env'))) {
+        foreach ($f in (Get-TsStackEnvFiles $dir)) { $pre += @('--env-file', $f) }
     }
     if ($DryRun) {
         Write-Host ("({0}) docker compose {1}{2}" -f $Name, (($pre -join ' ') + $(if ($pre) { ' ' })), ($ComposeArgs -join ' '))
@@ -513,7 +570,11 @@ switch ($Command) {
     'down' {
         # -v is NEVER in this argv. Volumes are only destroyed by an explicitly
         # gated path, and that is enforced by test, not by comment.
-        foreach ($s in Selected) {
+        #
+        # REVERSE start order: a stack that joins another's network has to let go
+        # of it first, or `down` on the owner leaves a network in use and the
+        # error names neither stack.
+        foreach ($s in @(Selected)[($(@(Selected).Count - 1))..0]) {
             Section $s
             if ((Invoke-TsStackCompose $s @('down')) -ne 0) { Bad "down failed for $s" }
         }
@@ -522,9 +583,17 @@ switch ($Command) {
     'restart' {
         # down + up, not `docker compose restart`: restart reuses the existing
         # container, so it ignores the changed .env that is the reason to restart.
-        foreach ($s in Selected) {
+        #
+        # ALL down (reverse order) before ANY up, rather than down-then-up per
+        # stack: restarting agentmemory while agent007memory still holds
+        # ts-agentmemory-net leaves the console pointed at a container that no
+        # longer exists, and it only recovers on its own restart timer.
+        foreach ($s in @(Selected)[($(@(Selected).Count - 1))..0]) {
             Section $s
             Invoke-TsStackCompose $s @('down') | Out-Null
+        }
+        foreach ($s in Selected) {
+            Section $s
             if ((Invoke-TsStackCompose $s @('up', '-d')) -ne 0) { Bad "restart failed for $s" }
         }
     }
@@ -549,12 +618,24 @@ switch ($Command) {
         Section 'named volumes'
         # external means compose will NOT create these, and this is where every
         # memory you have ever saved lives.
-        $vols = @('ts-agentmemory-data')
-        $amEnv = Join-Path (Get-TsStackDir 'agentmemory') '.env'
-        if ((Test-Path -LiteralPath $amEnv) -and
-            (Select-String -LiteralPath $amEnv -Pattern 'docker-compose\.console\.yml' -Quiet)) {
-            $vols += 'ts-agentmemory-console-history'
-        } else { Note 'agentmemory .env selects no console profile — skipping the console volume' }
+        # Read out of the compose files themselves rather than listed here: this
+        # used to name the console volume only when agentmemory's COMPOSE_FILE
+        # mentioned the console overlay, which stopped being true the moment the
+        # console became its own compose project. Every `external: true` volume
+        # of every stack, from the source of truth.
+        $vols = @()
+        foreach ($f in (Get-ChildItem -LiteralPath $STACK_ROOT -Recurse -Filter 'docker-compose.yml' -ErrorAction SilentlyContinue)) {
+            $inVolumes = $false; $name = ''
+            foreach ($line in (Get-Content -LiteralPath $f.FullName)) {
+                if ($line -match '^volumes:') { $inVolumes = $true; continue }
+                if ($line -match '^[a-zA-Z]') { $inVolumes = $false }
+                if (-not $inVolumes) { continue }
+                if ($line -match '^  ([a-zA-Z0-9_-]+):') { $name = $Matches[1]; continue }
+                if ($line -match 'external:\s*true' -and $name) { $vols += $name; $name = '' }
+            }
+        }
+        $vols = @($vols | Sort-Object -Unique)
+        if (-not $vols) { $vols = @('ts-agentmemory-data') }
         foreach ($v in $vols) {
             if ($DryRun) { Step "docker volume create $v (if absent)"; continue }
             if (Test-TsVolume $v) { Note "'$v' already exists — left untouched (this is where your data lives)"; continue }

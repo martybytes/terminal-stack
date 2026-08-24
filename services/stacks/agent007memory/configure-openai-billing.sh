@@ -20,8 +20,8 @@ while [ -L "$_self" ]; do
     case "$_self" in /*) ;; *) _self="$_d/$_self" ;; esac
 done
 SCRIPT_DIR="$(cd -- "$(dirname -- "$_self")" && pwd -P)"
-# shellcheck source=../_common.sh
-. "$SCRIPT_DIR/../_common.sh"
+# shellcheck source=../../_stack.sh
+. "$SCRIPT_DIR/../../_stack.sh"
 
 admin_key_file=''; project_id=''; refresh_hints=0
 while [ $# -gt 0 ]; do
@@ -123,7 +123,7 @@ if [ "$refresh_hints" = 1 ]; then
     write_billing_env "$existing_id" "$existing_name" "$admin_host_path" "$admin_hint" "$inference_hint"
     printf '%sRefreshed key fingerprints in %s.%s\n' "$C_GREEN" "$output_path" "$C_RESET"
     printf '%sRecreate the console to pick them up:%s\n' "$C_GREEN" "$C_RESET"
-    printf '%sdocker compose --env-file .env --env-file .billing.env -f docker-compose.yml -f docker-compose.console.yml -f docker-compose.billing.yml up -d%s\n' "$C_CYAN" "$C_RESET"
+    printf '%sts-stack up agent007memory%s\n' "$C_CYAN" "$C_RESET"
     exit 0
 fi
 
@@ -191,4 +191,4 @@ fi
 write_billing_env "$project_id" "$(json_str "$project_name")" "$admin_path" "$admin_hint" "$inference_hint"
 printf '%sWrote non-secret project billing settings. Organization Administration may now return to None.%s\n' "$C_GREEN" "$C_RESET"
 printf '%sDeploy with:%s\n' "$C_GREEN" "$C_RESET"
-printf '%sdocker compose --env-file .env --env-file .billing.env -f docker-compose.yml -f docker-compose.console.yml -f docker-compose.billing.yml up -d%s\n' "$C_CYAN" "$C_RESET"
+printf '%sts-stack up agent007memory%s\n' "$C_CYAN" "$C_RESET"

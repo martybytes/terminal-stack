@@ -211,7 +211,7 @@ def test_manifest_and_compose_agree_on_pins_and_ports():
     # The REST port the agents are told to use is the CONSOLE's, which proxies the
     # server; the server's own listener is the 3110 bypass. Both must be published.
     assert f":{urlparse(cfg['agentmemory']['restUrl']).port}:" in \
-        (ROOT / "services/stacks/agentmemory/docker-compose.console.yml").read_text(encoding="utf-8")
+        (ROOT / "services/stacks/agent007memory/docker-compose.yml").read_text(encoding="utf-8")
     assert f":{urlparse(cfg['agentmemory']['viewerUrl']).port}:" in am
 
 
@@ -254,7 +254,7 @@ def test_the_memory_volumes_are_external_and_the_headroom_ones_are_not():
     volume, which is why every memory ever saved lives in one; headroom's three
     are removable by design and ts-stack gates that behind --destroy-data."""
     am = (ROOT / "services/stacks/agentmemory/docker-compose.yml").read_text(encoding="utf-8")
-    con = (ROOT / "services/stacks/agentmemory/docker-compose.console.yml").read_text(encoding="utf-8")
+    con = (ROOT / "services/stacks/agent007memory/docker-compose.yml").read_text(encoding="utf-8")
     hr = (ROOT / "services/stacks/headroom/docker-compose.yml").read_text(encoding="utf-8")
     assert "ts-agentmemory-data:\n    external: true" in am
     assert "ts-agentmemory-console-history:\n    external: true" in con
@@ -382,3 +382,129 @@ def test_install_documents_docker_before_the_agent_toggles():
     assert "Phase 6a" in ins and ins.index("Phase 6a") < ins.index("Phase 6b")
     assert "ts-stack bootstrap" in ins
     assert "Terminal-stack never manages the containers" not in ins
+
+
+def test_every_optional_env_file_points_at_a_documented_location():
+    """An `env_file` entry with `required: false` is SILENT when it is wrong:
+    compose says nothing, the container starts, and the variables simply are not
+    there. That is how the merge broke LLM compression -- the tree gained a level
+    (services/stacks/<stack>/), so a `../.env` written for the old two-level
+    layout resolved to services/stacks/.env, which does not exist, and
+    OPENAI_API_KEY silently stopped reaching AgentMemory. Every compression call
+    then returned empty, failed XML parsing, retried and dead-lettered, for
+    weeks, with `outcome: success` in the log because the HTTP call never
+    happened.
+
+    The invariant that catches it without needing a real (untracked) .env: every
+    env_file path must sit beside a TRACKED .env.example documenting it. That is
+    true of services/.env and of each stack's own .env, and false of any level
+    the path lands on by accident."""
+    import re
+    for compose in sorted((ROOT / "services" / "stacks").glob("*/docker-compose*.yml")):
+        for path in re.findall(r"- path:\s*(\S+)", compose.read_text(encoding="utf-8")):
+            target = (compose.parent / path).resolve()
+            example = target.parent / ".env.example"
+            assert example.is_file(), (
+                f"{compose.relative_to(ROOT)} loads {path}, which resolves to "
+                f"{target} -- no tracked .env.example there, so nothing documents "
+                f"or verifies that file. A silently-missing env_file is invisible."
+            )
+
+
+def test_every_sourced_helper_path_resolves():
+    """`. "$SCRIPT_DIR/../_common.sh"` was correct in docker-local, where the
+    stacks sat one level under the repo root. The merge put them two levels down
+    AND renamed the helper to _stack.sh, and the sweep changed every tss_ call
+    inside these scripts while leaving the source line pointing at a file that
+    exists nowhere. Seven scripts -- reconcile-llm-queue, migrate-durable-llm,
+    migrate-memory-projects, configure-openai-billing, check-capture,
+    setup-kokoro-docker, check-playwright -- died on their first line, and
+    nothing ran them because they are the tools you reach for only when
+    something is already wrong."""
+    import re
+    bad = []
+    for sh in sorted((ROOT / "services").rglob("*.sh")):
+        if "node_modules" in sh.parts:
+            continue
+        for ref in re.findall(r'^\s*\.\s+"\$SCRIPT_DIR/([^"]+)"', sh.read_text(encoding="utf-8"), re.M):
+            if not (sh.parent / ref).resolve().is_file():
+                bad.append(f"{sh.relative_to(ROOT)} sources {ref}, which does not exist")
+    assert not bad, chr(10).join(bad)
+
+
+def test_a_stack_that_joins_another_network_declares_ts_after():
+    """Lexical order puts agent007memory FIRST ('0' < 'm'), and it joins
+    ts-agentmemory-net, which the agentmemory stack creates. An external network
+    cannot be joined before it exists, so without `ts-after` every fresh
+    `ts-stack up` fails with "network not found" on a stack that is perfectly
+    configured. Any stack declaring an external network must name the stack that
+    owns it."""
+    import re
+    stacks = ROOT / "services" / "stacks"
+    owners = {}
+    for compose in sorted(stacks.glob("*/docker-compose.yml")):
+        text = compose.read_text(encoding="utf-8")
+        block = text.split("networks:", 1)[-1] if "networks:" in text else ""
+        for name in re.findall(r"^\s+name:\s*(\S+)", block, re.M):
+            if "external: true" not in block.split(name, 1)[-1][:200]:
+                owners[name] = compose.parent.name
+    for compose in sorted(stacks.glob("*/docker-compose.yml")):
+        text = compose.read_text(encoding="utf-8")
+        if "external: true" not in text.split("networks:", 1)[-1]:
+            continue
+        block = text.split("networks:", 1)[-1]
+        for name in re.findall(r"^\s+name:\s*(\S+)", block, re.M):
+            owner = owners.get(name)
+            if not owner or owner == compose.parent.name:
+                continue
+            after = compose.parent / "ts-after"
+            assert after.is_file(), f"{compose.parent.name} joins {name} but has no ts-after"
+            assert owner in after.read_text(encoding="utf-8").split(), (
+                f"{compose.parent.name} joins {name}, owned by {owner}, but ts-after does not name it"
+            )
+
+
+def test_the_env_file_order_puts_the_stacks_own_env_last():
+    """`--env-file .billing.env` alone REPLACES .env as compose's interpolation
+    source, which is how the console's provider panel went blank while every
+    container reported healthy. Extras from ts-envfiles are interpolation
+    sources for values another stack owns, so they come first and the stack's
+    own .env wins; .billing.env is written by a generator and wins over both."""
+    sh = (ROOT / "services" / "_stack.sh").read_text(encoding="utf-8")
+    body = sh.split("tss_env_file_list()", 1)[1].split("tss_compose()", 1)[0]
+    assert body.index("ts-envfiles") < body.index("'%s\n' .env") < body.index(".billing.env")
+
+
+def test_ts_envfiles_never_becomes_an_env_file_entry():
+    """An `env_file:` entry hands every key in the file to the container. The
+    console is deliberately never given a provider secret, and the agentmemory
+    .env it reads for display values holds OPENAI_API_KEY -- so that file may
+    only ever be an INTERPOLATION source (--env-file), never an env_file."""
+    for extra in (ROOT / "services" / "stacks").glob("*/ts-envfiles"):
+        compose = (extra.parent / "docker-compose.yml").read_text(encoding="utf-8")
+        for line in extra.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            assert f"path: {line}" not in compose, (
+                f"{extra.parent.name}: {line} is listed in ts-envfiles AND as an env_file: "
+                f"entry -- that injects every key in it, including provider secrets"
+            )
+
+
+def test_the_console_is_its_own_project_named_for_what_it_is():
+    """agent007memory is a separate application with a separate lifecycle. As an
+    overlay on the agentmemory project it appeared in Docker as a second row
+    under someone else's name."""
+    d = ROOT / "services" / "stacks" / "agent007memory"
+    compose = (d / "docker-compose.yml").read_text(encoding="utf-8")
+    assert "name: ts-agent007memory" in compose
+    assert "container_name: ts-agent007memory" in compose
+    assert "image: ts-agent007memory:local" in compose
+    # depends_on cannot reach across compose projects; leaving one behind would
+    # be a silently ignored key, not an error.
+    # Comments about it are fine; a real key is not -- compose IGNORES depends_on
+    # across projects silently, so leaving one would read as ordering that is not
+    # happening.
+    assert not re.search(r"^\s+depends_on:", compose, re.M)
+    assert not (ROOT / "services" / "stacks" / "agentmemory" / "docker-compose.console.yml").exists()

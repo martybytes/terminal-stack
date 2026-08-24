@@ -1853,3 +1853,103 @@ look unpatched — and the injected block *ends with* `function authHeaders() {`
 own anchor, so a re-apply would have injected a second copy of the whole recovery block into every
 hook script on every wired machine. Both twins now pass an explicit marker,
 `let amFreshSecret = null;`, that every form of the block shares.
+
+## Why an optional `env_file` is a trap, and how the merge fell into it
+
+`services/stacks/agentmemory/docker-compose.yml` loads two env files: its own
+`.env`, and a shared one holding the single `OPENAI_API_KEY` that wins over the
+per-provider rollback settings. Both are `required: false`, because a fresh
+clone must start in degraded no-LLM mode rather than refusing to boot.
+
+In docker-local the stacks sat one level under the repo root, so the shared file
+was `../.env`. Absorbing the tree added a level (`services/stacks/<stack>/`) and
+that path silently became `services/stacks/.env` -- a file that has never
+existed. `required: false` means compose reports **nothing**: no warning, no
+non-zero exit, no line in `docker compose config`. The container started
+healthy, every check passed, and `OPENAI_API_KEY` was simply absent.
+
+What that looked like from the outside is the part worth remembering. With no
+usable provider AgentMemory returns an empty completion instead of raising, so
+the log line reads `"outcome":"success"` with `providerLatencyMs: 0`; the empty
+body then fails XML parsing, retries once, and dead-letters. 52,570 compression
+jobs accumulated that way. Capture, search and local embeddings kept working
+perfectly the whole time, which is exactly why nobody looked.
+
+Three things now guard it:
+
+- The path is `../../.env`, with the level spelled out in a comment.
+- `test_every_optional_env_file_points_at_a_documented_location` asserts every
+  `env_file` path resolves next to a **tracked** `.env.example`. That is true of
+  `services/.env` and of each stack's own `.env`, and false of any directory a
+  wrong number of `..` lands on. It needs no real `.env`, so it runs anywhere.
+- `ts-verify.sh` asks the provider **from inside the container**, using the
+  container's own `OPENAI_BASE_URL` and `OPENAI_API_KEY`. An unset base URL is a
+  skip (no chat provider is a supported configuration); a configured provider
+  that refuses is a failure. Asking from outside would have proved nothing --
+  the key is on the host either way.
+
+The same merge broke seven maintenance scripts the same way: they source
+`"$SCRIPT_DIR/../_common.sh"`, and the helper both moved a level and was renamed
+to `_stack.sh`. The rename sweep rewrote every `dl_` call *inside* those files
+and missed the source line, so each one died on its first executable statement.
+Nothing caught it because these are the scripts you reach for only when
+something is already wrong. `test_every_sourced_helper_path_resolves` now checks
+that every `. "$SCRIPT_DIR/…"` target exists.
+
+
+## Why agent007memory is its own compose project
+
+The console started as an overlay: `docker-compose.console.yml`, merged into the
+agentmemory project through `COMPOSE_FILE`. That was the right shape while it
+was a separate repository pinned by commit SHA, because the overlay was the only
+place the two met.
+
+It is the wrong shape now. The console is a 104-file TypeScript application with
+its own lifecycle — you rebuild the UI while the memory server keeps running —
+and as an overlay it appeared in `docker ps`, in Docker Desktop and in
+`ts-stack status` as a second row under someone else's name. Splitting it makes
+"3110 answers, 3111 does not" read as *one stack down and the other fine*
+instead of a mystery inside a single stack, which is exactly the verdict the
+check ordering has always been trying to produce.
+
+Three things had to be built to make a cross-project stack work, and all three
+are discovered rather than registered — the property that adding a stack takes
+no edit anywhere:
+
+- **`ts-after`**, one stack name per line: this stack starts after those, and
+  stops before them. Needed immediately, because stacks are listed lexically and
+  `agent007memory` sorts *before* `agentmemory` (`0` < `m`) while joining a
+  network `agentmemory` creates. An external network cannot be joined before it
+  exists, so a fresh `up` failed with "network not found" on a stack that was
+  perfectly configured. `down` and `restart` walk the reverse order, and
+  `restart` takes everything down before bringing anything up: restarting
+  agentmemory while the console still held its network left the console pointed
+  at a container that no longer existed, recovering only on its own timer.
+
+- **`ts-envfiles`**, extra `--env-file` interpolation sources applied before the
+  stack's own `.env`. The console displays which model and endpoint AgentMemory
+  is configured for, and the authority on that is the agentmemory stack's
+  `.env`. The alternative was a second copy of those values that silently went
+  stale.
+
+  The distinction it rests on is load-bearing and easy to lose: `--env-file` is
+  compose's *interpolation* source and injects nothing into a container, while
+  an `env_file:` key hands the container every variable in the file — including
+  `OPENAI_API_KEY`, which the console is deliberately never given. A test
+  asserts no path appears in both.
+
+- **A pinned network name.** `ts-agentmemory-net`, not the project-derived
+  `ts-agentmemory_default`. Anything that reaches across projects has to be
+  pinned, or it changes under the other side the day that project is renamed.
+  For the same reason the console addresses `ts-agentmemory-server` by container
+  name rather than the `agentmemory` service alias.
+
+`depends_on` does not survive the split — compose ignores it across projects,
+silently — so it is gone rather than left behind reading as ordering that is not
+happening. The console tolerates an upstream that is not answering yet; that is
+what `restart: unless-stopped` is for.
+
+What did **not** change: the history volume keeps its agentmemory-era name
+(`ts-agentmemory-console-history`). Renaming it would mean migrating a year of
+reporting history to buy nothing. The billing helpers did move, because they
+only ever configured the console.
