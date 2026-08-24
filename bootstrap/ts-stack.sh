@@ -31,6 +31,9 @@ Usage:
   ts-stack config [<stack>]    what compose actually resolves to on this machine
   ts-stack bootstrap           first run here: .env files, secrets, volumes
   ts-stack doctor              engine, .env files, health, ports, toggle drift
+  ts-stack test                take it all down, bring it back up, prove the chain
+  ts-stack backup [<stack>]    cold tar of every data volume, with a manifest
+  ts-stack reset [<stack>]     containers and locally built images, back to clean
   ts-stack migrate-volumes     the one-time rename to the ts- volume names
   ts-stack -h                  this help
 
@@ -39,6 +42,8 @@ Usage:
   -n, --tail <N>     logs: lines of history (default 50)
   -f, --follow       logs: follow (needs a single stack)
   --start-engine     doctor/up: launch the container engine and wait for it
+  --destroy-data     test/reset: also destroy volumes   [BACKS UP FIRST]
+  --purge            reset: also the two memory volumes [EVERY MEMORY YOU HAVE]
   --no-colour
 
 A stack is any directory under services/stacks/ holding a docker-compose.yml —
@@ -80,9 +85,10 @@ fi
 
 # ── args ────────────────────────────────────────────────────────────────────────
 cmd=""; want_stack=""; tail_n=50; follow=0; all=0; start_engine=0
+destroy_data=0; purge=0
 while [ $# -gt 0 ]; do
     case "$1" in
-        status|up|down|restart|logs|config|doctor|bootstrap|migrate-volumes)
+        status|up|down|restart|logs|config|doctor|bootstrap|migrate-volumes|test|backup|reset)
             [ -z "$cmd" ] || { echo "ts-stack: two commands given ($cmd, $1)" >&2; exit 2; }
             cmd="$1"; shift ;;
         --dry-run)      TS_STACK_DRY_RUN=1; shift ;;
@@ -90,6 +96,8 @@ while [ $# -gt 0 ]; do
         -f|--follow)    follow=1; shift ;;
         -n|--tail)      tail_n="${2:?--tail needs a value}"; shift 2 ;;
         --start-engine) start_engine=1; shift ;;
+        --destroy-data) destroy_data=1; shift ;;
+        --purge)        purge=1; destroy_data=1; shift ;;
         --no-colour|--no-color) NO_COLOR=1; shift ;;
         --stack)        want_stack="${2:?--stack needs a value}"; shift 2 ;;
         -*)             echo "ts-stack: unknown option: $1 (try -h)" >&2; exit 2 ;;
@@ -109,6 +117,12 @@ case "$tail_n" in *[!0-9]*|'') echo "ts-stack: --tail wants a number" >&2; exit 
 . "$SRC/bootstrap/_cc_tts.sh"
 # shellcheck source=../services/_stack.sh
 . "$SRC/services/_stack.sh"
+
+# The library's step/info/pass/fail helpers read TSS_APPLY. ts-stack acts
+# immediately, so it is 1 unless --dry-run says otherwise.
+TSS_APPLY=1
+[ "$TS_STACK_DRY_RUN" = 1 ] && TSS_APPLY=0
+export TSS_APPLY
 
 # ── WSL: hand mutating work to the Windows twin ─────────────────────────────────
 if [ "$(tss_docker_kind)" = wsl-shim ] && [ "$TS_STACK_DRY_RUN" != 1 ]; then
@@ -411,6 +425,103 @@ PY
                 esac
             fi
         fi ;;
+
+    test)
+        # PHASE 0 — preflight. The only phase that runs while everything is still
+        # up, so it has to be the exhaustive one: `compose config -q` names a
+        # missing HEADROOM_PROXY_TOKEN here, not after the teardown.
+        section 'preflight'
+        if [ "$engine_ok" = 0 ]; then
+            _bad 'engine unreachable'; tss_engine_advice "$(tss_os)" "$kind" | sed 's/^/      /'
+            exit 2
+        fi
+        _ok "engine reachable"
+        for s in $(selected); do
+            tss_env_seeded "$(tss_stack_dir "$s")" || { _bad "$s: .env missing — ts-stack bootstrap"; exit 2; }
+            if tss_compose "$s" config -q >/dev/null 2>&1; then _ok "$s: compose config parses"
+            else _bad "$s: compose config failed — a required value is missing"; exit 2; fi
+        done
+        pending="$(tss_volumes_pending 2>/dev/null || true)"
+        [ -z "$pending" ] || { _bad 'volumes still carry their pre-ts- names — ts-stack migrate-volumes'; exit 2; }
+        # The snapshot is what turns "the services came back" into "my data came
+        # back". Counts only; nothing here reads a memory's content.
+        before_mem="$(curl -s --max-time 5 'http://127.0.0.1:3110/agentmemory/memories?limit=1' 2>/dev/null | wc -c | tr -d ' ')"
+        _note "snapshot: agentmemory API answered with ${before_mem:-0} bytes"
+
+        # PHASE 1 — backup, only when something is about to be destroyed.
+        if [ "$destroy_data" = 1 ]; then
+            section 'backup'
+            tss_backup_all || { _bad 'backup failed — nothing was torn down'; exit 2; }
+        else
+            _note 'no --destroy-data: every volume is kept, so no backup is taken'
+        fi
+
+        # PHASE 2 — teardown.
+        section 'teardown'
+        for s in $(selected); do
+            if [ "$destroy_data" = 1 ]; then tss_compose "$s" down -v || true
+            else                             tss_compose "$s" down || true; fi
+        done
+
+        # PHASE 3 — bring-up. Every stack starts before any is waited on, so the
+        # start_periods overlap; only the console's depends_on serialises.
+        section 'bring-up'
+        for s in $(selected); do tss_compose "$s" up -d || _bad "up failed for $s"; done
+
+        # PHASE 4 — proof.
+        section 'health'
+        for s in $(selected); do tss_run_checks "$s" || issues=$((issues + 1)); done
+
+        section 'integration'
+        for s in $(selected); do
+            v="$(tss_stack_dir "$s")/ts-verify.sh"
+            [ -f "$v" ] || { _skip "$s: no ts-verify.sh"; continue; }
+            if bash "$v"; then _ok "$s: integration checks passed"
+            else _bad "$s: integration checks failed"; fi
+        done
+
+        # Never skipped by a toggle, and runs even when everything above failed:
+        # a service reachable off-box is a security incident, not an outage.
+        section 'loopback audit'
+        if out="$(tss_audit_loopback)"; then _ok 'every published port binds 127.0.0.1'
+        else _bad 'a container publishes beyond loopback:'; printf '%s\n' "$out" | sed 's/^/        /'; fi
+        ;;
+
+    backup)
+        [ "$engine_ok" = 1 ] || { _bad 'engine unreachable'; exit 2; }
+        section 'backup'
+        tss_backup_all || { _bad 'backup failed'; exit 1; } ;;
+
+    reset)
+        # Levels, each destroying strictly more than the one above:
+        #   (default)        containers, networks, and images BUILT here
+        #   --destroy-data   also the three headroom volumes
+        #   --purge          also the two memory volumes
+        [ "$engine_ok" = 1 ] || { _bad 'engine unreachable'; exit 2; }
+        if [ "$destroy_data" = 1 ]; then
+            section 'backup first'
+            tss_backup_all || { _bad 'backup failed — nothing was destroyed'; exit 2; }
+            phrase='destroy headroom data'
+            [ "$purge" = 1 ] && phrase='destroy all memories'
+            printf '\n%s\n' "This will DESTROY volumes. Type exactly: $phrase"
+            read -r typed </dev/tty || typed=''
+            [ "$typed" = "$phrase" ] || { _note 'phrase did not match — nothing was destroyed'; exit 1; }
+        fi
+        section 'reset'
+        for s in $(selected); do
+            if [ "$destroy_data" = 1 ]; then tss_compose "$s" down -v || true
+            else                             tss_compose "$s" down || true; fi
+        done
+        if [ "$purge" = 1 ]; then
+            # The two memory volumes are `external: true`, so `down -v` cannot
+            # touch them. That asymmetry is the safety property; removing them
+            # needs its own code path, and this is it.
+            for v in ts-agentmemory-data ts-agentmemory-console-history; do
+                step "docker volume rm $v"
+                [ "$TS_STACK_DRY_RUN" = 1 ] || docker volume rm "$v" >/dev/null 2>&1 || true
+            done
+        fi
+        _note 'images pulled from a registry are kept (re-pulling kokoro is multi-GB)' ;;
 
     doctor)
         section 'engine'

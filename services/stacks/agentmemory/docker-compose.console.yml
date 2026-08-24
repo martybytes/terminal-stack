@@ -15,12 +15,15 @@
 services:
   console:
     container_name: ts-agentmemory-console
+    image: ts-agentmemory-console:local
     build:
-      # Pinned to a commit SHA per ../docs/conventions.md — a locally built
-      # image from a git context gets an immutable ref, never a branch.
-      # Bump with ..\agentmemory\update-console.ps1 (pushes, re-pins, rebuilds,
-      # verifies); use `-Local` to iterate from a checkout without pushing.
-      context: "https://github.com/martybytes/agent007memory.git#69d25ff2e8a52fcb58cf9575a49cef1dfa6dea85"
+      # The console's source is in this repo, so the build context is a relative
+      # path and what runs is always what you have checked out. It used to be a
+      # pinned commit SHA of a separate repo, which made every console change a
+      # push -> re-pin the SHA here -> rebuild cycle (what update-console.* did).
+      # The trade is that a dirty tree builds a dirty image; `git status` before
+      # `ts-stack up` is the whole discipline.
+      context: ../../console
       dockerfile: Dockerfile
     restart: unless-stopped
     depends_on:

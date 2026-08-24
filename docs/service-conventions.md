@@ -137,6 +137,13 @@ that invokes it, and add it to the register below.
 
 ### Intentional divergences between a `.ps1` and its `.sh`
 
+**`ts-verify.sh` runs without `set -e`.** Every other script here uses
+`set -euo pipefail`. A verify script is a list of independent probes, and dying on
+the first failure would report one problem and hide the rest — the opposite of
+what a diagnostic is for. It uses `set -uo pipefail`, accumulates into `rc`, and
+its header states the exit contract. `tests/test_service_script_parity.py`
+enforces exactly this shape rather than allowing a bare opt-out.
+
 The parity test only works if the *deliberate* differences are written down — otherwise it gets
 weakened, or the differences get "corrected" back and forth forever. Anything here is expected;
 anything not here is drift.

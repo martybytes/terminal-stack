@@ -20,6 +20,8 @@ param(
     [switch]$All,
     [switch]$DryRun,
     [switch]$StartEngine,
+    [switch]$DestroyData,
+    [switch]$Purge,
     [switch]$NoColour,
     # -h is the alias: $HELP below holds the text, and a [switch]$Help would BE
     # that variable (pwsh names are case-insensitive), so the assignment would try
@@ -42,6 +44,9 @@ Usage:
   ts-stack config [<stack>]    what compose actually resolves to on this machine
   ts-stack bootstrap           first run here: .env files, secrets, volumes
   ts-stack doctor              engine, .env files, health, ports, toggle drift
+  ts-stack test                take it all down, bring it back up, prove the chain
+  ts-stack backup [<stack>]    cold tar of every data volume, with a manifest
+  ts-stack reset [<stack>]     containers and locally built images, back to clean
   ts-stack migrate-volumes     the one-time rename to the ts- volume names
   ts-stack -h                  this help
 
@@ -50,6 +55,8 @@ Usage:
   -n, --tail <N>     logs: lines of history (default 50)
   -f, --follow       logs: follow (needs a single stack)
   --start-engine     doctor/up: launch the container engine and wait for it
+  --destroy-data     test/reset: also destroy volumes   [BACKS UP FIRST]
+  --purge            reset: also the two memory volumes [EVERY MEMORY YOU HAVE]
   --no-colour
 
 A stack is any directory under services/stacks/ holding a docker-compose.yml —
@@ -144,6 +151,121 @@ function Get-TsEngineAdvice([string]$Kind) {
         default  { @('the engine is not answering.',
                      '  fix:  start Docker Desktop, or re-run with --start-engine') }
     }
+}
+
+# ── checks, backup, and the phases test runs ────────────────────────────────────
+# Twin of tss_run_checks: each stack ships ts-checks.conf, so a new stack
+# registers itself by having one. Fields: kind id expect secs target
+function Invoke-TsStackChecks([string]$Name) {
+    $conf = Join-Path (Get-TsStackDir $Name) 'ts-checks.conf'
+    if (-not (Test-Path -LiteralPath $conf)) { Note "$Name`: no ts-checks.conf"; return $true }
+    $ok = $true
+    foreach ($line in Get-Content -LiteralPath $conf) {
+        $t = $line.Trim()
+        if (-not $t -or $t.StartsWith('#')) { continue }
+        $f = $t -split '\s+'
+        $kind, $id, $expect, $secs, $target = $f[0], $f[1], $f[2], [int]$f[3], $f[4]
+        switch ($kind) {
+            'health' {
+                if (Wait-TsHealthy $id $secs) { Ok "$Name/$id healthy" }
+                else {
+                    Bad "$Name/$id not healthy within ${secs}s"; $ok = $false
+                    & docker logs --tail 40 $id 2>&1 | ForEach-Object { Write-Host "        $_" }
+                }
+            }
+            { $_ -in 'http', 'http-ok' } {
+                # Any response means something is listening: a 404 or a 401 is not
+                # "down". That distinction is why there are two kinds here.
+                $mode = if ($kind -eq 'http-ok') { '2xx' } else { 'any' }
+                if (Wait-TsHttp $target $secs $mode) { Ok "$Name/$id $mode" }
+                else { Bad "$Name/$id no $mode from $target in ${secs}s"; $ok = $false }
+            }
+            'port' {
+                if (Test-TsLoopbackPort $target) { Ok "$Name/$id published on 127.0.0.1:$target" }
+                else { Bad "$Name/$id port $target is not loopback-only"; $ok = $false }
+            }
+            default { Note "$Name`: unknown check kind '$kind'" }
+        }
+    }
+    return $ok
+}
+
+function Wait-TsHealthy([string]$Container, [int]$Seconds) {
+    $waited = 0
+    while ($waited -lt $Seconds) {
+        $state = (& docker inspect -f '{{.State.Status}}' $Container 2>$null) -join ''
+        $health = (& docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' $Container 2>$null) -join ''
+        if ($health -eq 'healthy') { return $true }
+        # A service with no healthcheck only has to be running; every service here
+        # should declare one, so this is the fallback, not the norm.
+        if (-not $health -and $state -eq 'running') { return $true }
+        Start-Sleep -Seconds 2; $waited += 2
+    }
+    return $false
+}
+
+function Wait-TsHttp([string]$Url, [int]$Seconds, [string]$Mode) {
+    $waited = 0
+    while ($true) {
+        try {
+            $r = Invoke-WebRequest -Uri $Url -TimeoutSec 5 -UseBasicParsing
+            if ($Mode -eq 'any' -or ($r.StatusCode -ge 200 -and $r.StatusCode -lt 300)) { return $true }
+        } catch {
+            if ($Mode -eq 'any' -and $_.Exception.Response) { return $true }
+        }
+        if ($waited -ge $Seconds) { return $false }
+        Start-Sleep -Seconds 2; $waited += 2
+    }
+}
+
+# Published AND loopback-only. None of these services authenticate, so a port
+# reachable off-box is a security incident, not an outage.
+function Test-TsLoopbackPort([string]$Port) {
+    $rows = @(& docker ps --format '{{.Ports}}' 2>$null) -split ',' |
+        Where-Object { $_ -match "[0-9.]+:$Port->" }
+    if (-not $rows) { return $false }
+    return -not ($rows | Where-Object { $_ -notmatch '127\.0\.0\.1:' })
+}
+
+function Get-TsLoopbackViolations {
+    @(& docker ps --format '{{.Names}} {{.Ports}}' 2>$null) -split ',' |
+        Where-Object { $_ -match '\d+->' -and $_ -notmatch '127\.0\.0\.1:' }
+}
+
+$DATA_VOLUMES = @('ts-agentmemory-data', 'ts-agentmemory-console-history',
+                  'ts-headroom-workspace', 'ts-headroom-qdrant', 'ts-headroom-neo4j')
+
+function Get-TsBackupDir {
+    $root = if ($env:TS_STACK_BACKUP_ROOT) { $env:TS_STACK_BACKUP_ROOT }
+            else { Join-Path $env:LOCALAPPDATA 'terminal-stack\stack-backups' }
+    Join-Path $root (Get-Date -Format 'yyyyMMdd-HHmmss')
+}
+
+# VERIFY the archive before anything is torn down. A backup only checked after
+# the teardown is not a backup.
+function Backup-TsVolume([string]$Volume, [string]$Dir) {
+    if (-not (Test-TsVolume $Volume)) { Note "$Volume does not exist — skipped"; return $true }
+    Step "backup $Volume"
+    if ($DryRun) { return $true }
+    & docker run --rm -v "$Volume`:/from:ro" -v "$Dir`:/to" alpine sh -c "tar -C /from -czf /to/$Volume.tgz ."
+    if ($LASTEXITCODE -ne 0) { Bad "$Volume`: tar failed"; return $false }
+    & docker run --rm -v "$Dir`:/to:ro" alpine sh -c "tar -tzf /to/$Volume.tgz >/dev/null"
+    if ($LASTEXITCODE -ne 0) { Bad "$Volume`: the archive does not read back"; return $false }
+    $bytes = (Get-Item -LiteralPath (Join-Path $Dir "$Volume.tgz")).Length
+    if ($bytes -le 100) { Bad "$Volume`: archive is suspiciously small ($bytes bytes)"; return $false }
+    Add-Content -LiteralPath (Join-Path $Dir 'manifest.txt') -Value "$Volume $bytes $(Get-Date -Format o)"
+    Ok "$Volume -> $Dir ($bytes bytes)"
+    return $true
+}
+
+function Backup-TsAll {
+    $dir = Get-TsBackupDir
+    Step "mkdir $dir"
+    if (-not $DryRun) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+    $ok = $true
+    foreach ($v in $DATA_VOLUMES) { if (-not (Backup-TsVolume $v $dir)) { $ok = $false } }
+    if ($ok) { Note "restore from: $dir" }
+    return $ok
 }
 
 # ── first-run setup ─────────────────────────────────────────────────────────────
@@ -459,6 +581,96 @@ switch ($Command) {
                 } else { Note 'nothing copied' }
             }
         }
+    }
+
+    'test' {
+        # PHASE 0 — preflight. The only phase that runs while everything is still
+        # up, so it is the exhaustive one: `compose config -q` names a missing
+        # HEADROOM_PROXY_TOKEN here, not after the teardown.
+        Section 'preflight'
+        if (-not $engineOk) {
+            Bad 'engine unreachable'; Get-TsEngineAdvice $kind | ForEach-Object { Note $_ }; exit 2
+        }
+        Ok 'engine reachable'
+        foreach ($s in Selected) {
+            if (-not (Test-TsStackEnvSeeded $s)) { Bad "$s`: .env missing — ts-stack bootstrap"; exit 2 }
+            if ((Invoke-TsStackCompose $s @('config', '-q')) -eq 0) { Ok "$s`: compose config parses" }
+            else { Bad "$s`: compose config failed — a required value is missing"; exit 2 }
+        }
+        if (@(Get-TsVolumesPending).Count) {
+            Bad 'volumes still carry their pre-ts- names — ts-stack migrate-volumes'; exit 2
+        }
+
+        # PHASE 1 — backup, only when something is about to be destroyed.
+        if ($DestroyData) {
+            Section 'backup'
+            if (-not (Backup-TsAll)) { Bad 'backup failed — nothing was torn down'; exit 2 }
+        } else { Note 'no --destroy-data: every volume is kept, so no backup is taken' }
+
+        # PHASE 2 — teardown.
+        Section 'teardown'
+        foreach ($s in Selected) {
+            $a = if ($DestroyData) { @('down', '-v') } else { @('down') }
+            Invoke-TsStackCompose $s $a | Out-Null
+        }
+
+        # PHASE 3 — bring-up. Every stack starts before any is waited on, so the
+        # start_periods overlap; only the console's depends_on serialises.
+        Section 'bring-up'
+        foreach ($s in Selected) {
+            if ((Invoke-TsStackCompose $s @('up', '-d')) -ne 0) { Bad "up failed for $s" }
+        }
+
+        # PHASE 4 — proof.
+        Section 'health'
+        foreach ($s in Selected) { if (-not (Invoke-TsStackChecks $s)) { } }
+
+        Section 'integration'
+        foreach ($s in Selected) {
+            $v = Join-Path (Get-TsStackDir $s) 'ts-verify.ps1'
+            if (-not (Test-Path -LiteralPath $v)) { Skip "$s`: no ts-verify.ps1"; continue }
+            & pwsh -NoLogo -NoProfile -File $v
+            if ($LASTEXITCODE -eq 0) { Ok "$s`: integration checks passed" }
+            else { Bad "$s`: integration checks failed" }
+        }
+
+        # Never skipped by a toggle, and runs even when everything above failed.
+        Section 'loopback audit'
+        $bad = @(Get-TsLoopbackViolations)
+        if (-not $bad.Count) { Ok 'every published port binds 127.0.0.1' }
+        else { Bad 'a container publishes beyond loopback:'; $bad | ForEach-Object { Note $_ } }
+    }
+
+    'backup' {
+        if (-not $engineOk) { Bad 'engine unreachable'; exit 2 }
+        Section 'backup'
+        if (-not (Backup-TsAll)) { exit 1 }
+    }
+
+    'reset' {
+        if (-not $engineOk) { Bad 'engine unreachable'; exit 2 }
+        if ($DestroyData -or $Purge) {
+            Section 'backup first'
+            if (-not (Backup-TsAll)) { Bad 'backup failed — nothing was destroyed'; exit 2 }
+            $phrase = if ($Purge) { 'destroy all memories' } else { 'destroy headroom data' }
+            Write-Host ''
+            $typed = Read-Host "This will DESTROY volumes. Type exactly: $phrase"
+            if ($typed -ne $phrase) { Note 'phrase did not match — nothing was destroyed'; exit 1 }
+        }
+        Section 'reset'
+        foreach ($s in Selected) {
+            $a = if ($DestroyData -or $Purge) { @('down', '-v') } else { @('down') }
+            Invoke-TsStackCompose $s $a | Out-Null
+        }
+        if ($Purge) {
+            # The two memory volumes are external, so `down -v` cannot touch them.
+            # That asymmetry is the safety property; this is its own code path.
+            foreach ($v in @('ts-agentmemory-data', 'ts-agentmemory-console-history')) {
+                Step "docker volume rm $v"
+                if (-not $DryRun) { & docker volume rm $v *> $null }
+            }
+        }
+        Note 'images pulled from a registry are kept (re-pulling kokoro is multi-GB)'
     }
 
     'doctor' {

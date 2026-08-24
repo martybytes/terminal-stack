@@ -917,3 +917,148 @@ tss_fill_secret() {                        # <env-file> <key> <placeholder> <byt
     # scrollback, and this one is also in `docker logs` until rotation.
     info "$key set (${secret%"${secret#??????}"}...${secret#"${secret%????}"})"
 }
+
+# ── declarative checks ───────────────────────────────────────────────────────
+# Each stack ships ts-checks.conf; a new stack registers itself by having one.
+# Fields: kind id expect secs target
+tss_run_checks() {                         # <stack>   -> 0 all passed
+    local stack="$1" conf kind id expect secs target rc=0 deadline
+    conf="$(tss_stack_dir "$stack")/ts-checks.conf"
+    [ -f "$conf" ] || { info "$stack: no ts-checks.conf"; return 0; }
+    while read -r kind id expect secs target; do
+        case "${kind:-}" in ''|'#'*) continue ;; esac
+        case "$kind" in
+            health)
+                if tss_wait_healthy "$id" "$secs"; then pass "$stack/$id healthy"
+                else fail "$stack/$id not healthy within ${secs}s"; rc=1
+                     docker logs --tail 40 "$id" 2>&1 | sed 's/^/        /' | tail -40
+                fi ;;
+            http)
+                # Any response means something is listening. A 404 or a 401 is
+                # not "down" -- that distinction is why there are two kinds here.
+                if tss_wait_http "$target" "$secs" any; then pass "$stack/$id answering"
+                else fail "$stack/$id no response from $target in ${secs}s"; rc=1; fi ;;
+            http-ok)
+                if tss_wait_http "$target" "$secs" 2xx; then pass "$stack/$id 2xx"
+                else fail "$stack/$id not 2xx from $target in ${secs}s"; rc=1; fi ;;
+            port)
+                if tss_assert_loopback_port "$target"; then pass "$stack/$id published on 127.0.0.1:$target"
+                else fail "$stack/$id port $target is not loopback-only"; rc=1; fi ;;
+            *) warn "$stack: unknown check kind '$kind'" ;;
+        esac
+    done < "$conf"
+    return $rc
+}
+
+# A container is healthy when compose says so; a container with NO healthcheck
+# only has to be running (docs/service-conventions.md says every service should
+# declare one, so this is the fallback, not the norm).
+tss_wait_healthy() {                       # <container> <seconds>
+    local name="$1" secs="${2:-60}" waited=0 state health
+    while [ "$waited" -lt "$secs" ]; do
+        state="$(docker inspect -f '{{.State.Status}}' "$name" 2>/dev/null || true)"
+        health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$name" 2>/dev/null || true)"
+        case "$health" in
+            healthy) return 0 ;;
+            unhealthy) : ;;
+            '') [ "$state" = running ] && return 0 ;;
+        esac
+        sleep 2; waited=$((waited + 2))
+    done
+    return 1
+}
+
+# <url> <seconds> <any|2xx>
+tss_wait_http() {
+    local url="$1" secs="${2:-10}" mode="${3:-any}" waited=0 code
+    while :; do
+        code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$url" 2>/dev/null)" || code=000
+        case "$mode:$code" in
+            any:000) : ;;
+            any:*)   return 0 ;;
+            2xx:2??) return 0 ;;
+        esac
+        [ "$waited" -ge "$secs" ] && return 1
+        sleep 2; waited=$((waited + 2))
+    done
+}
+
+# Published AND loopback-only. Never skipped by a toggle: a service here that is
+# reachable off-box is a security incident, not an outage, and none of them
+# authenticate.
+tss_assert_loopback_port() {               # <port>
+    local port="$1" out
+    out="$(docker ps --format '{{.Ports}}' 2>/dev/null | tr ',' '\n' | grep -E "(^| )[0-9.]+:$port->" || true)"
+    [ -n "$out" ] || return 1
+    printf '%s\n' "$out" | grep -qv '127\.0\.0\.1:' && return 1
+    return 0
+}
+
+# Every published port of every running container, or the one that is not
+# loopback. Runs even when everything else failed.
+tss_audit_loopback() {
+    local bad
+    bad="$(docker ps --format '{{.Names}} {{.Ports}}' 2>/dev/null \
+           | tr ',' '\n' | grep -E '[0-9]+->' | grep -v '127\.0\.0\.1:' || true)"
+    [ -z "$bad" ] || { printf '%s\n' "$bad"; return 1; }
+    return 0
+}
+
+# ── backup ───────────────────────────────────────────────────────────────────
+# Every volume this stack owns, whether external or not. The order matters only
+# for reading: the two memory volumes come first because they are the ones you
+# would actually miss.
+tss_data_volumes() {
+    cat <<'EOF'
+ts-agentmemory-data
+ts-agentmemory-console-history
+ts-headroom-workspace
+ts-headroom-qdrant
+ts-headroom-neo4j
+EOF
+}
+
+# Where backups go. NOT C:\DATA: that is one person's path. On macOS $HOME is
+# also the only tree Docker Desktop shares by default, so a backup root outside
+# it cannot be bind-mounted at all.
+tss_backup_dir() {
+    local root
+    if [ -n "${TS_STACK_BACKUP_ROOT:-}" ]; then root="$TS_STACK_BACKUP_ROOT"
+    elif [ -n "${LOCALAPPDATA:-}" ]; then root="$LOCALAPPDATA/terminal-stack/stack-backups"
+    else root="${XDG_STATE_HOME:-$HOME/.local/state}/terminal-stack/stack-backups"; fi
+    printf '%s/%s' "$root" "$(stamp)"
+}
+
+# tar one volume into <dir>, then VERIFY the archive before anything is torn
+# down. A backup that is only checked after the teardown is not a backup.
+tss_backup_volume() {                      # <volume> <dir>
+    local vol="$1" dir="$2" out="$2/$1.tgz" bytes
+    docker volume inspect "$vol" >/dev/null 2>&1 || { info "$vol does not exist — skipped"; return 0; }
+    step "backup $vol"
+    [ "$TSS_APPLY" = 1 ] || return 0
+    docker run --rm -v "$vol:/from:ro" -v "$dir:/to" alpine \
+        sh -c "tar -C /from -czf /to/$vol.tgz ." || { warn "$vol: tar failed"; return 1; }
+    docker run --rm -v "$dir:/to:ro" alpine sh -c "tar -tzf /to/$vol.tgz >/dev/null" \
+        || { warn "$vol: the archive does not read back"; return 1; }
+    bytes="$(file_size "$out" 2>/dev/null || echo 0)"
+    [ "$bytes" -gt 100 ] || { warn "$vol: archive is suspiciously small ($bytes bytes)"; return 1; }
+    printf '%s %s %s\n' "$vol" "$bytes" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$dir/manifest.txt"
+    pass "$vol -> $out ($bytes bytes)"
+}
+
+tss_backup_all() {
+    local dir rc=0 v
+    dir="$(tss_backup_dir)"
+    step "mkdir -p $dir"
+    if [ "$TSS_APPLY" = 1 ]; then
+        mkdir -p "$dir" || return 1
+        tss_assert_docker_shareable "$dir" \
+            || { warn "$dir cannot be bind-mounted by this engine — set TS_STACK_BACKUP_ROOT under \$HOME"; return 1; }
+        : > "$dir/manifest.txt"
+    fi
+    for v in $(tss_data_volumes); do
+        tss_backup_volume "$v" "$dir" || rc=1
+    done
+    [ "$rc" = 0 ] && info "restore with: ts-stack restore $(basename "$dir")"
+    return $rc
+}

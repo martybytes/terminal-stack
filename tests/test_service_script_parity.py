@@ -135,13 +135,22 @@ def test_sh_scripts_are_bash_32_clean():
 
 
 def test_sh_scripts_have_the_house_prologue():
+    """`set -e` has ONE sanctioned exception: a ts-verify.sh runs a list of
+    independent probes, and dying on the first failure would report one problem
+    and hide the rest -- the opposite of what a diagnostic is for. The opt-out
+    has to say so in the file, because a convention that can be dropped silently
+    is not a convention."""
     for p in sh_scripts():
         text = read(p)
         rel = p.relative_to(ROOT)
         assert text.startswith("#!/usr/bin/env bash"), f"{rel}: wrong or missing shebang"
-        assert "set -euo pipefail" in text, f"{rel}: missing strict mode"
-        assert "_common.sh" in text, f"{rel}: does not source _common.sh"
-        assert re.search(r"twin of \S+\.ps1", text), f"{rel}: header does not name its .ps1 twin"
+        if p.name == "ts-verify.sh":
+            assert "set -uo pipefail" in text, f"{rel}: missing strict mode"
+            assert "Exit 0 = pass" in text, f"{rel}: does not state its exit contract"
+        else:
+            assert "set -euo pipefail" in text, f"{rel}: missing strict mode"
+        assert "_stack.sh" in text or "_common.sh" in text, f"{rel}: does not source the shared library"
+        assert re.search(r"(?i)twin[:\s]", text), f"{rel}: header does not name its .ps1 twin"
 
 
 def test_sh_files_have_no_cr_and_no_bom():
