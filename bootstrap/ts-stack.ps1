@@ -20,6 +20,7 @@ param(
     [switch]$All,
     [switch]$DryRun,
     [switch]$StartEngine,
+    [Alias('y')][switch]$Yes,
     [switch]$DestroyData,
     [switch]$Purge,
     [switch]$NoColour,
@@ -55,6 +56,7 @@ Usage:
   -n, --tail <N>     logs: lines of history (default 50)
   -f, --follow       logs: follow (needs a single stack)
   --start-engine     doctor/up: launch the container engine and wait for it
+  -y, --yes          skip the migrate-volumes confirmation (NOT the destructive ones)
   --destroy-data     test/reset: also destroy volumes   [BACKS UP FIRST]
   --purge            reset: also the two memory volumes [EVERY MEMORY YOU HAVE]
   --no-colour
@@ -572,7 +574,7 @@ switch ($Command) {
             } else {
                 # Nothing is destroyed here, so this needs consent but not a typed
                 # phrase: the old volume survives as the rollback.
-                $reply = Read-Host 'Copy these now? The old volumes are kept. [y/N]'
+                $reply = if ($Yes) { 'y' } else { Read-Host 'Copy these now? The old volumes are kept. [y/N]' }
                 if ($reply -match '^[yY]') {
                     foreach ($v in $pending) {
                         if (-not (Copy-TsVolume $v.Old $v.New)) { Bad "$($v.Old) -> $($v.New) failed" }

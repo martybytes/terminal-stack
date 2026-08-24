@@ -42,6 +42,7 @@ Usage:
   -n, --tail <N>     logs: lines of history (default 50)
   -f, --follow       logs: follow (needs a single stack)
   --start-engine     doctor/up: launch the container engine and wait for it
+  -y, --yes          skip the migrate-volumes confirmation (NOT the destructive ones)
   --destroy-data     test/reset: also destroy volumes   [BACKS UP FIRST]
   --purge            reset: also the two memory volumes [EVERY MEMORY YOU HAVE]
   --no-colour
@@ -85,7 +86,7 @@ fi
 
 # ── args ────────────────────────────────────────────────────────────────────────
 cmd=""; want_stack=""; tail_n=50; follow=0; all=0; start_engine=0
-destroy_data=0; purge=0
+destroy_data=0; purge=0; assume_yes=0
 while [ $# -gt 0 ]; do
     case "$1" in
         status|up|down|restart|logs|config|doctor|bootstrap|migrate-volumes|test|backup|reset)
@@ -96,6 +97,7 @@ while [ $# -gt 0 ]; do
         -f|--follow)    follow=1; shift ;;
         -n|--tail)      tail_n="${2:?--tail needs a value}"; shift 2 ;;
         --start-engine) start_engine=1; shift ;;
+        -y|--yes)       assume_yes=1; shift ;;
         --destroy-data) destroy_data=1; shift ;;
         --purge)        purge=1; destroy_data=1; shift ;;
         --no-colour|--no-color) NO_COLOR=1; shift ;;
@@ -412,8 +414,12 @@ PY
             else
                 # Nothing is destroyed here, so this needs consent but not a typed
                 # phrase: the old volume survives as the rollback.
-                printf 'Copy these now? The old volumes are kept. [y/N]: '
-                read -r reply </dev/tty || reply=n
+                if [ "$assume_yes" = 1 ]; then
+                    reply=y
+                else
+                    printf 'Copy these now? The old volumes are kept. [y/N]: '
+                    read -r reply </dev/tty || reply=n
+                fi
                 case "$reply" in
                     [yY]*)
                         printf '%s\n' "$pending" | while read -r o n; do

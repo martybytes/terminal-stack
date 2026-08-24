@@ -1005,17 +1005,22 @@ tss_audit_loopback() {
 }
 
 # ── backup ───────────────────────────────────────────────────────────────────
-# Every volume this stack owns, whether external or not. The order matters only
-# for reading: the two memory volumes come first because they are the ones you
-# would actually miss.
+# Every volume this stack owns, whether external or not, INCLUDING any that still
+# carries its pre-ts- name. Listing only the new names made `backup` a no-op on
+# exactly the machine that needed it most: the one about to migrate.
+#
+# The two memory volumes come first because they are the ones you would miss.
 tss_data_volumes() {
-    cat <<'EOF'
-ts-agentmemory-data
-ts-agentmemory-console-history
-ts-headroom-workspace
-ts-headroom-qdrant
-ts-headroom-neo4j
-EOF
+    local new old
+    for new in ts-agentmemory-data ts-agentmemory-console-history \
+               ts-headroom-workspace ts-headroom-qdrant ts-headroom-neo4j; do
+        tss_volume_exists "$new" && printf '%s\n' "$new"
+    done
+    tss_volume_renames | while read -r old new; do
+        [ -n "$old" ] || continue
+        tss_volume_exists "$old" && printf '%s\n' "$old"
+    done
+    return 0
 }
 
 # Where backups go. NOT C:\DATA: that is one person's path. On macOS $HOME is
