@@ -369,13 +369,22 @@ agents_set() {
         headroom) key=headroomEnabled ;;
         caveman) key=cavemanEnabled ;;
         agentmemory) key=agentmemoryEnabled ;;
-        *) echo "usage: ts-config agents <headroom|caveman|agentmemory> on|off|status|repair|uninstall" >&2; return 2 ;;
+        # No ts-agents adapter: this one only records intent, and ts-stack acts
+        # on it. status defers to ts-stack, which is the thing that knows.
+        playwright) key=playwrightEnabled ;;
+        *) echo "usage: ts-config agents <headroom|caveman|agentmemory|playwright> on|off|status|repair|uninstall" >&2; return 2 ;;
     esac
     case "$action" in
-        on) run_agent_adapter "$tool" on && ts_agent_set "$key" on ;;
-        off) run_agent_adapter "$tool" off; ts_agent_set "$key" off ;;
+        on)
+            if [ "$tool" = playwright ]; then ts_agent_set "$key" on
+            else run_agent_adapter "$tool" on && ts_agent_set "$key" on; fi ;;
+        off)
+            if [ "$tool" = playwright ]; then ts_agent_set "$key" off
+            else run_agent_adapter "$tool" off; ts_agent_set "$key" off; fi ;;
         uninstall) run_agent_adapter "$tool" uninstall; ts_agent_set "$key" off ;;
-        status|repair) run_agent_adapter "$tool" "$action" ;;
+        status|repair)
+            if [ "$tool" = playwright ]; then echo "  playwright: $(ts_agent_get playwrightEnabled) — run 'ts-stack status' for the container"
+            else run_agent_adapter "$tool" "$action"; fi ;;
         *) echo "usage: ts-config agents $tool on|off|status|repair|uninstall" >&2; return 2 ;;
     esac
 }
