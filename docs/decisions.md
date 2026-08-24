@@ -1680,3 +1680,71 @@ leaves `background-blur` unset, which fails both halves of that condition. It
 also matches WezTerm on Windows, which is fully opaque already. A test pins the
 pair *and* asserts macOS is still translucent, so the divergence stays visible
 rather than quietly converging.
+
+## Why the pwsh profile caches tool init instead of running it
+
+`starship`, `zoxide` and `fnm` all print shell code that the profile evaluates.
+Running them is the obvious implementation and it was costing a WezTerm pane most
+of a second before it drew a prompt. Measured on a machine with a third-party
+antivirus (Datto AV) scanning every exec:
+
+| step | cold | warm |
+|---|---|---|
+| `starship init powershell` | 1,835ms | ~50ms |
+| `zoxide init powershell` | 869ms | ~90ms |
+| `fnm env --use-on-cd` | 764ms | ~40ms |
+| `Add-Type` for the console-codepage P/Invoke | 339ms | 339ms (never cached) |
+
+Two of those numbers deserve a note. `starship init powershell` emits a
+*bootstrap* that re-runs starship with `--print-full-init`, so the old line paid
+**two** starship spawns; asking for `--print-full-init` directly pays one, and
+none once cached. And `Add-Type` runs the C# compiler every session — PowerShell
+keeps nothing between sessions — so that 339ms was per pane, forever.
+
+So the generated text is cached under `%LOCALAPPDATA%\terminal-stack\cache\`,
+keyed on the producing binary's path, mtime and size, and the codepage helper is
+compiled once to an assembly there and loaded with `Add-Type -Path` (~25ms).
+Profile cost on that machine went from a 1,110ms median to 697ms, and from a
+1,062ms floor to 355ms.
+
+Three details are load-bearing:
+
+- **`Get-TsToolInit` returns a file to dot-source, not a string to
+  `Invoke-Expression`.** Same 10KB of starship init: 427ms dot-sourced against
+  612ms through `Invoke-Expression`. The cache's key line is a `#` comment
+  precisely so the file stays a plain dot-sourceable script.
+- **The caller dot-sources it, never the helper.** `$PROFILE` is dot-sourced into
+  the global scope; a function body is not. starship's `New-Module` and zoxide's
+  `function global:` definitions would land somewhere the prompt never sees.
+- **`fnm env` is not cached.** Its output embeds a per-shell
+  `FNM_MULTISHELL_PATH` containing the PID and a timestamp; a cached copy would
+  point every shell at one other shell's directory.
+
+The remaining floor is starship's init itself: ~430ms to parse 10KB, which is not
+a spawn and not ours to trim. Nothing here changes what the prompt looks like, so
+a wrong cache shows up as a stale prompt rather than a broken shell — and the
+stamp mismatch that follows any starship upgrade regenerates it.
+
+## Why fnm does not resolve `package.json` engines
+
+fnm resolves `engines.node` from `package.json` when no `.nvmrc` or
+`.node-version` is present, and that is on by default (`FNM_RESOLVE_ENGINES`).
+Two consequences, both bad on a Windows box:
+
+1. `package.json` is in nearly every JS repo, so fnm's `use-on-cd` hook fires on
+   nearly every `cd` — a 738ms measured spawn here, on a directory change.
+2. An `engines` range that no fnm-**installed** version satisfies turns `cd` into
+   an interactive prompt: `Can't find an installed Node version matching
+   >=24.0.0. Do you want to install it? answer [y/N]:`. fnm only considers
+   versions *it* installed, so this fires even when the active `node` already
+   satisfies the range — a system Node 26 against `>=24` still gets asked.
+
+Both shells therefore pass `--resolve-engines=false`. An explicit
+`.nvmrc`/`.node-version` pin is still honoured: that file is somebody's decision,
+an `engines` range is metadata. With the flag off, fnm's own generated hook stops
+testing for `package.json` at all, so `cd` into a JS repo costs 2ms instead of
+740ms.
+
+Keep the fallback in both shells. fnm before 1.36 has no `--resolve-engines` and
+exits non-zero, and `eval`/`Invoke-Expression` of the resulting empty string
+would leave fnm unwired with nothing printed.

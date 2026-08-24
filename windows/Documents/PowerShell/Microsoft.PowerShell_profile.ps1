@@ -499,6 +499,63 @@ function cyr { $resumeArgs = @('resume') + $args; Invoke-TsCodex -Yolo -CliArgs 
 # Nested — `exit` drops back to the customized shell.
 function plain { Set-TsTabTitle "plain • $(Split-Path -Leaf $PWD)"; try { pwsh -NoLogo -NoProfile @args } finally { Set-TsTabTitle "" } }
 
+# ---- shell-init-cache-start ----
+# Every external process this profile starts is expensive on a machine whose
+# antivirus scans each exec: measured 300ms-2s per spawn here, and `starship init
+# powershell` spawns starship TWICE (a bootstrap that re-runs it with
+# --print-full-init). A new WezTerm pane paid that for starship, zoxide and fnm
+# before it drew a prompt. The generated text only changes when the binary does,
+# so cache it, keyed on the exe's path, mtime and size.
+#
+# Hand back a FILE for the caller to dot-source, not a string to
+# Invoke-Expression: measured 427ms against 612ms for the same 10KB of starship
+# init, because the parse of a file is not the parse of a dynamic string.
+# And the caller dot-sources it, not this function -- $PROFILE runs in the global
+# scope, a function body does not, and starship's `New-Module` / zoxide's
+# `function global:` definitions would land somewhere the prompt never sees.
+#
+# The cache is ours and machine-local: no dated backup (that rule is for user
+# files), and a stale or unreadable one is simply regenerated. The stamp is a
+# comment line, so the cache stays a plain dot-sourceable script.
+function Get-TsToolInit {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$Exe,
+        [Parameter(Mandatory)][scriptblock]$Generate
+    )
+
+    $item = Get-Item -LiteralPath $Exe -ErrorAction SilentlyContinue
+    $key = if ($item) { "$($item.FullName)|$($item.LastWriteTimeUtc.Ticks)|$($item.Length)" } else { $Exe }
+    $stamp = "# ts-init-cache $key"
+    $cache = Join-Path $env:LOCALAPPDATA "terminal-stack\cache\$Name-init.ps1"
+
+    try {
+        if ((([System.IO.File]::ReadLines($cache)) | Select-Object -First 1) -eq $stamp) {
+            return [pscustomobject]@{ Path = $cache; Text = $null }
+        }
+    } catch { }
+
+    $text = (& $Generate | Out-String)
+    if (-not $text.Trim()) { return $null }
+    # %TEMP% is the fallback target rather than a straight give-up: dot-sourcing a
+    # file is the fast path, so a locked-down %LOCALAPPDATA% should cost one
+    # regeneration per shell, not the slower parse for the life of the machine.
+    foreach ($target in @($cache, (Join-Path $env:TEMP "ts-$Name-init.ps1"))) {
+        try {
+            $dir = Split-Path -Parent $target
+            if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+            # Another pane may be regenerating the same file: write private, then swap.
+            $tmp = "$target.$PID.tmp"
+            Set-Content -LiteralPath $tmp -Value ($stamp + "`n" + $text) -Encoding UTF8 -NoNewline
+            Move-Item -LiteralPath $tmp -Destination $target -Force
+            return [pscustomobject]@{ Path = $target; Text = $text }
+        } catch { }
+    }
+    # Nowhere to write: hand back the text so the shell still gets its prompt.
+    return [pscustomobject]@{ Path = $null; Text = $text }
+}
+# ---- shell-init-cache-end ----
+
 # ---- starship-stack-start ----
 
 # Cursor/Claude agent shells set TERM=dumb and CURSOR_AGENT=1 — skip prompt chrome there.
@@ -510,20 +567,47 @@ function Test-TsAgentShell {
 }
 
 # Native console children (Claude Code, etc.) can SetConsoleOutputCP back to 437 on exit; [Console]::OutputEncoding caches and won't catch it, so probe the OS codepage directly.
+# Compiling this C# at every shell start cost ~340ms (Add-Type runs the compiler;
+# PowerShell caches nothing between sessions). Compile once to an assembly under
+# %LOCALAPPDATA% and load that instead -- ~25ms. The in-memory compile stays as
+# the fallback, so a missing or unloadable cache only costs what it used to.
 if (-not ('Native.ConsoleCP' -as [type])) {
-    Add-Type -Namespace Native -Name ConsoleCP -MemberDefinition @'
+    $tsCpSrc = @'
 [System.Runtime.InteropServices.DllImport("kernel32.dll")]
 public static extern uint GetConsoleOutputCP();
 [System.Runtime.InteropServices.DllImport("kernel32.dll")]
 public static extern bool SetConsoleOutputCP(uint wCodePageID);
-'@ | Out-Null
+'@
+    $tsCpDll = Join-Path $env:LOCALAPPDATA 'terminal-stack\cache\ts-consolecp.dll'
+    if (-not (Test-Path -LiteralPath $tsCpDll)) {
+        try {
+            New-Item -ItemType Directory -Force -Path (Split-Path $tsCpDll) | Out-Null
+            # Never compile straight onto the target: another pane may have it loaded,
+            # and a locked overwrite would throw where a swap just loses the race.
+            $tsCpTmp = "$tsCpDll.$PID.tmp"
+            Add-Type -Namespace Native -Name ConsoleCP -MemberDefinition $tsCpSrc -OutputAssembly $tsCpTmp -ErrorAction Stop
+            Move-Item -LiteralPath $tsCpTmp -Destination $tsCpDll -Force
+        } catch { Remove-Item -LiteralPath "$tsCpDll.$PID.tmp" -Force -ErrorAction SilentlyContinue }
+    }
+    if (Test-Path -LiteralPath $tsCpDll) { try { Add-Type -Path $tsCpDll } catch { } }
+    if (-not ('Native.ConsoleCP' -as [type])) {
+        Add-Type -Namespace Native -Name ConsoleCP -MemberDefinition $tsCpSrc | Out-Null
+    }
 }
 [Native.ConsoleCP]::SetConsoleOutputCP(65001) | Out-Null
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 [Console]::InputEncoding  = [System.Text.Encoding]::UTF8
 
 if (-not (Test-TsAgentShell)) {
-    Invoke-Expression (&starship init powershell)
+    # --print-full-init is what `starship init powershell` itself re-runs starship
+    # for; asking for it directly is one spawn instead of two, and none when cached.
+    $tsStarship = (Get-Command starship -ErrorAction SilentlyContinue).Source
+    if ($tsStarship) {
+        $tsInit = Get-TsToolInit -Name starship -Exe $tsStarship -Generate {
+            & $tsStarship init powershell --print-full-init
+        }
+        if ($tsInit.Path) { . $tsInit.Path } elseif ($tsInit.Text) { Invoke-Expression $tsInit.Text }
+    }
     if (Get-Command Enable-TransientPrompt -ErrorAction SilentlyContinue) { Enable-TransientPrompt }
 
     function Invoke-Starship-PreCommand {
@@ -576,12 +660,27 @@ function y {
 # fnm — Node version manager. --use-on-cd auto-switches on .nvmrc/.node-version,
 # which is the whole reason to run a manager rather than a single winget node.
 # POSIX twin: the fnm line in dot_zshrc's cli-tools block.
+# --resolve-engines=false on purpose. fnm reads package.json `engines.node` when
+# no .nvmrc/.node-version is present, which means every `cd` into a JS repo spawns
+# fnm (~350ms here), and an `engines` range that no fnm-INSTALLED version
+# satisfies turns the cd into an interactive "Do you want to install it? [y/N]"
+# -- even when the active node already satisfies it (system node 26 vs `>=24`).
+# An explicit .nvmrc/.node-version pin is still honoured; that one is a choice,
+# an engines range is metadata. With this off, fnm's own hook stops testing for
+# package.json at all, so the cd costs nothing.
+# The fallback matters: fnm before 1.36 has no --resolve-engines and exits
+# non-zero, and Invoke-Expression of an empty string would leave fnm unwired
+# with nothing printed.
 if (Get-Command fnm -ErrorAction SilentlyContinue) {
-    fnm env --use-on-cd --shell powershell | Out-String | Invoke-Expression
+    $tsFnmEnv = fnm env --use-on-cd --resolve-engines=false --shell powershell 2>$null | Out-String
+    if (-not $tsFnmEnv.Trim()) { $tsFnmEnv = fnm env --use-on-cd --shell powershell | Out-String }
+    Invoke-Expression $tsFnmEnv
 }
 
-if (Get-Command zoxide -ErrorAction SilentlyContinue) {
-    Invoke-Expression (& { (zoxide init powershell | Out-String) })
+$tsZoxide = (Get-Command zoxide -ErrorAction SilentlyContinue).Source
+if ($tsZoxide) {
+    $tsInit = Get-TsToolInit -Name zoxide -Exe $tsZoxide -Generate { & $tsZoxide init powershell }
+    if ($tsInit.Path) { . $tsInit.Path } elseif ($tsInit.Text) { Invoke-Expression $tsInit.Text }
 }
 
 if (Get-Command eza -ErrorAction SilentlyContinue) {

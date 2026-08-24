@@ -1279,7 +1279,22 @@ wso() {
 # which is the whole reason to run a manager rather than a single brew node.
 # Chosen over nvm because nvm costs 200-500ms of shell startup and fnm ~10ms;
 # an unsourced ~/.nvm can stay where it is, this does not touch it.
-command -v fnm    >/dev/null && eval "$(fnm env --use-on-cd --shell zsh 2>/dev/null)"
+# --resolve-engines=false on purpose. fnm reads package.json `engines.node` when
+# no .nvmrc/.node-version is present, so every cd into a JS repo runs fnm, and an
+# engines range that no fnm-INSTALLED version satisfies turns that cd into an
+# interactive "Do you want to install it? [y/N]" — even when the active node
+# already satisfies it (a system node 26 against `>=24`). An explicit
+# .nvmrc/.node-version pin is still honoured: that one is a choice, an engines
+# range is metadata. With this off, fnm's own hook stops testing for package.json
+# at all. Same flag on the pwsh side, where the spawn also cost ~350ms per cd.
+# The fallback matters: fnm before 1.36 has no --resolve-engines and exits
+# non-zero, and eval of an empty string would silently leave fnm unwired.
+if command -v fnm >/dev/null; then
+    _ts_fnm_env="$(fnm env --use-on-cd --resolve-engines=false --shell zsh 2>/dev/null)"
+    [[ -n "$_ts_fnm_env" ]] || _ts_fnm_env="$(fnm env --use-on-cd --shell zsh 2>/dev/null)"
+    eval "$_ts_fnm_env"
+    unset _ts_fnm_env
+fi
 # grok ships completions but its installer appends them to ~/.zshrc, which this
 # stack owns whole-file — chezmoi reverts that on the next apply. Carry the line
 # ourselves so the completions survive. (The binary itself is routed to

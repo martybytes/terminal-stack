@@ -29,6 +29,22 @@ Picking `fnm` at install also installs the current LTS: the manager alone gives
 you no runtime. `node` is a separate catalog id for machines that want a single
 brew/winget Node and no manager at all.
 
+### `package.json` engines are deliberately ignored
+
+The stack wires fnm with `--resolve-engines=false`, so only `.nvmrc` and
+`.node-version` switch versions. Left on, fnm consults `engines.node` in
+`package.json`, which means every `cd` into a JS repo runs fnm, and an `engines`
+range that no fnm-installed version satisfies turns the `cd` into
+`Do you want to install it? answer [y/N]:` -- even when the active `node` already
+satisfies it, because fnm only counts versions it installed itself.
+
+Want a repo to switch automatically? Give it a pin:
+
+```sh
+node -v > .node-version      # or: echo 24 > .node-version
+fnm install                  # installs what the pin asks for
+```
+
 ## Python
 
 The interpreter comes from brew (`python@3.14`) / apt / winget. Everything else
