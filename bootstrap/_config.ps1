@@ -144,6 +144,13 @@ function Test-TsAppInstalled([string]$id) {
 # it however many times ts-update ran, which is exactly how gh/ghq/lazygit would
 # have missed every existing install.
 function Get-TsAppsPending {
+    # Refresh PATH from the persisted Machine+User values FIRST, the way the
+    # POSIX twin calls ts_load_node_env. Without it this reads the PATH this
+    # process started with, so anything installed since — by an installer that
+    # edited the User PATH, or by fnm, whose entry is per-shell — reads as
+    # missing. Measured: grok, gemini and pi were all installed and all three
+    # were offered again on every single ts-update.
+    Update-TsSessionPath
     $saved = @()
     try { $saved = @((Get-TsConfig).apps) } catch {}
     $seen = @{}; $out = @()
@@ -1268,7 +1275,28 @@ function Install-TsAiCli([string]$id) {
             }
         }
         'cursor-agent' {
-            Write-Warning 'cursor-agent has no Windows installer this stack can call; install it inside WSL, or see https://cursor.com/cli'
+            # There IS a Windows installer — the same URL as the POSIX one with
+            # ?win32=true, which serves a PowerShell script instead of a shell
+            # one. This used to warn "no Windows installer this stack can call;
+            # install it inside WSL", which was simply wrong.
+            #
+            # Run under Windows PowerShell rather than pwsh, matching claude and
+            # grok above: the script calls Get-WmiObject, which 5.1 always has
+            # and which pwsh has removed and reinstated across versions.
+            # Execution policy is not a concern — it governs script FILES, and
+            # `iex` on a string is unaffected, so this works even where 5.1 is
+            # Restricted.
+            #
+            # It installs to %LOCALAPPDATA%\cursor-agent and adds that to the
+            # USER PATH (and the calling shell's), so Update-TsSessionPath makes
+            # it visible to the rest of this run. Note the installer deletes that
+            # directory before unpacking, so re-running it is destructive but
+            # idempotent — which is exactly why the already-installed guard above
+            # matters. It also drops a generic `agent.exe` alias beside it, the
+            # same name grok claims; prefer `cursor-agent` (see doc node-python).
+            Write-Host '==> cursor-agent: installing via the official installer'
+            try { & powershell -NoProfile -Command "irm 'https://cursor.com/install?win32=true' | iex" }
+            catch { Write-Warning 'cursor-agent install failed; see https://cursor.com/cli' }
         }
         default { Write-Warning "${id}: no agent-CLI installer defined" }
     }

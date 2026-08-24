@@ -1283,6 +1283,39 @@ def test_windows_ghostty_is_opaque_so_the_dwm_backdrop_stays_off():
         "if macOS went opaque too, this test's premise needs revisiting"
 
 
+def test_cursor_agent_has_a_real_windows_installer():
+    """It does have one — the same URL as POSIX with ?win32=true, which serves a
+    PowerShell script instead of a shell one. Install-TsAiCli used to warn "no
+    Windows installer this stack can call; install it inside WSL", so ticking it
+    on Windows could never succeed."""
+    # _uncommented: the block records the old wrong claim verbatim in a comment.
+    # `#` starts a comment in pwsh as in shell, so the helper works on both.
+    ps = _uncommented((ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8"))
+    assert "cursor.com/install?win32=true" in ps, \
+        "cursor-agent must install on Windows, not defer to WSL"
+    assert "no Windows installer this stack can call" not in ps, "that claim is obsolete"
+    # POSIX keeps the shell-script form of the same endpoint.
+    sh = _uncommented((ROOT / "bootstrap/_config.sh").read_text(encoding="utf-8"))
+    assert "cursor.com/install" in sh and "win32" not in sh, \
+        "the POSIX twin must NOT take the win32 branch"
+
+
+def test_pending_apps_refreshes_path_before_probing():
+    """Get-TsAppsPending reads PATH to decide what is missing, so it must refresh
+    from the persisted Machine+User values first — the way the POSIX twin calls
+    ts_load_node_env. Without it, anything installed since this process started
+    (an installer that edited the User PATH; fnm, whose entry is per-shell) reads
+    as missing: grok, gemini and pi were all installed and all three were offered
+    again on every ts-update."""
+    ps = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
+    body = ps.split("function Get-TsAppsPending {")[1].split("\nfunction ")[0]
+    assert "Update-TsSessionPath" in body, \
+        "refresh PATH before probing, or the pending list reports false positives"
+    sh = (ROOT / "bootstrap/_config.sh").read_text(encoding="utf-8")
+    tw = sh.split("ts_apps_pending() {")[1].split("\n}")[0]
+    assert "ts_load_node_env" in tw, "the POSIX twin's equivalent moved; keep the pair aligned"
+
+
 # ── agentmemory bash port ───────────────────────────────────────────────────────
 
 def _uncommented(text):

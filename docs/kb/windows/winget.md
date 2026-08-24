@@ -86,8 +86,10 @@ needs no Node), **codex** via npm `@openai/codex` (Node 16+) and **gemini** via
 npm `@google/gemini-cli` (Node 20+). The npm ones are gated on the Node version
 and say what to do rather than failing — install `fnm` from the `runtimes` group
 and they work. There is deliberately no winget/brew fallback for gemini: that
-formula is deprecated upstream. **cursor-agent** has no Windows installer this
-stack can call; install it inside WSL.
+formula is deprecated upstream. **cursor-agent** installs from the same URL as
+POSIX with `?win32=true`, which serves a PowerShell script rather than a shell
+one (`irm 'https://cursor.com/install?win32=true' | iex`) — it lands in
+`%LOCALAPPDATA%\cursor-agent` and adds itself to the User PATH.
 
 The group is pre-ticked (default to all) but always asked, and every CLI in it
 stays individually untickable.
