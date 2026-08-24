@@ -2,13 +2,14 @@
 
 import importlib.util
 import json
+import subprocess
 import sys
 import tomllib
 from pathlib import Path
 
 
 HELPER = Path(__file__).resolve().parents[1] / "dot_codex/hooks/terminal_stack.py"
-PROFILE = Path(__file__).resolve().parents[1] / "dot_codex/terminal-stack.config.toml.tmpl"
+PROFILE = Path(__file__).resolve().parents[1] / "dot_codex/modify_private_terminal-stack.config.toml.tmpl"
 SPEC = importlib.util.spec_from_file_location("terminal_stack_codex", HELPER)
 assert SPEC and SPEC.loader
 codex = importlib.util.module_from_spec(SPEC)
@@ -17,8 +18,28 @@ SPEC.loader.exec_module(codex)
 
 
 def test_enhanced_profile_hides_native_status_line():
-    profile = tomllib.loads(PROFILE.read_text(encoding="utf-8"))
+    rendered = subprocess.run(
+        [sys.executable, str(PROFILE)], input="", text=True,
+        capture_output=True, check=True,
+    ).stdout
+    profile = tomllib.loads(rendered)
     assert profile["tui"]["status_line"] == []
+
+
+def test_profile_modifier_preserves_codex_hook_trust_state():
+    live = '''[tui]\nstatus_line = ["old"]\n\n[hooks.state]\n\n[hooks.state."profile:stop:0:0"]\ntrusted_hash = "sha256:keep-me"\n'''
+    first = subprocess.run(
+        [sys.executable, str(PROFILE)], input=live, text=True,
+        capture_output=True, check=True,
+    ).stdout
+    second = subprocess.run(
+        [sys.executable, str(PROFILE)], input=first, text=True,
+        capture_output=True, check=True,
+    ).stdout
+    parsed = tomllib.loads(first)
+    assert parsed["tui"]["status_line"] == []
+    assert parsed["hooks"]["state"]["profile:stop:0:0"]["trusted_hash"] == "sha256:keep-me"
+    assert second == first
 
 
 def test_bar_thresholds_and_size():

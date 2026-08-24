@@ -263,15 +263,29 @@ merge_part_owned() {
 # sync_tree <src_root> <dst_root> <render_tmpl:0|1>
 sync_tree() {
   local src_root="$1" dst_root="$2" render_tmpl="${3:-0}"
-  local src rel rel_out effective_src dst bak n
+  local src rel rel_out rel_dir rel_leaf effective_src dst bak n is_modifier modified
 
   [ -d "$src_root" ] || return 0
 
   while IFS= read -r -d '' src; do
     rel="${src#"$src_root"/}"
+    is_modifier=0
+    modified=""
+    [[ "${rel##*/}" == modify_* ]] && is_modifier=1
 
     if [ "$render_tmpl" = 1 ] && [[ "$rel" == *.tmpl ]]; then
       rel_out="${rel%.tmpl}"
+      if [ "$is_modifier" = 1 ]; then
+        rel_leaf="${rel_out##*/}"
+        rel_leaf="${rel_leaf#modify_}"
+        rel_leaf="${rel_leaf#private_}"
+        if [[ "$rel_out" == */* ]]; then
+          rel_dir="${rel_out%/*}"
+          rel_out="$rel_dir/$rel_leaf"
+        else
+          rel_out="$rel_leaf"
+        fi
+      fi
       if command -v python3 >/dev/null 2>&1; then
         WIN_USER="$WIN_USER" LEADER_KEY="$LEADER_KEY" LEADER_MODS="$LEADER_MODS" \
         THEME_MODE="$THEME_MODE" THEME_RESOLVED="$THEME_RESOLVED" TMUX_PREFIX="$TMUX_PREFIX" \
@@ -315,6 +329,15 @@ PY
     fi
 
     dst="$dst_root/$rel_out"
+    if [ "$is_modifier" = 1 ]; then
+      modified="$(mktemp)"
+      if [ -f "$dst" ]; then
+        python3 "$effective_src" < "$dst" > "$modified"
+      else
+        python3 "$effective_src" < /dev/null > "$modified"
+      fi
+      effective_src="$modified"
+    fi
 
     case "$dst" in
       "$dst_home/.claude/settings.json")
@@ -352,6 +375,7 @@ PY
       printf 'created  %s\n' "$dst"
       case "$dst" in "$dst_home/.wezterm"*) wezterm_cfg_changed=1 ;; esac
     fi
+    [ -z "$modified" ] || rm -f -- "$modified"
   done < <(find "$src_root" -type d -name __pycache__ -prune -o \
     -type f ! -name '*.pyc' ! -name '*.pyo' -print0)
 }

@@ -619,6 +619,65 @@ _ts_src() {
 }
 _TS_STATE="${XDG_STATE_HOME:-$HOME/.local/state}/terminal-stack"
 
+_ts_chezmoi_conflicts() {
+  local cz="$1"
+  "$cz" status --path-style absolute --exclude scripts 2>/dev/null |
+    awk 'substr($0,1,1)!=" " && substr($0,2,1)!=" " { print substr($0,4) }'
+}
+
+_ts_chezmoi_apply_guided() {
+  local cz="$1" target ans conflict_text
+  local -a conflicts overwrite
+  while true; do
+    conflict_text="$(_ts_chezmoi_conflicts "$cz")"
+    [[ -n "$conflict_text" ]] || break
+    conflicts=("${(@f)conflict_text}")
+    echo "==> chezmoi found ${#conflicts} file(s) changed both locally and by terminal-stack."
+    if [[ ! -t 0 ]]; then
+      printf '  %s\n' "${conflicts[@]}"
+      echo "ts-update: rerun interactively to review; nothing was overwritten." >&2
+      return 1
+    fi
+    overwrite=()
+    for target in "${conflicts[@]}"; do
+      while true; do
+        echo
+        echo "Conflict: $target"
+        echo "  overwrite = discard live-only edits and install terminal-stack's version"
+        echo "  merge     = open chezmoi's three-way merge tool, then recheck"
+        "$cz" diff --no-pager -- "$target" || true
+        read -r "ans?Choose [o]verwrite, [m]erge, [v]iew again, or [q]uit (default): "
+        case "$ans" in
+          o|O|overwrite) overwrite+=("$target"); break ;;
+          m|M|merge)
+            "$cz" merge -- "$target" || { echo "ts-update: merge failed; nothing was overwritten." >&2; return 1; }
+            if ! _ts_chezmoi_conflicts "$cz" | grep -Fxq -- "$target"; then break; fi
+            echo "ts-update: $target still conflicts after merge; review it again." >&2 ;;
+          v|V|view) ;;
+          *) echo "ts-update: cancelled before general apply. Rerun ts-update to resume." >&2; return 1 ;;
+        esac
+      done
+    done
+    if (( ${#overwrite} )); then
+      echo "The following live-only edits will be discarded:"
+      printf '  %s\n' "${overwrite[@]}"
+      read -r "ans?Apply terminal-stack's versions to these files? [y/N]: "
+      [[ "$ans" == (y|Y|yes|YES) ]] || { echo "ts-update: cancelled; nothing was overwritten." >&2; return 1; }
+      "$cz" apply --force --no-tty -- "${overwrite[@]}" || return 1
+    fi
+  done
+  if ! "$cz" apply --dry-run --error-on-conflict --no-tty --no-pager; then
+    echo "ts-update: chezmoi dry-run failed; no general apply was attempted." >&2
+    echo "  Diagnose: chezmoi apply --dry-run --verbose --error-on-conflict" >&2
+    return 1
+  fi
+  if ! "$cz" apply --error-on-conflict --no-tty; then
+    echo "ts-update: chezmoi apply failed; later update steps were skipped." >&2
+    echo "  Rerun ts-update, or diagnose with the dry-run command shown above." >&2
+    return 1
+  fi
+}
+
 # Pull the latest terminal-stack from GitHub and re-apply via chezmoi.
 # Shows incoming commits and records the pre-update SHA so ts-rollback can undo.
 # Same name as the PowerShell alias for cross-shell muscle memory.
@@ -631,6 +690,14 @@ ts-update() {
   git -C "$src" config --get remote.origin.url 2>/dev/null | grep -qi terminal-stack \
     || echo "ts-update: note — '$src' doesn't look like a terminal-stack clone. Run 'ts-doctor' to check." >&2
   echo "==> clone: $src"
+  local dirty
+  dirty="$(git -C "$src" status --porcelain 2>/dev/null)"
+  if [[ -n "$dirty" ]]; then
+    echo "ts-update: runtime clone has uncommitted changes; refusing to fetch, pull, or apply." >&2
+    print -r -- "$dirty" | sed 's/^/  /' >&2
+    echo "  Make changes in the workspace dev clone, commit them, then rerun ts-update." >&2
+    return 1
+  fi
   # Location notice only — moving is ts-doctor's job, never a side effect of updating.
   local _canon; _canon="$(_ts_canonical_clone 2>/dev/null)"
   if [[ -n "$_canon" && "$src" != "$_canon" ]] && ! _ts_is_dev_clone "$src"; then
@@ -677,7 +744,7 @@ ts-update() {
   # script (incl. our 114-line sync hook) as a git-style diff on every run,
   # which looks like a pager opening on long-output. Use `chezmoi diff` if
   # you want to preview.
-  "$cz" apply
+  _ts_chezmoi_apply_guided "$cz" || return 1
   # Config files are only half an update: a release that adds a CLI tool is
   # inert until the tool exists. Offer the gap rather than installing behind
   # your back, and stay silent when there is nothing to do.

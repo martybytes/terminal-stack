@@ -66,6 +66,11 @@ Codex is the awkward host, for two reasons:
 
 ## Headroom and Caveman
 
+Codex writes hook trust hashes into `[hooks.state]` in the terminal-stack
+profile. That state is Codex-owned and survives `ts-update`; terminal-stack
+updates only its dashboard and hook definitions. A normal update should never
+ask to overwrite the profile merely because `/hooks` was trusted.
+
 With `ts-config agents headroom on`, enhanced interactive launches get a
 session-local custom provider named `headroom`. The wrapper passes its base URL,
 maps `HEADROOM_PROXY_TOKEN` to `X-Headroom-Proxy-Token`, and selects that provider

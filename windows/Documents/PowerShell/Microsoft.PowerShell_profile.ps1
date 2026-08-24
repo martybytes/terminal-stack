@@ -796,6 +796,13 @@ function Update-TerminalStack {
         Write-Warning "ts-update: '$SourceDir' doesn't look like a terminal-stack clone. Run 'ts-doctor' to check."
     }
     Write-Host "==> clone: $SourceDir"
+    $dirty = @(& git -C $SourceDir status --porcelain 2>$null)
+    if ($dirty.Count) {
+        Write-Warning 'ts-update: runtime clone has uncommitted changes; refusing to fetch, pull, or sync.'
+        $dirty | ForEach-Object { Write-Host "  $_" }
+        Write-Host '  Make changes in the workspace dev clone, commit them, then rerun ts-update.'
+        return
+    }
     # Location notice only — moving is ts-doctor's job, never a side effect of updating.
     $canon = Get-TsCanonicalCloneDir
     if ($SourceDir.TrimEnd('\') -ne $canon.TrimEnd('\') -and -not (Test-TsDevClone $SourceDir)) {

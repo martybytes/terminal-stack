@@ -6,6 +6,12 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Added
 
+- **`ts-update` now owns chezmoi conflict resolution (08/23/2026).** Codex hook
+  trust state survives profile refreshes instead of triggering an overwrite
+  prompt. Unknown two-sided conflicts are reviewed one at a time with explained
+  overwrite/merge/cancel choices, and the final apply can never fall through to
+  chezmoi's terse prompt. Dirty runtime clones are refused before deployment.
+
 - **macOS window shortcuts and Codex self-speech stop falling through (08/23/2026).**
   Ghostty no longer installs a global Command-Backtick quick-terminal binding;
   the standard macOS window-cycle shortcut remains untouched. The Codex Stop

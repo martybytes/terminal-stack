@@ -51,6 +51,16 @@ terminal-stack clone it finds there — see `doc common/workspace-org`. `%LOCALA
 `docs/decisions.md` § "Runtime clone location".
 
 ## `ts-update`
+
+Before applying, `ts-update` checks chezmoi for files changed both locally and
+by terminal-stack. It explains each conflict and offers overwrite, three-way
+merge, view again, or cancel; cancel is the default and there is no overwrite-all
+shortcut. The final apply is non-prompting, so a raw chezmoi overwrite question
+is an update bug rather than something the user is expected to understand.
+
+The runtime clone must be clean. If it is dirty, `ts-update` stops before fetch,
+pull, or apply and lists the files. Make the change in a workspace dev clone,
+commit it, then rerun `ts-update`.
 Resolves the **runtime** clone — the pin (`$TERMINAL_STACK_DIR`) first, else the
 canonical location, else legacy defaults; a pin with no clone behind it is warned
 about and skipped rather than obeyed. Dev clones at workspace tier paths are

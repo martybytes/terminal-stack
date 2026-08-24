@@ -67,6 +67,32 @@ def test_launch_wrappers_are_process_local_and_have_stock_escape_hatches():
     assert "openai_base_url=\"http://127.0.0.1:8787/v1\"" in zsh
 
 
+def test_ts_update_owns_chezmoi_conflict_handling_and_runtime_guard():
+    zsh = (ROOT / "dot_zshrc").read_text(encoding="utf-8")
+    ps = (ROOT / "windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1").read_text(encoding="utf-8")
+    update = zsh[zsh.index("_ts_chezmoi_conflicts() {"):zsh.index("ts-rollback() {")]
+    assert "status --path-style absolute --exclude scripts" in update
+    assert "[o]verwrite, [m]erge, [v]iew again, or [q]uit" in update
+    assert "apply --dry-run --error-on-conflict --no-tty" in update
+    assert "apply --error-on-conflict --no-tty" in update
+    assert "apply --force --no-tty" in update
+    assert "runtime clone has uncommitted changes" in update
+    assert "runtime clone has uncommitted changes" in ps
+    assert ps.index("runtime clone has uncommitted changes") < ps.index("fetch --quiet")
+
+
+def test_codex_profile_is_partially_owned_on_every_sync_path():
+    modifier = ROOT / "dot_codex/modify_private_terminal-stack.config.toml.tmpl"
+    assert modifier.exists() and os.access(modifier, os.X_OK)
+    assert not (ROOT / "dot_codex/terminal-stack.config.toml.tmpl").exists()
+    body = modifier.read_text(encoding="utf-8")
+    assert "hooks.state" in body and "state_sections" in body
+    ps_sync = (ROOT / "scripts/sync-windows.ps1").read_text(encoding="utf-8")
+    wsl_sync = (ROOT / "run_after_90-sync-windows.sh").read_text(encoding="utf-8")
+    assert "StartsWith('modify_')" in ps_sync
+    assert '== modify_*' in wsl_sync
+
+
 def test_headroom_enable_requires_authenticated_proxy_and_disable_restores_direct_mode():
     adapter = (ROOT / "bootstrap/ts-agents.sh").read_text(encoding="utf-8")
     ps_adapter = PS_ADAPTER.read_text(encoding="utf-8")

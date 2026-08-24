@@ -1,0 +1,60 @@
+#!/usr/bin/env python3
+"""Refresh terminal-stack's Codex profile while preserving Codex trust state.
+
+chezmoi passes the current target on stdin and installs stdout. Codex owns the
+[hooks.state] subtree written by /hooks; terminal-stack owns everything else in
+this dedicated profile. Windows mirror scripts execute this same modifier.
+"""
+
+import re
+import sys
+
+
+MANAGED = r'''# terminal-stack additions used by enhanced interactive Codex launches.
+# Run /hooks once in Codex to review and trust these local hook commands.
+
+[tui]
+status_line = []
+
+[[hooks.SessionStart]]
+
+[[hooks.SessionStart.hooks]]
+type = "command"
+command = "python3 ~/.codex/hooks/terminal_stack.py hook"
+commandWindows = "py -3 C:/Users/__WIN_USER__/.codex/hooks/terminal_stack.py hook"
+timeout = 5
+
+[[hooks.Stop]]
+
+[[hooks.Stop.hooks]]
+type = "command"
+command = "python3 ~/.codex/hooks/terminal_stack.py hook"
+commandWindows = "py -3 C:/Users/__WIN_USER__/.codex/hooks/terminal_stack.py hook"
+timeout = 10
+async = true
+'''
+
+HEADER = re.compile(r"^\s*(\[\[?)([^\]]+)(\]\]?)\s*(?:#.*)?$")
+
+
+def state_sections(text: str) -> str:
+    """Return only [hooks.state] and its child tables, byte-for-byte."""
+    lines = text.splitlines(keepends=True)
+    kept: list[str] = []
+    keep = False
+    for line in lines:
+        match = HEADER.match(line.rstrip("\r\n"))
+        if match:
+            name = match.group(2).strip()
+            keep = name == "hooks.state" or name.startswith("hooks.state.")
+        if keep:
+            kept.append(line)
+    return "".join(kept).strip()
+
+
+live = sys.stdin.read()
+state = state_sections(live)
+out = MANAGED.rstrip() + "\n"
+if state:
+    out += "\n" + state + "\n"
+sys.stdout.write(out)

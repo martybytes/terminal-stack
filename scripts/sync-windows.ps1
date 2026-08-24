@@ -34,6 +34,14 @@ $localApp = $env:LOCALAPPDATA
 if (-not $localApp) {
     throw 'sync-windows: $env:LOCALAPPDATA is unset.'
 }
+$canonicalSource = Join-Path $localApp 'terminal-stack\stack'
+if ((Test-Path -LiteralPath (Join-Path $SourceDir '.git')) -and
+    $SourceDir.TrimEnd('\') -eq $canonicalSource.TrimEnd('\')) {
+    $dirtySource = @(& git -C $SourceDir status --porcelain 2>$null)
+    if ($dirtySource.Count) {
+        throw "sync-windows: canonical runtime clone is dirty; refusing to deploy uncommitted files:`n$($dirtySource -join "`n")"
+    }
+}
 
 # Load the saved config (leader/theme tokens). Falls back to defaults when the
 # config helper or config.json is absent (clone predating the wizard).
@@ -182,11 +190,20 @@ function Sync-MirrorTree {
         $_.Extension -notin '.pyc', '.pyo' -and
         $_.FullName -notmatch '[\\/]__pycache__[\\/]'
     } | ForEach-Object {
-        $src = $_.FullName
-        $rel = $src.Substring($SrcRoot.Length).TrimStart('\','/')
+            $src = $_.FullName
+            $rel = $src.Substring($SrcRoot.Length).TrimStart('\','/')
+            $rendered = $null
+            $modified = $null
 
-        if ($RenderTmpl -and $rel.EndsWith('.tmpl')) {
-            $relOut = $rel.Substring(0, $rel.Length - 5)
+            $isModifier = (Split-Path -Leaf $rel).StartsWith('modify_')
+            if ($RenderTmpl -and $rel.EndsWith('.tmpl')) {
+                $relOut = $rel.Substring(0, $rel.Length - 5)
+                if ($isModifier) {
+                    $relDir = Split-Path -Parent $relOut
+                    $relLeaf = (Split-Path -Leaf $relOut).Substring(7)
+                    if ($relLeaf.StartsWith('private_')) { $relLeaf = $relLeaf.Substring(8) }
+                    $relOut = if ($relDir) { Join-Path $relDir $relLeaf } else { $relLeaf }
+                }
             $rendered = [IO.Path]::GetTempFileName()
             $content = (Get-Content -LiteralPath $src -Raw)
             # String .Replace, not -replace: regex replacement would interpret
@@ -200,7 +217,25 @@ function Sync-MirrorTree {
         }
 
         $dst = Join-Path $DstRoot $relOut
-        $dstDir = Split-Path -Parent $dst
+            $dstDir = Split-Path -Parent $dst
+            if ($isModifier) {
+                $modified = [IO.Path]::GetTempFileName()
+                $live = if (Test-Path -LiteralPath $dst -PathType Leaf) {
+                    Get-Content -LiteralPath $dst -Raw
+                } else { '' }
+                $python = Get-Command python -ErrorAction SilentlyContinue
+                $pythonArgs = @()
+                if (-not $python) {
+                    $python = Get-Command py -ErrorAction SilentlyContinue
+                    $pythonArgs = @('-3')
+                }
+                if (-not $python) { throw "sync-windows: Python 3 required to merge $dst" }
+                $merged = $live | & $python.Source @pythonArgs $effectiveSrc
+                if ($LASTEXITCODE -ne 0) { throw "sync-windows: modifier failed for $dst" }
+                (($merged -join "`n") + "`n") |
+                    Set-Content -LiteralPath $modified -NoNewline -Encoding utf8
+                $effectiveSrc = $modified
+            }
 
         try {
             # Claude Code writes this file too (model, enabledPlugins, permissions,
@@ -239,11 +274,13 @@ function Sync-MirrorTree {
                 if ($relOut -like '.wezterm*') { $script:weztermChanged = $true }
                 Write-Host "created  $dst"
             }
-        } finally {
-            if ($RenderTmpl -and $rel.EndsWith('.tmpl') -and (Test-Path -LiteralPath $effectiveSrc)) {
-                Remove-Item -LiteralPath $effectiveSrc -Force -ErrorAction SilentlyContinue
+            } finally {
+                foreach ($tmp in @($rendered, $modified)) {
+                    if ($tmp -and (Test-Path -LiteralPath $tmp)) {
+                        Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+                    }
+                }
             }
-        }
     }
 }
 

@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Never deploy uncommitted files from the canonical POSIX runtime clone. Dev
+# clones remain intentionally deployable for the documented development loop.
+set -eu
+
+src={{ .chezmoi.sourceDir | quote }}
+canonical="$HOME/.local/share/terminal-stack"
+[ "$src" = "$canonical" ] || exit 0
+[ -d "$src/.git" ] || exit 0
+
+dirty="$(git -C "$src" status --porcelain 2>/dev/null || true)"
+[ -z "$dirty" ] || {
+  echo "terminal-stack: refusing chezmoi apply from dirty runtime clone: $src" >&2
+  printf '%s\n' "$dirty" | sed 's/^/  /' >&2
+  echo "Make the change in the workspace dev clone, commit it, then run ts-update." >&2
+  exit 1
+}
