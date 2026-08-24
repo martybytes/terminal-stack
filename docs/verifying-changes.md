@@ -526,6 +526,29 @@ foreach ($k in ($script:TsWingetIds.Keys | Sort-Object)) {
 }
 ```
 
+**A Ghostty change now has two targets, and only one of them can be checked.**
+macOS has a real gate — `ghostty +validate-config` exits 1 on error. The Windows
+build (noctty, shipping as winghostty) has none: `+validate-config` fails with
+`FileTooBig` on 1.3.123 even for a 14-byte config, and `+show-config` silently
+reports **nothing** for an unknown key or a bad value on a real key. So never
+treat `+show-config` as a validator — probing options that way returns
+"accepted" for garbage. What you can check is that the file *renders* and that
+the values you set actually land:
+
+```powershell
+# render the mirror template the way the sync will, then read it back
+$t = (Get-Content windows\AppData\Local\ghostty\config.tmpl -Raw).
+     Replace('__GHOSTTY_THEME__','Catppuccin Mocha').Replace('__GHOSTTY_WINDOW_THEME__','dark')
+$t | Set-Content "$env:LOCALAPPDATA\ghostty\config" -NoNewline -Encoding utf8
+& 'C:\Program Files\winghostty\winghostty.com' +show-config |
+    Select-String '^(theme|window-theme|font-family|background) ='
+```
+
+A directive that is absent from the output was **not** applied. And remember the
+mirror gets blind token substitution: any `__TOKEN__` the sync knows about is
+replaced even inside a comment (a comment mentioning the tmux-prefix token was
+rewritten to `C-b` mid-sentence). A test pins the token set.
+
 And check the id's **binary name**, which is a separate claim: winget's
 `aristocratos.btop4win` installs `btop4win.exe`, so probing for `btop` reported
 it missing forever even though it was installed. `Get-TsAppBin` must name what

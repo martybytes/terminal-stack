@@ -1574,3 +1574,86 @@ prepending the live process PATH so anything a session set by hand (fnm's
 per-shell entry, a manual prepend) survives. It is the pwsh counterpart of
 `ts_load_node_env`'s role in `ts_apps_pending`, and it is wrapped in a `try` that
 swallows everything: a stale PATH costs an inaccurate report, never an install.
+
+## Why Ghostty is managed on Windows too
+
+`ts-config ghostty` used to refuse anywhere but macOS, and `.chezmoiignore` said
+"Ghostty has no Windows build". That was true when it was written and is not any
+more: [noctty](https://github.com/amanthanvi/noctty) is Ghostty's terminal core
+wrapped in a native Win32 app — tabs, splits, session restore, an OpenGL
+renderer, and most of Ghostty's config surface. It was renamed from **WingHostty**
+in main on 2026-08-20 after a trademark request from the Ghostty team, but that
+landed *after* the v1.3.123 tag, so every release asset published so far is still
+named `winghostty-…`. Installing "winghostty" from the noctty releases page is
+therefore current, not stale — a distinction worth stating, because the repo, the
+release title and the downloaded file disagree with each other by design.
+
+**The config goes to `%LOCALAPPDATA%\ghostty\config`, not the app-named dir.**
+This is the whole reason the integration is cheap. Verified against 1.3.123: the
+app reads *two* locations, its own `%LOCALAPPDATA%\<appname>\config.ghostty` and
+the upstream-compatible `%LOCALAPPDATA%\ghostty\config`, with the latter loaded
+first and the former winning on conflict. `<appname>` is `winghostty` today and
+`noctty` the day the rename ships, so writing to the app-named path would
+silently stop being read on upgrade day, with no error and nothing in any log.
+The upstream path is read by both, needs no migration, and — because it is
+`ghostty/config` plus `ghostty/themes/` — is the *same relative layout* as macOS
+`~/.config/ghostty/`. The generated `vs-code-light-modern` theme file ports
+byte-for-byte; a test pins the two copies together, and the existing test pinning
+the macOS copy to WezTerm's `PALETTES.light` then covers Windows transitively.
+
+**It is a `windows/` mirror file, not a chezmoi target.** chezmoi only manages
+`$HOME` on the machine it runs on, so the Windows copy rides the same
+relative-path-preserving sync as `$PROFILE` and `.wezterm.lua`:
+`windows/AppData/Local/ghostty/…` → `C:\Users\<you>\AppData\Local\ghostty\…`.
+That also means the `ghosttyConfig=off` switch needed a second implementation —
+a path skip in both sync paths — rather than the `.chezmoiignore` gate the macOS
+side uses. Both skip; neither deletes. Deleting stays `ts-config`'s job for the
+same reason it does on macOS: a sync-side removal runs on *every* machine and
+would wipe a hand-written config on a box that never opted in.
+
+**The theme is resolved in the sync, not branched in the template.** Ghostty's
+config format has no conditionals, and Windows mirror files get plain token
+substitution with no template engine — so `{{ if }}` would be copied through
+literally. `themeMode` therefore maps to two computed tokens,
+`__GHOSTTY_THEME__` and `__GHOSTTY_WINDOW_THEME__`, exactly as
+`tmuxPrefixResolved` is derived. The mapping now exists three times (bash sync,
+pwsh sync, `ts-config ghostty diff`) and a test pins them together, because a
+drift between them shows up as `diff` reporting a phantom change forever.
+
+`follow` cannot be expressed by pinning `window-theme`, and an explicit mode
+cannot be expressed by a split theme: a `dark:…,light:…` theme *always* tracks
+the OS. That is why the two values move together rather than one deriving from
+the other.
+
+**Windows drops four macOS directives and gains one.** `font-thicken` and
+`window-colorspace = display-p3` are macOS rendering niceties; the three `cmd+…`
+readline chords have no Cmd key to hang off (`Home`/`End`/`Ctrl+U` are the
+natives); and `macos-option-as-alt` is absent from the Windows option set
+entirely. That last one is worth stating precisely: it is *silently ignored*, not
+diagnosed, so shipping it would have cost nothing — it is dropped because a
+config that pretends to set something it cannot is a lie to the next reader.
+Windows gains `window-theme`, which drives the DWM title bar.
+
+**There is no honest syntax gate on Windows.** On macOS `ghostty
++validate-config` exits 1 on error and `ts-config ghostty status` runs it as a
+real check. Neither Windows equivalent works on 1.3.123: `+validate-config` fails
+with `FileTooBig` even for a 14-byte config, and `+show-config` reports *nothing*
+for an unknown key or for a bad value on a real key — it silently drops both.
+Every "accepted" result from probing options that way is therefore meaningless,
+which is a trap worth remembering the next time someone reaches for
+`+show-config` as a validator. `status` prints `validate: unavailable on this
+build` rather than a check it did not run.
+
+**Offered, never installed.** The terminal question now lists Ghostty on Windows
+and pre-ticks it when the executable is present, the same shape as the WezTerm
+channels — and like them it is deliberately absent from `$TsTerminalWingetIds`,
+so ticking it prints the install command instead of running it. winget does carry
+`AmanThanvi.winghostty`, currently the same 1.3.123 the releases page ships, so
+either source is fine; the managed config lands the same way regardless, and
+lands whether or not the app is installed at all.
+
+One PowerShell trap this uncovered, unrelated to Ghostty but caught by it: a
+`switch` unrolls a one-element array to a **scalar**, so `$preticked += 'ghostty'`
+concatenated strings instead of appending and produced the single nonsense key
+`wezterm-nightlyghostty` — leaving the entire question unticked. The `@( )` around
+the switch is load-bearing, and a test pins it.

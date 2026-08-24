@@ -1128,6 +1128,129 @@ def test_ghostty_is_gated_and_never_removed_by_chezmoi():
     assert "Darwin" in body, "must no-op off macOS"
 
 
+# ── Ghostty on Windows (noctty / winghostty) ────────────────────────────────────
+
+WIN_GHOSTTY = "windows/AppData/Local/ghostty"
+
+
+def test_windows_ghostty_targets_the_upstream_config_dir():
+    r"""noctty reads BOTH its own %LOCALAPPDATA%\<appname>\config.ghostty and the
+    upstream-compatible %LOCALAPPDATA%\ghostty\config. We target the upstream one
+    because <appname> is `winghostty` today and `noctty` the day the rebrand ships
+    (it is in main since 2026-08-20 but no release carries it yet) — the app-named
+    path would silently stop being read on upgrade day. Verified against 1.3.123."""
+    assert (ROOT / WIN_GHOSTTY / "config.tmpl").exists()
+    assert (ROOT / WIN_GHOSTTY / "themes/vs-code-light-modern").exists()
+    for bad in ("AppData/Local/winghostty", "AppData/Local/noctty"):
+        assert not (ROOT / bad).exists(), \
+            "%s is app-named and breaks on the rename; use AppData/Local/ghostty" % bad
+
+
+def test_windows_ghostty_theme_is_byte_identical_to_the_macos_one():
+    """Two copies exist because chezmoi manages the macOS one and the Windows sync
+    mirrors the other. A test already pins the macOS copy to the WezTerm palette,
+    so pinning the pair keeps Windows on that palette transitively."""
+    mac = (ROOT / "dot_config/ghostty/themes/vs-code-light-modern").read_bytes()
+    win = (ROOT / WIN_GHOSTTY / "themes/vs-code-light-modern").read_bytes()
+    assert mac == win, "the Windows Ghostty theme drifted from the macOS one"
+
+
+def test_windows_ghostty_config_carries_no_foreign_token():
+    """Windows mirror files get blind token substitution, so ANY __TOKEN__ the
+    sync knows about is replaced — including one that only appears inside a
+    comment. A comment here mentioning __TMUX_PREFIX__ was rewritten to `C-b`
+    mid-sentence before this test existed."""
+    cfg = (ROOT / WIN_GHOSTTY / "config.tmpl").read_text(encoding="utf-8")
+    found = set(re.findall(r"__[A-Z0-9_]+__", cfg))
+    assert found == {"__GHOSTTY_THEME__", "__GHOSTTY_WINDOW_THEME__"}, \
+        "unexpected token(s) in the Windows Ghostty config: %s" % sorted(found)
+
+
+def test_windows_ghostty_config_uses_tokens_not_go_templates():
+    """The Windows sync substitutes tokens with str.replace; it has no template
+    engine, so a `{{ if }}` would be copied through literally."""
+    cfg = (ROOT / WIN_GHOSTTY / "config.tmpl").read_text(encoding="utf-8")
+    assert "{{" not in cfg, "Go-template syntax never renders on the Windows side"
+    # Ghostty has no inline comments: a `#` after a value becomes the value.
+    for ln in cfg.splitlines():
+        st = ln.strip()
+        if st.startswith("#") or "=" not in st:
+            continue
+        val = st.split("=", 1)[1]
+        assert "#" not in val, \
+            "inline comment would be parsed as part of the value: %r" % ln
+
+
+def test_windows_ghostty_drops_the_macos_only_directives():
+    """macos-option-as-alt is absent from this build's option set and is silently
+    ignored rather than diagnosed, so shipping it would be harmless but dishonest.
+    font-thicken and window-colorspace are macOS rendering niceties, and there is
+    no Cmd key to bind."""
+    cfg = (ROOT / WIN_GHOSTTY / "config.tmpl").read_text(encoding="utf-8")
+    body = "\n".join(l for l in cfg.splitlines() if not l.strip().startswith("#"))
+    for directive in ("macos-option-as-alt", "font-thicken", "window-colorspace"):
+        assert directive not in body, "%s is macOS-only" % directive
+    assert "cmd+" not in body, "there is no Cmd key on Windows"
+
+
+def test_ghostty_theme_mapping_is_the_same_in_both_sync_paths():
+    """Ghostty's config format has no conditionals and Windows mirror files get
+    token substitution, so themeMode -> theme is resolved in the sync. That means
+    the mapping exists three times (bash sync, pwsh sync, ts-config diff) and all
+    of them must agree, or `ts-config ghostty diff` reports a phantom change."""
+    sources = {
+        "run_after_90-sync-windows.sh": (ROOT / "run_after_90-sync-windows.sh"),
+        "scripts/sync-windows.ps1": (ROOT / "scripts/sync-windows.ps1"),
+        "bootstrap/ts-config.sh": (ROOT / "bootstrap/ts-config.sh"),
+    }
+    for name, path in sources.items():
+        body = path.read_text(encoding="utf-8")
+        assert "dark:Catppuccin Mocha,light:vs-code-light-modern" in body, \
+            "%s: follow must use a split theme (it is what tracks the OS)" % name
+        assert "vs-code-light-modern" in body and "Catppuccin Mocha" in body, name
+        for wt in ("'light'", "'auto'", "'dark'"):
+            assert wt in body, "%s: missing window-theme value %s" % (name, wt)
+
+
+def test_ghostty_off_skips_the_windows_subtree_without_deleting_it():
+    """Same rule as the macOS .chezmoiignore gate: `off` stops the config being
+    re-rendered. Deleting is ts-config's job, for the machine you run it on — a
+    sync-side deletion runs everywhere and would wipe a hand-written config."""
+    sh = (ROOT / "run_after_90-sync-windows.sh").read_text(encoding="utf-8")
+    ps = (ROOT / "scripts/sync-windows.ps1").read_text(encoding="utf-8")
+    assert "AppData/Local/ghostty/*" in sh and "GHOSTTY_CFG_ON" in sh
+    assert "AppData/Local/ghostty/*" in ps and "tsGhosttyOn" in ps
+    for name, body in (("bash", sh), ("pwsh", ps)):
+        assert "rm -rf" not in body.lower() or "ghostty" not in body.lower().split("rm -rf")[1][:200], \
+            "%s sync must never delete the Ghostty tree" % name
+
+
+def test_ghostty_is_offered_on_windows_but_never_installed():
+    """It is a real Windows option now, but like the WezTerm channels it is asked,
+    never forced — so it must NOT gain a winget id in the terminal table."""
+    ps = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
+    # Cut at the closing paren on its OWN line: the block's comments contain
+    # parenthesised URLs, so splitting on the first ")" truncates mid-comment.
+    cand = ps.split("$script:TsTerminalCandidates")[1].split(chr(10) + ")")[0]
+    assert "Key = 'ghostty'" in cand, "Ghostty must be offered on Windows"
+    # Split on the ASSIGNMENT: the candidates block above mentions this variable
+    # by name in a comment, and splitting on the bare name lands there instead.
+    ids = ps.split("$script:TsTerminalWingetIds = @{")[1].split("}")[0]
+    assert "ghostty" not in ids, "offered, never auto-installed"
+    assert "no Windows build available" not in ps, "that claim is obsolete"
+
+
+def test_pwsh_preticked_list_survives_appending():
+    """A PowerShell `switch` unrolls a one-element array to a SCALAR, so `+=` on
+    the result concatenates strings instead of appending: the preticked list
+    silently became the single key 'wezterm-nightlyghostty' and the whole question
+    rendered unticked. The @( ) around the switch is what prevents it."""
+    ps = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
+    block = ps.split("$preticked = ")[1][:400]
+    assert block.startswith("@(switch"), \
+        "wrap the switch in @( ) or += will concatenate instead of append"
+
+
 # ── agentmemory bash port ───────────────────────────────────────────────────────
 
 def _uncommented(text):

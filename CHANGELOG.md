@@ -6,6 +6,14 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Added
 
+- **Ghostty on Windows: the managed config now deploys there too (08/24/2026).** There is a Ghostty for Windows after all — [noctty](https://github.com/amanthanvi/noctty), Ghostty's terminal core in a native Win32 app. It was renamed from WingHostty in main on 2026-08-20 after a trademark request, but that landed *after* the v1.3.123 tag, so its releases still ship as `winghostty-…`; installing that is current, not stale.
+
+  The stack's Ghostty config and generated `vs-code-light-modern` theme now mirror to **`%LOCALAPPDATA%\ghostty\`** — the *upstream* path, not the app-named one. noctty reads both, but `<appname>` flips from `winghostty` to `noctty` the day the rename ships, so the app-named path would silently stop being read on upgrade day. Because the upstream path is `ghostty/config` plus `ghostty/themes/`, it is the same relative layout as macOS, and the theme file ports byte-for-byte (a test pins the two copies together).
+
+  `ts-config ghostty on|off|status|diff` gained a PowerShell twin and now works from WSL as well, driving the Windows copy over `/mnt/c/`. The terminal question offers Ghostty on Windows and pre-ticks an installed one — but like the WezTerm channels it is **asked, never installed**, so it stays out of `$TsTerminalWingetIds`.
+
+  Two honest limits are recorded rather than papered over. Windows drops four macOS directives (`macos-option-as-alt`, `font-thicken`, `window-colorspace`, the `cmd+…` chords) and gains `window-theme` for the DWM title bar. And there is **no working syntax gate**: `+validate-config` fails `FileTooBig` on 1.3.123 even for a 14-byte config, and `+show-config` reports nothing at all for an unknown key or a bad value — so `status` says `validate: unavailable on this build` instead of claiming a check it never ran.
+
 - **Guided rclone, verified SMB setup, and Tailscale discovery helpers (08/23/2026).** Bare `rclone config` now explains what is being selected, leads with Windows/NAS shares, preselects common providers, and progressively searches the full catalog; `rclone-stock config` preserves upstream's raw wizard. `ts-smb setup` discovers live Tailscale SMB hosts and verifies credentials/share access before transactional local saving. New `tail-*` identity and diagnostic shortcuts are documented in `doc tailscale`.
 
 - **`ts-update` now finishes the shell handoff (08/23/2026).** When an update

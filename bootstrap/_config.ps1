@@ -261,7 +261,7 @@ function Get-TsConfig {
     }
     return [pscustomobject]@{
         leaderChord = 'ctrl-space'; themeMode = 'dark'; tmuxPrefix = 'ctrl-b'
-        weztermMux = 'off'; weztermRestore = 'off'; apps = @()
+        weztermMux = 'off'; weztermRestore = 'off'; ghosttyConfig = 'on'; apps = @()
         headroomEnabled = 'off'; headroomCursorMode = 'mcp'
         cavemanEnabled = 'off'; agentmemoryEnabled = 'off'
     }
@@ -313,6 +313,15 @@ function Get-TsWeztermRestore {
     return 'off'
 }
 
+# Managed Ghostty config. Defaults ON, unlike the other toggles: it only ever
+# writes when a Ghostty is actually there to read it, and `off` is a real revert.
+# POSIX twin: bootstrap/_config.sh ts_ghostty_get.
+function Get-TsGhosttyConfig {
+    $v = (Get-TsConfig).ghosttyConfig
+    if ($v -eq 'off') { return 'off' }
+    return 'on'
+}
+
 function Save-TsConfig {
     param(
         [string]$LeaderChord = 'ctrl-space',
@@ -321,6 +330,7 @@ function Save-TsConfig {
         [string[]]$Apps      = @(),
         [string]$WeztermMux  = 'off',
         [string]$WeztermRestore = 'off',
+        [ValidateSet('on','off')][string]$GhosttyConfig = 'on',
         $CcTts                = $null,
         [ValidateSet('on','off')][string]$HeadroomEnabled = 'off',
         [ValidateSet('mcp','byok','off')][string]$HeadroomCursorMode = 'mcp',
@@ -345,6 +355,12 @@ function Save-TsConfig {
         $WeztermRestore = $existing.weztermRestore
     }
     if ($WeztermRestore -ne 'on') { $WeztermRestore = 'off' }
+    # Defaults on, so the carry-forward keeps an explicit 'off' rather than an
+    # explicit 'on' — the mirror image of the two above.
+    if (-not $PSBoundParameters.ContainsKey('GhosttyConfig') -and $existing.ghosttyConfig) {
+        $GhosttyConfig = $existing.ghosttyConfig
+    }
+    if ($GhosttyConfig -ne 'off') { $GhosttyConfig = 'on' }
     foreach ($pair in @(
         @{ Param = 'HeadroomEnabled'; Name = 'headroomEnabled'; Default = 'off' },
         @{ Param = 'HeadroomCursorMode'; Name = 'headroomCursorMode'; Default = 'mcp' },
@@ -365,6 +381,7 @@ function Save-TsConfig {
         tmuxPrefixResolved = (ConvertTo-TsTmuxPrefix $TmuxPrefix)
         weztermMux         = $WeztermMux
         weztermRestore     = $WeztermRestore
+        ghosttyConfig      = $GhosttyConfig
         apps               = @($Apps)
         ccTts              = $CcTts
         headroomEnabled    = $HeadroomEnabled
@@ -814,8 +831,12 @@ function Update-TsWezterm {
 $script:TsTerminalCandidates = @(
     @{ Key = 'wezterm-nightly'; Label = 'WezTerm nightly'; Note = 'current builds; what this stack configures' }
     @{ Key = 'wezterm-stable';  Label = 'WezTerm stable';  Note = '20240203 — upstream has not cut one since' }
-    # Ghostty ships no Windows build, so it is offered on macOS/Linux only. If
-    # that changes, add it here AND to $script:TsTerminalWingetIds below.
+    # Ghostty DOES run on Windows: noctty (github.com/amanthanvi/noctty) is
+    # Ghostty's terminal core in a native Win32 app, still shipping its release
+    # assets under the former name winghostty. Offered, never installed for you —
+    # the same rule as the WezTerm channels, so it is absent from
+    # $script:TsTerminalWingetIds below on purpose.
+    @{ Key = 'ghostty';         Label = 'Ghostty';         Note = 'via noctty/winghostty; you install it, we configure it' }
 )
 $script:TsTerminalWingetIds = @{ 'wezterm-nightly' = 'wez.wezterm.nightly'; 'wezterm-stable' = 'wez.wezterm' }
 
@@ -824,6 +845,16 @@ function Get-TsTerminalsChannel([string[]]$Selected) {
     if ($Selected -contains 'wezterm-nightly') { return 'nightly' }
     if ($Selected -contains 'wezterm-stable')  { return 'stable' }
     return ''
+}
+
+# The installed noctty/winghostty executable, or $null. Post-rename name first:
+# the rebrand is in main but has not shipped in a release yet, so today this
+# finds the winghostty path and will find the other one without a code change.
+function Get-TsGhosttyExe {
+    @(
+        (Join-Path $env:ProgramFiles 'noctty\noctty.exe'),
+        (Join-Path $env:ProgramFiles 'winghostty\winghostty.exe')
+    ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
 }
 
 function Read-TsTerminals {
@@ -859,10 +890,18 @@ function Read-TsTerminals {
     # config is not written for. The one exception is `unknown`: a WezTerm
     # installed outside a package manager is not ours to replace.
     # POSIX twin: the same case in ts_prompt_terminals.
-    $preticked = switch (Get-TsWezChannel) {
+    # @( ) around the switch is load-bearing: a switch unrolls a one-element
+    # array to a SCALAR, and `+=` on a scalar string concatenates instead of
+    # appending — which silently produced the single key 'wezterm-nightlyghostty'
+    # and left the whole list unticked.
+    $preticked = @(switch (Get-TsWezChannel) {
         'unknown' { @() }
         default   { @('wezterm-nightly') }
-    }
+    })
+    # Twin of `command -v ghostty` in ts_prompt_terminals: an installed one
+    # comes up ticked so Enter keeps it, rather than silently dropping it.
+    $ghosttyExe = Get-TsGhosttyExe
+    if ($ghosttyExe) { $preticked += 'ghostty' }
 
     $intro = @()
     $inst = Get-TsWezInstalled
@@ -879,6 +918,11 @@ function Read-TsTerminals {
     if ($inst) {
         $tally = Get-TsWezChangesTally $inst.Version
         if ($tally) { $intro += "  Since your build: $tally" }
+    }
+
+    if ($ghosttyExe) {
+        $gv = (& $ghosttyExe --version 2>$null | Select-Object -First 1)
+        $intro += "  Ghostty:  $gv"
     }
 
     # The two WezTerm channels are mutually exclusive, so the tick-list enforces
@@ -1072,7 +1116,18 @@ function Install-TsTerminals {
         Write-Host '==> WezTerm: not selected — skipped'
     }
     if ($Selected -contains 'ghostty') {
-        Write-Host '==> Ghostty: no Windows build available — skipped'
+        # Offered but never installed, exactly like the WezTerm channels. The
+        # managed config is written by the sync whether or not it is installed,
+        # so there is nothing to undo if you change your mind.
+        $exe = Get-TsGhosttyExe
+        if ($exe) {
+            Write-Host "==> Ghostty: already installed ($exe)"
+        } else {
+            Write-Host '==> Ghostty on Windows is noctty (ships as winghostty today):'
+            Write-Host '      winget install AmanThanvi.winghostty'
+            Write-Host '      or https://github.com/amanthanvi/noctty/releases'
+            Write-Host '    The managed config is written by the sync either way.'
+        }
     }
 }
 

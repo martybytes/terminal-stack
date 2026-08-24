@@ -14,7 +14,7 @@
 #   ts-config mux [on|off|...]  hand-off to ts-mux (WezTerm multiplexer domain)
 #   ts-config restore <on|off>  reopen the last WezTerm session at startup
 #   ts-config atuin   <on|off>  atuin shell history (owns Ctrl+R when on)
-#   ts-config ghostty [on|off|status|diff]   managed Ghostty config (macOS)
+#   ts-config ghostty [on|off|status|diff]   managed Ghostty config (macOS/Windows)
 #   ts-config agents [show|<tool> on|off|status|repair|uninstall]
 #   ts-config wezterm [status|changes|install <chan>|upgrade]
 #   ts-config wizard          re-run the whole install questionnaire
@@ -96,6 +96,15 @@ install_terminals() {
     case " $sel " in *" ghostty "*)
         if [ "$(uname -s)" = Darwin ] && command -v brew >/dev/null 2>&1; then
             brew list --cask ghostty >/dev/null 2>&1 || brew install --cask ghostty || true
+        elif [ -d /mnt/c/Users ]; then
+            # Windows: noctty/winghostty is offered but never installed for you.
+            # winget carries AmanThanvi.winghostty, currently the same 1.3.123 the
+            # releases page ships. Either is fine; the managed config lands the same
+            # way. Same rule as WezTerm: asked, never forced.
+            echo "==> Ghostty on Windows is noctty (ships as winghostty today):"
+            echo "      winget install AmanThanvi.winghostty"
+            echo "      or https://github.com/amanthanvi/noctty/releases"
+            echo "    The managed config is written by the sync either way."
         fi ;;
     esac
 }
@@ -142,22 +151,77 @@ set_restore() { ts_wez_restore_set "$1"; finish; }
 set_atuin() { ts_atuin_set "$1"; finish; }
 
 # ── Ghostty ───────────────────────────────────────────────────────────────────
-# macOS only: Ghostty ships no Windows build and native-Linux hosts here are
-# headless. No pwsh twin for the same reason ts-smb has none — the absence is a
-# decision, not drift.
-GHOSTTY_CFG="$HOME/.config/ghostty/config"
-GHOSTTY_THEME="$HOME/.config/ghostty/themes/vs-code-light-modern"
+# Two platforms, one setting. On macOS this manages ~/.config/ghostty/; on WSL it
+# manages the WINDOWS-side copy under /mnt/c/…/AppData/Local/ghostty/, because
+# there is a Ghostty for Windows after all: noctty (github.com/amanthanvi/noctty),
+# Ghostty's terminal core in a native Win32 app. It still ships its release assets
+# under its former name winghostty — the rebrand landed in main on 2026-08-20,
+# after the v1.3.123 tag, so no release carries the new name yet.
+#
+# It reads the upstream-compatible %LOCALAPPDATA%\ghostty\config as well as its
+# own %LOCALAPPDATA%\<appname>\config.ghostty, and we target the upstream one on
+# purpose: <appname> is `winghostty` today and `noctty` the day the rename ships,
+# so the app-named path would silently stop being read on upgrade day.
+#
+# Native Linux is still refused: those hosts are headless, the GUI lives elsewhere.
+# See docs/decisions.md § "Why Ghostty is managed on Windows too".
+GHOSTTY_PLATFORM=""
+GHOSTTY_DIR=""
+GHOSTTY_CFG=""
+GHOSTTY_THEME=""
 
-ghostty_require_darwin() {
-    [ "$(uname -s)" = Darwin ] && return 0
-    echo "ts-config ghostty: macOS only (Ghostty has no Windows build, and this" >&2
-    echo "  stack's Linux hosts are headless)." >&2
-    return 1
+# Resolve the platform and the paths, or explain why we cannot.
+ghostty_paths() {
+    [ -n "$GHOSTTY_PLATFORM" ] && return 0
+    if [ "$(uname -s)" = Darwin ]; then
+        GHOSTTY_PLATFORM=darwin
+        GHOSTTY_DIR="$HOME/.config/ghostty"
+    elif [ -d /mnt/c/Users ]; then
+        local u=""
+        if [ -n "$CZ" ] && [ -x "$CZ" ]; then
+            u="$("$CZ" execute-template '{{ if hasKey . "windowsUsername" }}{{ .windowsUsername }}{{ end }}' 2>/dev/null || true)"
+        fi
+        if [ -z "$u" ] && [ -x /mnt/c/Windows/System32/cmd.exe ]; then
+            u="$(/mnt/c/Windows/System32/cmd.exe /c 'echo %USERNAME%' 2>/dev/null | tr -d '\r\n' || true)"
+        fi
+        if [ -z "$u" ]; then
+            echo "ts-config ghostty: could not resolve the Windows username." >&2
+            echo "  Add windowsUsername to [data] in ~/.config/chezmoi/chezmoi.toml." >&2
+            return 1
+        fi
+        GHOSTTY_PLATFORM=wsl
+        GHOSTTY_DIR="/mnt/c/Users/$u/AppData/Local/ghostty"
+    else
+        echo "ts-config ghostty: macOS or WSL only. Ghostty runs on macOS, and on" >&2
+        echo "  Windows as noctty/winghostty; this stack's native-Linux hosts are" >&2
+        echo "  headless, so there is no GUI here to configure." >&2
+        return 1
+    fi
+    GHOSTTY_CFG="$GHOSTTY_DIR/config"
+    GHOSTTY_THEME="$GHOSTTY_DIR/themes/vs-code-light-modern"
+    return 0
+}
+
+# Render the Windows template the way the sync will. sed is safe for exactly
+# these two tokens — both are single-line and neither value can contain a `#`,
+# which is why the sync's own no-sed rule (multi-line __CC_TTS_*__ tokens) does
+# not apply. `follow` needs a split dark:…,light:… theme, which always tracks the
+# OS, so it cannot be expressed by pinning window-theme.
+ghostty_render_windows() {
+    local mode gt gw
+    mode="$(ts_data_get themeMode 2>/dev/null || echo dark)"
+    case "$mode" in
+        light)  gt='vs-code-light-modern'; gw='light' ;;
+        follow) gt='dark:Catppuccin Mocha,light:vs-code-light-modern'; gw='auto' ;;
+        *)      gt='Catppuccin Mocha'; gw='dark' ;;
+    esac
+    sed -e "s#__GHOSTTY_THEME__#$gt#g" -e "s#__GHOSTTY_WINDOW_THEME__#$gw#g" \
+        "$SRC/windows/AppData/Local/ghostty/config.tmpl"
 }
 
 ghostty_status() {
-    ghostty_require_darwin || return 1
-    echo "ghostty config: $(ts_ghostty_get)"
+    ghostty_paths || return 1
+    echo "ghostty config: $(ts_ghostty_get)   (target: $GHOSTTY_PLATFORM)"
     if [ -e "$GHOSTTY_CFG" ]; then
         if head -20 "$GHOSTTY_CFG" | grep -q 'managed by terminal-stack'; then
             echo "  $GHOSTTY_CFG  (ours)"
@@ -169,36 +233,93 @@ ghostty_status() {
     fi
     [ -e "$GHOSTTY_THEME" ] && echo "  $GHOSTTY_THEME  (custom light theme)"
     local b
-    b="$(ls -1t "$HOME/.config/ghostty"/config.bak.* 2>/dev/null | head -1 || true)"
+    b="$(ls -1t "$GHOSTTY_DIR"/config.bak.* 2>/dev/null | head -1 || true)"
     [ -n "$b" ] && echo "  newest backup: $b"
-    if command -v ghostty >/dev/null 2>&1; then
-        echo "  ghostty: $(ghostty --version 2>/dev/null | head -1)"
-        if [ -e "$GHOSTTY_CFG" ]; then
-            if ghostty +validate-config --config-file="$GHOSTTY_CFG" >/dev/null 2>&1; then
-                echo "  validate: ok"
-            else
-                echo "  validate: FAILED —"
-                ghostty +validate-config --config-file="$GHOSTTY_CFG" 2>&1 | sed 's/^/    /'
+    ghostty_status_binary
+}
+
+# The binary half differs enough per platform to be worth splitting out.
+ghostty_status_binary() {
+    if [ "$GHOSTTY_PLATFORM" = darwin ]; then
+        if command -v ghostty >/dev/null 2>&1; then
+            echo "  ghostty: $(ghostty --version 2>/dev/null | head -1)"
+            if [ -e "$GHOSTTY_CFG" ]; then
+                if ghostty +validate-config --config-file="$GHOSTTY_CFG" >/dev/null 2>&1; then
+                    echo "  validate: ok"
+                else
+                    echo "  validate: FAILED —"
+                    ghostty +validate-config --config-file="$GHOSTTY_CFG" 2>&1 | sed 's/^/    /'
+                fi
             fi
+        else
+            echo "  ghostty: not installed (ts-config wizard installs the cask)"
         fi
-    else
-        echo "  ghostty: not installed (ts-config wizard installs the cask)"
+        return 0
     fi
+
+    # Windows, reached over WSL interop. Both names, post-rename first.
+    local exe="" c
+    for c in "/mnt/c/Program Files/noctty/noctty.com" \
+             "/mnt/c/Program Files/winghostty/winghostty.com"; do
+        [ -x "$c" ] && { exe="$c"; break; }
+    done
+    if [ -z "$exe" ]; then
+        echo "  noctty/winghostty: not installed"
+        echo "    releases: https://github.com/amanthanvi/noctty/releases"
+        return 0
+    fi
+    echo "  $(basename "$exe" .com): $("$exe" --version 2>/dev/null | head -1)"
+    # NO validate step, deliberately. `+validate-config` fails with FileTooBig on
+    # winghostty 1.3.123 even for a 14-byte config, and `+show-config` reports
+    # nothing at all for an unknown key or a bad value — so unlike macOS there is
+    # no honest syntax gate to run here. Printing "validate: ok" would be a lie.
+    echo "  validate: unavailable on this build (see docs/decisions.md)"
 }
 
 # What apply would change, without applying it.
 ghostty_diff() {
-    ghostty_require_darwin || return 1
-    "$CZ" diff -- "$GHOSTTY_CFG" "$GHOSTTY_THEME" 2>/dev/null || true
+    ghostty_paths || return 1
+    if [ "$GHOSTTY_PLATFORM" = darwin ]; then
+        "$CZ" diff -- "$GHOSTTY_CFG" "$GHOSTTY_THEME" 2>/dev/null || true
+        return 0
+    fi
+    # The Windows copy is not chezmoi-managed (windows/** is chezmoi-ignored and
+    # mirrored by the sync), so diff the rendered template against what is live.
+    local tmp; tmp="$(mktemp)"
+    ghostty_render_windows > "$tmp" || { rm -f "$tmp"; return 1; }
+    if [ -e "$GHOSTTY_CFG" ]; then
+        diff -u "$GHOSTTY_CFG" "$tmp" && echo "ghostty config: up to date"
+    else
+        echo "ghostty config: $GHOSTTY_CFG would be created"
+    fi
+    rm -f "$tmp"
+    if [ -e "$GHOSTTY_THEME" ]; then
+        diff -u "$GHOSTTY_THEME" \
+            "$SRC/windows/AppData/Local/ghostty/themes/vs-code-light-modern" \
+            && echo "ghostty theme: up to date"
+    else
+        echo "ghostty theme: $GHOSTTY_THEME would be created"
+    fi
+}
+
+ghostty_reload_hint() {
+    if [ "$GHOSTTY_PLATFORM" = darwin ]; then
+        echo "Reload Ghostty with Cmd+Shift+, (or restart it)."
+    else
+        echo "Reload with Ctrl+Shift+, (or restart it)."
+    fi
 }
 
 # `off` is a real revert, not merely "stop managing": restore the newest backup
 # if there is one, else remove our files so Ghostty falls back to its defaults.
+# Deliberately NOT a .chezmoiignore removal rule or a sync deletion — those are
+# evaluated on every machine and would wipe a hand-written config on a box that
+# never opted in. This removes for THIS machine, because it was asked to.
 ghostty_off() {
-    ghostty_require_darwin || return 1
+    ghostty_paths || return 1
     ts_ghostty_set off
     local b
-    b="$(ls -1t "$HOME/.config/ghostty"/config.bak.* 2>/dev/null | head -1 || true)"
+    b="$(ls -1t "$GHOSTTY_DIR"/config.bak.* 2>/dev/null | head -1 || true)"
     if [ -n "$b" ] && [ -e "$b" ]; then
         cp -p -- "$b" "$GHOSTTY_CFG"
         echo "==> restored $GHOSTTY_CFG from $b"
@@ -207,15 +328,15 @@ ghostty_off() {
         echo "==> removed $GHOSTTY_CFG (no backup existed; Ghostty uses its defaults)"
     fi
     [ -e "$GHOSTTY_THEME" ] && { rm -f -- "$GHOSTTY_THEME"; echo "==> removed $GHOSTTY_THEME"; }
-    echo "==> ghostty config off. Reload Ghostty with Cmd+Shift+, (or restart it)."
+    echo "==> ghostty config off. $(ghostty_reload_hint)"
     finish
 }
 
 ghostty_on() {
-    ghostty_require_darwin || return 1
+    ghostty_paths || return 1
     ts_ghostty_set on
     finish
-    echo "==> ghostty config on. Reload Ghostty with Cmd+Shift+, (or restart it)."
+    echo "==> ghostty config on. $(ghostty_reload_hint)"
 }
 
 # The mux has its own verbs (kill/restart/reset), so ts-config just hands off.

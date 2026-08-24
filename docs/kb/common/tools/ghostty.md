@@ -38,8 +38,38 @@ POSIX, so without that hook a hand-written config would vanish silently. `off`
 restores the newest backup; if there never was one, it removes ours and Ghostty
 falls back to its own defaults.
 
-**No PowerShell twin**, deliberately — Ghostty has no Windows build, so there is
-nothing to configure there. The absence is a decision, not drift.
+### Windows: noctty (still shipping as winghostty)
+
+There *is* a Ghostty for Windows — not from upstream, but
+[noctty](https://github.com/amanthanvi/noctty): Ghostty's terminal core wrapped
+in a native Win32 app, with tabs, splits, session restore and a command palette.
+The project was renamed from **WingHostty** in main on 2026-08-20 after a
+trademark request, but that landed *after* the v1.3.123 tag, so the release
+assets are still `winghostty-<ver>-windows-x64-setup.exe`. Install it with
+`winget install AmanThanvi.winghostty` or from the releases page — the stack
+offers it in the terminal question but never installs it, exactly like the
+WezTerm channels.
+
+The managed config lands at **`%LOCALAPPDATA%\ghostty\config`**, with the custom
+light theme beside it in `themes\`. That is the *upstream* path, and the choice
+is deliberate: noctty reads both that and its own
+`%LOCALAPPDATA%\<appname>\config.ghostty`, and `<appname>` is `winghostty`
+today and `noctty` the day the rename ships — so the app-named path would
+silently stop being read on upgrade day.
+
+`ts-config ghostty` works on Windows and from WSL (where it drives the
+Windows-side copy over `/mnt/c/`). Two differences from macOS worth knowing:
+
+- **There is no working syntax gate.** `+validate-config` fails with
+  `FileTooBig` on 1.3.123 even for a 14-byte config, and `+show-config` reports
+  *nothing* for an unknown key or a bad value. `status` says
+  `validate: unavailable on this build` rather than claiming a check it did not
+  run.
+- **A few macOS directives are dropped**, not carried: `macos-option-as-alt`
+  (absent from the Windows option set — silently ignored, not diagnosed),
+  `font-thicken` and `window-colorspace` (macOS rendering), and the `cmd+…`
+  readline chords (no Cmd key; `Home`/`End`/`Ctrl+U` are the natives). Windows
+  gains `window-theme`, which drives the DWM title bar.
 
 ### What it sets
 

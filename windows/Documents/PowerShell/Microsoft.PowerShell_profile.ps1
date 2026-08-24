@@ -1213,12 +1213,104 @@ function Set-TerminalStackConfig {
             Invoke-TsSync $src
             Write-Host '==> done.'
         }
+        # Managed Ghostty config. There IS a Ghostty for Windows: noctty
+        # (github.com/amanthanvi/noctty), Ghostty's terminal core in a native
+        # Win32 app, still shipping release assets under its former name
+        # winghostty. POSIX twin: the ghostty_* functions in bootstrap/ts-config.sh
+        # — keep the verbs and the reported facts aligned.
+        #
+        # NOTE for a combined WSL+Windows box: prefer running this from WSL. Its
+        # chezmoi apply is authoritative for the Windows-side files, same caveat
+        # as the rest of ts-config.
+        'ghostty' {
+            # %LOCALAPPDATA%\ghostty\, NOT the app-named dir. noctty reads both
+            # its own %LOCALAPPDATA%\<appname>\config.ghostty and the
+            # upstream-compatible path; <appname> is winghostty today and noctty
+            # the day the rename ships, so only this one survives the upgrade.
+            $gDir   = Join-Path $env:LOCALAPPDATA 'ghostty'
+            $gCfg   = Join-Path $gDir 'config'
+            $gTheme = Join-Path $gDir 'themes\vs-code-light-modern'
+            switch ($Value) {
+                { $_ -in 'on', 'off' } {
+                    Save-TsConfig -GhosttyConfig $_ | Out-Null
+                    if ($_ -eq 'off') {
+                        # A real revert, not merely "stop managing". Deliberately
+                        # not a sync-side deletion: that runs on every machine and
+                        # would wipe a hand-written config on a box that never
+                        # opted in. This removes for THIS machine, on request.
+                        $bak = Get-ChildItem -LiteralPath $gDir -Filter 'config.bak.*' -ErrorAction SilentlyContinue |
+                               Sort-Object LastWriteTime -Descending | Select-Object -First 1
+                        if ($bak) {
+                            Copy-Item -LiteralPath $bak.FullName -Destination $gCfg -Force
+                            Write-Host "==> restored $gCfg from $($bak.Name)"
+                        } elseif (Test-Path -LiteralPath $gCfg) {
+                            Remove-Item -LiteralPath $gCfg -Force
+                            Write-Host "==> removed $gCfg (no backup existed; Ghostty uses its defaults)"
+                        }
+                        if (Test-Path -LiteralPath $gTheme) {
+                            Remove-Item -LiteralPath $gTheme -Force
+                            Write-Host "==> removed $gTheme"
+                        }
+                    } else {
+                        Invoke-TsSync $src
+                    }
+                    Write-Host "==> ghostty config $_. Reload with Ctrl+Shift+, (or restart it)."
+                }
+                'diff' {
+                    if (-not (Test-Path -LiteralPath $gCfg)) {
+                        Write-Host "ghostty config: $gCfg would be created"; return
+                    }
+                    $tmplPath = Join-Path $src 'windows\AppData\Local\ghostty\config.tmpl'
+                    $mode = Get-TsProp (Get-TsConfig) themeMode 'dark'
+                    $gt, $gw = switch ($mode) {
+                        'light'  { 'vs-code-light-modern', 'light' }
+                        'follow' { 'dark:Catppuccin Mocha,light:vs-code-light-modern', 'auto' }
+                        default  { 'Catppuccin Mocha', 'dark' }
+                    }
+                    $want = (Get-Content -LiteralPath $tmplPath -Raw).
+                        Replace('__GHOSTTY_THEME__', $gt).Replace('__GHOSTTY_WINDOW_THEME__', $gw)
+                    $have = Get-Content -LiteralPath $gCfg -Raw
+                    if ($want -eq $have) { Write-Host 'ghostty config: up to date' }
+                    else {
+                        Write-Host "ghostty config: $gCfg differs from the rendered template —"
+                        Compare-Object ($have -split "`r?`n") ($want -split "`r?`n") |
+                            ForEach-Object { "  $($_.SideIndicator) $($_.InputObject)" }
+                    }
+                }
+                default {
+                    Write-Host "ghostty config: $(Get-TsGhosttyConfig)   (target: windows)"
+                    if (Test-Path -LiteralPath $gCfg) {
+                        $head = (Get-Content -LiteralPath $gCfg -TotalCount 20) -join "`n"
+                        if ($head -match 'managed by terminal-stack') { Write-Host "  $gCfg  (ours)" }
+                        else { Write-Host "  $gCfg  (NOT ours — sync would replace it; a backup is taken first)" }
+                    } else { Write-Host "  $gCfg  (absent)" }
+                    if (Test-Path -LiteralPath $gTheme) { Write-Host "  $gTheme  (custom light theme)" }
+                    $bak = Get-ChildItem -LiteralPath $gDir -Filter 'config.bak.*' -ErrorAction SilentlyContinue |
+                           Sort-Object LastWriteTime -Descending | Select-Object -First 1
+                    if ($bak) { Write-Host "  newest backup: $($bak.FullName)" }
+                    $exe = Get-TsGhosttyExe
+                    if ($exe) {
+                        Write-Host "  $([IO.Path]::GetFileNameWithoutExtension($exe)): $(& $exe --version 2>$null | Select-Object -First 1)"
+                        # NO validate step, deliberately. `+validate-config` fails
+                        # with FileTooBig on winghostty 1.3.123 even for a 14-byte
+                        # config, and `+show-config` reports nothing at all for an
+                        # unknown key or a bad value — so unlike macOS there is no
+                        # honest syntax gate here. "validate: ok" would be a lie.
+                        Write-Host '  validate: unavailable on this build (see docs/decisions.md)'
+                    } else {
+                        Write-Host '  noctty/winghostty: not installed'
+                        Write-Host '    winget install AmanThanvi.winghostty'
+                        Write-Host '    or https://github.com/amanthanvi/noctty/releases'
+                    }
+                }
+            }
+        }
         # The mux has its own verbs (kill/restart/reset), so ts-config just hands off.
         'mux'    {
             $muxArgs = @(@($Value) + @($Rest) | Where-Object { $_ })
             Invoke-TsMux @muxArgs
         }
-        default { Write-Warning "ts-config: unknown command '$Action' (show, leader, theme, tmux, apps, tts, mux, restore, agents, wezterm, wizard)" }
+        default { Write-Warning "ts-config: unknown command '$Action' (show, leader, theme, tmux, apps, tts, mux, restore, ghostty, agents, wezterm, wizard)" }
     }
 }
 Set-Alias -Name ts-config -Value Set-TerminalStackConfig
