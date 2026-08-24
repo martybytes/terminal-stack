@@ -545,7 +545,31 @@ tss_env_value() {                          # <env-file> <key> -> value, or non-z
 _tss_file_mode() { stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1" 2>/dev/null; }
 
 tss_secret_cache_path() {
+    printf '%s' "${XDG_CONFIG_HOME:-$HOME/.config}/terminal-stack/agentmemory.secret"
+}
+
+# The pre-merge location. Still WRITTEN, not just read: the reader is JavaScript
+# injected into vendor hook files on live machines, and those are only rewritten
+# when `ts-agentmemory --apply` runs -- so a machine can be carrying the old
+# reader for a while after this clone updates. Dropping the old path silently
+# turns 401-recovery back into a permanent no-op, which is the exact failure that
+# cost 56 consecutive captures on 2026-08-21 with nothing in any log.
+tss_secret_cache_path_legacy() {
     printf '%s' "${XDG_CONFIG_HOME:-$HOME/.config}/docker-local/agentmemory.secret"
+}
+
+# Write the cache to both paths, 0600, creating the directories. Callers that
+# refresh the secret must use this rather than writing the new path alone.
+tss_secret_cache_write() {                 # <secret>
+    local secret="$1" path
+    [ -n "$secret" ] || return 1
+    for path in "$(tss_secret_cache_path)" "$(tss_secret_cache_path_legacy)"; do
+        mkdir -p "$(dirname "$path")" 2>/dev/null || continue
+        # Create private, then fill: a world-readable window is still a window,
+        # and agentmemory_secret refuses a cache that is not mode 600 anyway.
+        ( umask 077; printf '%s' "$secret" > "$path" ) || continue
+        chmod 600 "$path" 2>/dev/null || true
+    done
 }
 
 # Windows keeps this in HKCU\Environment, which every newly launched process
@@ -558,20 +582,25 @@ tss_secret_cache_path() {
 # The 0600 check has no Windows analogue and is the reason the file is safe to
 # use at all. Refuse a group- or world-readable cache rather than trusting it.
 agentmemory_secret() {                    # [stack-dir]
-    local cache mode dir out
+    local cache mode dir out legacy
     if [ -n "${AGENTMEMORY_SECRET:-}" ]; then printf '%s' "$AGENTMEMORY_SECRET"; return 0; fi
-    cache="$(tss_secret_cache_path)"
-    if [ -f "$cache" ]; then
+    # New path first, then the pre-merge one, so a machine that has not re-applied
+    # its hook edits yet still finds its cache.
+    for cache in "$(tss_secret_cache_path)" "$(tss_secret_cache_path_legacy)"; do
+        [ -f "$cache" ] || continue
         mode="$(_tss_file_mode "$cache")"
         if [ "$mode" = 600 ]; then
             tr -d '\r\n' < "$cache"; return 0
         fi
         warn "$cache is mode ${mode:-unknown}, not 600 — refusing to use it. chmod 600 it, or delete it."
-    fi
+    done
     dir="${1:-$TSS_STACKS/agentmemory}"
     out="$( cd "$dir" 2>/dev/null && docker compose exec -T agentmemory cat /data/.hmac 2>/dev/null )" || return 1
     [ -n "$out" ] || return 1
-    printf '%s' "$out" | tr -d '\r\n'
+    out="$(printf '%s' "$out" | tr -d '\r\n')"
+    # Refresh both cache paths while we have the authoritative value in hand.
+    tss_secret_cache_write "$out" 2>/dev/null || true
+    printf '%s' "$out"
 }
 
 # Read a raw credential file, refusing anything that looks wrong. The mode check
