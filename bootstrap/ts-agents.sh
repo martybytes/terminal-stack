@@ -82,18 +82,42 @@ headroom_token() {
     sed -n 's/^HEADROOM_PROXY_TOKEN=//p' "$file" | head -1
 }
 
+# Probe the proxy and SAY WHY it failed. One 2s attempt reported a cold
+# container as broken, and `on`/`repair` gate on this, so a slow first hit
+# turned into 'registrations were not changed' with nothing to act on. A
+# real HTTP answer (401, 500) is conclusive and is not retried; only a
+# connection failure or timeout is.
+headroom_probe_auth() {
+    local token="$1" proxy="$2" code attempt
+    for attempt in 1 2; do
+        # curl PRINTS 000 and exits non-zero on a connection failure, so a
+        # `|| echo 000` fallback concatenates and yields 000000.
+        code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
+            -H "X-Headroom-Proxy-Token: $token" "$proxy/stats" 2>/dev/null)" || code=000
+        case "${code:-000}" in
+            2??) return 0 ;;
+            000)
+                # set -e safe: a bare `[ ] && { }` as the last command of the
+                # loop body would abort the retry it exists to allow.
+                if [ "$attempt" = 2 ]; then printf unreachable; return 1; fi
+                ;;
+            *) printf 'HTTP %s' "$code"; return 1 ;;
+        esac
+    done
+}
+
 headroom_status() {
-    local proxy mcp token proxy_ok=0
+    local proxy mcp token why proxy_ok=0
     proxy="$(json_get headroom.proxyUrl)"; mcp="$(json_get headroom.mcpUrl)"
     echo "Headroom:"
     token="$(headroom_token)" || token=""
-    if [ -n "$token" ] && curl -fsS --max-time 2 -H "X-Headroom-Proxy-Token: $token" "$proxy/stats" >/dev/null 2>&1; then
+    if [ -z "$token" ]; then
+        echo "  !!  proxy token unavailable; set HEADROOM_PROXY_TOKEN or HEADROOM_ENV_FILE"
+    elif why="$(headroom_probe_auth "$token" "$proxy")"; then
         echo "  ok  proxy authentication works at $proxy"
         proxy_ok=1
-    elif [ -z "$token" ]; then
-        echo "  !!  proxy token unavailable; set HEADROOM_PROXY_TOKEN or HEADROOM_ENV_FILE"
     else
-        echo "  !!  proxy authentication failed at $proxy (docker-local owns it)"
+        echo "  !!  proxy authentication failed at $proxy: $why (docker-local owns it)"
     fi
     if am_probe "$mcp" >/dev/null 2>&1; then echo "  ok  MCP reachable at $mcp"
     else

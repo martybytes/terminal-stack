@@ -111,6 +111,35 @@ def test_headroom_enable_requires_authenticated_proxy_and_disable_restores_direc
     assert 'off) run_agent_adapter "$tool" off; ts_agent_set "$key" off' in config
 
 
+def test_headroom_auth_probe_retries_and_names_the_failure():
+    """A single 2s probe called a cold proxy broken, and `on`/`repair` gate on it,
+    so a slow first hit printed "registrations were not changed" with no cause -
+    while the missing MCP registrations it was meant to fix stayed missing. Both
+    twins now retry a connection failure, never retry a real HTTP answer, and put
+    the reason in the message."""
+    adapter = (ROOT / "bootstrap/ts-agents.sh").read_text(encoding="utf-8")
+    ps_adapter = PS_ADAPTER.read_text(encoding="utf-8")
+    probe = adapter[adapter.index("headroom_probe_auth() {"):adapter.index("\nheadroom_status() {")]
+    assert "--max-time 5" in probe, "2s is a false negative against a cold container"
+    assert "for attempt in 1 2" in probe
+    assert "printf unreachable" in probe
+    # curl prints 000 itself on a connection failure; `|| echo 000` yields 000000.
+    assert "|| code=000" in probe and "|| echo 000" not in _uncommented(probe)
+    assert 'why="$(headroom_probe_auth "$token" "$proxy")"' in adapter
+    assert 'proxy authentication failed at $proxy: $why' in adapter
+    ps_probe = ps_adapter[ps_adapter.index("function Test-TsHeadroomAuth"):]
+    ps_probe = ps_probe[:ps_probe.index("\n}\n")]
+    assert "-TimeoutSec 5" in ps_probe
+    assert "foreach ($attempt in 1, 2)" in ps_probe
+    assert "$script:TsHeadroomAuthReason = 'unreachable'" in ps_probe
+    assert '"HTTP $code"' in ps_probe, "a real HTTP answer must be reported, not retried"
+    # And every caller of the gate must print the reason it just recorded.
+    for verb in ("leaving direct mode unchanged", "registrations were not changed"):
+        line = [l for l in ps_adapter.splitlines() if verb in l]
+        assert line and "$script:TsHeadroomAuthReason" in line[0], \
+            f"the '{verb}' message does not say why auth failed"
+
+
 def test_offline_optional_headroom_mcp_is_removed_instead_of_registered():
     adapter = (ROOT / "bootstrap/ts-agents.sh").read_text(encoding="utf-8")
     ps_adapter = PS_ADAPTER.read_text(encoding="utf-8")
@@ -806,6 +835,32 @@ def test_shared_pwsh_prompts_live_where_both_callers_can_reach_them():
     for fn in ("function Read-TsWizard", "function Install-TsTerminals"):
         assert fn in cfg, f"{fn} must live in _config.ps1"
         assert fn not in boot, f"{fn} is duplicated in windows-bootstrap.ps1"
+
+
+def test_wizard_callees_are_all_defined_in_config_ps1():
+    """Naming the two moved functions is not enough: `Read-TsWizard` calling a
+    prompt that stayed in windows-bootstrap.ps1 is a runtime crash for
+    `ts-config wizard` only (this is how Read-TsWorkspaceDir broke it). Derive
+    the callee list from the body instead of maintaining it by hand."""
+    cfg = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
+    body = cfg[cfg.index("function Read-TsWizard"):]
+    body = body[:body.index("\nfunction ", 1)]
+    called = set(re.findall(r"\b((?:Read|Get|Test|Show|Save|Install)-Ts[A-Za-z]+)", body))
+    called.discard("Read-TsWizard")
+    missing = sorted(n for n in called
+                     if not re.search(r"^function " + n + r"\b", cfg, re.M))
+    assert not missing, f"Read-TsWizard calls {missing}, which ts-config wizard cannot see"
+
+
+def test_pwsh_wizard_persists_the_workspace_answer():
+    """The questionnaire asks for a workspace root; dropping the answer on the
+    `ts-config wizard` path is a silent behaviour difference from the installer."""
+    ps = (ROOT / "windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1").read_text(encoding="utf-8")
+    cfg = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
+    assert "function Save-TsWorkspaceOverride" in cfg
+    assert "Save-TsWorkspaceOverride $w.Workspace" in ps
+    # And a half-finished questionnaire must not be persisted over real answers.
+    assert "did not complete" in ps
 
 
 # ── ts-smb ──────────────────────────────────────────────────────────────────────

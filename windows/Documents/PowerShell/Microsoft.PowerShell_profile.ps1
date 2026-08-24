@@ -1007,6 +1007,12 @@ function Set-TerminalStackConfig {
     # the menu would keep printing the pre-wizard values.
     $runWizard = {
         $w = Read-TsWizard
+        # A prompt that throws leaves $w null or half-filled, and Save-TsConfig would
+        # then persist '' over real answers (ValidateSet only catches some of them).
+        if (-not $w -or -not $w.Leader -or -not $w.Theme -or -not $w.Headroom) {
+            Write-Warning 'ts-config wizard: the questionnaire did not complete — nothing was installed or saved.'
+            return $null
+        }
         Install-TsTerminals -Selected $w.Terminals
         Install-TsApps @($w.Apps)
         Save-TsConfig -LeaderChord $w.Leader -ThemeMode $w.Theme -TmuxPrefix $tmux -Apps @($w.Apps) -CcTts $ccTts `
@@ -1014,6 +1020,7 @@ function Set-TerminalStackConfig {
             -HeadroomEnabled $w.Headroom -HeadroomCursorMode $w.HeadroomCursor `
             -CavemanEnabled $w.Caveman -AgentmemoryEnabled $w.Agentmemory | Out-Null
         Export-CcTtsJson
+        Save-TsWorkspaceOverride $w.Workspace
         Invoke-TsSync $src
         Show-TsInstalledApps @($w.Apps)
         Write-Host '==> done.'
@@ -1080,9 +1087,11 @@ function Set-TerminalStackConfig {
                     't' { Show-TsWezStatus }
                     'w' {
                         $w = & $runWizard
-                        $leader = $w.Leader; $theme = $w.Theme; $apps = @($w.Apps)
-                        $headroom = $w.Headroom; $headroomCursor = $w.HeadroomCursor
-                        $caveman = $w.Caveman; $agentmemory = $w.Agentmemory
+                        if ($w) {
+                            $leader = $w.Leader; $theme = $w.Theme; $apps = @($w.Apps)
+                            $headroom = $w.Headroom; $headroomCursor = $w.HeadroomCursor
+                            $caveman = $w.Caveman; $agentmemory = $w.Agentmemory
+                        }
                     }
                     '7' { Invoke-TsMux status }
                     '8' { $restore = Read-TsWeztermRestore; Save-TsConfig -WeztermRestore $restore | Out-Null; Invoke-TsSync $src; Write-Host '==> done.' }
