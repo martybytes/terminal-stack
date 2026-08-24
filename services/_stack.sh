@@ -1027,10 +1027,37 @@ tss_fill_secret() {                        # <env-file> <key> <placeholder> <byt
 # ── declarative checks ───────────────────────────────────────────────────────
 # Each stack ships ts-checks.conf; a new stack registers itself by having one.
 # Fields: kind id expect secs target
+
+# Every check file in effect for a stack: ts-checks.conf, plus one per compose
+# OVERLAY this machine has selected. `docker-compose.<x>.yml` pairs with
+# `ts-checks.<x>.conf` by name — no registry, same rule as everything else here.
+#
+# Without this an overlay's services either go unchecked, or their checks sit in
+# the base file and fail on every machine that has not enabled the overlay.
+# headroom is the case that forced it: its Qdrant and Neo4j checks were asserted
+# everywhere, and passed everywhere, while nothing had ever written to either.
+tss_check_files() {                        # <stack> -> one path per line
+    local stack="$1" dir f name
+    dir="$(tss_stack_dir "$stack")"
+    [ -f "$dir/ts-checks.conf" ] && printf '%s\n' "$dir/ts-checks.conf"
+    while IFS= read -r f; do
+        case "$f" in
+            docker-compose.yml|'') continue ;;
+            docker-compose.*.yml) name="${f#docker-compose.}"; name="${name%.yml}" ;;
+            *) continue ;;
+        esac
+        [ -f "$dir/ts-checks.$name.conf" ] && printf '%s\n' "$dir/ts-checks.$name.conf"
+    done <<EOF
+$(tss_compose_files "$dir")
+EOF
+    return 0
+}
+
 tss_run_checks() {                         # <stack>   -> 0 all passed
-    local stack="$1" conf kind id expect secs target rc=0 deadline
-    conf="$(tss_stack_dir "$stack")/ts-checks.conf"
-    [ -f "$conf" ] || { info "$stack: no ts-checks.conf"; return 0; }
+    local stack="$1" conf kind id expect secs target rc=0 deadline confs
+    confs="$(tss_check_files "$stack")"
+    [ -n "$confs" ] || { info "$stack: no ts-checks.conf"; return 0; }
+    for conf in $confs; do
     while read -r kind id expect secs target; do
         case "${kind:-}" in ''|'#'*) continue ;; esac
         case "$kind" in
@@ -1056,6 +1083,7 @@ tss_run_checks() {                         # <stack>   -> 0 all passed
             *) warn "$stack: unknown check kind '$kind'" ;;
         esac
     done < "$conf"
+    done
     return $rc
 }
 

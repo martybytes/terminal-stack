@@ -271,6 +271,7 @@ function Get-TsConfig {
         weztermMux = 'off'; weztermRestore = 'off'; ghosttyConfig = 'on'; apps = @()
         headroomEnabled = 'off'; headroomCursorMode = 'mcp'
         cavemanEnabled = 'off'; agentmemoryEnabled = 'off'
+        memoryBackend = 'agentmemory'
     }
 }
 
@@ -285,6 +286,7 @@ function Get-TsAgentSetting([string]$Name) {
         'cavemanEnabled'    { 'TS_CAVEMAN' }
         'agentmemoryEnabled'{ 'TS_AGENTMEMORY' }
         'playwrightEnabled' { 'TS_PLAYWRIGHT' }
+        'memoryBackend'     { 'TS_MEMORY_BACKEND' }
     }
     if ($envName) {
         $override = [Environment]::GetEnvironmentVariable($envName, 'Process')
@@ -294,6 +296,10 @@ function Get-TsAgentSetting([string]$Name) {
     $saved = Get-TsProp $cfg $Name $null
     if ($saved) { return "$saved".ToLowerInvariant() }
     if ($Name -eq 'headroomCursorMode') { return 'mcp' }
+    # agentmemory is the default backend: it is what a machine with no answer
+    # has effectively been running, since Headroom's memory needs a --memory the
+    # compose file has never passed. Upgrading into this key changes nothing.
+    if ($Name -eq 'memoryBackend') { return 'agentmemory' }
     if ($Name -eq 'agentmemoryEnabled') {
         $claudeCache = Join-Path $env:USERPROFILE '.claude\plugins\cache\agentmemory\agentmemory'
         $codexCache = Join-Path $env:USERPROFILE '.codex\plugins\cache\agentmemory\agentmemory'
@@ -344,7 +350,8 @@ function Save-TsConfig {
         [ValidateSet('mcp','byok','off')][string]$HeadroomCursorMode = 'mcp',
         [ValidateSet('on','off')][string]$CavemanEnabled = 'off',
         [ValidateSet('on','off')][string]$AgentmemoryEnabled = 'off',
-        [ValidateSet('on','off')][string]$PlaywrightEnabled = 'off'
+        [ValidateSet('on','off')][string]$PlaywrightEnabled = 'off',
+        [ValidateSet('agentmemory','headroom','none')][string]$MemoryBackend = 'agentmemory'
     )
     $l = ConvertTo-TsLeader $LeaderChord
     $existing = Get-TsConfig
@@ -375,7 +382,8 @@ function Save-TsConfig {
         @{ Param = 'HeadroomCursorMode'; Name = 'headroomCursorMode'; Default = 'mcp' },
         @{ Param = 'CavemanEnabled'; Name = 'cavemanEnabled'; Default = 'off' },
         @{ Param = 'AgentmemoryEnabled'; Name = 'agentmemoryEnabled'; Default = $(Get-TsAgentSetting agentmemoryEnabled) },
-        @{ Param = 'PlaywrightEnabled'; Name = 'playwrightEnabled'; Default = 'off' }
+        @{ Param = 'PlaywrightEnabled'; Name = 'playwrightEnabled'; Default = 'off' },
+        @{ Param = 'MemoryBackend'; Name = 'memoryBackend'; Default = 'agentmemory' }
     )) {
         if (-not $PSBoundParameters.ContainsKey($pair.Param)) {
             Set-Variable -Name $pair.Param -Value (Get-TsProp $existing $pair.Name $pair.Default)
@@ -399,11 +407,65 @@ function Save-TsConfig {
         cavemanEnabled     = $CavemanEnabled
         agentmemoryEnabled = $AgentmemoryEnabled
         playwrightEnabled = $PlaywrightEnabled
+        memoryBackend      = $MemoryBackend
     }
     $p = Get-TsConfigPath
     New-Item -ItemType Directory -Force -Path (Split-Path $p) | Out-Null
     ($obj | ConvertTo-Json) | Set-Content -Encoding UTF8 $p
     return $obj
+}
+
+# <clone>\services\stacks\<stack>\.env. One rule everywhere: the stack tree is
+# always under the clone, so there is nothing to search for. POSIX twin:
+# bootstrap/_config.sh ts_stack_env_file.
+function Get-TsStackEnvFile([string]$Stack) {
+    Join-Path (Split-Path -Parent $PSScriptRoot) "services\stacks\$Stack\.env"
+}
+
+# ── the memory backend ──────────────────────────────────────────────────────────
+# AgentMemory or Headroom, never both. They do the same job, so running both
+# gives two half-filled stores and no way to know which one holds the answer.
+#
+# This is the ONLY writer of agentmemoryEnabled. Anything that sets that key on
+# its own can produce a combination the wizard refuses to offer, which is how a
+# "cannot happen" state happens.
+# POSIX twin: bootstrap/_config.sh ts_memory_apply.
+function Get-TsMemoryBackend { Get-TsAgentSetting memoryBackend }
+
+# The headroom stack's COMPOSE_FILE is derived, never hand-edited: Qdrant and
+# Neo4j are only referenced -- and so only ever pulled -- when the overlay is
+# selected, and the overlay is what passes --memory.
+function Get-TsMemoryComposeSpec([string]$Backend) {
+    if ($Backend -eq 'headroom') { return 'docker-compose.yml:docker-compose.memory.yml' }
+    return 'docker-compose.yml'
+}
+
+function Set-TsMemoryComposeFile([string]$Backend) {
+    $envFile = Get-TsStackEnvFile 'headroom'
+    if (-not $envFile -or -not (Test-Path -LiteralPath $envFile)) { return }
+    $spec = Get-TsMemoryComposeSpec $Backend
+    $lines = @(Get-Content -LiteralPath $envFile)
+    $sawFile = $false; $sawSep = $false
+    $out = foreach ($line in $lines) {
+        if ($line -match '^COMPOSE_FILE=')           { $sawFile = $true; "COMPOSE_FILE=$spec" }
+        elseif ($line -match '^COMPOSE_PATH_SEPARATOR=') { $sawSep = $true; $line }
+        else { $line }
+    }
+    $out = @($out)
+    if (-not $sawSep)  { $out += 'COMPOSE_PATH_SEPARATOR=:' }
+    if (-not $sawFile) { $out += "COMPOSE_FILE=$spec" }
+    # -Value, never a Where-Object pipeline: an empty pipeline leaves the file
+    # untouched with no error, which is the documented trap in this repo.
+    Set-Content -LiteralPath $envFile -Value $out -Encoding UTF8
+}
+
+function Set-TsMemoryBackend([ValidateSet('agentmemory','headroom','none')][string]$Backend) {
+    Save-TsConfig -MemoryBackend $Backend | Out-Null
+    # Derived in the same breath. A separate "also turn AgentMemory off" command
+    # is a command someone forgets to run.
+    if ($Backend -eq 'agentmemory') { Save-TsConfig -AgentmemoryEnabled 'on'  | Out-Null }
+    else                            { Save-TsConfig -AgentmemoryEnabled 'off' | Out-Null }
+    Set-TsMemoryComposeFile $Backend
 }
 
 # ── Wizard prompts ──────────────────────────────────────────────────────────────
@@ -992,6 +1054,38 @@ function Read-TsAgentToggle([string]$EnvName, [string]$Title, [string[]]$Intro) 
     )
 }
 
+# ONE question, replacing the two independent 'Headroom?' / 'AgentMemory?'
+# toggles. They ask about two things that do the same job, so every combination
+# was reachable -- including the one nobody wants: two memory systems, each
+# holding half the story. POSIX twin: ts_prompt_memory_backend in _wizard.sh;
+# keep the option labels aligned, they are what the reader compares.
+function Read-TsMemoryBackend {
+    $override = [Environment]::GetEnvironmentVariable('TS_MEMORY_BACKEND', 'Process')
+    if ($override -in 'agentmemory','headroom','none') { return $override }
+    # A pre-merge unattended install only knew the two booleans. Honour them
+    # rather than ignoring them, so an old script cannot land on a combination
+    # this menu will not offer.
+    $am = [Environment]::GetEnvironmentVariable('TS_AGENTMEMORY', 'Process')
+    $hr = [Environment]::GetEnvironmentVariable('TS_HEADROOM', 'Process')
+    if ($am -or $hr) { return $(if ($am -eq 'on') { 'agentmemory' } else { 'none' }) }
+
+    Read-TsChoice -Title 'Memory and compression:' -Default 'agentmemory' -Intro @(
+        '  RECOMMENDATION: AgentMemory remembers, Headroom compresses.',
+        '  Only ONE memory system runs. They overlap, and two stores means two',
+        '  half-filled ones with no way to tell which holds the answer you want.',
+        '',
+        '  Compression is not a memory feature and is unaffected by this: Headroom',
+        '  compresses by trimming tool schemas and code, and calls no model of its own.',
+        "  Headroom's memory additionally runs Qdrant and Neo4j (about 940 MB); the",
+        '  other answers never pull those images.'
+    ) -Options @(
+        @{ Key = 'agentmemory'; Label = 'AgentMemory remembers, Headroom compresses'; Note = 'the default' },
+        @{ Key = 'headroom'; Label = 'Headroom does both'; Note = 'AgentMemory is not installed' },
+        @{ Key = 'none'; Label = 'Headroom compresses only'; Note = 'no memory at all' },
+        @{ Key = 'off'; Label = 'Neither'; Note = 'no proxy, no memory' }
+    )
+}
+
 function Read-TsHeadroomCursorMode {
     if ($env:TS_HEADROOM_CURSOR -in 'mcp','byok','off') { return $env:TS_HEADROOM_CURSOR }
     Read-TsChoice -Title 'Cursor Headroom mode:' -Default 'mcp' -Intro @(
@@ -1151,17 +1245,19 @@ function Read-TsWizard {
         WezRestore = (Read-TsWeztermRestore)
         Apps      = @(Read-TsApps)
         CcTts     = (Read-TsCcTts)
-        Headroom  = (Read-TsAgentToggle TS_HEADROOM 'Headroom prompt compression and monitoring?' @(
-            '  Expects the headroom stack on 127.0.0.1:8787 and its MCP sidecar on 8788.',
-            '  This installer never manages those containers.'
-        ))
+        MemoryBackend = (Read-TsMemoryBackend)
         Caveman   = (Read-TsAgentToggle TS_CAVEMAN 'Caveman terse output for all projects?' @(
             '  Installs the pinned user-scope plugin/skill; no project files are changed.'
         ))
-        Agentmemory = (Read-TsAgentToggle TS_AGENTMEMORY 'AgentMemory for all projects?' @(
-            '  Expects the agentmemory stack on 127.0.0.1:3111; this owns only agent wiring.'
-        ))
         Workspace = (Read-TsWorkspaceDir)
+    }
+    # Derived, never asked separately: that is what makes two memory systems
+    # unrepresentable rather than merely discouraged.
+    switch ($w.MemoryBackend) {
+        'agentmemory' { $w.Agentmemory = 'on';  $w.Headroom = 'on' }
+        'headroom'    { $w.Agentmemory = 'off'; $w.Headroom = 'on' }
+        'none'        { $w.Agentmemory = 'off'; $w.Headroom = 'on' }
+        default       { $w.Agentmemory = 'off'; $w.Headroom = 'off'; $w.MemoryBackend = 'none' }
     }
     # Tray daemon follow-up only makes sense when TTS itself was enabled.
     $w.CcTtsDaemon = if ($w.CcTts -eq 'on') { Read-TsCcTtsDaemon } else { 'off' }

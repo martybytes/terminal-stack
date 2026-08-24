@@ -1,6 +1,15 @@
-# headroom — local LLM proxy with semantic memory, plus the two datastores it
-# needs, plus a token-injecting dashboard gateway. Upstream:
-# https://github.com/headroomlabs-ai/headroom
+# headroom — the compression proxy and its token-injecting dashboard gateway.
+# Upstream: https://github.com/headroomlabs-ai/headroom
+#
+# Compression is STRUCTURAL, not model-driven: tool-schema trimming, code-aware
+# compression and CCR. It calls no model of its own — the only model it talks to
+# is the one it relays your traffic to. Nothing in this file needs an LLM
+# endpoint, and pointing one at it would change which model your agents use.
+#
+# Headroom's semantic memory is NOT here. It lives in docker-compose.memory.yml
+# and only runs when `memoryBackend` is `headroom`, because AgentMemory does the
+# same job and only one memory system runs on a machine (`ts-config memory`).
+# Selected by COMPOSE_FILE in .env; see that file and docs/decisions.md.
 #
 # This is a docker-local adaptation of the project's own compose file, not a
 # copy. Differences, each required by ../docs/conventions.md:
@@ -11,12 +20,10 @@
 #   - dashboard-gateway, so the dashboard works in a plain browser tab
 #     without pasting the token anywhere (see that service below).
 #
-# Ports are loopback-only, as upstream also does. None of the four services
-# authenticates by default: the proxy's /v1/* data plane is open unless
-# HEADROOM_PROXY_TOKEN is set, Qdrant has no API key, and Neo4j would fall back
-# to a dev password. Publishing any of them on 0.0.0.0 would hand any peer on
-# the network a relay through the proxy plus read/write on the embeddings and
-# graph derived from your prompts.
+# Ports are loopback-only, as upstream also does. Nothing here authenticates by
+# default: the proxy's /v1/* data plane is open unless HEADROOM_PROXY_TOKEN is
+# set. Publishing it on 0.0.0.0 would hand any peer on the network a relay
+# through your provider account.
 # The compose PROJECT name, pinned here rather than inherited from the
 # directory: every container, network and default volume this stack creates
 # is then prefixed ts-, so `docker ps` and `docker network ls` show at a
@@ -50,10 +57,6 @@ services:
       # Keep all read/write state on the named volume below.
       HEADROOM_WORKSPACE_DIR: /home/nonroot/.headroom
       HEADROOM_CONFIG_DIR: /home/nonroot/.headroom/config
-      QDRANT_URL: "http://qdrant:6333"
-      NEO4J_URI: "bolt://neo4j:7687"
-      NEO4J_USER: "${NEO4J_USER:-neo4j}"
-      NEO4J_PASSWORD: "${NEO4J_PASSWORD:?set NEO4J_PASSWORD in headroom/.env — see .env.example}"
       # Lets dashboard-gateway's requests (settings UI, unmasked stats) past
       # headroom's separate loopback-or-trusted-client check -- an
       # upstream-supported knob for exactly this "dashboard behind a
@@ -72,9 +75,6 @@ services:
       timeout: 5s
       start_period: 30s
       retries: 3
-    depends_on:
-      - qdrant
-      - neo4j
     logging:
       driver: json-file
       options:
@@ -111,70 +111,9 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # Vector database: embeddings, so the proxy can retrieve similar context.
-  qdrant:
-    image: qdrant/qdrant:v1.17.1
-    container_name: ts-headroom-qdrant
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:${QDRANT_REST_PORT:-6333}:6333"   # REST
-      - "127.0.0.1:${QDRANT_GRPC_PORT:-6334}:6334"   # gRPC
-    environment:
-      QDRANT__SERVICE__GRPC_PORT: "6334"
-    volumes:
-      - qdrant:/qdrant/storage
-    # The image ships no curl or wget, so the check runs the qdrant binary's own
-    # entrypoint-adjacent tooling: bash's /dev/tcp is present and is enough to
-    # prove the REST port is accepting connections.
-    healthcheck:
-      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/6333' || exit 1"]
-      interval: 30s
-      timeout: 5s
-      start_period: 20s
-      retries: 3
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-  # Graph database: relationships and multi-hop reasoning behind the memory
-  # features that traverse links between stored items.
-  neo4j:
-    image: neo4j:5.26
-    container_name: ts-headroom-neo4j
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:${NEO4J_HTTP_PORT:-7474}:7474"   # Browser
-      - "127.0.0.1:${NEO4J_BOLT_PORT:-7687}:7687"   # Bolt
-    environment:
-      NEO4J_AUTH: "${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:?set NEO4J_PASSWORD in headroom/.env — see .env.example}"
-      # APOC is Neo4j's standard procedure library, needed by Headroom's queries.
-      # Its file import/export stays disabled (the Neo4j default) — that grants
-      # filesystem read/write via stored procedures. Do not enable it.
-      NEO4J_PLUGINS: '["apoc"]'
-      # Bounded on purpose: the default heap sizing is a fraction of host RAM,
-      # and this stack shares an 8 GB Docker VM with agentmemory and kokoro.
-      NEO4J_server_memory_heap_initial__size: "${NEO4J_HEAP:-512m}"
-      NEO4J_server_memory_heap_max__size: "${NEO4J_HEAP:-512m}"
-      NEO4J_server_memory_pagecache_size: "${NEO4J_PAGECACHE:-256m}"
-    volumes:
-      - neo4j:/data
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:7474 >/dev/null 2>&1 || exit 1"]
-      interval: 30s
-      timeout: 10s
-      start_period: 45s
-      retries: 5
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-# Plain named volumes rather than `external: true`, and that asymmetry IS the
+# A plain named volume rather than `external: true`, and that asymmetry IS the
 # safety property: agentmemory's two are external so `down -v` cannot touch them,
-# while these three are removable by design and `ts-stack` gates that behind an
+# while this one is removable by design and `ts-stack` gates that behind an
 # explicit --destroy-data plus a verified backup.
 #
 # `name:` is pinned so the volume is exactly this, with no <project>_ prefix. A
@@ -182,15 +121,12 @@ services:
 # is named ts-headroom.
 volumes:
   workspace:
-    name: ts-headroom-workspace   # dashboard history, logs, config, memory state
-  qdrant:
-    name: ts-headroom-qdrant
-  neo4j:
-    name: ts-headroom-neo4j
+    name: ts-headroom-workspace   # dashboard history, logs, config, savings state
 
 # Explicit, deterministic subnet (rather than Docker's dynamic default) so
 # HEADROOM_PROXY_TRUSTED_DASHBOARD_CLIENT_CIDRS above names a fixed, known
-# range: this stack's own 4 containers, nothing else on the host.
+# range: this stack's own containers, nothing else on the host. Pinned here
+# rather than in the overlay so the range does not move when memory is enabled.
 networks:
   default:
     ipam:

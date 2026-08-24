@@ -260,9 +260,14 @@ def test_the_memory_volumes_are_external_and_the_headroom_ones_are_not():
     assert "ts-agentmemory-console-history:\n    external: true" in con
     assert "external: true" not in hr.split("volumes:")[-1]
     # ...and pinned by name, or a plain key under a project called ts-headroom
-    # would produce ts-headroom_ts-headroom-workspace.
-    for name in ("ts-headroom-workspace", "ts-headroom-qdrant", "ts-headroom-neo4j"):
-        assert f"name: {name}" in hr
+    # would produce ts-headroom_ts-headroom-workspace. The two datastore volumes
+    # live with the datastores, in the memory overlay -- they only exist on a
+    # machine that chose Headroom as its memory backend.
+    assert "name: ts-headroom-workspace" in hr
+    mem = (ROOT / "services/stacks/headroom/docker-compose.memory.yml").read_text(encoding="utf-8")
+    for name in ("ts-headroom-qdrant", "ts-headroom-neo4j"):
+        assert f"name: {name}" in mem
+        assert f"name: {name}" not in hr
 
 
 def test_the_volume_rename_map_names_the_volumes_as_they_are_on_disk():
@@ -508,3 +513,94 @@ def test_the_console_is_its_own_project_named_for_what_it_is():
     # happening.
     assert not re.search(r"^\s+depends_on:", compose, re.M)
     assert not (ROOT / "services" / "stacks" / "agentmemory" / "docker-compose.console.yml").exists()
+
+
+def test_headroom_memory_needs_the_flag_and_the_flag_lives_in_the_overlay():
+    """`headroom proxy` engages memory ONLY when passed --memory, and there is no
+    environment variable for that flag. The base compose used to set QDRANT_URL
+    and NEO4J_URI and start both databases while the proxy never contacted
+    either: 0 memories, 0 Qdrant collections, 0 Neo4j nodes, a 900 MB Neo4j, and
+    four containers reporting healthy.
+
+    So the overlay has to carry three things together -- the datastores, the
+    connection settings, and the flag. An overlay that starts the databases
+    without --memory reproduces the original bug in a tidier shape, which is
+    exactly the edit this test is here to fail."""
+    d = ROOT / "services" / "stacks" / "headroom"
+    base = (d / "docker-compose.yml").read_text(encoding="utf-8")
+    overlay = (d / "docker-compose.memory.yml").read_text(encoding="utf-8")
+
+    for name in ("qdrant:", "neo4j:"):
+        assert name not in base, f"the base compose still defines {name}"
+        assert name in overlay, f"the overlay does not define {name}"
+    for key in ("QDRANT_URL", "NEO4J_URI", "NEO4J_PASSWORD"):
+        assert key not in base, f"{key} is still in the base compose"
+        assert key in overlay, f"{key} is missing from the overlay"
+    assert "--memory" in overlay, "the overlay starts the datastores but never turns memory on"
+
+
+def test_the_memory_backend_is_one_slot_with_three_values():
+    """One key, so two memory systems are unrepresentable rather than merely
+    discouraged, and agentmemoryEnabled is derived from it rather than set
+    independently."""
+    sh = (ROOT / "bootstrap" / "_config.sh").read_text(encoding="utf-8")
+    ps = (ROOT / "bootstrap" / "_config.ps1").read_text(encoding="utf-8")
+    toml = (ROOT / ".chezmoi.toml.tmpl").read_text(encoding="utf-8")
+
+    for value in ("agentmemory", "headroom", "none"):
+        assert f"memoryBackend:{value}" in sh, f"{value} is not an accepted value in bash"
+    assert "'agentmemory','headroom','none'" in ps.replace(" ", ""), "pwsh ValidateSet"
+    assert 'default "agentmemory"' in toml, "the chezmoi default must be agentmemory"
+    # The single writer, in both twins.
+    assert "ts_memory_apply()" in sh
+    assert "function Set-TsMemoryBackend" in ps
+
+
+def test_the_wizard_asks_once_and_derives_the_rest():
+    """The two independent Headroom/AgentMemory toggles are what made a
+    two-memory-system machine one keystroke away, so they must not come back."""
+    sh = (ROOT / "bootstrap" / "_wizard.sh").read_text(encoding="utf-8")
+    ps = (ROOT / "bootstrap" / "_config.ps1").read_text(encoding="utf-8")
+    assert "ts_prompt_memory_backend()" in sh
+    assert "function Read-TsMemoryBackend" in ps
+    assert "TS_AGENTMEMORY 'AgentMemory for all projects?'" not in sh
+    assert "Read-TsAgentToggle TS_AGENTMEMORY" not in ps
+    assert "TS_HEADROOM 'Headroom prompt compression" not in sh
+    # Both twins offer the same four answers.
+    for key in ("agentmemory", "headroom", "none", "off"):
+        assert key in sh and key in ps
+
+
+def test_ts_envfiles_paths_are_interpolation_sources_only():
+    """An `env_file:` entry hands the container every variable in the file. The
+    console reads the agentmemory stack's .env for display values, and that file
+    holds OPENAI_API_KEY -- so it may only ever be a --env-file interpolation
+    source."""
+    for extra in sorted((ROOT / "services" / "stacks").glob("*/ts-envfiles")):
+        compose = (extra.parent / "docker-compose.yml").read_text(encoding="utf-8")
+        for line in extra.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            assert f"path: {line}" not in compose, (
+                f"{extra.parent.name}: {line} is both a ts-envfiles entry and an env_file: "
+                f"entry -- that injects every key in it, secrets included"
+            )
+            assert (extra.parent / line).resolve().is_file(), f"{extra.parent.name}: {line} does not exist"
+
+
+def test_overlay_checks_are_paired_with_their_overlay():
+    """ts-checks.<x>.conf goes with docker-compose.<x>.yml. Without the pairing an
+    overlay's services either go unchecked, or their checks sit in the base file
+    and pass on every machine that has not enabled the overlay -- which is what
+    the Qdrant and Neo4j health checks were doing."""
+    stacks = ROOT / "services" / "stacks"
+    for conf in sorted(stacks.glob("*/ts-checks.*.conf")):
+        name = conf.name[len("ts-checks."):-len(".conf")]
+        assert (conf.parent / f"docker-compose.{name}.yml").is_file(), (
+            f"{conf.relative_to(ROOT)} has no docker-compose.{name}.yml to belong to"
+        )
+    # And the base file must not assert the overlay's containers.
+    base = (stacks / "headroom" / "ts-checks.conf").read_text(encoding="utf-8")
+    assert "ts-headroom-qdrant" not in base and "ts-headroom-neo4j" not in base
+    assert "sh" in "sh"  # keep the module import-light; no docker needed anywhere above

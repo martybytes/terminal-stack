@@ -1953,3 +1953,91 @@ What did **not** change: the history volume keeps its agentmemory-era name
 (`ts-agentmemory-console-history`). Renaming it would mean migrating a year of
 reporting history to buy nothing. The billing helpers did move, because they
 only ever configured the console.
+
+## Why only one memory backend runs
+
+AgentMemory and Headroom both do semantic memory. The install asked about them
+as two independent yes/no questions, so every combination was reachable,
+including the one nobody wants: two stores, each holding half the story, with no
+way to know which one has the answer you are looking for.
+
+It is now one question with one slot — `memoryBackend`, `agentmemory` |
+`headroom` | `none`. A single slot cannot hold two values, so the bad
+combination is unrepresentable rather than merely discouraged. `headroomEnabled`
+stays independent because compression is genuinely orthogonal; only the memory
+half is exclusive.
+
+`agentmemoryEnabled` is derived from it, and `ts_memory_apply` /
+`Set-TsMemoryBackend` is the only thing that writes either key.
+`ts-config agents agentmemory on` refuses when the backend is something else and
+names `ts-config memory agentmemory`, rather than silently reconciling —
+quietly undoing what someone asked for is worse than telling them the two
+disagree. `ts-doctor` reports drift for the case where something wrote the key
+anyway.
+
+The default is `agentmemory`, and that is not a preference: it is what every
+machine has effectively been running (see below), so upgrading into this key
+changes nothing about how any existing install behaves.
+
+## Why Headroom's memory is a compose overlay, not a flag inside the proxy
+
+The thing that made this a bug rather than a tidy-up: **Headroom's memory has
+never run.** The proxy's command is `headroom proxy --host 0.0.0.0`, and memory
+engages only when it is passed `--memory`. The compose file set `QDRANT_URL` and
+`NEO4J_URI` and started both databases, so everything looked wired — and the
+proxy never contacted either. Measured on a machine that had been running it for
+months:
+
+```
+headroom memory stats   0 memories      qdrant   0 collections
+/stats mcp              0 retrievals    neo4j    0 nodes
+                                        ts-headroom-neo4j  899 MB RSS
+```
+
+Four containers reporting healthy, two of them holding nothing, and no check
+anywhere that would have said so. Note also that `--memory-qdrant-url` reads
+`HEADROOM_QDRANT_URL`, not the un-prefixed `QDRANT_URL` the datastores
+themselves were wired with — so even the variable that was set was the wrong
+name. Both are set now, and the flag is passed explicitly on the command line as
+well.
+
+So the split is `docker-compose.memory.yml`, selected through the stack's
+`COMPOSE_FILE`, and it carries three things that must travel together: the two
+services, the proxy's connection settings, and `--memory`. Putting only the
+services behind the overlay would have preserved the original bug in a tidier
+shape.
+
+Why an overlay rather than a profile: a profile can gate services but not the
+`command:` of a service that is in the base file, and `--memory` has no
+environment variable to gate instead. The overlay also means Qdrant and Neo4j
+are never *referenced* on a machine that does not want them, so they are never
+pulled — which is most of the point on a laptop.
+
+`ts-config memory` restarts headroom rather than printing the command. The
+setting and the running state disagreeing is exactly the failure mode above, and
+a restart of a compression proxy costs an in-flight request, not a pane full of
+work (contrast `ts-mux restart`, which is deliberate for that reason).
+
+## `ts-after` and `ts-envfiles`
+
+Two small per-stack files, both discovered by name rather than registered, both
+added because the console split needed them:
+
+- **`ts-after`** — stack names this one must start after, and stop before.
+  Stacks are listed lexically, and `agent007memory` sorts before `agentmemory`
+  (`0` < `m`) while joining a network `agentmemory` creates. An external network
+  cannot be joined before it exists, so without this a fresh `up` failed with
+  "network not found" on a stack that was perfectly configured.
+
+- **`ts-envfiles`** — extra `--env-file` paths, applied before the stack's own
+  `.env` so its values win. These are compose *interpolation* sources and inject
+  nothing into a container. The distinction is load-bearing: an `env_file:` key
+  hands the container every variable in the file, and the console reads the
+  agentmemory stack's `.env` for display values — a file that contains
+  `OPENAI_API_KEY`. A test asserts no path appears in both.
+
+`ts-checks.<x>.conf` follows the same naming rule as the overlay it belongs to.
+Without it an overlay's services either go unchecked, or their checks sit in the
+base file and fail on every machine that has not enabled the overlay — which is
+precisely what the Qdrant and Neo4j health checks were doing: passing
+everywhere, proving nothing.

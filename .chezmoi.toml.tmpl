@@ -111,6 +111,16 @@ agentmemoryEnabled = {{ index . "agentmemoryEnabled" | default "off" | quote }}
 # 2GB of shared memory for a browser, which is not something to spend on a
 # machine that never asked for it.
 playwrightEnabled = {{ index . "playwrightEnabled" | default "off" | quote }}
+# Which memory system runs: agentmemory | headroom | none. ONE slot, so two
+# memory systems are unrepresentable rather than merely discouraged -- they do
+# the same job, and running both leaves two half-filled stores.
+#
+# agentmemory is the default because it is what every machine has effectively
+# been running: Headroom's memory needs a --memory flag its compose file never
+# passed, so its Qdrant and Neo4j were started and never once contacted.
+# agentmemoryEnabled above is DERIVED from this; ts-config memory is the only
+# thing that writes either, and ts-doctor reports drift between them.
+memoryBackend = {{ index . "memoryBackend" | default "agentmemory" | quote }}
 {{- if hasKey . "apps" }}
 apps = [{{ range $i, $a := .apps }}{{ if $i }}, {{ end }}{{ $a | quote }}{{ end }}]
 {{- end }}

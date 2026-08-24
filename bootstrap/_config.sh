@@ -266,6 +266,13 @@ ts_stack_env_file() {                      # <stack> -> <clone>/services/stacks/
     printf '%s' "$src/services/stacks/$1/.env"
 }
 
+# One KEY=value out of a .env, without sourcing it: these files are compose's,
+# not the shell's, and sourcing one would execute whatever is in it.
+ts_env_value() {                           # <file> <key>
+    [ -r "$1" ] || return 1
+    sed -n "s/^$2=//p" "$1" | head -1
+}
+
 ts_probe_headroom() {
     local proxy="${1:-http://127.0.0.1:8787}" mcp="${2:-http://127.0.0.1:8788/mcp}" rc=1 token="" file="" root
     token="${HEADROOM_PROXY_TOKEN:-}"
@@ -730,7 +737,7 @@ TS_MIRROR_DATA_KEYS="
     ccTtsSummarizer ccTtsTemplateError ccTtsTemplatePermission ccTtsTemplateQuestion 
     ccTtsTemplateWaiting ccTtsVoicePool leaderChord tmuxPrefix windowsUsername
     weztermMux weztermRestore atuinEnabled headroomEnabled headroomCursorMode
-    cavemanEnabled agentmemoryEnabled playwrightEnabled
+    cavemanEnabled agentmemoryEnabled playwrightEnabled memoryBackend
 "
 
 ts_data_prefetch() {
@@ -784,11 +791,17 @@ ts_agent_get() {
         cavemanEnabled) env_name=TS_CAVEMAN ;;
         agentmemoryEnabled) env_name=TS_AGENTMEMORY ;;
         playwrightEnabled) env_name=TS_PLAYWRIGHT ;;
+        memoryBackend) env_name=TS_MEMORY_BACKEND ;;
         *) echo "ts_agent_get: unknown key '$key'" >&2; return 2 ;;
     esac
     eval "v=\${$env_name:-}"
     [ -n "$v" ] || v="$(ts_data_get "$key" 2>/dev/null || true)"
     if [ -z "$v" ] && [ "$key" = headroomCursorMode ]; then v=mcp; fi
+    # agentmemory is the default backend: it is what a machine with no answer
+    # has effectively been running, since Headroom's memory needs a --memory the
+    # compose file has never passed. A machine that upgrades into this key keeps
+    # doing exactly what it was doing.
+    if [ -z "$v" ] && [ "$key" = memoryBackend ]; then v=agentmemory; fi
     if [ -z "$v" ] && [ "$key" = agentmemoryEnabled ]; then
         if [ -d "$HOME/.claude/plugins/cache/agentmemory/agentmemory" ] \
             || [ -d "$HOME/.codex/plugins/cache/agentmemory/agentmemory" ]; then v=on; fi
@@ -805,11 +818,70 @@ ts_agent_get() {
 ts_agent_set() {
     local key="$1" value="$2"
     case "$key:$value" in
-        headroomEnabled:on|headroomEnabled:off|cavemanEnabled:on|cavemanEnabled:off|agentmemoryEnabled:on|agentmemoryEnabled:off|headroomCursorMode:mcp|headroomCursorMode:byok|headroomCursorMode:off|playwrightEnabled:on|playwrightEnabled:off) ;;
+        headroomEnabled:on|headroomEnabled:off|cavemanEnabled:on|cavemanEnabled:off|agentmemoryEnabled:on|agentmemoryEnabled:off|headroomCursorMode:mcp|headroomCursorMode:byok|headroomCursorMode:off|playwrightEnabled:on|playwrightEnabled:off|memoryBackend:agentmemory|memoryBackend:headroom|memoryBackend:none) ;;
         *) echo "ts_agent_set: invalid $key=$value" >&2; return 2 ;;
     esac
     ts_data_set "$key" "$value"
     ts_mirror_windows_config
+}
+
+# ── the memory backend ───────────────────────────────────────────────────────
+# AgentMemory or Headroom, never both. They do the same job, so running both
+# gives you two half-filled stores and no way to know which one holds the answer
+# you are looking for.
+#
+# This is the ONLY writer of agentmemoryEnabled. Anything that sets that key on
+# its own can produce a combination the install wizard refuses to offer, which
+# is how a "cannot happen" state happens.
+#
+# Three values:
+#   agentmemory  AgentMemory remembers, Headroom compresses   (the default)
+#   headroom     Headroom does both; AgentMemory is not installed
+#   none         no memory at all
+ts_memory_backend_get() { ts_agent_get memoryBackend; }
+
+# The headroom stack's COMPOSE_FILE is derived, never hand-edited: Qdrant and
+# Neo4j are only referenced -- and so only ever pulled -- when the overlay is
+# selected, and the overlay is what passes --memory.
+ts_memory_compose_spec() {                 # <backend> -> the COMPOSE_FILE value
+    case "$1" in
+        headroom) printf 'docker-compose.yml:docker-compose.memory.yml' ;;
+        *)        printf 'docker-compose.yml' ;;
+    esac
+}
+
+# Rewrite one key in a .env, in place, creating it if absent. sed -i is not
+# portable (BSD wants an argument, GNU does not) and appends a newline to a file
+# that lacked one, which the two script sets would then fight over.
+ts_memory_write_compose_file() {           # <backend>
+    local backend="$1" env_file spec tmp
+    env_file="$(ts_stack_env_file headroom 2>/dev/null || true)"
+    [ -n "$env_file" ] && [ -f "$env_file" ] || return 0
+    spec="$(ts_memory_compose_spec "$backend")"
+    tmp="$env_file.tmp.$$"
+    awk -v spec="$spec" '
+        /^COMPOSE_FILE=/            { print "COMPOSE_FILE=" spec; seen = 1; next }
+        /^COMPOSE_PATH_SEPARATOR=/  { print; sep = 1; next }
+        { print }
+        END {
+            if (!sep)  print "COMPOSE_PATH_SEPARATOR=:"
+            if (!seen) print "COMPOSE_FILE=" spec
+        }
+    ' "$env_file" > "$tmp" && mv "$tmp" "$env_file"
+}
+
+ts_memory_apply() {                        # <agentmemory|headroom|none>
+    local backend="$1"
+    case "$backend" in
+        agentmemory|headroom|none) ;;
+        *) echo "ts_memory_apply: invalid backend '$backend'" >&2; return 2 ;;
+    esac
+    ts_agent_set memoryBackend "$backend" || return 1
+    # Derived, in the same breath. A separate command to "also turn AgentMemory
+    # off" is a command someone forgets to run.
+    if [ "$backend" = agentmemory ]; then ts_agent_set agentmemoryEnabled on
+    else                                  ts_agent_set agentmemoryEnabled off; fi
+    ts_memory_write_compose_file "$backend"
 }
 
 ts_agents_save_config() {
@@ -1036,6 +1108,7 @@ EOF
   "cavemanEnabled": "$(ts_agent_get cavemanEnabled)",
   "agentmemoryEnabled": "$(ts_agent_get agentmemoryEnabled)",
   "playwrightEnabled": "$(ts_agent_get playwrightEnabled)",
+  "memoryBackend": "$(ts_agent_get memoryBackend)",
   "apps": [$jsonapps],
 $(ts_cc_tts_json_for_mirror)
 }

@@ -351,11 +351,64 @@ run_wezterm() {
         bash "$SRC/bootstrap/ts-wezterm.sh" "$@"
 }
 
+# ── memory backend ───────────────────────────────────────────────────────────
+# One slot, three values, and the derived state moves with it. See
+# docs/decisions.md, "Why only one memory backend runs".
+memory_show() {
+    local b; b="$(ts_agent_get memoryBackend)"
+    echo "memory backend: $b"
+    case "$b" in
+        agentmemory) echo "  AgentMemory remembers (3111), Headroom compresses (8787)." ;;
+        headroom)    echo "  Headroom remembers and compresses; AgentMemory is not installed." ;;
+        none)        echo "  No memory. Headroom still compresses if it is enabled." ;;
+    esac
+    echo "  agentmemory wiring: $(ts_agent_get agentmemoryEnabled)   headroom: $(ts_agent_get headroomEnabled)"
+    local env_file spec
+    env_file="$(ts_stack_env_file headroom 2>/dev/null || true)"
+    if [ -n "$env_file" ] && [ -f "$env_file" ]; then
+        spec="$(ts_env_value "$env_file" COMPOSE_FILE 2>/dev/null || true)"
+        echo "  headroom COMPOSE_FILE: ${spec:-docker-compose.yml}"
+        # Drift is worth naming rather than silently correcting: a hand-edited
+        # COMPOSE_FILE is somebody trying to do something, and quietly undoing it
+        # is worse than saying it disagrees.
+        if [ "${spec:-docker-compose.yml}" != "$(ts_memory_compose_spec "$b")" ]; then
+            echo "  $WARN COMPOSE_FILE does not match the backend — fix: ts-config memory $b"
+        fi
+    fi
+}
+
+memory_set() {
+    local backend="$1" before
+    before="$(ts_agent_get memoryBackend)"
+    ts_memory_apply "$backend" || return 1
+    echo "saved: memoryBackend = $backend"
+
+    # The agent wiring is what actually captures, so it moves with the setting.
+    # ts-agents refuses to persist a state it cannot verify, which is why this
+    # runs it rather than only writing the key.
+    if [ "$backend" = agentmemory ]; then
+        run_agent_adapter agentmemory on || echo "  $WARN AgentMemory wiring failed; retry: ts-config agents agentmemory repair" >&2
+    elif [ "$before" = agentmemory ]; then
+        run_agent_adapter agentmemory off || true
+        echo "  AgentMemory hooks removed from Claude/Codex/Cursor."
+    fi
+
+    # Restart rather than print the command: the setting and the running state
+    # must not disagree, and a headroom that is still running the old compose
+    # file is exactly the silent mismatch this whole change exists to remove.
+    if command -v docker >/dev/null 2>&1; then
+        echo "  restarting headroom so the change takes effect..."
+        bash "$SRC/bootstrap/ts-stack.sh" restart headroom ||             echo "  $WARN headroom restart failed — run: ts-stack restart headroom" >&2
+    else
+        echo "  no docker on PATH; apply it later with: ts-stack restart headroom"
+    fi
+}
+
 agents_show() {
     echo "coding agents (user-global on this computer):"
     echo "  headroom   : $(ts_agent_get headroomEnabled)   (Cursor: $(ts_agent_get headroomCursorMode))"
     echo "  caveman    : $(ts_agent_get cavemanEnabled)"
-    echo "  agentmemory: $(ts_agent_get agentmemoryEnabled)"
+    echo "  agentmemory: $(ts_agent_get agentmemoryEnabled)   (memory backend: $(ts_agent_get memoryBackend))"
 }
 
 run_agent_adapter() {
@@ -374,6 +427,17 @@ agents_set() {
         playwright) key=playwrightEnabled ;;
         *) echo "usage: ts-config agents <headroom|caveman|agentmemory|playwright> on|off|status|repair|uninstall" >&2; return 2 ;;
     esac
+    # AgentMemory is DERIVED from memoryBackend, so turning it on directly while
+    # the backend is something else would create a two-memory-system machine --
+    # the exact combination the install wizard is built to make unreachable.
+    if [ "$tool" = agentmemory ] && [ "$action" = on ]; then
+        local backend; backend="$(ts_agent_get memoryBackend)"
+        if [ "$backend" != agentmemory ]; then
+            echo "$WARN memoryBackend is '$backend', so AgentMemory is not this machine's memory system." >&2
+            echo "      Only one runs. To switch:  ts-config memory agentmemory" >&2
+            return 2
+        fi
+    fi
     case "$action" in
         on)
             if [ "$tool" = playwright ]; then ts_agent_set "$key" on
@@ -506,6 +570,12 @@ case "${1:-}" in
             diff)   ghostty_diff ;;
             *) echo "usage: ts-config ghostty [on|off|status|diff]" >&2; exit 2 ;;
         esac ;;
+    memory)
+        case "${2:-status}" in
+            agentmemory|headroom|none) memory_set "$2" ;;
+            status|show) memory_show ;;
+            *) echo "usage: ts-config memory [agentmemory|headroom|none|status]" >&2; exit 2 ;;
+        esac ;;
     agents)
         shift
         agents_config "$@" ;;
@@ -516,6 +586,7 @@ case "${1:-}" in
         echo "  restore on|off   reopen the last WezTerm session at startup"
         echo "  atuin on|off     atuin shell history; when on it owns Ctrl+R (fzf keeps Ctrl+T/Alt+C)"
         echo "  ghostty [on|off|status|diff]   managed Ghostty config (macOS only; off restores your backup)"
+        echo "  memory [agentmemory|headroom|none|status]   which memory system runs — only ever one"
         echo "  agents [show|<headroom|caveman|agentmemory> on|off|status|repair|uninstall]"
         echo "  wezterm [status|changes|install <stable|nightly>|upgrade]  (see: ts-wezterm -h)"
         echo "  wizard           re-run the whole install questionnaire (TS_ASSUME_YES=1 to accept defaults)"

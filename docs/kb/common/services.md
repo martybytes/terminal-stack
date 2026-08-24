@@ -4,14 +4,22 @@ Three headline features of this stack are a client talking to a server on
 `127.0.0.1`. `ts-stack` drives those servers. Long-form reference lives beside
 each compose file in `services/stacks/<name>/README.md`.
 
-## The four stacks
+> AgentMemory and Headroom both do semantic memory, and exactly one of them runs:
+> `ts-config memory agentmemory|headroom|none`. The default is AgentMemory for
+> memory and Headroom for compression.
+
+## The stacks
 
 | stack | what you lose without it | ports |
 |---|---|---|
-| `agentmemory` | agents forget everything between sessions | 3111 proxy, 3110 server, 3113 viewer, 3114 console |
-| `headroom` | no prompt compression, no usage dashboard | 8787, 8788, 6333/6334, 7474/7687 |
+| `agentmemory` | agents forget everything between sessions | 3110 server, 3112/3113 viewer |
+| `agent007memory` | no console UI, and MCP clients lose the 3111 proxy they are pointed at | 3111 proxy, 3114 console |
+| `headroom` | no prompt compression, no usage dashboard | 8787, 8788 (+ 6333/6334, 7474/7687 only with `memoryBackend=headroom`) |
 | `kokoro` | voice notifications go silent | 8880 |
 | `playwright` | agents cannot drive a browser | 8931 |
+
+`agent007memory` starts after `agentmemory` and joins its network — `ts-stack`
+orders them, and reversing them by hand fails with "network not found".
 
 Everything binds `127.0.0.1` only — none of these services authenticate.
 

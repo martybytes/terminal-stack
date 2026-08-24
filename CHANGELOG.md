@@ -4,6 +4,18 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+### Changed
+
+- **One memory backend, chosen at install (08/24/2026).** AgentMemory and Headroom both do semantic memory, and the installer asked about them as two independent yes/no questions — so every combination was reachable, including two stores each holding half the story. They are now one question with one slot: `memoryBackend` is `agentmemory` (the default: AgentMemory remembers, Headroom compresses), `headroom` (Headroom does both, AgentMemory is not installed), or `none`. A single slot cannot hold two values, so the bad combination is unrepresentable rather than merely discouraged. `agentmemoryEnabled` is derived from it, `ts-config memory <backend>` is the only writer of either and restarts headroom so the setting and the running state cannot disagree, and `ts-config agents agentmemory on` refuses when the backend is something else rather than silently reconciling.
+
+  **What this uncovered: Headroom's memory had never run.** The proxy's command is `headroom proxy --host 0.0.0.0`, and memory engages only when passed `--memory` — for which there is no environment variable. The compose file set `QDRANT_URL` and `NEO4J_URI` and started both databases, so everything looked wired, and the proxy never contacted either. On a machine that had been running it for months: **0 memories, 0 Qdrant collections, 0 Neo4j nodes, and 899 MB of JVM**, with all four containers reporting healthy and no check anywhere that would have said so. (The flag also reads `HEADROOM_QDRANT_URL`, not the un-prefixed `QDRANT_URL` the datastores were wired with, so even the variable that was set was the wrong name.)
+
+  Headroom's memory is now a compose overlay carrying all three things that must travel together — the datastores, the connection settings, and `--memory` — selected through the stack's `COMPOSE_FILE`. A machine using AgentMemory never references Qdrant or Neo4j, so it never pulls them: the base headroom stack is two small containers. `ts-stack doctor` reports the backend, flags drift between it and `agentmemoryEnabled`, fails when `headroom` is selected but the proxy is running without `--memory`, and notes leftover datastores that nothing writes to.
+
+  Two mechanisms came out of it, both discovered by filename rather than registered: `ts-checks.<x>.conf` is loaded alongside `docker-compose.<x>.yml` (the Qdrant and Neo4j health checks used to sit in the base file, passing on every machine and proving nothing), and `ts-envfiles` names extra `--env-file` **interpolation** sources — never `env_file:` keys, which would hand a container every variable in the file, `OPENAI_API_KEY` included. A test asserts no path is both.
+
+  `doc headroom` now says plainly what Headroom does and does not use a model for: compression is structural (tool-schema trimming, code-aware compression, CCR) and calls no model; embeddings are local and in-image; the only model it talks to is the one it relays to. It also records that `headroom doctor` run *inside* the container always reports claude/codex "not routed", because those files never exist there.
+
 ### Fixed
 
 - **AgentMemory's LLM credential never reached the container, and nothing said so (08/24/2026).** Absorbing the Docker stacks moved them one directory deeper, and the agentmemory compose file kept loading the shared credential from `../.env` — which now resolves to `services/stacks/.env`, a file that has never existed. Both env files are `required: false` so a fresh clone starts in degraded no-LLM mode, and compose says *nothing at all* about an optional `env_file` it cannot find: no warning, no non-zero exit, nothing in `docker compose config`.

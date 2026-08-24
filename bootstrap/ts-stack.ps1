@@ -197,11 +197,45 @@ function Get-TsEngineAdvice([string]$Kind) {
 # ── checks, backup, and the phases test runs ────────────────────────────────────
 # Twin of tss_run_checks: each stack ships ts-checks.conf, so a new stack
 # registers itself by having one. Fields: kind id expect secs target
+
+# Twin of tss_check_files. Every check file in effect: ts-checks.conf, plus one
+# per compose OVERLAY this machine has selected — `docker-compose.<x>.yml` pairs
+# with `ts-checks.<x>.conf` by name, no registry.
+#
+# Without this an overlay's services either go unchecked, or their checks sit in
+# the base file and fail on every machine that has not enabled the overlay.
+function Get-TsCheckFiles([string]$Name) {
+    $dir = Get-TsStackDir $Name
+    $files = @()
+    $base = Join-Path $dir 'ts-checks.conf'
+    if (Test-Path -LiteralPath $base) { $files += $base }
+
+    # COMPOSE_FILE out of the stack's own .env, the same source compose reads.
+    $envFile = Join-Path $dir '.env'
+    if (Test-Path -LiteralPath $envFile) {
+        $sep = ':'
+        $spec = ''
+        foreach ($line in (Get-Content -LiteralPath $envFile)) {
+            if ($line -match '^\s*COMPOSE_PATH_SEPARATOR=(.+)$') { $sep = $Matches[1].Trim() }
+            if ($line -match '^\s*COMPOSE_FILE=(.+)$')           { $spec = $Matches[1].Trim() }
+        }
+        if (-not $sep) { $sep = ':' }
+        foreach ($f in ($spec -split [regex]::Escape($sep))) {
+            $f = $f.Trim()
+            if (-not $f -or $f -eq 'docker-compose.yml') { continue }
+            if ($f -notmatch '^docker-compose\.(.+)\.yml$') { continue }
+            $overlay = Join-Path $dir ("ts-checks." + $Matches[1] + ".conf")
+            if (Test-Path -LiteralPath $overlay) { $files += $overlay }
+        }
+    }
+    return ,$files
+}
+
 function Invoke-TsStackChecks([string]$Name) {
-    $conf = Join-Path (Get-TsStackDir $Name) 'ts-checks.conf'
-    if (-not (Test-Path -LiteralPath $conf)) { Note "$Name`: no ts-checks.conf"; return $true }
+    $confs = @(Get-TsCheckFiles $Name)
+    if (-not $confs.Count) { Note "$Name`: no ts-checks.conf"; return $true }
     $ok = $true
-    foreach ($line in Get-Content -LiteralPath $conf) {
+    foreach ($line in ($confs | ForEach-Object { Get-Content -LiteralPath $_ })) {
         $t = $line.Trim()
         if (-not $t -or $t.StartsWith('#')) { continue }
         $f = $t -split '\s+'
@@ -818,6 +852,37 @@ switch ($Command) {
             }
         } else {
             Skip 'compose config, health and the port audit need the engine'
+        }
+
+        # Twin of the bash doctor's memory-backend section. Every check here
+        # exists because Headroom's memory had NO reporting at all: the compose
+        # file started Qdrant and Neo4j and the proxy engaged memory only with a
+        # --memory flag nothing passed, so two databases ran empty forever while
+        # everything reported healthy.
+        Section 'memory backend'
+        $mb = Get-TsAgentSetting memoryBackend
+        $am = Get-TsAgentSetting agentmemoryEnabled
+        Ok "backend: $mb"
+        $expected = if ($mb -eq 'agentmemory') { 'on' } else { 'off' }
+        if ($am -ne $expected) {
+            # Drift means something wrote agentmemoryEnabled without going
+            # through ts-config memory, leaving the machine half-configured for
+            # two memory systems.
+            Bad "memoryBackend is '$mb' but agentmemoryEnabled is '$am' - fix: ts-config memory $mb"
+        }
+        if ($engineOk) {
+            $cmd = (& docker inspect ts-headroom-proxy --format '{{json .Config.Cmd}}' 2>$null) -join ''
+            $qd = (& docker ps --filter 'name=ts-headroom-qdrant' --format '{{.Names}}' 2>$null) -join ''
+            $n4 = (& docker ps --filter 'name=ts-headroom-neo4j' --format '{{.Names}}' 2>$null) -join ''
+            if ($mb -eq 'headroom') {
+                if (-not $cmd) { Skip 'headroom proxy is not running' }
+                elseif ($cmd -match '--memory') { Ok 'the proxy is running with --memory' }
+                else { Bad 'memoryBackend is headroom but the proxy is running WITHOUT --memory: it stores nothing, and Qdrant and Neo4j will stay empty - ts-stack restart headroom' }
+                if (-not $qd -or -not $n4) { Bad 'headroom memory is selected but Qdrant/Neo4j are not both running - ts-stack up headroom' }
+            } elseif ($qd -or $n4) {
+                Note "Qdrant/Neo4j are still running but this machine's memory backend is '$mb', so nothing writes to them."
+                Note 'Clear them out with:  ts-stack down headroom && ts-stack up headroom'
+            }
         }
     }
 
