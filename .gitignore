@@ -20,3 +20,26 @@ __pycache__/
 
 # chezmoi local-only artifacts that should never be committed
 .chezmoiscripts/
+
+# Per-machine compose configuration. Every stack ships a tracked .env.example;
+# the .env is machine-specific (GPU model, ports, generated secrets) and is
+# never tracked. These must be IGNORED, not merely uncommitted: the tree lives
+# inside the runtime clone, and run_before_05-refuse-dirty-runtime.sh.tmpl plus
+# scripts/sync-windows.ps1 abort the whole apply on a dirty runtime clone.
+services/**/.env
+services/**/.billing.env
+# Local-only compose overrides, read only when COMPOSE_FILE names them.
+services/**/*.local.yml
+# Output from the verification snippets in the stack READMEs (kokoro's synthesis
+# check writes an audio file into the stack directory).
+services/**/out.mp3
+services/**/*.wav
+
+# Console build artifacts. node_modules/ or dist/ visible to `git status` inside
+# the runtime clone would make every later `chezmoi apply` and `ts-update` refuse.
+services/console/node_modules/
+services/console/dist/
+services/console/*.log
+services/console/.env
+services/console/.env.local
+services/console/.agent007memory/

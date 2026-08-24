@@ -1,0 +1,33 @@
+# Templated by the base nginx image's own entrypoint (envsubst on every
+# /etc/nginx/templates/*.template, using only real process env vars -- nginx's
+# own runtime variables like $host and $remote_addr are untouched because they
+# are not environment variables). No custom Dockerfile needed.
+#
+# Purpose: let a plain browser tab load the headroom dashboard without
+# pasting the proxy token anywhere. This container is the only place the
+# token is ever attached to a request; it never reaches the browser.
+#
+# Deliberately NOT a general reverse proxy: only read-only dashboard/status
+# routes are proxied. /v1/* (the LLM-relay data plane) has no matching
+# location below and falls through to the default 404 -- the real proxy
+# token requirement for /v1/* is completely unaffected by this container.
+
+server {
+    listen 80;
+
+    location /dashboard/static/ {
+        proxy_pass http://headroom-proxy:8787;
+        proxy_set_header Host $host;
+        proxy_set_header X-Headroom-Proxy-Token ${HEADROOM_PROXY_TOKEN};
+    }
+
+    location ~ ^/(dashboard|health|stats|stats-lifetime|stats-history|settings|settings/schema|settings/apply|metrics)$ {
+        proxy_pass http://headroom-proxy:8787;
+        proxy_set_header Host $host;
+        proxy_set_header X-Headroom-Proxy-Token ${HEADROOM_PROXY_TOKEN};
+    }
+
+    location / {
+        return 404;
+    }
+}

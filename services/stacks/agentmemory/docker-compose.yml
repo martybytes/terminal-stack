@@ -1,0 +1,82 @@
+services:
+  agentmemory:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        AGENTMEMORY_VERSION: "0.9.29"
+        III_VERSION: "0.11.2"
+        III_SDK_VERSION: "0.11.2"
+    restart: unless-stopped
+    ports:
+      # 3110 is agentmemory's own API, always published. When the optional
+      # agent007memory console overlay (docker-compose.console.yml) is
+      # active, it separately publishes 3111 as a transparent proxy in front
+      # of this port — that's what gives the console its live request feed,
+      # and what MCP clients should hit instead of 3110 in that profile. If
+      # 3111 stops answering, hit 3110 first to tell a console failure from
+      # an agentmemory failure. Without the console overlay, 3110 is the only
+      # way in — see ../docs/conventions.md, "Per-machine variation".
+      - "127.0.0.1:3110:3111"
+      # iii-stream. The viewer opens a live WebSocket to ws://localhost:3112;
+      # without this published the UI sits at "Connecting" and reloads on a
+      # retry loop every few seconds while the REST API works fine.
+      - "127.0.0.1:3112:3112"
+      - "127.0.0.1:3113:3113"
+    # Stack settings load first; the repo-root file loads second so its single
+    # OPENAI_API_KEY copy wins over provider-specific rollback settings.
+    # Both are optional so a clone can still start in degraded no-LLM mode.
+    env_file:
+      - path: .env
+        required: false
+      - path: ../.env
+        required: false
+    environment:
+      # The viewer defaults to binding 127.0.0.1 *inside* the container's
+      # own network namespace. A container-internal loopback bind is
+      # unreachable through ANY published port mapping, on every platform:
+      # the forwarder connects to the container's address on its bridge
+      # network, which is not the container's loopback. This is not a
+      # Docker Desktop or WSL 2 behaviour -- it is equally true on native
+      # Linux Docker. (Same pattern deploy/fly/entrypoint.sh uses for its
+      # proxy.) This is safe here because the host-side port is already
+      # loopback-only (127.0.0.1:3113:3113, not 0.0.0.0), so it still
+      # only reaches this machine. VIEWER_ALLOWED_HOSTS must match the
+      # Host header the browser sends when hitting localhost:3113.
+      AGENTMEMORY_VIEWER_HOST: "0.0.0.0"
+      VIEWER_ALLOWED_HOSTS: "localhost:3113,127.0.0.1:3113"
+      # Zero removes AgentMemory's default 500-observation rejection. Raw
+      # observations are stored first and their small ID-only LLM jobs are
+      # durably rate-limited by iii-queue.
+      AGENTMEMORY_MAX_OBSERVATIONS_PER_SESSION: "${AGENTMEMORY_MAX_OBSERVATIONS_PER_SESSION:-0}"
+      # AgentMemory 0.9.29's runtime reads this legacy name. Keep the public,
+      # descriptive alias above and bridge it here until upstream supports it.
+      MAX_OBS_PER_SESSION: "${AGENTMEMORY_MAX_OBSERVATIONS_PER_SESSION:-0}"
+      AGENTMEMORY_LLM_QUEUE: "${AGENTMEMORY_LLM_QUEUE:-agentmemory-llm}"
+      AGENTMEMORY_LLM_RECOVERY_BATCH_SIZE: "${AGENTMEMORY_LLM_RECOVERY_BATCH_SIZE:-25}"
+      AGENTMEMORY_GRAPH_STORAGE_V2: "${AGENTMEMORY_GRAPH_STORAGE_V2:-true}"
+      NODE_OPTIONS: "${AGENTMEMORY_NODE_OPTIONS:---max-old-space-size=2048}"
+    volumes:
+      - agentmemory_iii-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:3111/agentmemory/livez || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  # Declared external so the volume name is stable and identical on every
+  # machine — no project-name prefix, and no per-machine edit to this file.
+  # Here it reuses the volume already populated by the earlier
+  # `npx @agentmemory/agentmemory` setup; on a fresh machine ../bootstrap.sh/.ps1
+  # creates it (`docker volume create agentmemory_iii-data`) before first run.
+  # Run ../bootstrap.sh --apply (or ..\bootstrap.ps1 -Apply) first, or `up` fails with
+  # "external volume not found". See ../docs/new-machine.md.
+  agentmemory_iii-data:
+    external: true
