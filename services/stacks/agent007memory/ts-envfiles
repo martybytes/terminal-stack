@@ -1,0 +1,12 @@
+# Extra --env-file paths, one per line, relative to this directory, applied in
+# order BEFORE this stack's own .env so its values win.
+#
+# These are compose INTERPOLATION sources, not env_file: entries -- nothing here
+# is injected into the container. The console displays which model and endpoint
+# AgentMemory is configured for, and the authority on that is the agentmemory
+# stack's .env. Reading it here keeps one copy of the truth; the alternative was
+# a second set of LLM_* values in this stack's .env that silently went stale.
+#
+# The distinction is load-bearing: an env_file: entry WOULD hand the console
+# OPENAI_API_KEY, and the console is deliberately never given a provider secret.
+../agentmemory/.env

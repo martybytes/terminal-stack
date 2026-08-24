@@ -710,7 +710,47 @@ tss_stack_list() {
     for d in "$TSS_STACKS"/*/; do
         [ -f "$d/docker-compose.yml" ] || continue
         basename "$d"
+    done | tss_stack_order
+}
+
+# Start order. Lexical order is wrong the moment one stack joins another's
+# network: agent007memory sorts BEFORE agentmemory ('0' < 'm'), and an external
+# network cannot be joined before it exists. A stack declares what it must
+# follow in an optional `ts-after` file, one stack name per line -- discovered
+# like everything else here, never registered.
+#
+# Repeated passes rather than a real topological sort: the input is a handful of
+# stacks, and a cycle degrades to "leave the order alone" instead of hanging.
+tss_stack_order() {
+    local names line moved pass name after
+    names="$(cat)"
+    for pass in 1 2 3 4 5; do
+        moved=0
+        for name in $names; do
+            [ -f "$TSS_STACKS/$name/ts-after" ] || continue
+            while IFS= read -r after; do
+                case "$after" in ''|'#'*) continue ;; esac
+                # Already later than its dependency? Nothing to do.
+                case "
+$names
+" in *"
+$after
+"*) ;; *) continue ;; esac
+                if [ "$(printf '%s
+' "$names" | grep -n -x -- "$after" | cut -d: -f1)"                      -gt "$(printf '%s
+' "$names" | grep -n -x -- "$name" | cut -d: -f1)" ]; then
+                    names="$(printf '%s
+' "$names" | grep -v -x -- "$name")"
+                    names="$(printf '%s
+' "$names" | awk -v a="$after" -v n="$name"                         '{print} $0==a{print n}')"
+                    moved=1
+                fi
+            done < "$TSS_STACKS/$name/ts-after"
+        done
+        [ "$moved" = 0 ] && break
     done
+    printf '%s
+' "$names"
 }
 
 tss_stack_dir() { printf '%s' "$TSS_STACKS/$1"; }
@@ -721,6 +761,10 @@ tss_stack_dir() { printf '%s' "$TSS_STACKS/$1"; }
 tss_toggle_for() {
     case "$1" in
         agentmemory) printf 'agentmemoryEnabled' ;;
+        # The console is part of the agentmemory feature, not a separate choice:
+        # a machine that wants memories wants the proxy every client is pointed
+        # at. Separate PROJECT, same switch.
+        agent007memory) printf 'agentmemoryEnabled' ;;
         headroom)    printf 'headroomEnabled' ;;
         playwright)  printf 'playwrightEnabled' ;;
         kokoro)      printf 'ccTts' ;;
@@ -811,12 +855,44 @@ tss_engine_advice() {                       # <os> <kind>
 #     .billing.env — a lone --env-file REPLACES the interpolation source, so
 #     every ${OPENAI_*}-derived LLM_* display value silently resolves to ""
 #   * TS_STACK_DRY_RUN=1 prints the exact argv and runs nothing
+# The --env-file list for a stack, in order, one per line. Compose reads these
+# as INTERPOLATION sources; nothing here is injected into a container.
+#
+# Order is the whole point. `--env-file .billing.env` alone REPLACES .env as the
+# interpolation source, so every ${...} default resolves to empty -- which is how
+# the console's provider panel went blank while everything reported healthy.
+# Extras from `ts-envfiles` come first so the stack's own .env always wins.
+tss_env_file_list() {                       # <stack-dir>
+    local dir="$1" line
+    if [ -f "$dir/ts-envfiles" ]; then
+        while IFS= read -r line; do
+            case "$line" in ''|'#'*) continue ;; esac
+            [ -f "$dir/$line" ] || continue
+            printf '%s
+' "$line"
+        done < "$dir/ts-envfiles"
+    fi
+    [ -f "$dir/.env" ] && printf '%s
+' .env
+    [ -f "$dir/.billing.env" ] && printf '%s
+' .billing.env
+    return 0
+}
+
 tss_compose() {                             # <stack> <compose args...>
     local stack="$1"; shift
     local dir; dir="$(tss_stack_dir "$stack")"
     local -a pre; pre=()
-    if [ -f "$dir/.billing.env" ]; then
-        pre=(--env-file .env --env-file .billing.env)
+    local f
+    # Only pass --env-file at all when there is something beyond the default
+    # .env: compose already reads .env on its own, and naming it explicitly for
+    # every stack would be noise in the dry-run argv this is all inspected by.
+    if [ -f "$dir/ts-envfiles" ] || [ -f "$dir/.billing.env" ]; then
+        while IFS= read -r f; do
+            [ -n "$f" ] && pre=(${pre[@]+"${pre[@]}"} --env-file "$f")
+        done <<EOF
+$(tss_env_file_list "$dir")
+EOF
     fi
     if [ "${TS_STACK_DRY_RUN:-0}" = 1 ]; then
         printf '(%s) docker compose %s%s\n' "$stack" \

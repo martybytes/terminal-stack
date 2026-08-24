@@ -231,7 +231,7 @@ explicit or capture becomes write-only when context injection was intended.
 
 > **Client wiring lives in `terminal-stack`, and is Windows-only today.**
 > The `setup-codex-agent-tagging.ps1` / `setup-cursor-integration.ps1` helpers that used to live in
-> the docker-local stack were moved out; the current automation is
+> the deployment stack were moved out; the current automation is
 > `terminal-stack/bootstrap/ts-agentmemory.ps1` (over `bootstrap/_agentmemory.ps1`). There is **no
 > bash twin yet**, so on macOS and Linux the tagged proxy URLs, the Codex plugin-hook fallback, and
 > `AGENTMEMORY_INJECT_CONTEXT` must be set by hand using the table above. Everything else in this
@@ -302,34 +302,28 @@ npm start          # serve the built app
 
 ## Docker
 
-`Dockerfile` is a two-stage Node 24 build pinned by the lockfile (`npm ci`). Deployment lives in the
-`docker-local` repo's `agentmemory` stack, which pins **this repo by commit SHA** in its compose
-build context and fronts agentmemory with the proxy:
+`Dockerfile` is a two-stage Node 24 build pinned by the lockfile (`npm ci`). Deployment lives in
+this repo, at `services/stacks/agent007memory/` — its own compose project, whose build context is
+this directory:
 
-```bash
-# from docker-local/agentmemory (macOS / Linux)
-./update-console.sh                    # preview: push check, SHA pin, build, deploy, verify
-./update-console.sh --apply            # do it
-./update-console.sh --local --apply    # rebuild/recreate from this checkout without pushing
+```sh
+ts-stack up agent007memory              # rebuild and deploy from this checkout
+ts-stack logs agent007memory -n 50      # what it did
 ```
 
-```powershell
-# from docker-local\agentmemory (Windows)
-.\update-console.ps1          # preview: push check, SHA pin, build, deploy, verify
-.\update-console.ps1 -Apply   # do it
-.\update-console.ps1 -Local -Apply   # rebuild/recreate from this checkout without pushing
-```
+`update-console.sh` / `.ps1` are gone. They existed to push this repo, re-pin a commit SHA in
+the compose file, rebuild and verify -- a loop that only made sense while the console was a
+separate repository built from a pin. The build context is now the in-tree `services/console/`,
+so what runs is what you have checked out, and the whole cycle is one `ts-stack up`.
 
-The two script sets are twins and take the same steps; `docker-local` keeps the PowerShell version
-canonical and ports changes both ways. `--local` / `-Local` changes the Docker build context; it
-does not bind mount the checkout or enable hot reload. Re-run the command after each local change.
-The deployed console remains an immutable compiled image. It mounts AgentMemory's volume read-only
+There is no hot reload: the deployed console is an immutable compiled image, so re-run
+`ts-stack up agent007memory` after each change. It mounts AgentMemory's volume read-only
 for the HMAC secret and a separate external `ts-agentmemory-console-history` volume read/write at `/data`
 for aggregate reporting.
 
 When OpenAI inference is active, enable authoritative costs by creating a dedicated **Agentmemory** project, putting its inference
-key in docker-local's root `.env`, and use docker-local's
-`agentmemory/configure-openai-billing.sh` (or `.ps1` on Windows) to validate the project and Costs
+key in the services-root `.env` (`services/.env`), and running this stack's own
+`services/stacks/agent007memory/configure-openai-billing.sh` (or `.ps1` on Windows) to validate the project and Costs
 API permissions. The helper writes the project ID/name, Admin-key mount paths, and the two safe
 masked key hints to ignored `.billing.env`; raw key material never enters it. The shared hint
 contract is `LLM_API_KEY_HINT` for inference and `LLM_ADMIN_KEY_HINT` for billing administration.
@@ -337,7 +331,7 @@ Deploy with the read-only billing overlay described in that stack's README. With
 estimates continue working and the UI explicitly shows
 **Billing setup required**.
 
-Current docker-local deployments publish both hints automatically. Agent007Memory ignores those
+The stack publishes both hints automatically. Agent007Memory ignores those
 OpenAI hints while the active provider is local, so stale safe metadata does not imply key use. The optional
 `docker-compose.key-hints.yml` overlay is retained for older stacks and manual deployments; it
 forwards only already-masked values. Generate a compatibility hint in memory without printing or

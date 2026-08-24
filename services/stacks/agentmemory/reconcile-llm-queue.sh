@@ -22,8 +22,22 @@ while [ -L "$_self" ]; do
     case "$_self" in /*) ;; *) _self="$_d/$_self" ;; esac
 done
 SCRIPT_DIR="$(cd -- "$(dirname -- "$_self")" && pwd -P)"
-# shellcheck source=../_common.sh
-. "$SCRIPT_DIR/../_common.sh"
+# shellcheck source=../../_stack.sh
+. "$SCRIPT_DIR/../../_stack.sh"
+
+# The console lives in its OWN compose project (ts-agent007memory) since the
+# split, so `docker compose stop console` from this directory stops nothing and
+# says nothing -- it would have left the console reading a volume this script is
+# about to move. Stop it where it actually lives, and only if it is there.
+am_console() {                            # stop | up
+    local dir="$stack_dir/../agent007memory"
+    [ -f "$dir/docker-compose.yml" ] || return 0
+    case "$1" in
+        stop) ( cd "$dir" && docker compose stop ) ;;
+        up)   ( cd "$dir" && docker compose up -d ) ;;
+    esac
+}
+
 
 backup_root="$(tss_backup_root)"
 max_terra=25
@@ -241,9 +255,20 @@ metrics() {                               # <telemetry-json> <max-terra> <max-co
 }
 
 projected_cost() {                        # <analysis-json> <telemetry-json> <max-cost>
-    node -e '
-      const [aRaw,tRaw,maxCost]=process.argv.slice(1);
-      let a={},t={}; try{a=JSON.parse(aRaw);}catch{} try{t=JSON.parse(tRaw);}catch{}
+    # Both blobs go over STDIN, NUL-separated, never on argv. Telemetry carries
+    # every queued and dead-lettered job, so on a machine with a real backlog it
+    # is megabytes and execve fails outright with "Argument list too long" --
+    # node never runs, $projected comes back EMPTY, and the cost gate then reads
+    # that emptiness as "cost exceeded" and refuses to reconcile. Measured with a
+    # 52,574-entry DLQ. metrics() already pipes for exactly this reason.
+    # JSON text cannot contain a raw NUL, so it is an unambiguous separator.
+    printf '%s\0%s' "$1" "$2" | node -e '
+      let s=""; process.stdin.setEncoding("utf8");
+      process.stdin.on("data",d=>s+=d).on("end",()=>{
+      const maxCost=Number(process.argv[1]);
+      const i=s.indexOf("\u0000");
+      let a={},t={};
+      try{a=JSON.parse(s.slice(0,i));}catch{} try{t=JSON.parse(s.slice(i+1));}catch{}
       const cost=(rows)=>rows.reduce((s,c)=>{
         if(c.promptTokens==null||c.completionTokens==null) return s;
         if(c.model==="gpt-5.6-terra") return s + c.promptTokens*2/1e6 + c.completionTokens*12/1e6;
@@ -263,7 +288,7 @@ projected_cost() {                        # <analysis-json> <telemetry-json> <ma
       const projected=(a.graphDue||[]).length*g+(a.summaryDueSessionIds||[]).length*sm;
       process.stdout.write([g.toFixed(4),sm.toFixed(4),projected.toFixed(2),
         projected>Number(maxCost)?1:0].join(" "));
-    ' "$1" "$2" "$3"
+      });' "$3"
 }
 
 markers_not_advanced() {                  # <before-json> <after-json> -> count
@@ -290,7 +315,8 @@ llm_telemetry() {                         # <secret>
 # The safety guards must stop the stack BEFORE failing. Deliberately an explicit
 # call rather than a trap: a trap would also fire on the clean path.
 stop_stack_then_die() {                   # <message>
-    docker compose stop console agentmemory >/dev/null 2>&1 || true
+    am_console stop >/dev/null 2>&1 || true
+    docker compose stop agentmemory >/dev/null 2>&1 || true
     die "$1"
 }
 
@@ -334,12 +360,32 @@ read -r graph_avg summary_avg projected cost_tripped <<EOF
 $(projected_cost "$before" "$telemetry_before" "$max_cost")
 EOF
 
+# No output means the estimator DIED, not that the cost is zero or infinite.
+# Without this the empty $cost_tripped fell through the gate below as "not 0"
+# and reported a cost limit breach with a blank figure: "projected cost $
+# exceeds safety limit $1.00".
+[ -n "$projected" ] && [ -n "$cost_tripped" ]     || die 'projected-cost estimator produced no output; refusing to guess (run with bash -x to see the node error)'
+
 info "sessions=$sessions malformed_sessions=$malformed raw=$raw summaries_due=$sum_due graphs_due=$graph_due"
 info "queue waiting=$q_wait active=$q_active dlq=$q_dlq"
 info "DLQ families: $dlq_families"
 info "projected Terra provider calls=$proj_terra; estimated cost=\$$projected"
-[ "$proj_terra" -le "$max_terra" ] || die "projected Terra calls $proj_terra exceed safety limit $max_terra"
-[ "$cost_tripped" = 0 ] || die "projected cost \$$projected exceeds safety limit \$$max_cost"
+# Both limits exist to stop a recovery pass quietly running up an OpenAI bill,
+# and both are priced from OpenAI's list prices for gpt-5.6-terra/luna. Against
+# a self-hosted endpoint those prices are fiction: the numbers above are printed
+# from fallback averages, the marginal cost is zero, and the rail was refusing
+# to clear a dead-letter queue on a machine that cannot be billed for anything.
+#
+# Not skipped silently, and not skipped by default. The endpoint has to actually
+# be somewhere other than OpenAI, and the reason is stated.
+llm_base="$(tss_env_value "$stack_dir/.env" OPENAI_BASE_URL 2>/dev/null || true)"
+case "$llm_base" in
+    ''|*api.openai.com*)
+        [ "$proj_terra" -le "$max_terra" ] || die "projected Terra calls $proj_terra exceed safety limit $max_terra"
+        [ "$cost_tripped" = 0 ] || die "projected cost \$$projected exceeds safety limit \$$max_cost" ;;
+    *)
+        info "billing limits not applicable: OPENAI_BASE_URL is $llm_base, not OpenAI — the figures above are OpenAI list prices for models this endpoint does not serve" ;;
+esac
 [ "$q_missing" -eq 0 ] || die "queue has $q_missing active references without job files"
 info 'preflight safety limits passed'
 
@@ -356,7 +402,8 @@ if [ "$TSS_APPLY" = 1 ]; then
     tss_assert_within "$backup_root_full" "$resolved_backup" \
         || die "resolved backup directory escaped backup root: $resolved_backup"
 
-    docker compose stop console agentmemory || die 'failed to stop the stack'
+    am_console stop || die 'failed to stop the console'
+    docker compose stop agentmemory || die 'failed to stop the stack'
     docker run --rm --entrypoint sh \
         -v "${volume_name}:/source:ro" -v "${resolved_backup}:/backup" "$image" \
         -c 'tar -C /source -czf /backup/agentmemory-volume.tgz .' \
@@ -382,6 +429,7 @@ step "enforce Terra provider-call limit $max_terra and estimated-cost limit \$$m
 
 if [ "$TSS_APPLY" = 1 ]; then
     docker compose up -d || die 'stack start failed'
+    am_console up || die 'console start failed'
     wait_http_200 "$API/livez" 180 || stop_stack_then_die "timed out waiting for $API/livez"
     wait_http_200 'http://127.0.0.1:3114/healthz' 180 || stop_stack_then_die 'timed out waiting for the console'
     sleep 15

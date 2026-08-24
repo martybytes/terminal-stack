@@ -2,7 +2,7 @@
 
 Agent007Memory is the intelligence console for an AgentMemory deployment. It observes AgentMemory traffic through a transparent proxy, shows live behavior, stores privacy-safe aggregates for reports, and exposes guarded maintenance actions. It is not the memory database. Normal monitoring does not retain prompt bodies, response bodies, memory text, or complete provider keys.
 
-This guide describes the deployment pinned to AgentMemory 0.9.29 with the docker-local compatibility patches. Later AgentMemory releases may expose additional native telemetry.
+This guide describes the deployment pinned to AgentMemory 0.9.29 with this stack's compatibility patches. Later AgentMemory releases may expose additional native telemetry.
 
 ## System map
 

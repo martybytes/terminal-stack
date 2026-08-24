@@ -98,4 +98,31 @@ switch ($found) {
     default    { Fail 'the probe was written but never came back from sessions or search' }
 }
 
+# 4. The derived layer: is the chat provider the CONTAINER is configured for
+#    actually accepting the CONTAINER's own credentials? See ts-verify.sh for
+#    the full reasoning. Short version: an unset OPENAI_BASE_URL is a skip
+#    (AgentMemory stores, searches and embeds with no chat provider at all),
+#    while a configured provider that refuses makes every compression call
+#    return empty, fail XML parsing, retry and dead-letter -- with the log line
+#    still reading outcome:"success" because no HTTP request was ever made.
+#    Asked inside the container because an optional env_file pointing at a
+#    non-existent path is completely silent, so from outside a container with no
+#    key looks identical to one with a working key.
+$probeSh = '[ -n "${OPENAI_BASE_URL:-}" ] || { echo "skip -"; exit 0; }; printf "%s " "$OPENAI_BASE_URL"; curl -s -m 10 -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${OPENAI_API_KEY:-}" "$OPENAI_BASE_URL/models"'
+$llm = (& docker exec ts-agentmemory-server sh -c $probeSh 2>$null) -join ' '
+$parts = @($llm -split '\s+' | Where-Object { $_ })
+$llmUrl = if ($parts.Count -gt 0) { $parts[0] } else { '' }
+$llmCode = if ($parts.Count -gt 1) { $parts[1] } else { '' }
+if ($llmUrl -eq 'skip') {
+    Write-Host '  -- no chat provider configured; storage, search and embeddings are unaffected'
+} elseif ($llmCode -match '^2') {
+    Pass "LLM provider answers with the container's own credentials ($llmUrl)"
+} elseif ($llmCode -eq '401' -or $llmCode -eq '403') {
+    Fail "the LLM provider at $llmUrl REFUSES the container's credentials ($llmCode) - compression will dead-letter silently; check the key reaches the container: docker exec ts-agentmemory-server printenv OPENAI_API_KEY"
+} elseif (-not $llmCode -or $llmCode -eq '000') {
+    Fail "could not reach the LLM provider from the container - compression will dead-letter silently"
+} else {
+    Fail "the LLM provider at $llmUrl answered $llmCode"
+}
+
 exit $rc

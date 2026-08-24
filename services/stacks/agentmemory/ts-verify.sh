@@ -92,4 +92,39 @@ case "$found" in
     *)        fail 'the probe was written but never came back from sessions or search'; rc=1 ;;
 esac
 
+# 4. The derived layer: is the chat provider the CONTAINER is configured for
+#    actually accepting the CONTAINER's own credentials?
+#
+#    An unset OPENAI_BASE_URL is a skip, not a failure -- AgentMemory stores,
+#    searches and embeds with no chat provider at all, which is the documented
+#    default for a fresh clone. What is a failure is a provider that is
+#    configured and refuses: every compression call then produces nothing, fails
+#    XML parsing, retries, and dead-letters, while the log line still says
+#    outcome:"success" because no HTTP request was ever made. 52,570 compression
+#    jobs dead-lettered that way with no error anywhere.
+#
+#    Asked INSIDE the container deliberately. The credential arrives through an
+#    optional env_file, and compose says NOTHING when an optional env_file path
+#    is wrong -- so from outside, a container with no key looks identical to one
+#    with a working key.
+llm="$(docker exec ts-agentmemory-server sh -c '
+    [ -n "${OPENAI_BASE_URL:-}" ] || { echo "skip -"; exit 0; }
+    printf "%s " "$OPENAI_BASE_URL"
+    curl -s -m 10 -o /dev/null -w "%{http_code}" \
+        -H "Authorization: Bearer ${OPENAI_API_KEY:-}" "$OPENAI_BASE_URL/models"' 2>/dev/null)" || llm="unreachable -"
+set -- $llm
+case "${2:-}" in
+    -)   if [ "${1:-}" = skip ]; then
+             echo "  -- no chat provider configured; storage, search and embeddings are unaffected"
+         else
+             fail 'could not ask the container about its LLM provider'; rc=1
+         fi ;;
+    2??) pass "LLM provider answers with the container's own credentials ($1)" ;;
+    401|403)
+         fail "the LLM provider at $1 REFUSES the container's credentials ($2) — compression will dead-letter silently; check OPENAI_API_KEY reaches the container: docker exec ts-agentmemory-server printenv OPENAI_API_KEY"
+         rc=1 ;;
+    000) fail "the LLM provider at $1 is unreachable from the container — compression will dead-letter silently"; rc=1 ;;
+    *)   fail "the LLM provider at $1 answered $2"; rc=1 ;;
+esac
+
 exit $rc

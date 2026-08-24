@@ -22,8 +22,8 @@ while [ -L "$_self" ]; do
     case "$_self" in /*) ;; *) _self="$_d/$_self" ;; esac
 done
 SCRIPT_DIR="$(cd -- "$(dirname -- "$_self")" && pwd -P)"
-# shellcheck source=../_common.sh
-. "$SCRIPT_DIR/../_common.sh"
+# shellcheck source=../../_stack.sh
+. "$SCRIPT_DIR/../../_stack.sh"
 
 while [ $# -gt 0 ]; do
     arg="$(tss_normalise_flag "$1")"

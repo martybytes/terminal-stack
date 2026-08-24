@@ -33,13 +33,19 @@ services:
       # retry loop every few seconds while the REST API works fine.
       - "127.0.0.1:3112:3112"
       - "127.0.0.1:3113:3113"
-    # Stack settings load first; the repo-root file loads second so its single
-    # OPENAI_API_KEY copy wins over provider-specific rollback settings.
-    # Both are optional so a clone can still start in degraded no-LLM mode.
+    # Stack settings load first; the services-root file loads second so its
+    # single OPENAI_API_KEY copy wins over provider-specific rollback settings.
+    #
+    # ../../.env, NOT ../.env. This tree gained a level in the merge
+    # (services/stacks/<stack>/), so ../.env now points at services/stacks/.env
+    # -- a file that does not exist. required:false means compose says NOTHING
+    # about a missing env_file, so the key silently never reached the container
+    # and every compression call returned empty and failed XML parsing forever.
+    # Both stay optional so a clone can still start in degraded no-LLM mode.
     env_file:
       - path: .env
         required: false
-      - path: ../.env
+      - path: ../../.env
         required: false
     environment:
       # The viewer defaults to binding 127.0.0.1 *inside* the container's
@@ -71,14 +77,29 @@ services:
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:3111/agentmemory/livez || exit 1"]
       interval: 30s
-      timeout: 5s
+      # 15s, not 5s. This is a single-threaded Node process, and while it is
+      # working through a compression backlog (provider latency measured at
+      # 3-18s per call, several in flight) the event loop does not get back to
+      # an HTTP handler within 5 seconds. The container then goes "unhealthy"
+      # while livez answers a direct request in 260ms -- and the console
+      # depends_on it being service_healthy, so the next `up` would sit there
+      # waiting for a server that is busy, not broken.
+      timeout: 15s
       start_period: 30s
-      retries: 3
+      retries: 5
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "3"
+
+networks:
+  # Named, not left as ts-agentmemory_default. agent007memory joins this network
+  # from its own compose project to reach ts-agentmemory-server by name, and a
+  # project-derived default name would change under it the day this project is
+  # renamed. Anything that reaches across projects has to be pinned.
+  default:
+    name: ts-agentmemory-net
 
 volumes:
   # Declared external so the volume name is stable and identical on every

@@ -289,6 +289,10 @@ selected() {                                # stacks that actually take part
     printf '%s' "${out# }"
 }
 
+# Reverse the lines on stdin. `tac` is GNU-only -- macOS has no tac -- and awk
+# is everywhere this repo already assumes awk.
+tac_lines() { awk '{ a[NR] = $0 } END { for (i = NR; i > 0; i--) print a[i] }'; }
+
 case "$cmd" in
     status) cmd_status ;;
 
@@ -323,7 +327,11 @@ case "$cmd" in
     down)
         # -v is NEVER in this argv. Volumes are only ever destroyed by an
         # explicitly gated path, and that is enforced by test, not by comment.
-        for s in $(selected); do
+        #
+        # REVERSE start order: a stack that joins another's network has to let
+        # go of it first, or `down` on the owner leaves a network in use and the
+        # error names neither stack.
+        for s in $(selected | tac_lines); do
             section "$s"
             tss_compose "$s" down || _bad "down failed for $s"
         done ;;
@@ -332,9 +340,17 @@ case "$cmd" in
         # down + up, not `docker compose restart`: restart reuses the existing
         # container, so it does not pick up the changed .env or overlay that is
         # the reason anyone restarts.
-        for s in $(selected); do
+        #
+        # ALL down (reverse order) before ANY up, rather than down-then-up per
+        # stack: restarting agentmemory while agent007memory still holds
+        # ts-agentmemory-net leaves the console pointed at a container that no
+        # longer exists, and it only recovers on its own restart timer.
+        for s in $(selected | tac_lines); do
             section "$s"
             tss_compose "$s" down || true
+        done
+        for s in $(selected); do
+            section "$s"
             tss_compose "$s" up -d || _bad "restart failed for $s"
         done ;;
 
@@ -371,11 +387,18 @@ PY
         # The two external volumes have to exist before the first `up`, because
         # external means compose will not create them. This is where every memory
         # you have ever saved lives, so an existing one is never touched.
-        vols='ts-agentmemory-data'
-        case "$(tss_compose_files "$(tss_stack_dir agentmemory)" | tr '\n' ' ')" in
-            *docker-compose.console.yml*) vols="$vols ts-agentmemory-console-history" ;;
-            *) info 'agentmemory .env selects no console profile — skipping the console volume' ;;
-        esac
+        # Read out of the compose files themselves rather than listed here: this
+        # used to name the console volume only when agentmemory's COMPOSE_FILE
+        # mentioned the console overlay, which stopped being true the moment the
+        # console became its own compose project. Every `external: true` volume of
+        # every stack, from the source of truth.
+        vols="$(awk '
+            /^volumes:/        { inv = 1; next }
+            /^[a-zA-Z]/        { inv = 0 }
+            inv && /^  [a-zA-Z0-9_-]+:/ { name = $1; sub(/:$/, "", name); next }
+            inv && /external:[[:space:]]*true/ && name { print name; name = "" }
+        ' "$TSS_STACKS"/*/docker-compose.yml | sort -u | tr '\n' ' ')"
+        [ -n "$vols" ] || vols='ts-agentmemory-data'
         for v in $vols; do
             if [ "$TSS_APPLY" = 0 ]; then step "docker volume create $v (if absent)"; continue; fi
             if docker volume inspect "$v" >/dev/null 2>&1; then

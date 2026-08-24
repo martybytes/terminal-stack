@@ -69,8 +69,8 @@ own settings (`COMPOSE_FILE`, `COMPOSE_PROFILES`, `COMPOSE_PROJECT_NAME`). Two w
   cannot cleanly remove a block. `kokoro`'s base file is hardware-neutral and
   `docker-compose.gpu.yml` adds the NVIDIA reservation; the reverse would not work. `agentmemory`
   follows the same pattern for an optional whole *service*, not just a config block: the base file
-  is agentmemory alone, and `docker-compose.console.yml` adds the agent007memory console — any
-  script or overlay that explicitly lists `-f` files for that stack must include the console overlay
+  is kokoro's GPU selection — any script or overlay that explicitly lists `-f` files for a stack
+  must include every overlay that stack's `COMPOSE_FILE` names
   before any overlay that patches the `console` service (billing, local-checkout), or Compose errors
   that the service isn't defined.
 
@@ -155,7 +155,7 @@ anything not here is drift.
 | Exits non-zero when problems were found | `check-capture.sh` | The `ts-doctor.sh` house rule, so it can be used in a pipeline or a hook. The `.ps1` always exits 0. |
 | Probe sessions tracked and cleaned from an `EXIT` trap | `check-capture.sh` | Fixes a real bug: the `.ps1`'s `$probeSessions` is never initialised and section D's probe is never added to it. |
 | Backup root defaults under `$HOME` XDG state | `reconcile-llm-queue.sh`, `migrate-durable-llm.sh` | There is no Unix `C:\DATA`, and Docker Desktop for Mac only bind-mounts from `$HOME`, `/tmp`, `/private`, `/Volumes`. |
-| Console repo path derived from the repo's own location | `update-console.sh` | Removes a hardcoded per-machine path; `agent007memory` is a sibling under the same workspace root. |
+
 | Refuses the GPU path on macOS instead of falling back to CPU | `setup-kokoro-docker.sh` | Docker Desktop for Mac has no passthrough of any kind. A silent switch is the failure mode `kokoro`'s Blackwell section exists to warn about. |
 | CPU image pinned to `v0.8.0`, not `:latest` | `setup-kokoro-docker.sh` | A new file should not inherit the `.ps1`'s violation of the pin rule. Bring the `.ps1` into line the next time it is touched. |
 | agentmemory image derived, not hardcoded | `migrate-durable-llm.sh` | `.ps1:56` hardcodes `agentmemory-agentmemory:latest`, correct only because the compose project name happens to match the directory name. |

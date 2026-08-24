@@ -13,6 +13,19 @@ param(
 $ErrorActionPreference = 'Stop'
 $stackDir = [System.IO.Path]::GetFullPath($PSScriptRoot)
 $expectedStack = [System.IO.Path]::GetFullPath((Join-Path (Split-Path $PSScriptRoot -Parent) 'agentmemory'))
+
+# The console lives in its OWN compose project (ts-agent007memory) since the
+# split, so `docker compose stop console` from this directory stops nothing and
+# reports nothing -- it would have left the console reading a volume this script
+# is about to move. Stop it where it actually lives, and only if it is there.
+function Invoke-AmConsole([ValidateSet('stop', 'up')][string]$Action) {
+    $dir = Join-Path (Split-Path -Parent $stackDir) 'agent007memory'
+    if (-not (Test-Path -LiteralPath (Join-Path $dir 'docker-compose.yml'))) { return }
+    Push-Location $dir
+    try {
+        if ($Action -eq 'stop') { & docker compose stop } else { & docker compose up -d }
+    } finally { Pop-Location }
+}
 if ($stackDir -ne $expectedStack) { throw "unexpected stack directory: $stackDir" }
 if (-not (Test-Path -LiteralPath (Join-Path $stackDir 'docker-compose.yml') -PathType Leaf)) { throw "docker-compose.yml missing in $stackDir" }
 
@@ -51,7 +64,8 @@ try {
         if (-not ($resolvedBackup + '\').StartsWith($rootBoundary, [System.StringComparison]::OrdinalIgnoreCase)) {
             throw "resolved backup directory escaped backup root: $resolvedBackup"
         }
-        & docker compose stop console agentmemory
+        Invoke-AmConsole stop
+        & docker compose stop agentmemory
         if ($LASTEXITCODE -ne 0) { throw 'failed to stop stack for backup' }
         & docker run --rm --entrypoint sh -v 'ts-agentmemory-data:/source:ro' -v "${resolvedBackup}:/backup" agentmemory-agentmemory:latest -c 'tar -C /source -czf /backup/agentmemory-volume.tgz .'
         if ($LASTEXITCODE -ne 0) { throw 'volume backup failed; stack remains stopped' }
@@ -63,10 +77,11 @@ try {
     Section 'Deploy'
     Step 'build the patched AgentMemory image and recreate the stack'
     if ($Apply) {
-        & docker compose build agentmemory console
+        & docker compose build agentmemory
         if ($LASTEXITCODE -ne 0) { throw 'image build failed' }
         & docker compose up -d
         if ($LASTEXITCODE -ne 0) { throw 'stack start failed' }
+        Invoke-AmConsole up
     }
 
     Section 'Verify graph migration'

@@ -47,6 +47,46 @@ A plugin upgrade replaces the vendor cache and silently reverts the wiring; both
 sync paths repair it, and `ts-doctor` reports it. If the round trip returns 401,
 the cached secret is stale — `ts-stack doctor` compares the copies.
 
+## Memories are captured but never summarised, and the dead-letter count climbs
+
+The console's LLM Calls panel shows a large **dead letter** figure, "Observation
+compression" glows coral, and the server log repeats
+
+```
+warn Failed to parse compression XML {"obsId":"…","retried":true}
+```
+
+next to `llm_call … "outcome":"success","providerLatencyMs":0`. Those two lines
+together mean the job "succeeded" without any HTTP request happening: with no
+usable chat provider AgentMemory produces an empty completion, the XML parse
+fails, the job retries once and dead-letters. Storage, search and embeddings are
+unaffected throughout, which is why nothing looks broken.
+
+```sh
+docker exec ts-agentmemory-server printenv OPENAI_BASE_URL OPENAI_API_KEY
+services/stacks/agentmemory/ts-verify.sh    # asks the provider with the container's own credentials
+```
+
+Ask **inside** the container. The credential arrives through an optional
+`env_file`, and compose says nothing at all when an optional `env_file` path
+does not exist, so from outside a container with no key is indistinguishable
+from one with a working key.
+
+Two causes, in order: the key never reached the container (empty above), or the
+provider refuses it (`401` from the verify). Provider choice and the no-provider
+default: `doc agentmemory`.
+
+Clearing a backlog that built up while the provider was broken:
+
+```sh
+services/stacks/agentmemory/reconcile-llm-queue.sh            # preview, changes nothing
+services/stacks/agentmemory/reconcile-llm-queue.sh --apply    # cold backup, quarantine, one recovery pass
+```
+
+`--apply` stops the stack briefly. It never deletes: the old queue store is
+moved aside to `/data/queue_store.quarantine-<stamp>` and a full volume backup
+is written first.
+
 ## Claude is not compressing prompts
 
 ```sh
