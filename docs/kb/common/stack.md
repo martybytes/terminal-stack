@@ -11,6 +11,8 @@
 | `ts-config wizard` | re-run the whole install questionnaire from scratch — see below |
 | `ts-mux` | WezTerm multiplexer domain: on/off, status, kill/restart/reset — see below |
 | `ts-smb` | SMB/CIFS shares over rclone: discover, interrogate, mount — `doc smb-shares` (macOS/Linux) |
+| `rclone config` / `rclone-stock config` | guided provider setup / untouched upstream wizard — `doc rclone` |
+| `tail-self` / `tail-hosts` / `tail-find` | Tailscale identity and peer discovery — `doc tailscale` |
 | `ts-wezterm` | WezTerm build info, upstream comparison, channel switching — see below |
 | `plain` | vanilla shell, no rc/profile (no oh-my-zsh/starship/aliases) — `exit` to return |
 | `chezmoi diff` / `chezmoi apply -v` | preview / apply configs (run from inside WSL on Windows) |
@@ -177,6 +179,7 @@ vocabulary on macOS and Linux instead of `smbutil`/`mount_smbfs` on one box and
 
 | Command | What it does |
 |---|---|
+| `ts-smb setup` | guided Tailscale discovery, sign-in, verified share selection, and preview |
 | `ts-smb` / `ts-smb list` | live mounts: name, state, engine, mountpoint (strays flagged) |
 | `ts-smb hosts` | SMB servers advertising on this LAN over mDNS |
 | `ts-smb hosts --sweep` | also port-scan your /24 — asks first, and it is noisy |

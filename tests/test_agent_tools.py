@@ -222,7 +222,8 @@ def test_shell_entrypoints_parse():
         "bootstrap/ts-mux.sh", "bootstrap/ts-wezterm.sh", "bootstrap/ts-doctor.sh",
         "bootstrap/wso.sh", "bootstrap/_workspace.sh", "bootstrap/_doctor.sh",
         "bootstrap/_common-debian.sh",
-        "bootstrap/ts-smb.sh", "bootstrap/_smb.sh",
+        "bootstrap/ts-smb.sh", "bootstrap/_smb.sh", "bootstrap/_smb_setup.sh",
+        "bootstrap/ts-rclone-config.sh",
     ]
     result = subprocess.run([shutil.which("bash"), "-n", *files], cwd=ROOT,
                             text=True, capture_output=True, check=False)
@@ -887,6 +888,45 @@ def test_rclone_is_in_the_catalog_with_a_description():
     ps = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
     assert "rclone     = 'Rclone.Rclone'" in ps
     assert "'rclone'" in ps
+
+
+def test_guided_rclone_only_intercepts_exact_bare_config():
+    zsh = (ROOT / "dot_zshrc").read_text(encoding="utf-8")
+    body = zsh[zsh.index("rclone() {"):zsh.index("# ts-smb", zsh.index("rclone() {"))]
+    assert '(( $# == 1 )) && [[ "$1" == config ]]' in body
+    assert '"$_TS_RCLONE_BIN" "$@"' in body
+    assert "rclone-stock()" in zsh
+    wizard = (ROOT / "bootstrap/ts-rclone-config.sh").read_text(encoding="utf-8")
+    assert "This does NOT choose a folder" in wizard
+    assert "rclone config providers" not in wizard  # always use the resolved binary
+    assert 'config providers' in wizard
+    assert "Tier 5  deprecated" in wizard
+
+
+def test_smb_guided_setup_verifies_before_transactional_save():
+    setup = (ROOT / "bootstrap/_smb_setup.sh").read_text(encoding="utf-8")
+    verify = setup.index("verifying that")
+    review = setup.index("Review — nothing has been saved yet")
+    store = setup.index("ts_smb_cred_set", review)
+    write = setup.index(".shares.local.conf.XXXXXX", review)
+    assert verify < review < store
+    assert verify < review < write
+    assert "RCLONE_SMB_PASS" in setup
+    assert "--password" not in setup
+    assert "rolled back" in setup
+    assert "tailscale status --json" in setup
+
+
+def test_tailscale_helpers_and_topic_cover_identity_and_diagnostics():
+    zsh = (ROOT / "dot_zshrc").read_text(encoding="utf-8")
+    for name in ("tail-self", "tail-hosts", "tail-ip", "tail-fqdn", "tail-find"):
+        assert f"{name}()" in zsh
+    for name in ("tail-status", "tail-ping", "tail-netcheck", "tail-nc", "tail-ssh"):
+        assert f"alias {name}=" in zsh
+    topic = (ROOT / "docs/kb/common/tools/tailscale.md").read_text(encoding="utf-8")
+    for command in ("tailscale ip -4", "tailscale status --json", "tailscale ping", "tailscale netcheck", "tailscale whois"):
+        assert command in topic
+    assert "https://tailscale.com/kb/1080/cli" in topic
 
 
 # ── atuin / arch-tag regressions ────────────────────────────────────────────────

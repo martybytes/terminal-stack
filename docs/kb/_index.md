@@ -19,7 +19,7 @@ edits the highlighted topic. The reader is `less`: `/pattern` searches, `q` quit
 ## Layout
 
 - `common/` — cross-OS (git, ssh, tmux, clipboard, the stack itself, workspace navigation and the `wso` organizer, SMB shares via `ts-smb`, …)
-- `common/tools/` — per-tool cheat-sheets (eza, fzf, bat, fd, tree, ripgrep, zoxide, atuin, yazi, delta, starship, chezmoi, micro, glow, neovim, zed, cursor, wezterm, ghostty, grok, gemini, pi, llmfit, node-python, and the disk/monitor set: duf, ncdu, dust, gdu, btop, bottom, glances, bandwhich, gping, rclone) — `doc eza`, `doc nvim`, …
+- `common/tools/` — per-tool cheat-sheets (eza, fzf, bat, fd, tree, ripgrep, zoxide, atuin, yazi, delta, starship, chezmoi, micro, glow, neovim, zed, cursor, wezterm, ghostty, grok, gemini, pi, llmfit, node-python, tailscale, rclone, and disk/network monitors) — `doc eza`, `doc tailscale`, …
 - `common/codex.md` / `common/claude-code.md` — AI coding-agent shortcuts and footer configuration (`doc codex`, `doc claude-code`); `common/tools/{grok,gemini}.md` cover the other two agents, and `common/tools/node-python.md` the runtimes they need
 - `linux/` — apt, VeraCrypt, ssh permissions, systemd, docker
 - `macos/` — Homebrew, macOS WezTerm toggles

@@ -6,6 +6,7 @@ and `smbclient`/`mount.cifs` on another.
 
 | Command | What it does |
 |---|---|
+| `ts-smb setup` | guided Tailscale-aware setup; verifies access before saving |
 | `ts-smb hosts` | SMB servers advertising on this LAN (mDNS) |
 | `ts-smb hosts --sweep` | also port-scan your /24 — asks first, and it is noisy |
 | `ts-smb shares HOST` | the shares a host offers |
@@ -43,6 +44,12 @@ doctor` says so if you get it wrong.
 Passwords are obscured once by `ts-smb creds` and kept in the OS keychain; they
 reach rclone through the environment and never appear in a command line. There is
 no `--password VALUE` flag on purpose; use `-P` or `--password-stdin`.
+
+Start a new connection with `ts-smb setup`. It explains every choice, finds
+online Tailscale computers with SMB open, signs in before listing their actual
+shared folders, verifies the selected folder, and reviews everything before
+writing the machine-local inventory. It then previews the folder and optionally
+offers a read-only mount. `ts-smb add` remains the lower-level manual route.
 
 rclone has no anonymous mode — user `guest` with an empty password is the
 substitute, and it is the default.

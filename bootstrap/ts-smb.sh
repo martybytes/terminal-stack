@@ -31,6 +31,7 @@ Usage:
   ts-smb tree SPEC   the tree, depth-limited (--depth N, default 2)
   ts-smb du SPEC     what it holds (rclone size)
   ts-smb get SRC DST copy out of a share without mounting it
+  ts-smb setup       guided Windows/NAS share setup (Tailscale-aware)
   ts-smb mount NAME  mount it
   ts-smb umount NAME unmount it
   ts-smb add NAME    add a share to the store, asking for whatever you left out
@@ -741,6 +742,9 @@ umount_one() {
 
 # ── subcommands: store + credentials ────────────────────────────────────────────
 
+. "$SRC/bootstrap/_smb_setup.sh"
+cmd_setup() { ts_smb_setup_run "$@"; }
+
 cmd_add() {
     local name="${1:-}"
     [ -n "$name" ] || { echo "ts-smb add: a name is required." >&2; return 2; }
@@ -1134,6 +1138,7 @@ case "$CMD" in
     tree)           cmd_tree "$@" ;;
     du|size)        cmd_du "$@" ;;
     get|copy)       cmd_get "$@" ;;
+    setup)          cmd_setup "$@" ;;
     mount)          cmd_mount "$@" ;;
     umount|unmount) cmd_umount "$@" ;;
     add)            cmd_add "$@" ;;
@@ -1141,5 +1146,5 @@ case "$CMD" in
     creds)          cmd_creds "$@" ;;
     engine)         cmd_engine "$@" ;;
     doctor)         cmd_doctor "$@" ;;
-    *) echo "ts-smb: unknown command '$CMD' (list, hosts, shares, probe, ls, tree, du, get, mount, umount, add, config, creds, engine, doctor)" >&2; exit 2 ;;
+    *) echo "ts-smb: unknown command '$CMD' (list, hosts, shares, probe, ls, tree, du, get, setup, mount, umount, add, config, creds, engine, doctor)" >&2; exit 2 ;;
 esac

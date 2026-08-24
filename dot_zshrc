@@ -887,6 +887,36 @@ ts-mux() {
   TERMINAL_STACK_DIR="$src" TERMINAL_STACK_CHEZMOI="$cz" bash "$src/bootstrap/ts-mux.sh" "$@"
 }
 
+# rclone's stock config wizard opens with a 60+ item provider list and calls the
+# provider type "Storage", which is easy to mistake for a folder/location. Only
+# the exact interactive `rclone config` gets the guided terminal-stack front end.
+typeset -g _TS_RCLONE_BIN=""
+_ts_rclone_bin() {
+  _ts_agent_bin rclone _TS_RCLONE_BIN && return 0
+  print -u2 "rclone: not found. Install it with: ts-config apps rclone"
+  return 127
+}
+rclone-stock() {
+  _ts_rclone_bin || return 127
+  "$_TS_RCLONE_BIN" "$@"
+}
+rclone() {
+  _ts_rclone_bin || return 127
+  if (( $# == 1 )) && [[ "$1" == config ]]; then
+    local cz src
+    cz="$(_ts_chezmoi)" || { print -u2 "rclone config: chezmoi not found on PATH."; return 1; }
+    src="$(_ts_src "$cz" rclone-config)" || return 1
+    if [[ ! -f "$src/bootstrap/ts-rclone-config.sh" ]]; then
+      print -u2 "rclone config: guided setup is missing. Run 'ts-update' or use 'rclone-stock config'."
+      return 1
+    fi
+    TERMINAL_STACK_DIR="$src" TERMINAL_STACK_CHEZMOI="$cz" \
+      TERMINAL_STACK_RCLONE_BIN="$_TS_RCLONE_BIN" bash "$src/bootstrap/ts-rclone-config.sh"
+  else
+    "$_TS_RCLONE_BIN" "$@"
+  fi
+}
+
 # ts-smb — SMB/CIFS shares over rclone: find them, look inside, mount them.
 # Thin wrapper over the shared bootstrap/ts-smb.sh in the clone. macOS and Linux
 # only for now: there is deliberately no pwsh twin (see `ts-smb -h`).
@@ -899,6 +929,109 @@ ts-smb() {
   fi
   TERMINAL_STACK_DIR="$src" TERMINAL_STACK_CHEZMOI="$cz" bash "$src/bootstrap/ts-smb.sh" "$@"
 }
+
+# Tailscale identity/discovery helpers. `tailscale ip` already resolves peers;
+# JSON is used only where the native CLI has no concise FQDN/table equivalent.
+_tail_status_json() {
+  command -v tailscale >/dev/null 2>&1 || { print -u2 "Tailscale is not installed."; return 127; }
+  command -v jq >/dev/null 2>&1 || { print -u2 "These helpers need jq. Install it, then retry."; return 127; }
+  local data
+  data="$(command tailscale status --json 2>/dev/null)" || {
+    print -u2 "Cannot read Tailscale status. Is Tailscale running and connected?"
+    return 1
+  }
+  print -r -- "$data" | command jq -e '.Self and .Peer' >/dev/null 2>&1 || {
+    print -u2 "Tailscale returned an unexpected status format; try: tailscale status"
+    return 1
+  }
+  print -r -- "$data"
+}
+
+tail-self() {
+  _tail_status_json | command jq -r '
+    def clean: rtrimstr(".");
+    ["Host", (.Self.HostName // "unknown")],
+    ["FQDN", ((.Self.DNSName // "unknown") | clean)],
+    ["IPv4", ([.Self.TailscaleIPs[]? | select(test("^[0-9]+\\."))][0] // "unavailable")],
+    ["IPv6", ([.Self.TailscaleIPs[]? | select(contains(":"))][0] // "unavailable")],
+    ["State", (if .Self.Online then "online" else "offline" end)]
+    | @tsv' | column -t -s $'\t'
+}
+
+tail-hosts() {
+  local online=0
+  [[ "${1:-}" == --online ]] && { online=1; shift; }
+  (( $# == 0 )) || { print -u2 "usage: tail-hosts [--online]"; return 2; }
+  _tail_status_json | command jq -r --argjson online "$online" '
+    def clean: rtrimstr(".");
+    ([.Self] + [.Peer[]?])
+    | map(select(($online == 0) or .Online))
+    | sort_by((if .Online then 0 else 1 end), (.HostName // .DNSName // "" | ascii_downcase))
+    | (["STATE","HOST","IPv4","FQDN","OS"],
+       (.[] | [(if .Online then "online" else "offline" end),
+               (.HostName // "?"),
+               ([.TailscaleIPs[]? | select(test("^[0-9]+\\."))][0] // "-"),
+               ((.DNSName // "-") | clean), (.OS // "-")]))
+    | @tsv' | column -t -s $'\t'
+}
+
+tail-ip() {
+  command -v tailscale >/dev/null 2>&1 || { print -u2 "Tailscale is not installed."; return 127; }
+  command tailscale ip -4 "$@"
+}
+
+_tail_matches() {
+  local query="$1"
+  _tail_status_json | command jq -c --arg q "$query" '
+    def clean: rtrimstr(".");
+    def short: (clean | split(".")[0]);
+    def hay: [(.HostName // ""), (.DNSName // "" | clean), (.DNSName // "" | short)] + [.TailscaleIPs[]?];
+    ([.Self] + [.Peer[]?]) as $nodes
+    | ($nodes | map(select(any(hay[]; ascii_downcase == ($q|ascii_downcase))))) as $exact
+    | if ($exact|length) > 0 then $exact
+      else $nodes | map(select(any(hay[]; ascii_downcase | contains($q|ascii_downcase))))
+      end | .[]'
+}
+
+tail-fqdn() {
+  local query="${1:-}" matches count data
+  if [[ -z "$query" ]]; then
+    data="$(_tail_status_json)" || return $?
+    print -r -- "$data" | command jq -r '.Self.DNSName | rtrimstr(".")'
+    return
+  fi
+  (( $# == 1 )) || { print -u2 "usage: tail-fqdn [HOST]"; return 2; }
+  matches="$(_tail_matches "$query")" || return $?
+  count="$(print -r -- "$matches" | sed '/^$/d' | wc -l | tr -d ' ')"
+  if [[ "$count" == 1 ]]; then
+    print -r -- "$matches" | command jq -r '.DNSName | rtrimstr(".")'
+  elif [[ "$count" == 0 ]]; then
+    print -u2 "No Tailscale host matched '$query'. Try: tail-find $query"
+    return 1
+  else
+    print -u2 "'$query' is ambiguous. Matching hosts:"
+    print -r -- "$matches" | command jq -r '"  \(.HostName // "?")  \(.DNSName | rtrimstr("."))"' >&2
+    return 2
+  fi
+}
+
+tail-find() {
+  (( $# == 1 )) || { print -u2 "usage: tail-find QUERY"; return 2; }
+  local matches
+  matches="$(_tail_matches "$1")" || return $?
+  [[ -n "$matches" ]] || { print -u2 "No Tailscale host matched '$1'."; return 1; }
+  print -r -- "$matches" | command jq -sr '
+    (["STATE","HOST","IPv4","FQDN","OS"] | @tsv),
+    (.[] | [if .Online then "online" else "offline" end, (.HostName // "?"),
+      ([.TailscaleIPs[]? | select(test("^[0-9]+\\."))][0] // "-"),
+      ((.DNSName // "-") | rtrimstr(".")), (.OS // "-")] | @tsv)' | column -t -s $'\t'
+}
+
+alias tail-status='tailscale status'
+alias tail-ping='tailscale ping'
+alias tail-netcheck='tailscale netcheck'
+alias tail-nc='tailscale nc'
+alias tail-ssh='tailscale ssh'
 
 # ts-wezterm — which WezTerm build you have, what upstream has, and what changed.
 # Also switches channel. Nothing here runs on its own; see `ts-wezterm -h`.

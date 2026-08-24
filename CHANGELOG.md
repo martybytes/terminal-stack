@@ -6,6 +6,8 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Added
 
+- **Guided rclone, verified SMB setup, and Tailscale discovery helpers (08/23/2026).** Bare `rclone config` now explains what is being selected, leads with Windows/NAS shares, preselects common providers, and progressively searches the full catalog; `rclone-stock config` preserves upstream's raw wizard. `ts-smb setup` discovers live Tailscale SMB hosts and verifies credentials/share access before transactional local saving. New `tail-*` identity and diagnostic shortcuts are documented in `doc tailscale`.
+
 - **`ts-update` now finishes the shell handoff (08/23/2026).** When an update
   changes zsh configuration, it explains why the current process still has old
   functions and offers a safe immediate restart when interactive with no
