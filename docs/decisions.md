@@ -1055,10 +1055,15 @@ did not choose from a source they did not vet. **This originally said the stack 
 The original position was that theme, leader chord and font are baked into `.wezterm.lua`
 and "have no Ghostty equivalent", so a Ghostty user got the tooling but not the theming.
 That was true of the *tab bar* and turned out to be false of everything else: Ghostty has a
-theme system, a font stack, padding, key bindings and a quick terminal, and configuring none
+theme system, a font stack, padding and key bindings, and configuring none
 of them meant Ghostty looked nothing like the rest of the stack on the same machine.
 
 Four things decided the shape of it.
+
+**Global shortcuts must preserve macOS conventions.** An early version bound
+`global:cmd+grave_accent=toggle_quick_terminal`. That intercepted Command-Backtick,
+the standard “cycle windows in the active application” shortcut, system-wide.
+The stack intentionally ships no quick-terminal configuration now.
 
 **Theme is live, not baked.** Every other consumer of the theme setting reads `resolvedTheme`,
 the palette resolved at apply time, because Starship, tmux and Claude cannot re-evaluate at

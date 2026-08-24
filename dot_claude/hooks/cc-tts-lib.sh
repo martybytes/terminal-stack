@@ -291,6 +291,8 @@ cc_tts_build_speech() {
        && [ -n "${CC_TTS_HOOK_JSON:-}" ] && command -v jq >/dev/null 2>&1; then
         local final_text self_line
         final_text="$(printf '%s' "${CC_TTS_HOOK_JSON}" | jq -r '
+            (.last_assistant_message // .text // empty) as $direct
+            | if ($direct | type) == "string" and ($direct | length) > 0 then $direct else
             [.. | objects
              | select(.role? == "assistant" or .type? == "assistant")
              | (.content // .message // empty)
@@ -298,7 +300,7 @@ cc_tts_build_speech() {
                  [ .[] | select(.type? == "text") | .text ] | join(" ")
                elif type == "string" then .
                else empty end
-            ] | last // empty' 2>/dev/null || true)"
+            ] | last // empty end' 2>/dev/null || true)"
         if [ -n "$final_text" ]; then
             self_line="$(cc_tts_self_summary "$final_text")"
             if [ -n "$self_line" ]; then

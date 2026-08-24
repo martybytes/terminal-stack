@@ -1454,6 +1454,29 @@ def test_self_summarizer_matches_the_python_daemon():
             f"shell/python disagree on {c!r}"
 
 
+def test_codex_direct_stop_message_feeds_self_summary():
+    """Codex Stop input carries the final response at the top level, unlike
+    Claude's transcript-shaped payload. Missing that field silently fell back
+    to the fixed template even when the user selected self."""
+    script = r'''
+        export CC_TTS_SOURCE=codex
+        export CC_TTS_HOOK_JSON='{"last_assistant_message":"Done. <!-- speak: Codex used its own summary. -->"}'
+        . dot_claude/hooks/cc-tts-lib.sh 2>/dev/null
+        cc_tts_build_speech codex waiting terminal-stack
+    '''
+    result = subprocess.run(["bash", "-c", script], cwd=ROOT,
+                            capture_output=True, text=True, check=True)
+    assert "Codex used its own summary" in result.stdout
+    assert "I'm waiting for you" not in result.stdout
+
+
+def test_ghostty_preserves_standard_macos_window_cycle_shortcut():
+    cfg = (ROOT / "dot_config/ghostty/config.tmpl").read_text(encoding="utf-8")
+    assert "toggle_quick_terminal" not in cfg
+    assert "quick-terminal-" not in cfg
+    assert "global:cmd+grave_accent" not in cfg
+
+
 @pytest.mark.skipif(not shutil.which("bash"), reason="bash is unavailable")
 def test_speak_marker_is_never_spoken_verbatim():
     """In hook mode the raw final message IS the speech text, so a

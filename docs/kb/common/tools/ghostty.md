@@ -55,10 +55,9 @@ nothing to configure there. The absence is a decision, not drift.
   `cmd+t`/`w`/`d` are deliberately left on Ghostty's own tab and split actions:
   this stack multiplexes *inside* the terminal with WezTerm and tmux, so there
   is no host multiplexer to forward them to.
-- **Quick terminal**: a Quake-style drop-down on `Cmd+\``. This needs
-  **Accessibility permission** — System Settings → Privacy & Security →
-  Accessibility → enable Ghostty. Without it the global hotkey silently does
-  nothing, and Ghostty cannot warn you because it never receives the key.
+- **No global quick-terminal key**: `Cmd+\`` remains the standard macOS
+  “cycle windows in the active application” shortcut. A global Ghostty binding
+  would intercept that system convention even while another app is active.
 - **Behaviour**: copy-on-select, paste protection, and a 10000-line scrollback
   matching WezTerm's.
 

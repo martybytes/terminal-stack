@@ -67,16 +67,6 @@ keybind = cmd+backspace=text:\x15
 # tmux, so there is no host multiplexer to forward them to; unbinding them here
 # would remove working keys and give nothing back.
 
-# ── Quick terminal (Quake-style drop-down) ────────────────────────────────────
-# Needs Accessibility permission: System Settings > Privacy & Security >
-# Accessibility > enable Ghostty. Without it the global hotkey silently does
-# nothing — Ghostty cannot tell you, because it never receives the key.
-# cmd+grave_accent shadows macOS's "cycle windows in app" while Ghostty runs.
-keybind = global:cmd+grave_accent=toggle_quick_terminal
-quick-terminal-position = top
-quick-terminal-size = 40%
-quick-terminal-autohide = true
-
 # ── Behaviour ─────────────────────────────────────────────────────────────────
 copy-on-select = clipboard
 clipboard-paste-protection = true
