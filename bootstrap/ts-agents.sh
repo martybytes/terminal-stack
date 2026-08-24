@@ -66,18 +66,15 @@ with open(path, "w", encoding="utf-8") as f: json.dump(cfg, f, indent=2); f.writ
 PY
 }
 
+# The stack tree is always <clone>/services/, so there is nothing to search for:
+# $ROOT is this script's directory. The old four-root workspace walk could not
+# work from the runtime clone (not under the workspace) and, post-merge, could
+# only find a stale file from an archived repo. HEADROOM_ENV_FILE stays as the
+# documented override.
 headroom_token() {
     if [ -n "${HEADROOM_PROXY_TOKEN:-}" ]; then printf '%s' "$HEADROOM_PROXY_TOKEN"; return 0; fi
-    local file root
-    if [ -n "${HEADROOM_ENV_FILE:-}" ]; then
-        file="$HEADROOM_ENV_FILE"
-    else
-        for root in "${WORKSPACE_DIR:-}" "$HOME/Documents/Workspace" "$HOME/workspace" "$HOME/Workspace" /mnt/c/DATA/Workspace; do
-            [ -n "$root" ] || continue
-            file="$root/src/github.com/martybytes/docker-local/headroom/.env"
-            [ -r "$file" ] && break
-        done
-    fi
+    local file
+    file="${HEADROOM_ENV_FILE:-$ROOT/../services/stacks/headroom/.env}"
     [ -r "${file:-}" ] || return 1
     sed -n 's/^HEADROOM_PROXY_TOKEN=//p' "$file" | head -1
 }
@@ -117,12 +114,12 @@ headroom_status() {
         echo "  ok  proxy authentication works at $proxy"
         proxy_ok=1
     else
-        echo "  !!  proxy authentication failed at $proxy: $why (docker-local owns it)"
+        echo "  !!  proxy authentication failed at $proxy: $why (ts-stack runs the proxy)"
     fi
     if am_probe "$mcp" >/dev/null 2>&1; then echo "  ok  MCP reachable at $mcp"
     else
         # Not a fault in this stack: `headroom mcp serve` is a SEPARATE process
-        # (default 127.0.0.1:8788) that docker-local's compose does not start.
+        # (default 127.0.0.1:8788) that the headroom stack's compose does not start.
         echo "  !!  MCP not reachable at $mcp"
         echo "      start it with: headroom mcp serve --transport http"
     fi

@@ -251,20 +251,28 @@ ts_docker_ports() {
 
 # ts_probe_headroom — 0 when the proxy is ready. Echoes a human summary.
 # The MCP endpoint is reported separately because it is a SEPARATE process
-# (`headroom mcp serve`, default 127.0.0.1:8788) that docker-local's compose does
-# not start — so the proxy being up says nothing about MCP being up.
+# (`headroom mcp serve`, default 127.0.0.1:8788) that services/stacks/headroom's
+# compose does not start — so the proxy being up says nothing about MCP being up.
+# The absorbed compose stacks live at <clone>/services/stacks/<name>/. Resolved
+# from the clone — $TERMINAL_STACK_DIR, else chezmoi's source path — because that
+# is the only answer that also works from the runtime clone, which is not under
+# the workspace at all.
+ts_stack_env_file() {                      # <stack> -> <clone>/services/stacks/<stack>/.env
+    local src="${TERMINAL_STACK_DIR:-}"
+    if [ -z "$src" ] && command -v chezmoi >/dev/null 2>&1; then
+        src="$(chezmoi source-path 2>/dev/null || true)"
+    fi
+    [ -n "$src" ] || return 1
+    printf '%s' "$src/services/stacks/$1/.env"
+}
+
 ts_probe_headroom() {
     local proxy="${1:-http://127.0.0.1:8787}" mcp="${2:-http://127.0.0.1:8788/mcp}" rc=1 token="" file="" root
     token="${HEADROOM_PROXY_TOKEN:-}"
     if [ -z "$token" ]; then
-        file="${HEADROOM_ENV_FILE:-}"
-        if [ -z "$file" ]; then
-            for root in "${WORKSPACE_DIR:-}" "$HOME/Documents/Workspace" "$HOME/workspace" "$HOME/Workspace" /mnt/c/DATA/Workspace; do
-                [ -n "$root" ] || continue
-                file="$root/src/github.com/martybytes/docker-local/headroom/.env"
-                [ -r "$file" ] && break
-            done
-        fi
+        # One rule everywhere: the stack tree is <clone>/services/. ts_stack_env_file
+        # resolves it from the clone, never by walking the workspace for a sibling repo.
+        file="${HEADROOM_ENV_FILE:-$(ts_stack_env_file headroom)}"
         [ -r "$file" ] && token="$(sed -n 's/^HEADROOM_PROXY_TOKEN=//p' "$file" | head -1)"
     fi
     if [ -n "$token" ] && curl -fsS --max-time 2 -H "X-Headroom-Proxy-Token: $token" "$proxy/stats" >/dev/null 2>&1; then

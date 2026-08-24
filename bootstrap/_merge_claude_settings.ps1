@@ -14,7 +14,7 @@
 # those. Everything else in the live file survives byte-for-byte.
 #
 # Client wiring that lives in this file (the AgentMemory URL, plugin enablement) is
-# deliberately outside version control — see docker-local\agentmemory\README.md.
+# deliberately outside version control — see services\stacks\agentmemory\README.md.
 # Do not "fix" this by adding those keys to the template.
 
 [CmdletBinding()]

@@ -681,7 +681,7 @@ ts_wizard_ask() {
         TS_WIZ_HEADROOM="$(ts_prompt_agent_toggle TS_HEADROOM 'Headroom prompt compression and monitoring?' \
 "  RECOMMENDATION: ${_hr_def}, based on probing this machine just now.
 ${_hr_report}
-  docker-local owns these containers; this installer never starts or stops them.
+  ts-stack starts and stops these containers; this installer never does.
   Turning it on only points Claude/Codex/Cursor at the proxy, and each launch
   falls back to the provider directly if the proxy is down — so it degrades
   rather than breaking." "$_hr_def" "$_hr_note")"
@@ -694,7 +694,7 @@ ${_hr_report}
         TS_WIZ_AGENTMEMORY="$(ts_prompt_agent_toggle TS_AGENTMEMORY 'AgentMemory for all projects?' \
 "  RECOMMENDATION: ${_am_def}, based on probing this machine just now.
 ${_am_report}
-  docker-local owns the service; terminal-stack owns only the agent wiring.
+  ts-stack runs the service; ts-config agents owns only the agent wiring.
   Note the hooks fail silently by design — they swallow errors and exit 0 — so
   a machine wired to a service that is not running captures nothing and says
   nothing about it. That is why this is probed rather than guessed." "$_am_def" "$_am_note")"

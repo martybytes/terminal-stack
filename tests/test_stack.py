@@ -155,3 +155,73 @@ def test_docker_kind_calls_the_desktop_stub_what_it_is():
     assert "wsl-shim" in r.stdout, r.stdout + r.stderr
     assert "WSL Integration" in r.stdout, "the advice must name the actual fix"
     assert "is Docker Desktop running" not in r.stdout
+
+
+# ── one resolution rule, six copies ───────────────────────────────────────────
+def test_the_stack_env_file_resolves_from_the_clone_in_every_copy():
+    """Five sites walked the workspace for a sibling docker-local clone. That
+    could never work from the runtime clone (which is not under the workspace)
+    and, post-merge, can only find a stale file from an archived repo -- whose
+    token may be for a proxy that has since rotated, producing a 401 that reads
+    like a broken install. There is no fallback to the old path on purpose."""
+    posix = ("bootstrap/ts-agents.sh", "bootstrap/_config.sh", "dot_zshrc")
+    windows = ("bootstrap/ts-agents.ps1",
+               "windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1")
+    for rel in posix:
+        body = (ROOT / rel).read_text(encoding="utf-8")
+        # _config.sh takes the stack name as an argument; the rest name headroom.
+        assert "services/stacks/headroom/.env" in body or "services/stacks/$1/.env" in body, rel
+        assert "martybytes/docker-local" not in body, rel
+    for rel in windows:
+        body = (ROOT / rel).read_text(encoding="utf-8")
+        assert "services\\stacks\\headroom\\.env" in body, rel
+        assert "martybytes\\docker-local" not in body, rel
+    # HEADROOM_ENV_FILE stays the documented override in all five.
+    for rel in posix + windows:
+        assert "HEADROOM_ENV_FILE" in (ROOT / rel).read_text(encoding="utf-8"), rel
+
+
+def test_no_runtime_file_points_at_the_absorbed_repo_by_name():
+    """'docker-local owns it' pointed the reader at a repo they do not have."""
+    for pattern in ("bootstrap/*.sh", "bootstrap/*.ps1", "scripts/*.ps1"):
+        for f in sorted(ROOT.glob(pattern)):
+            body = f.read_text(encoding="utf-8")
+            if f.name == "_agentmemory.sh" or f.name == "_agentmemory.ps1":
+                continue      # the secret-cache path migrates with a fallback; see its own test
+            assert "docker-local" not in body, f"{f.name} still names the absorbed repo"
+
+
+# ── the manifest and the compose tree must agree ──────────────────────────────
+def test_manifest_and_compose_agree_on_pins_and_ports():
+    """New, and only POSSIBLE now: the manifest pinned 0.36.5 and 8787 in one
+    repo while the compose file pinned them in another, so the existing manifest
+    test could stay green while compose ran a different image."""
+    import json
+    from urllib.parse import urlparse
+    cfg = json.loads((ROOT / "bootstrap/agent-tools.json").read_text(encoding="utf-8"))
+
+    hr_env = (ROOT / "services/stacks/headroom/.env.example").read_text(encoding="utf-8")
+    assert f"HEADROOM_IMAGE={cfg['headroom']['dockerImage']}" in hr_env
+    assert f"HEADROOM_PORT={urlparse(cfg['headroom']['proxyUrl']).port}" in hr_env
+    assert f"HEADROOM_DASHBOARD_PORT={urlparse(cfg['headroom']['mcpUrl']).port}" in hr_env
+
+    am = (ROOT / "services/stacks/agentmemory/docker-compose.yml").read_text(encoding="utf-8")
+    assert f'AGENTMEMORY_VERSION: "{cfg["agentmemory"]["version"]}"' in am
+    # The REST port the agents are told to use is the CONSOLE's, which proxies the
+    # server; the server's own listener is the 3110 bypass. Both must be published.
+    assert f":{urlparse(cfg['agentmemory']['restUrl']).port}:" in \
+        (ROOT / "services/stacks/agentmemory/docker-compose.console.yml").read_text(encoding="utf-8")
+    assert f":{urlparse(cfg['agentmemory']['viewerUrl']).port}:" in am
+
+
+def test_every_published_port_binds_loopback_only():
+    """None of these services authenticate. `"8880:8880"` would put one on the
+    LAN, and the failure is silent until somebody else finds it."""
+    import re as _re
+    bad = []
+    for f in sorted((ROOT / "services").rglob("docker-compose*.yml")):
+        for m in _re.finditer(r'^\s*-\s*"?([0-9.]+:)?(\d+):\d+"?\s*$',
+                              f.read_text(encoding="utf-8"), _re.M):
+            if m.group(1) != "127.0.0.1:":
+                bad.append(f"{f.relative_to(ROOT)}: {m.group(0).strip()}")
+    assert not bad, "\n".join(bad)

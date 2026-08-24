@@ -13,7 +13,7 @@
              the TTS hooks for all three agents — and already carries agentmemory-aware code in
              bootstrap/_merge_claude_settings.ps1 and bootstrap/_merge_cursor_hooks.ps1, which
              exist to stop agentmemory's hook entries being clobbered. The server image, compose
-             file and in-container patches stay in docker-local. Which hooks exist and what they
+             file and in-container patches stay under services/. Which hooks exist and what they
              run is a terminal-stack concern; what the server does with the request is not.
 
              `ts-config agents agentmemory on|off` owns the saved per-machine setting and

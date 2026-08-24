@@ -265,8 +265,10 @@ function Get-TsHeadroomToken {
     if ($env:HEADROOM_PROXY_TOKEN) { return $env:HEADROOM_PROXY_TOKEN }
     $file = $env:HEADROOM_ENV_FILE
     if (-not $file) {
-        $root = Get-TsWorkspace
-        if ($root) { $file = Join-Path $root 'src\github.com\martybytes\docker-local\headroom\.env' }
+        # <clone>\services\stacks\headroom\.env — from the clone, not by walking
+        # the workspace for a sibling repo (the runtime clone is not in it).
+        $src = Resolve-TsSourceDir
+        if ($src) { $file = Join-Path $src 'services\stacks\headroom\.env' }
     }
     if (-not $file -or -not (Test-Path -LiteralPath $file)) { return $null }
     $line = Get-Content -LiteralPath $file | Where-Object { $_ -match '^HEADROOM_PROXY_TOKEN=' } | Select-Object -First 1

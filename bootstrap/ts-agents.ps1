@@ -52,16 +52,15 @@ function Test-TsHttp([string]$Url) {
     } catch { return $false }
 }
 
+# The stack tree is always <clone>\services\, so there is nothing to search for.
+# The old five-root workspace walk could not work from the runtime clone (which is
+# not under the workspace) and, post-merge, could only find a stale file from an
+# archived repo. HEADROOM_ENV_FILE stays as the documented override.
 function Get-TsHeadroomToken {
     if ($env:HEADROOM_PROXY_TOKEN) { return $env:HEADROOM_PROXY_TOKEN }
     $file = $env:HEADROOM_ENV_FILE
     if (-not $file) {
-        $roots = @($env:WORKSPACE_DIR, 'C:\DATA\Workspace', (Join-Path $HOME 'Documents\Workspace'),
-            (Join-Path $HOME 'workspace'), (Join-Path $HOME 'Workspace')) | Where-Object { $_ }
-        foreach ($root in $roots) {
-            $candidate = Join-Path $root 'src\github.com\martybytes\docker-local\headroom\.env'
-            if (Test-Path -LiteralPath $candidate) { $file = $candidate; break }
-        }
+        $file = Join-Path (Split-Path -Parent $PSScriptRoot) 'services\stacks\headroom\.env'
     }
     if (-not $file -or -not (Test-Path -LiteralPath $file)) { return $null }
     $line = Get-Content -LiteralPath $file | Where-Object { $_ -match '^HEADROOM_PROXY_TOKEN=' } | Select-Object -First 1

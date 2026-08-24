@@ -227,7 +227,9 @@ typeset -gi _TS_HEADROOM_WARNED=0
 _ts_headroom_token() {
   local token="${HEADROOM_PROXY_TOKEN:-}" env_file="${HEADROOM_ENV_FILE:-}"
   if [[ -z "$token" ]]; then
-    [[ -n "$env_file" ]] || env_file="$(_ts_workspace 2>/dev/null)/src/github.com/martybytes/docker-local/headroom/.env"
+    # <clone>/services/stacks/headroom/.env — resolved from the clone, not by
+    # walking the workspace for a sibling repo (which the runtime clone is not in).
+    [[ -n "$env_file" ]] || env_file="$(_ts_src "$(_ts_chezmoi 2>/dev/null)" 2>/dev/null)/services/stacks/headroom/.env"
     [[ -r "$env_file" ]] || return 1
     token="$(sed -n 's/^HEADROOM_PROXY_TOKEN=//p' "$env_file" | head -1)"
   fi
