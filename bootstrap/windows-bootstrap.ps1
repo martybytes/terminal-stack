@@ -55,30 +55,6 @@ function Test-WingetAvailable {
     }
 }
 
-# Workspace root for the ws/wsp/wspu profile functions. Same contract as the
-# WSL/Linux/Mac bootstraps: $env:WORKSPACE_DIR skips the prompt.
-function Get-TsDetectedWorkspace {
-    foreach ($d in @(
-        'C:\DATA\Workspace',
-        (Join-Path $env:USERPROFILE 'workspace'),
-        (Join-Path $env:USERPROFILE 'Documents\Workspace')
-    )) { if (Test-Path $d) { return $d } }
-    return $null
-}
-
-function Read-TsWorkspaceDir {
-    if ($env:WORKSPACE_DIR) {
-        Write-Host "==> WORKSPACE_DIR=$($env:WORKSPACE_DIR) (from env; skipping prompt)"
-        return $env:WORKSPACE_DIR
-    }
-    $detected = Get-TsDetectedWorkspace
-    $promptDefault = if ($detected) { $detected } else { 'none' }
-    if (-not (Test-TsInteractive)) { return $detected }
-    Write-Host ''
-    $answer = Read-Host "Workspace directory [$promptDefault]"
-    if ($answer) { $answer.Trim() } else { $detected }
-}
-
 # Preflight
 if (-not (Test-WingetAvailable)) {
     throw "winget not available. Install App Installer from the Microsoft Store, then re-run."
@@ -226,29 +202,10 @@ if ($existingIncludes -match 'terminal-stack\.gitconfig') {
 }
 
 # Persist the workspace answer ONLY when it differs from the autodetect
-# (Get-TsWorkspace in $PROFILE covers the detected case).
-$wsDetected = Get-TsDetectedWorkspace
-$wsChoice = $wizard.Workspace
-if (-not $wsChoice) {
-    Write-Warning 'No workspace directory found or chosen. Set one later: $env:WORKSPACE_DIR in profile.local.ps1'
-} elseif ($wsChoice -eq $wsDetected) {
-    Write-Host "==> Workspace: $wsChoice (autodetected; no override needed)"
-} else {
-    if (-not (Test-Path $wsChoice)) { Write-Warning "$wsChoice does not exist (yet) — ws will warn until it does." }
-    # pwsh 7's $PROFILE is Documents\PowerShell\...; resolve via MyDocuments so
-    # this works even when the bootstrap itself runs under Windows PowerShell 5.
-    $localProfile = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'PowerShell\profile.local.ps1'
-    if ($PSCmdlet.ShouldProcess($localProfile, "persist WORKSPACE_DIR=$wsChoice")) {
-        New-Item -ItemType Directory -Force -Path (Split-Path $localProfile) | Out-Null
-        $line = "`$env:WORKSPACE_DIR = '$wsChoice'"
-        if ((Test-Path $localProfile) -and (Get-Content $localProfile | Where-Object { $_ -match '^\s*\$env:WORKSPACE_DIR\s*=' })) {
-            (Get-Content $localProfile) -replace '^\s*\$env:WORKSPACE_DIR\s*=.*', $line | Set-Content $localProfile
-            Write-Host "==> Updated WORKSPACE_DIR in $localProfile"
-        } else {
-            Add-Content -Path $localProfile -Value $line
-            Write-Host "==> Wrote WORKSPACE_DIR=$wsChoice to $localProfile"
-        }
-    }
+# (Get-TsWorkspace in $PROFILE covers the detected case). Save-TsWorkspaceOverride
+# lives in _config.ps1 so `ts-config wizard` persists the answer the same way.
+if ($PSCmdlet.ShouldProcess('Documents\PowerShell\profile.local.ps1', "persist WORKSPACE_DIR=$($wizard.Workspace)")) {
+    Save-TsWorkspaceOverride $wizard.Workspace
 }
 
 Write-Host ''

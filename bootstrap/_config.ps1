@@ -1080,6 +1080,61 @@ function Read-TsAppsCustom {
 }
 
 # Install the selected toggleable apps via winget (catalog id -> winget id).
+# Workspace root for the ws/wsp/wspu profile functions. Same contract as the
+# WSL/Linux/Mac bootstraps: $env:WORKSPACE_DIR skips the prompt.
+function Get-TsDetectedWorkspace {
+    foreach ($d in @(
+        'C:\DATA\Workspace',
+        (Join-Path $env:USERPROFILE 'workspace'),
+        (Join-Path $env:USERPROFILE 'Documents\Workspace')
+    )) { if (Test-Path $d) { return $d } }
+    return $null
+}
+
+function Read-TsWorkspaceDir {
+    if ($env:WORKSPACE_DIR) {
+        Write-Host "==> WORKSPACE_DIR=$($env:WORKSPACE_DIR) (from env; skipping prompt)"
+        return $env:WORKSPACE_DIR
+    }
+    $detected = Get-TsDetectedWorkspace
+    $promptDefault = if ($detected) { $detected } else { 'none' }
+    if (-not (Test-TsInteractive)) { return $detected }
+    Write-Host ''
+    $answer = Read-Host "Workspace directory [$promptDefault]"
+    if ($answer) { $answer.Trim() } else { $detected }
+}
+
+# Persist a workspace answer that differs from the autodetect. Lives here, not in
+# windows-bootstrap.ps1, so `ts-config wizard` does not silently drop the answer
+# it just asked for. The caller owns any -WhatIf/ShouldProcess gate.
+function Save-TsWorkspaceOverride {
+    param([string]$Choice)
+
+    $detected = Get-TsDetectedWorkspace
+    if (-not $Choice) {
+        Write-Warning 'No workspace directory found or chosen. Set one later: $env:WORKSPACE_DIR in profile.local.ps1'
+        return
+    }
+    if ($Choice -eq $detected) {
+        Write-Host "==> Workspace: $Choice (autodetected; no override needed)"
+        return
+    }
+    if (-not (Test-Path $Choice)) { Write-Warning "$Choice does not exist (yet) — ws will warn until it does." }
+    # pwsh 7's $PROFILE is Documents\PowerShell\...; resolve via MyDocuments so
+    # this works even when the caller runs under Windows PowerShell 5.
+    $localProfile = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'PowerShell\profile.local.ps1'
+    New-Item -ItemType Directory -Force -Path (Split-Path $localProfile) | Out-Null
+    $line = "`$env:WORKSPACE_DIR = '$Choice'"
+    if ((Test-Path $localProfile) -and (Get-Content $localProfile | Where-Object { $_ -match '^\s*\$env:WORKSPACE_DIR\s*=' })) {
+        # -replace can't go empty, so the pipeline-into-Set-Content trap does not apply.
+        (Get-Content $localProfile) -replace '^\s*\$env:WORKSPACE_DIR\s*=.*', $line | Set-Content $localProfile
+        Write-Host "==> Updated WORKSPACE_DIR in $localProfile"
+    } else {
+        Add-Content -Path $localProfile -Value $line
+        Write-Host "==> Wrote WORKSPACE_DIR=$Choice to $localProfile"
+    }
+}
+
 # The whole install questionnaire, in one place so both the bootstrap and
 # `ts-config wizard` ask exactly the same questions in the same order. POSIX
 # twin: ts_wizard_ask / ts_wizard_collect in bootstrap/_wizard.sh.

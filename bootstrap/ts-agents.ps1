@@ -69,14 +69,34 @@ function Get-TsHeadroomToken {
     return $null
 }
 
+# Twin of headroom_probe_auth in ts-agents.sh: probe, and record WHY it
+# failed. One 2s attempt reported a cold container as broken, and `on`/`repair`
+# gate on this, so a slow first hit turned into 'registrations were not
+# changed' with nothing to act on. A real HTTP answer is conclusive and is not
+# retried; only a connection failure or timeout is.
+$script:TsHeadroomAuthReason = ''
 function Test-TsHeadroomAuth {
+    $script:TsHeadroomAuthReason = ''
     $token = Get-TsHeadroomToken
-    if (-not $token) { return $false }
-    try {
-        $r = Invoke-WebRequest -Uri 'http://127.0.0.1:8787/stats' -TimeoutSec 2 -UseBasicParsing `
-            -Headers @{ 'X-Headroom-Proxy-Token' = $token }
-        return ($r.StatusCode -ge 200 -and $r.StatusCode -lt 300)
-    } catch { return $false }
+    if (-not $token) {
+        $script:TsHeadroomAuthReason = 'no proxy token (set HEADROOM_PROXY_TOKEN or HEADROOM_ENV_FILE)'
+        return $false
+    }
+    $uri = ([string]$manifest.headroom.proxyUrl).TrimEnd('/') + '/stats'
+    foreach ($attempt in 1, 2) {
+        try {
+            $r = Invoke-WebRequest -Uri $uri -TimeoutSec 5 -UseBasicParsing `
+                -Headers @{ 'X-Headroom-Proxy-Token' = $token }
+            if ($r.StatusCode -ge 200 -and $r.StatusCode -lt 300) { return $true }
+            $script:TsHeadroomAuthReason = "HTTP $($r.StatusCode)"
+            return $false
+        } catch {
+            $code = $_.Exception.Response.StatusCode.value__
+            if ($code) { $script:TsHeadroomAuthReason = "HTTP $code"; return $false }
+            $script:TsHeadroomAuthReason = 'unreachable'
+        }
+    }
+    return $false
 }
 
 function Test-TsTcp([string]$HostName, [int]$Port) {
@@ -158,7 +178,7 @@ function Show-TsHeadroomStatus {
     Write-Host 'Headroom:'
     $proxy = [string]$manifest.headroom.proxyUrl
     if (Test-TsHeadroomAuth) { Good "proxy authentication works at $proxy" }
-    else { Bad "proxy unusable at $proxy (unreachable, missing token, or unauthorized)" }
+    else { Bad "proxy unusable at $proxy ($script:TsHeadroomAuthReason)" }
     if (Test-TsTcp '127.0.0.1' 8788) { Good "MCP sidecar reachable at $($manifest.headroom.mcpUrl)" }
     else { Info "MCP sidecar not reachable at $($manifest.headroom.mcpUrl) (optional separate process)" }
     $mcpUrl = [string]$manifest.headroom.mcpUrl
@@ -196,8 +216,8 @@ function Invoke-TsHeadroom {
     switch ($Action) {
         'dashboard' { Start-Process ([string]$manifest.headroom.dashboardUrl); return }
         'status' { Show-TsHeadroomStatus; return }
-        'on' { if (-not (Test-TsHeadroomAuth)) { Bad 'Headroom proxy authentication failed; leaving direct mode unchanged.'; return }; Invoke-TsMcpRegistration add; Show-TsHeadroomStatus; return }
-        'repair' { if (-not (Test-TsHeadroomAuth)) { Bad 'Headroom proxy authentication failed; registrations were not changed.'; return }; Invoke-TsMcpRegistration add; Show-TsHeadroomStatus; return }
+        'on' { if (-not (Test-TsHeadroomAuth)) { Bad "Headroom proxy authentication failed ($script:TsHeadroomAuthReason); leaving direct mode unchanged."; return }; Invoke-TsMcpRegistration add; Show-TsHeadroomStatus; return }
+        'repair' { if (-not (Test-TsHeadroomAuth)) { Bad "Headroom proxy authentication failed ($script:TsHeadroomAuthReason); registrations were not changed."; return }; Invoke-TsMcpRegistration add; Show-TsHeadroomStatus; return }
         'off' { Invoke-TsMcpRegistration remove; Info 'Headroom routing and MCP registrations removed; Docker was not changed.'; return }
         'uninstall' { Invoke-TsMcpRegistration remove; Info 'Terminal-stack Headroom registrations removed; Docker was not changed.'; return }
     }

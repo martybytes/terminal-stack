@@ -193,6 +193,27 @@ Then strip ANSI and blank lines, drop the trailing `Choose …` line (it differs
 legitimately: a live prompt vs `(non-interactive — taking the default)`), and
 `Compare-Object`.
 
+A pwsh prompt must also be **reachable from the `ts-config wizard` path**, which
+dot-sources `bootstrap/_config.ps1` and nothing else. A prompt that lives in
+`windows-bootstrap.ps1` works during install and dies mid-questionnaire on a
+re-run, discarding every answer already given. Resolve the whole callee list from
+a clean shell:
+
+```powershell
+pwsh -NoLogo -NoProfile -Command @'
+. bootstrap/_config.ps1
+$b = (Get-Content -Raw bootstrap/_config.ps1)
+$b = $b.Substring($b.IndexOf('function Read-TsWizard'))
+$b = $b.Substring(0, $b.IndexOf("`nfunction ", 1))
+[regex]::Matches($b, '\b(?:Read|Get|Test|Save)-Ts[A-Za-z]+') |
+  ForEach-Object { $_.Value } | Sort-Object -Unique |
+  Where-Object { -not (Get-Command $_ -ErrorAction SilentlyContinue) }
+'@
+```
+
+Anything it prints is a prompt `ts-config wizard` cannot see.
+`test_wizard_callees_are_all_defined_in_config_ps1` pins the same rule.
+
 ## 4. Config-store changes — use a throwaway store
 
 Adding or changing a key in chezmoi `[data]` / `config.json` can be exercised without
