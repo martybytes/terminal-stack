@@ -70,6 +70,17 @@ html[data-theme="light"] {
   --color-peri-bright: #665bd6;
 }
 
+/* The app frame is pinned to the viewport and does its own scrolling inside.
+   Without this the document can pick up a scrollbar of its own from any stray
+   overflow, and then the whole page slides around under the window instead of
+   the content scrolling in its pane -- which is what a zoom is not supposed to
+   do. */
+html,
+body {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
 body {
   background: var(--color-app);
   color: var(--color-fg1);

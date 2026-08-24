@@ -187,11 +187,36 @@ function ZoomStepper({ collapsed }: { collapsed: boolean }) {
   );
 }
 
+// The window's own size, in CSS pixels, tracked so the zoomed frame can be
+// sized in px rather than in viewport units. Viewport units inside a zoomed
+// element are the one part of `zoom` engines disagree about; pixels are not.
+function useViewportSize(): { width: number; height: number } {
+  const [size, setSize] = useState(() => ({
+    width: typeof window === "undefined" ? 1280 : window.innerWidth,
+    height: typeof window === "undefined" ? 800 : window.innerHeight,
+  }));
+  useEffect(() => {
+    const measure = () => setSize({ width: window.innerWidth, height: window.innerHeight });
+    measure();
+    window.addEventListener("resize", measure);
+    // Also fires when the BROWSER's zoom changes, which resizes the layout
+    // viewport without a resize event in some engines.
+    const media = window.matchMedia?.(`(resolution: ${window.devicePixelRatio}dppx)`);
+    media?.addEventListener?.("change", measure);
+    return () => {
+      window.removeEventListener("resize", measure);
+      media?.removeEventListener?.("change", measure);
+    };
+  }, []);
+  return size;
+}
+
 export default function Shell(): JSX.Element {
   const location = useLocation();
   const pageId = PAGE_BY_PATH[location.pathname] ?? "overview";
   const { preference } = usePagePreferences(pageId);
   const { theme, setTheme, openDrawer, scale } = usePreferences();
+  const viewport = useViewportSize();
   const [collapsed, setCollapsed] = useState(() => {
     if (typeof window === "undefined") return false;
     try {
@@ -209,19 +234,25 @@ export default function Shell(): JSX.Element {
     }
   }, [collapsed]);
 
+  // The zoom lives on the frame, not on the routed content, so the sidebar and
+  // the SystemBar scale with the page instead of staying a fixed size around it.
+  //
+  // Sized in PIXELS, measured from the window and divided by the zoom: `zoom: z`
+  // renders a `w px` box at `w * z` CSS pixels in every engine that implements
+  // zoom, whereas a viewport unit inside a zoomed element is the part engines
+  // disagree about. Floored, so a rounding remainder can only ever leave the
+  // frame a pixel short rather than a pixel too wide.
+  const zoom = scale / 100;
+  const frameWidth = Math.floor(viewport.width / zoom);
+  const frameHeight = Math.floor(viewport.height / zoom);
+
   return (
-    // The zoom lives HERE, on the frame, not on the routed content: everything
-    // chrome included scales together, and because the frame is sized in
-    // inverse-scaled viewport units it still occupies exactly one screen. Zoom
-    // to 150% and the SystemBar is still on screen -- it is the content inside
-    // that scrolls, which is the whole difference from browser zoom.
+    // Pinned to the viewport and clipping, so that even if an engine disagreed
+    // about the arithmetic above the worst case is content scrolling in its own
+    // pane -- never the whole document sliding under the window.
     <div
-      className="flex overflow-hidden bg-app"
-      style={{
-        zoom: scale / 100,
-        width: `${100 / (scale / 100)}vw`,
-        height: `${100 / (scale / 100)}vh`,
-      }}
+      className="fixed left-0 top-0 flex overflow-hidden bg-app"
+      style={{ zoom, width: `${frameWidth}px`, height: `${frameHeight}px` }}
     >
       <aside
         className={`flex flex-none flex-col overflow-y-auto border-r border-line bg-side pb-4 pt-5 transition-[width,padding] duration-200 ${
