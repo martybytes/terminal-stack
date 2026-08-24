@@ -7,7 +7,7 @@
 #
 # POSIX twin of ts-agentmemory.ps1. Runs from ts-agents.sh's agentmemory verb, so
 # a plugin upgrade that reverts the hook-script edits is repaired on the next
-# `ts-update`. docker-local/agentmemory/check-capture.sh probes for this exact
+# `ts-update`. services/stacks/agentmemory/check-capture.sh probes for this exact
 # path, which is why the name is not negotiable.
 #
 # Without this, macOS and Linux serve and search but never capture — silently,

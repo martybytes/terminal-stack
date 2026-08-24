@@ -1,0 +1,104 @@
+@import "tailwindcss";
+
+/* Molecular Designs tokens recast as the console's dark ops theme.
+   Chart palettes are CVD-validated against --color-surface:
+   series #1FA0A9/#8A80F0/#4FA05C · status stack #1FA0A9/#BB8412/#C24028 */
+@theme {
+  --color-app: #00072d;
+  --color-side: #04081f;
+  --color-surface: #0b1238;
+  --color-surface2: #121a4b;
+  --color-line: rgba(237, 240, 251, 0.08);
+  --color-linestrong: rgba(237, 240, 251, 0.16);
+  --color-fg1: #edf0fb;
+  --color-fg2: #b7bedc;
+  --color-fg3: #7c84a6;
+  --color-brand: #231e84;
+  --color-peri: #8a80f0;
+  --color-turq: #53e2dd;
+  --color-s1: #1fa0a9;
+  --color-s2: #8a80f0;
+  --color-s3: #4fa05c;
+  --color-ok: #4fa05c;
+  --color-warn: #bb8412;
+  --color-bad: #c24028;
+  --color-na: #3a4160;
+  --font-display: "Montserrat", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "Roboto", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+}
+
+:root,
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --rgb-fg: 237 240 251;
+  --rgb-surface: 11 18 56;
+  --rgb-side: 4 8 31;
+  --color-tooltip: #121a4b;
+  --color-bad-bright: #ee8064;
+  --color-turq-bright: #6ed8df;
+  --color-peri-bright: #b0a8f6;
+}
+
+html[data-theme="light"] {
+  color-scheme: light;
+  --color-app: #eef2f8;
+  --color-side: #f8faff;
+  --color-surface: #ffffff;
+  --color-surface2: #e7ecf5;
+  --color-line: rgba(29, 38, 75, 0.1);
+  --color-linestrong: rgba(29, 38, 75, 0.2);
+  --color-fg1: #151b36;
+  --color-fg2: #3d466c;
+  --color-fg3: #67708f;
+  --color-brand: #332da0;
+  --color-peri: #665bd6;
+  --color-turq: #087c82;
+  --color-s1: #087c82;
+  --color-s2: #665bd6;
+  --color-s3: #307a3e;
+  --color-ok: #307a3e;
+  --color-warn: #9a6500;
+  --color-bad: #b43b29;
+  --color-na: #8991a8;
+  --rgb-fg: 21 27 54;
+  --rgb-surface: 255 255 255;
+  --rgb-side: 248 250 255;
+  --color-tooltip: #ffffff;
+  --color-bad-bright: #b43b29;
+  --color-turq-bright: #087c82;
+  --color-peri-bright: #665bd6;
+}
+
+body {
+  background: var(--color-app);
+  color: var(--color-fg1);
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+.page-canvas {
+  min-width: 0;
+  transform-origin: top center;
+}
+
+[data-density="compact"] .space-y-5 { gap: 0.75rem; }
+[data-density="compact"] .space-y-4 { gap: 0.65rem; }
+[data-density="compact"] .py-5 { padding-top: 0.85rem; padding-bottom: 0.85rem; }
+
+@media (prefers-reduced-motion: no-preference) {
+  body, aside, main, .page-canvas { transition: background-color 160ms ease, color 160ms ease, border-color 160ms ease; }
+}
+
+::selection {
+  background: #53e2dd;
+  color: #00072d;
+}
+
+:focus-visible {
+  outline: 2px solid #8a80f0;
+  outline-offset: 2px;
+  border-radius: 2px;
+}

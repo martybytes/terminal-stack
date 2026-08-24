@@ -1251,10 +1251,36 @@ repo whose subject is a Docker stack.
 
 This repo already owned that surface. It manages those exact files, ships the TTS hooks for all
 three agents, and `bootstrap/_merge_claude_settings.ps1` and `bootstrap/_merge_cursor_hooks.ps1`
-exist **specifically** to stop agentmemory's hook entries being clobbered by a sync. The seam is
-one line: *which hooks are registered, what they run, and what environment they carry* is
-terminal-stack; *the server image, the compose file, the in-container bundle patches and the data
-migrations* are docker-local.
+exist **specifically** to stop agentmemory's hook entries being clobbered by a sync.
+
+### The boundary is now a directory, not a repository
+
+The seam used to be a repository boundary, which enforced itself: you could not accidentally put a
+hook installer in the Docker repo, because it was a different clone. Absorbing that repo removes the
+enforcement, so the rule has to be written down and tested rather than merely observed.
+
+**`services/` is the service side.** Anything that defines, builds, configures or runs inside a
+container lives there. **Everything outside `services/` is the client side** — anything that
+configures a program running on this host. The two meet at exactly two places: a published loopback
+port, and `bootstrap/agent-tools.json`, the one file where a port, URL, image tag or version pin is
+written down. Neither side reaches into the other by path.
+
+At the command level the same line is `ts-stack` versus `ts-agents`. **`ts-stack` is the only thing
+in this repo that starts, stops or builds a container; `ts-agents` may only probe one.** That is not
+a style preference — `test_no_project_scope_or_docker_mutation_in_lifecycle_adapters` asserts the
+strings `docker compose`, `docker rm` and `restart: unless-stopped` appear nowhere in
+`bootstrap/ts-agents.{sh,ps1}`, as case-insensitive matches over the whole file, **so even a comment
+naming the compose command fails it**. When a probe fails, `ts-agents` prints the *verb*
+(`ts-stack up playwright`), never the command. Having an in-repo verb to point at is what makes that
+guardrail easy to keep: before the merge there was no such command, which is precisely why inlining
+`docker compose` was tempting.
+
+Three consequences. `bootstrap/ts-agentmemory.*` stays outside `services/` although its whole
+subject is agentmemory, because it edits `~/.claude`, `~/.codex` and `~/.cursor`.
+`services/stacks/agentmemory/patch-agentmemory.mjs` stays inside, because it patches the npm bundle
+in the image. And `services/stacks/*/ts-verify.sh` is the **one deliberate exception**: proving
+capture works needs both halves, and only the server-side record is evidence, because the hook
+always exits 0.
 
 Three consequences worth writing down.
 
@@ -1748,3 +1774,82 @@ testing for `package.json` at all, so `cd` into a JS repo costs 2ms instead of
 Keep the fallback in both shells. fnm before 1.36 has no `--resolve-engines` and
 exits non-zero, and `eval`/`Invoke-Expression` of the resulting empty string
 would leave fnm unwired with nothing printed.
+
+## Why the service stacks moved into this repo
+
+Three headline features — agentmemory capture and retrieval, Headroom compression, Kokoro voice
+notifications — do not work unless a Docker service is running. Those services lived in a separate
+private repo, and one of them (the agentmemory console) lived in a *third* repo that the second
+built from a pinned commit SHA. Shipping a change across that boundary meant three clones, two
+remotes, and a push, re-pin, rebuild loop.
+
+The seam had real costs beyond inconvenience. `check-capture.sh` carried an entire section that
+existed only because the two repos could not call each other. Both absorbed repos still told macOS
+and Linux users that the bash hook wiring did not exist, which had stopped being true when
+`bootstrap/ts-agentmemory.sh` shipped. And a version pinned in `bootstrap/agent-tools.json` and the
+same version pinned in a compose file could only be reconciled by hand — now a test does it, which
+is a check that was not *possible* before.
+
+What did not move: the upstream projects themselves. `@agentmemory/agentmemory`, the `iii` runtime,
+Headroom, Kokoro, Qdrant, Neo4j and the Playwright MCP image are third-party, pinned, and patched at
+build time. This repo owns the compose glue, the patches and the lifecycle, not the software.
+
+## Why the console builds from the working tree, not a pinned SHA
+
+The console's compose build context was a pinned `github.com/...#<sha>`, which is the right answer
+when the source is in another repository: a locally built image from a git context gets an immutable
+ref rather than a branch. With the source in `services/console/`, the same pin costs a push, a
+re-pin and a rebuild for every change — the loop `update-console.*` existed to automate.
+
+The context is now `../../console`, so what runs is what you have checked out. The trade is real and
+worth stating: a dirty working tree builds a dirty image. `git status` before `ts-stack up` is the
+whole discipline, and `ts-stack --dry-run up` shows exactly what would be built.
+
+Dropping `update-console.*` also dropped two behaviours that had to be inherited rather than lost:
+the double `--env-file` billing deploy in the correct order, and the post-rebuild `/healthz` verify.
+Both live in `ts-stack` now. A lone `--env-file .billing.env` *replaces* `.env` as compose's
+interpolation source, so every `${OPENAI_*}`-derived value the console displays resolves to empty —
+a blank provider panel, no error, everything healthy.
+
+## Why everything is named `ts-`, and why the volumes needed a migration
+
+`docker ps` on a working machine also lists that person's own projects. Before, this stack's
+containers were indistinguishable from them: projects were the directory name, containers mixed
+three conventions (a bare `kokoro`, a hyphenated `headroom-proxy`, and nothing at all for the memory
+server — Docker called it `agentmemory-agentmemory-1`), and volumes were split between prefixed and
+bare.
+
+Projects are now pinned with compose's `name:` key rather than `COMPOSE_PROJECT_NAME` in five `.env`
+files: tracked, so every machine agrees, and unaffected by which directory you run from.
+
+Volumes are the one part that touches data, and two details only a live `docker volume ls` shows.
+Headroom's three were project-prefixed on disk (`headroom_headroom_workspace`, and so on) because
+they are plain named volumes, while agentmemory's two are `external: true` and so never had a
+prefix. And renaming the compose *key* alone would have produced
+`ts-headroom_ts-headroom-workspace`, so the three pin `name:` explicitly.
+
+They stay non-external deliberately: **the asymmetry is the safety property**. `down -v` cannot
+touch an external volume, which is why every memory ever saved lives in one, while headroom's graph
+and vectors are removable by design behind `--destroy-data`.
+
+`ts-stack up` refuses to start while a legacy volume exists and its replacement does not, because
+compose would otherwise create an empty one and start the stack with no memories in it, reporting
+success. `ts-stack migrate-volumes` copies in a container, verifies the file count came across, and
+leaves the old volume as the rollback. The same trap caught `ts-stack bootstrap`, which happily
+created the empty replacement until it learned the same rule.
+
+## Why the agentmemory secret cache kept a fallback when it moved
+
+The cache moved from `$XDG_CONFIG_HOME/docker-local/agentmemory.secret` to
+`$XDG_CONFIG_HOME/terminal-stack/agentmemory.secret`, which sounds like a rename and is not. The
+*reader* is JavaScript already injected into vendor hook files on live machines, and those files are
+only rewritten when `ts-agentmemory --apply` runs. Moving the writer alone turns 401-recovery into a
+permanent no-op — the exact failure that cost 56 consecutive captures on 2026-08-21 with nothing in
+any log, because `/observe` swallows errors and retrieval discards non-2xx.
+
+So the writer writes both paths and the injected reader tries both. The dangerous part was the edit
+MARKER: it defaults to the full replacement text, so changing that text makes an already-patched file
+look unpatched — and the injected block *ends with* `function authHeaders() {`, which is the edit's
+own anchor, so a re-apply would have injected a second copy of the whole recovery block into every
+hook script on every wired machine. Both twins now pass an explicit marker,
+`let amFreshSecret = null;`, that every form of the block shares.

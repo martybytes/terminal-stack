@@ -265,8 +265,10 @@ function Get-TsHeadroomToken {
     if ($env:HEADROOM_PROXY_TOKEN) { return $env:HEADROOM_PROXY_TOKEN }
     $file = $env:HEADROOM_ENV_FILE
     if (-not $file) {
-        $root = Get-TsWorkspace
-        if ($root) { $file = Join-Path $root 'src\github.com\martybytes\docker-local\headroom\.env' }
+        # <clone>\services\stacks\headroom\.env — from the clone, not by walking
+        # the workspace for a sibling repo (the runtime clone is not in it).
+        $src = Resolve-TsSourceDir
+        if ($src) { $file = Join-Path $src 'services\stacks\headroom\.env' }
     }
     if (-not $file -or -not (Test-Path -LiteralPath $file)) { return $null }
     $line = Get-Content -LiteralPath $file | Where-Object { $_ -match '^HEADROOM_PROXY_TOKEN=' } | Select-Object -First 1
@@ -1621,6 +1623,20 @@ function Invoke-TsMux {
         default { Write-Warning "ts-mux: unknown command '$cmd' (status, on, off, list, kill, restart, reset)" }
     }
 }
+# The local Docker service stacks. PARALLEL implementation of
+# bootstrap/ts-stack.sh, reached through the script in the clone so `ts-update`
+# ships fixes without a profile re-sync -- same shape as Invoke-TsDoctor.
+function Invoke-TsStack {
+    $src = Resolve-TsSourceDir
+    if (-not $src) { return }
+    $script = Join-Path $src 'bootstrap	s-stack.ps1'
+    if (-not (Test-Path -LiteralPath $script)) {
+        Write-Warning "$script not found; run ts-update."; return
+    }
+    & $script @args
+}
+Set-Alias -Name ts-stack -Value Invoke-TsStack
+
 Set-Alias -Name ts-mux -Value Invoke-TsMux
 
 # Probe known clone locations for one that actually contains the repo — used so

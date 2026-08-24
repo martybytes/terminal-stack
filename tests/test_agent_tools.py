@@ -1462,9 +1462,23 @@ def test_agentmemory_secret_recovery_uses_the_unix_cache_not_the_registry():
     sh_code = _uncommented(sh)
     assert "reg query" not in sh_code, "the Windows registry read must not survive the port"
     assert "XDG_CONFIG_HOME" in sh
-    assert 'docker-local", "agentmemory.secret"' in sh
+    # Both cache paths, new first. The legacy read stays because this JavaScript is
+    # injected into vendor files on live machines and is only rewritten when
+    # --apply runs, so a machine can carry the old reader for a while after the
+    # clone updates. Dropping it turns 401-recovery back into a permanent no-op.
+    assert '["terminal-stack", "docker-local"]' in sh
+    assert '"agentmemory.secret"' in sh
+    # The marker must be explicit and shared by every form of the block: with it
+    # defaulting to $New, an already-patched file fails the marker test, matches
+    # the `function authHeaders() {` anchor the block itself ends with, and gets a
+    # SECOND copy of the whole recovery block.
+    ps = AM_PS.read_text(encoding="utf-8")
+    for text, name in ((sh, "bash"), (ps, "pwsh")):
+        i = text.index("stale secret recovery")
+        j = text.index("duplicate-invocation guard helper", i)
+        assert "'let amFreshSecret = null;'" in text[i:j],             f"the {name} twin's recovery edit has no explicit marker"
     # The .ps1 keeps its registry form; this is a deliberate divergence, not drift.
-    assert "reg query" in AM_PS.read_text(encoding="utf-8")
+    assert "reg query" in ps
 
 
 def test_agentmemory_edit_text_matches_the_powershell_twin():

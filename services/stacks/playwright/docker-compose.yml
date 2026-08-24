@@ -1,0 +1,49 @@
+# The compose PROJECT name, pinned here rather than inherited from the
+# directory: every container, network and default volume this stack creates
+# is then prefixed ts-, so `docker ps` and `docker network ls` show at a
+# glance what belongs to terminal-stack and nothing can collide with an
+# unrelated project of the same name.
+name: ts-playwright
+
+services:
+  playwright:
+    container_name: ts-playwright-mcp
+
+    # Official Playwright MCP release, pinned by both version and manifest digest.
+    # The digest is the multi-platform v0.0.79 manifest (amd64 + arm64).
+    image: mcr.microsoft.com/playwright/mcp:v0.0.79@sha256:18c0a9c934004fe9580cc79f1e8e6e6cde7c667348b215335e8a23fd3e509804
+    init: true
+    restart: unless-stopped
+    command:
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8931"
+      - --allowed-hosts
+      - 127.0.0.1,localhost,127.0.0.1:8931,localhost:8931
+      - --isolated
+      - --output-dir
+      - /tmp/playwright-mcp-output
+      - --output-max-size
+      - "268435456"
+    ports:
+      # Loopback-only on purpose: MCP can drive a browser and has no authentication.
+      - "127.0.0.1:8931:8931"
+    shm_size: "2gb"
+    healthcheck:
+      # A protocol-less GET is rejected by MCP, but any HTTP response proves the
+      # server is listening. Functional browser verification lives in check-playwright.ps1.
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:8931/mcp').then(() => process.exit(0)).catch(() => process.exit(1))"
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 4
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

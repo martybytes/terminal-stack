@@ -6,7 +6,7 @@
 # Why this needs more than the key-splice _merge_claude_settings.ps1 does: everything
 # in this file lives under ONE top-level `hooks` key, and other tools put their
 # entries in the same event arrays we use. agentmemory's Cursor wiring
-# (docker-local\agentmemory\setup-cursor-integration.ps1) adds seven hooks, two of
+# (the agentmemory plugin's Cursor installer) adds seven hooks, two of
 # which — `stop` and `postToolUse` — are events our TTS hooks are already in. So
 # ownership here is per *entry*, not per key: rebuild each event array from our
 # rendered entries plus every foreign entry that was already there, then splice the

@@ -19,6 +19,18 @@ context/**
 # maps to ~/tests/** and litters $HOME with the test files — same trap the
 # installer entry points below fell into.
 tests/**
+# The absorbed service tree: compose files, per-stack helper scripts, and the
+# console's source. None of it is a user-config file, and .chezmoiignore is
+# allow-by-default, so without this line every one of ~160 files is written into
+# $HOME on apply (services/stacks/kokoro/README.md -> ~/services/stacks/...) —
+# the same trap tests/** and the installer entry points fell into.
+#
+# ONE line, deliberately: a stack is discovered by finding a compose file, with
+# nothing to register anywhere. A per-stack list here would reintroduce a
+# mandatory registration step whose failure mode is silent $HOME pollution.
+services/**
+# The pre-commit hook is repo infrastructure, run from a DEV clone, never $HOME.
+.githooks/**
 # Python bytecode caches are build noise. .gitignore already covers them, but
 # chezmoi has its own ignore list — without this, running the codex hook tests
 # deploys ~/.codex/hooks/__pycache__/*.pyc.

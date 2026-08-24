@@ -1,0 +1,52 @@
+# Base stack definition — deliberately hardware-neutral so the same tracked
+# file works on a Blackwell box, an older GPU box, and a CPU-only laptop.
+#
+# The NVIDIA device reservation lives in docker-compose.gpu.yml and is merged
+# in only when your .env says to. Which files load, and which image is pulled,
+# are both selected in .env — copy .env.example to .env and pick your profile.
+# See README.md ("Picking your machine profile").
+# The compose PROJECT name, pinned here rather than inherited from the
+# directory: every container, network and default volume this stack creates
+# is then prefixed ts-, so `docker ps` and `docker network ls` show at a
+# glance what belongs to terminal-stack and nothing can collide with an
+# unrelated project of the same name.
+name: ts-kokoro
+
+services:
+  kokoro:
+    # container_name is load-bearing on Windows: claude-local's
+    # tools/windows/diagnostics/gpu-tts-diagnose.ps1 and gpu-tts-quiet.ps1 find
+    # this container by the literal name "kokoro". Those tools are Windows- and
+    # NVIDIA-only, but keep the name stable everywhere so the stacks match.
+    container_name: ts-kokoro-tts
+
+    # Default targets Blackwell (RTX 50-series, sm_120). Kokoro-FastAPI's ':latest'
+    # GPU tag ships a CUDA 12.6 PyTorch build whose kernels only cover GTX 900
+    # through RTX 40-series (sm_90) — on a 50-series card it pulls and starts fine,
+    # then crash-loops on the first synthesis with "CUDA error: no kernel image is
+    # available for execution on the device". See README.md.
+    #
+    # Override KOKORO_IMAGE in .env for other hardware:
+    #   pre-Blackwell GPU -> ghcr.io/remsky/kokoro-fastapi-gpu:v0.8.0-cu126
+    #   CPU, and every Mac -> ghcr.io/remsky/kokoro-fastapi-cpu:v0.8.0
+    # The CPU tag is multi-arch (linux/amd64 + linux/arm64), so Apple Silicon
+    # gets a native image with no separate tag. This default stays GPU on
+    # purpose: a Mac sets KOKORO_IMAGE in its .env, and a MISSING .env should
+    # fail loudly here rather than quietly running the wrong thing.
+    image: ${KOKORO_IMAGE:-ghcr.io/remsky/kokoro-fastapi-gpu:v0.8.0-cu128}
+
+    restart: unless-stopped
+    ports:
+      # Loopback-only on purpose — this API has no auth.
+      - "127.0.0.1:${KOKORO_PORT:-8880}:8880"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8880/docs || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

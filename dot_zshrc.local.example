@@ -51,11 +51,11 @@
 # wsnetsuite() { cd "$(_ts_workspace)/netsuite-customizations" }
 
 # ── Example: dotfiles sync between two specific peers ─────────────────────────
-# Used on lambda-dual <-> internal (10.30.1.14). Hostname check makes the same
+# Used between a pair of machines (hostA <-> hostB). The hostname check makes the same
 # file work on either side without edits — peer is always "the other one".
 # Note: pull each file with its own rsync — a single rsync with two remote
 # sources flattens into the destination dir (.ssh/config would land at ~/config).
 #
-# _DOTPEER=$( [[ $(hostname -s) == "lambda-dual" ]] && echo "internal" || echo "lambda-dual" )
+# _DOTPEER=$( [[ $(hostname -s) == "hostA" ]] && echo "hostB" || echo "hostA" )
 # dot-push() { rsync -av ~/.zshrc "<your-user>@${_DOTPEER}:~/" && rsync -av ~/.ssh/config "<your-user>@${_DOTPEER}:~/.ssh/"; }
 # dot-pull() { rsync -av "<your-user>@${_DOTPEER}:~/.zshrc" ~/ && rsync -av "<your-user>@${_DOTPEER}:~/.ssh/config" ~/.ssh/; }

@@ -176,6 +176,10 @@ function Get-AmHookEdits {
     }
 
     # 6. Stale-secret recovery, every script. See the JS comment for the incident.
+    # The MARKER is explicit and is a line every form of this block shares. Without
+    # it an already-patched file fails the marker test, matches the
+    # `function authHeaders() {` anchor the injected block itself ends with, and
+    # gets a second copy of the whole block. See the bash twin.
     $edits += New-AmEdit 'stale secret recovery' @('*') `
         'function authHeaders() {' `
         ('// terminal-stack: recover from a stale AGENTMEMORY_SECRET.@N' +
@@ -220,7 +224,8 @@ function Get-AmHookEdits {
          '@T} catch {}@N' +
          '@Treturn res;@N' +
          '};@N' +
-         'function authHeaders() {@N')
+         'function authHeaders() {@N') `
+        'let amFreshSecret = null;'
 
     # LAST, deliberately: the pre-tool-use project-helper edit above anchors on the
     # shebang line too, and must consume its anchor before this one widens it.

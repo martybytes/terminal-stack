@@ -5,8 +5,25 @@
     "proxyUrl": "http://127.0.0.1:8787",
     "mcpUrl": "http://127.0.0.1:8788/mcp",
     "dashboardUrl": "http://127.0.0.1:8787/dashboard",
-    "healthPaths": ["/readyz", "/health"],
-    "dockerImage": "ghcr.io/headroomlabs-ai/headroom:0.36.5"
+    "healthPaths": [
+      "/readyz",
+      "/health"
+    ],
+    "dockerImage": "ghcr.io/headroomlabs-ai/headroom:0.36.5",
+    "generatedSecrets": [
+      {
+        "key": "HEADROOM_PROXY_TOKEN",
+        "bytes": 32,
+        "encoding": "hex",
+        "placeholder": "replace-me-with-openssl-rand-hex-32"
+      },
+      {
+        "key": "NEO4J_PASSWORD",
+        "bytes": 32,
+        "encoding": "hex",
+        "placeholder": "replace-me-with-openssl-rand-hex-32"
+      }
+    ]
   },
   "caveman": {
     "version": "2.2.0",

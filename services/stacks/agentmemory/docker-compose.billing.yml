@@ -1,0 +1,11 @@
+services:
+  console:
+    volumes:
+      - type: bind
+        source: "${OPENAI_ADMIN_KEY_FILE_HOST:?Run configure-openai-billing.ps1 or set OPENAI_ADMIN_KEY_FILE_HOST}"
+        target: /run/secrets/openai-admin-key
+        read_only: true
+    environment:
+      OPENAI_ADMIN_KEY_FILE: /run/secrets/openai-admin-key
+      OPENAI_BILLING_PROJECT_ID: "${OPENAI_BILLING_PROJECT_ID:?Run configure-openai-billing.ps1 to select a billing project}"
+      OPENAI_BILLING_PROJECT_NAME: "${OPENAI_BILLING_PROJECT_NAME:-OpenAI project}"

@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Runs the script-parity tests before a commit. There is no CI for this repo, so
+# this is the only thing standing between the .ps1 and .sh sets and silent drift.
+#
+# Installed by `bootstrap.sh --apply` / `bootstrap.ps1 -Apply`, which set
+# core.hooksPath to .githooks. core.hooksPath is per-clone config, so wiring it
+# from the script every new machine already runs is the cheapest place for it.
+#
+# Skip a single commit with `git commit --no-verify` if you must.
+set -euo pipefail
+
+root="$(git rev-parse --show-toplevel)"
+[ -d "$root/tests" ] || exit 0
+
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "pre-commit: python3 not found — skipping the script-parity tests." >&2
+    exit 0
+fi
+if ! python3 -c 'import pytest' >/dev/null 2>&1; then
+    echo "pre-commit: pytest not installed — skipping the script-parity tests." >&2
+    echo "            install it with: python3 -m pip install --user pytest" >&2
+    exit 0
+fi
+
+python3 -m pytest -q "$root/tests"

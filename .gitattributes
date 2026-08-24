@@ -13,3 +13,12 @@
 *.webp binary
 *.pdf binary
 *.zip binary
+
+# The absorbed service tree. These .ps1 are run standalone — possibly by Windows
+# PowerShell 5.1, which reads a BOM-less file as ANSI and then dies on the
+# non-ASCII characters they print — so they are UTF-8-WITH-BOM and CRLF by rule
+# (docs/service-conventions.md). The global eol=lf above exists for the CHEZMOI
+# SOURCE TREE and the sync hook; services/** is chezmoi-ignored and is not a
+# sync root, so neither reason reaches here. This repo's own .ps1 files ARE
+# synced and ARE run by pwsh 7, so they stay LF and BOM-less.
+services/**/*.ps1 text eol=crlf

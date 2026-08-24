@@ -1,0 +1,15 @@
+# GPU overlay — merged on top of docker-compose.yml when .env sets
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml
+#
+# Kept separate so a CPU-only machine can run the same base file untouched.
+# Without a working NVIDIA runtime this reservation makes the container fail
+# to start, which is why it is opt-in rather than the default.
+services:
+  kokoro:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

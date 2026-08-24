@@ -1148,14 +1148,14 @@ function Read-TsWizard {
         Apps      = @(Read-TsApps)
         CcTts     = (Read-TsCcTts)
         Headroom  = (Read-TsAgentToggle TS_HEADROOM 'Headroom prompt compression and monitoring?' @(
-            '  Expects docker-local on 127.0.0.1:8787 and its MCP sidecar on 8788.',
+            '  Expects the headroom stack on 127.0.0.1:8787 and its MCP sidecar on 8788.',
             '  This installer never manages those containers.'
         ))
         Caveman   = (Read-TsAgentToggle TS_CAVEMAN 'Caveman terse output for all projects?' @(
             '  Installs the pinned user-scope plugin/skill; no project files are changed.'
         ))
         Agentmemory = (Read-TsAgentToggle TS_AGENTMEMORY 'AgentMemory for all projects?' @(
-            '  Expects docker-local on 127.0.0.1:3111; terminal-stack owns only agent wiring.'
+            '  Expects the agentmemory stack on 127.0.0.1:3111; this owns only agent wiring.'
         ))
         Workspace = (Read-TsWorkspaceDir)
     }
