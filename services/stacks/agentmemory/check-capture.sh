@@ -26,8 +26,8 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "$_self")" && pwd -P)"
 . "$SCRIPT_DIR/../_common.sh"
 
 while [ $# -gt 0 ]; do
-    arg="$(dl_normalise_flag "$1")"
-    if dl_parse_common_flag "$arg" "${2:-}"; then shift "$DL_FLAG_CONSUMED"; continue; fi
+    arg="$(tss_normalise_flag "$1")"
+    if tss_parse_common_flag "$arg" "${2:-}"; then shift "$TSS_FLAG_CONSUMED"; continue; fi
     die "unknown option: $1 (try --help)"
 done
 
@@ -39,14 +39,14 @@ cd "$stack_dir"
 # it at all. Declared here, appended by BOTH probes, and drained from an EXIT
 # trap so a mid-script failure still cleans up — which is what the .ps1's
 # per-section try/finally was reaching for and could not achieve across sections.
-DL_PROBE_SESSIONS=''
+TSS_PROBE_SESSIONS=''
 HMAC=''
 
 cleanup_probe_sessions() {
-    [ -n "$DL_PROBE_SESSIONS" ] || return 0
+    [ -n "$TSS_PROBE_SESSIONS" ] || return 0
     [ -n "$HMAC" ] || return 0
     local sid n=0
-    for sid in $DL_PROBE_SESSIONS; do
+    for sid in $TSS_PROBE_SESSIONS; do
         http_post_json_auth 'http://127.0.0.1:3111/agentmemory/forget' "$HMAC" \
             "{\"sessionId\":$(json_str "$sid")}" 15 >/dev/null 2>&1 \
             || warn "could not forget probe session $sid — remove it from the viewer (http://localhost:3113) if it lingers"
@@ -56,9 +56,9 @@ cleanup_probe_sessions() {
 }
 trap cleanup_probe_sessions EXIT
 
-dl_mode >/dev/null
-printf '%scheck-capture  mode=%s  stack=%s%s\n' "$C_WHITE" "$DL_MODE" "$stack_dir" "$C_RESET"
-[ "$DL_APPLY" = 1 ] || printf '%s(read-only checks; add --apply to also run the end-to-end probe)%s\n' "$C_DIM" "$C_RESET"
+tss_mode >/dev/null
+printf '%scheck-capture  mode=%s  stack=%s%s\n' "$C_WHITE" "$TSS_MODE" "$stack_dir" "$C_RESET"
+[ "$TSS_APPLY" = 1 ] || printf '%s(read-only checks; add --apply to also run the end-to-end probe)%s\n' "$C_DIM" "$C_RESET"
 
 require_docker
 
@@ -75,7 +75,7 @@ ts_entry=''
 for cand in \
     "$(command -v ts-agentmemory 2>/dev/null || true)" \
     "${TERMINAL_STACK_DIR:-}/bootstrap/ts-agentmemory.sh" \
-    "$DL_ROOT/../terminal-stack/bootstrap/ts-agentmemory.sh" \
+    "$TSS_ROOT/../terminal-stack/bootstrap/ts-agentmemory.sh" \
     "$HOME/Documents/Workspace/src/github.com/martybytes/terminal-stack/bootstrap/ts-agentmemory.sh"
 do
     [ -n "$cand" ] && [ -e "$cand" ] && { ts_entry="$cand"; break; }
@@ -126,12 +126,12 @@ if [ -z "$HMAC" ]; then
 else
     info "/data/.hmac: ${#HMAC} chars"
 
-    cache="$(dl_secret_cache_path)"
+    cache="$(tss_secret_cache_path)"
     if [ -n "${AGENTMEMORY_SECRET:-}" ]; then
         if [ "$AGENTMEMORY_SECRET" = "$HMAC" ]; then pass 'exported AGENTMEMORY_SECRET matches /data/.hmac'
         else fail 'the exported AGENTMEMORY_SECRET does not match /data/.hmac — stale after a rotation. Re-export it.'; fi
     elif [ -f "$cache" ]; then
-        mode="$(_dl_file_mode "$cache")"
+        mode="$(_tss_file_mode "$cache")"
         if [ "$mode" != 600 ]; then
             fail "$cache is mode ${mode:-unknown}, not 600 — any local user can read the bearer. chmod 600 it."
         elif [ "$(tr -d '\r\n' < "$cache")" = "$HMAC" ]; then
@@ -181,7 +181,7 @@ else
     # `docker compose logs` prefixes each line with the container name, so pull
     # the timestamp out by shape rather than by position.
     stamp="$(printf '%s' "$last_line" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z?' | head -n 1 || true)"
-    age="$(dl_iso_age_minutes "$stamp")"
+    age="$(tss_iso_age_minutes "$stamp")"
     if [ -z "$age" ]; then
         info 'newest capture: could not read a timestamp from the log line'
     else
@@ -195,12 +195,12 @@ section 'D. End-to-end probe'
 
 if [ -z "$plugin_root" ] || [ -z "$HMAC" ]; then
     warn 'skipped — needs a resolved plugin root and a readable /data/.hmac (see above)'
-elif [ "$DL_APPLY" != 1 ]; then
+elif [ "$TSS_APPLY" != 1 ]; then
     step 'run the installed post-tool-use hook against a synthetic payload, confirm the session lands, then forget it'
     info 'Nothing else proves capture works: the hook always exits 0, so only the server-side record counts.'
 else
-    probe_id="check-capture-probe-$(dl_rand_hex 12)"
-    DL_PROBE_SESSIONS="$DL_PROBE_SESSIONS $probe_id"
+    probe_id="check-capture-probe-$(tss_rand_hex 12)"
+    TSS_PROBE_SESSIONS="$TSS_PROBE_SESSIONS $probe_id"
     hook_script="$plugin_root/scripts/post-tool-use.mjs"
 
     if [ ! -f "$hook_script" ]; then
@@ -304,12 +304,12 @@ if [ -n "$HMAC" ]; then
     fi
 fi
 
-if [ "$DL_APPLY" != 1 ]; then
+if [ "$TSS_APPLY" != 1 ]; then
     step 'save a probe memory under one project, prove the filter includes it and excludes it from another, then delete it'
 elif [ -z "$HMAC" ]; then
     warn 'project regression skipped - no readable secret'
 else
-    tag="check-capture-project-$(dl_rand_hex 10)"
+    tag="check-capture-project-$(tss_rand_hex 10)"
     proj_a="$tag-a"; proj_b="$tag-b"
     saved_id=''
     body="{\"content\":$(json_str "$tag probe memory for project persistence"),\"type\":\"fact\",\"project\":$(json_str "$proj_a")}"
@@ -373,7 +373,7 @@ scan_duplicate_pairs() {                  # <since-ms> -> prints "<pairs> <rows>
         });' "$1" 2>/dev/null || printf '0 0'
 }
 
-if [ "$DL_APPLY" != 1 ]; then
+if [ "$TSS_APPLY" != 1 ]; then
     step 'post one observation twice and confirm only one is stored'
     if [ -n "$HMAC" ]; then
         read -r pairs rows <<EOF
@@ -386,8 +386,8 @@ EOF
 elif [ -z "$HMAC" ]; then
     warn 'duplicate check skipped - no readable secret'
 else
-    sid="check-capture-dupe-$(dl_rand_hex 10)"
-    DL_PROBE_SESSIONS="$DL_PROBE_SESSIONS $sid"
+    sid="check-capture-dupe-$(tss_rand_hex 10)"
+    TSS_PROBE_SESSIONS="$TSS_PROBE_SESSIONS $sid"
     mk_obs() {                            # <millis-suffix>
         node -e '
           const [sid,ms]=process.argv.slice(1);
@@ -436,14 +436,14 @@ fi
 
 # --------------------------------------------------------------------------
 printf '\n'
-if [ "$DL_PROBLEMS" = 0 ]; then
-    printf '%sNo problems found (%s).%s\n' "$C_GREEN" "$DL_MODE" "$C_RESET"
-    [ "$DL_APPLY" = 1 ] || printf '%sRe-run with --apply to prove capture end to end.%s\n' "$C_DIM" "$C_RESET"
+if [ "$TSS_PROBLEMS" = 0 ]; then
+    printf '%sNo problems found (%s).%s\n' "$C_GREEN" "$TSS_MODE" "$C_RESET"
+    [ "$TSS_APPLY" = 1 ] || printf '%sRe-run with --apply to prove capture end to end.%s\n' "$C_DIM" "$C_RESET"
 else
-    printf '%s%s problem(s) found - see the X lines above.%s\n' "$C_YELLOW" "$DL_PROBLEMS" "$C_RESET"
+    printf '%s%s problem(s) found - see the X lines above.%s\n' "$C_YELLOW" "$TSS_PROBLEMS" "$C_RESET"
 fi
 printf '%sPlugins, hooks, permissions and environment are read at process start: after any fix, restart Claude Code, Cursor and Codex.%s\n' "$C_DIM" "$C_RESET"
 
 # Unlike the .ps1, which always exits 0, this mirrors the health so it can be
 # used in a pipeline or a hook — the ts-doctor.sh house rule.
-[ "$DL_PROBLEMS" = 0 ]
+[ "$TSS_PROBLEMS" = 0 ]

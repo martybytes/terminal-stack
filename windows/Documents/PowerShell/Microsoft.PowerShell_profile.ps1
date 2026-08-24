@@ -1621,6 +1621,20 @@ function Invoke-TsMux {
         default { Write-Warning "ts-mux: unknown command '$cmd' (status, on, off, list, kill, restart, reset)" }
     }
 }
+# The local Docker service stacks. PARALLEL implementation of
+# bootstrap/ts-stack.sh, reached through the script in the clone so `ts-update`
+# ships fixes without a profile re-sync -- same shape as Invoke-TsDoctor.
+function Invoke-TsStack {
+    $src = Resolve-TsSourceDir
+    if (-not $src) { return }
+    $script = Join-Path $src 'bootstrap	s-stack.ps1'
+    if (-not (Test-Path -LiteralPath $script)) {
+        Write-Warning "$script not found; run ts-update."; return
+    }
+    & $script @args
+}
+Set-Alias -Name ts-stack -Value Invoke-TsStack
+
 Set-Alias -Name ts-mux -Value Invoke-TsMux
 
 # Probe known clone locations for one that actually contains the repo — used so

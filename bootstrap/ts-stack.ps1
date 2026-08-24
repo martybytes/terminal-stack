@@ -1,132 +1,323 @@
 <#
-.NAME        stack
-.SYNOPSIS    Drive every Docker stack in this repo from one place — list, status, up, down, logs. Read-only actions run immediately; -Up and -Down preview unless you pass -Apply.
-.PLATFORM    windows
-.USAGE       .\stack.ps1 [-List|-Status|-Up|-Down|-Logs] [-Stack <name>] [-Tail <int>] [-Follow] [-Apply]
-.WHEN        Day-to-day: bringing the local stacks up after a reboot, checking what's healthy, or tailing a container that misbehaves. Run .\bootstrap.ps1 first on a new machine.
+.NAME     ts-stack.ps1
+.SYNOPSIS The local Docker service stacks: bring them up, prove they work.
+.PLATFORM Windows (pwsh 7). PARALLEL implementation of bootstrap/ts-stack.sh --
+          not a wrapper. Change one, change the other, and keep -h byte-identical.
+.USAGE    ts-stack [status|up|down|restart|logs|config|doctor] [<stack>] [flags]
+.WHEN     Day to day: bringing the services up after a reboot, seeing what is
+          healthy, tailing a container that misbehaves.
+.NOTE     This is the ONLY thing in the repo that starts, stops or builds a
+          container. ts-agents may probe one and print a verb from here; it may
+          never run docker. services\ is the service side; everything outside it
+          configures a program running on this host. See docs/decisions.md.
 #>
+[CmdletBinding()]
 param(
-    [string]$Stack,          # limit to one stack (directory name); default is all
-    [switch]$List,           # default action: one line per stack
-    [switch]$Status,         # docker compose ps per stack
-    [switch]$Up,             # docker compose up -d       (needs -Apply)
-    [switch]$Down,           # docker compose down        (needs -Apply)
-    [switch]$Logs,           # docker compose logs
-    [int]$Tail = 50,         # lines of history for -Logs
-    [switch]$Follow,         # -Logs: follow (implies a single stack)
-    [switch]$Apply           # write switch; without it, -Up/-Down preview only
+    [Parameter(Position = 0)][string]$Command = 'status',
+    [Parameter(Position = 1)][string]$Stack = '',
+    [string]$Tail = '50',
+    [switch]$Follow,
+    [switch]$All,
+    [switch]$DryRun,
+    [switch]$StartEngine,
+    [switch]$NoColour,
+    # -h is the alias: $HELP below holds the text, and a [switch]$Help would BE
+    # that variable (pwsh names are case-insensitive), so the assignment would try
+    # to convert a string to a SwitchParameter. See docs/powershell-quirks.md.
+    [Alias('h')][switch]$ShowHelp
 )
 
 $ErrorActionPreference = 'Stop'
-$root = $PSScriptRoot
 
-function Section([string]$t) { Write-Host "`n=== $t ===" -ForegroundColor Cyan }
-function Step([string]$t)    { $tag = if ($Apply) { '[DO]  ' } else { '[would]' }; Write-Host "$tag $t" -ForegroundColor ($(if ($Apply) { 'Green' } else { 'Yellow' })) }
-function Info([string]$t)    { Write-Host "       $t" -ForegroundColor DarkGray }
-function Warn([string]$t)    { Write-Host "  !    $t" -ForegroundColor Yellow }
-function Have([string]$c)    { [bool](Get-Command $c -ErrorAction SilentlyContinue) }
+# Byte-identical to the HELP string in bootstrap/ts-stack.sh. A test pins that.
+$HELP = @'
+ts-stack — the local Docker service stacks: bring them up, prove they work.
 
-if (-not (Have 'docker')) { throw 'docker CLI not found on PATH — install/launch Docker Desktop first.' }
-$null = & docker info 2>&1
-if ($LASTEXITCODE -ne 0) { throw 'Docker daemon not responding — is Docker Desktop running?' }
+Usage:
+  ts-stack [status]            one line per stack: state, health, published ports
+  ts-stack up [<stack>]        docker compose up -d
+  ts-stack down [<stack>]      docker compose down          (every volume kept)
+  ts-stack restart [<stack>]   down, then up
+  ts-stack logs <stack>        docker compose logs
+  ts-stack config [<stack>]    what compose actually resolves to on this machine
+  ts-stack doctor              engine, .env files, health, ports, toggle drift
+  ts-stack -h                  this help
 
-# A "stack" is any top-level directory holding a docker-compose.yml. New stacks
-# need no registration here — drop the directory in and it is picked up.
-$stacks = @(Get-ChildItem -Path $root -Directory |
-    Where-Object { Test-Path (Join-Path $_.FullName 'docker-compose.yml') } |
-    Sort-Object Name)
+  --dry-run          print the exact docker argv and change nothing
+  -a, --all          include stacks whose saved terminal-stack setting is off
+  -n, --tail <N>     logs: lines of history (default 50)
+  -f, --follow       logs: follow (needs a single stack)
+  --start-engine     doctor/up: launch the container engine and wait for it
+  --no-colour
 
-if ($Stack) {
-    $stacks = @($stacks | Where-Object { $_.Name -eq $Stack })
-    if (-not $stacks) { throw "no stack named '$Stack' — run .\stack.ps1 -List to see what exists" }
+A stack is any directory under services/stacks/ holding a docker-compose.yml —
+there is nothing to register. Which stacks take part comes from the saved
+settings you already have: agentmemoryEnabled, headroomEnabled, playwrightEnabled
+and, for kokoro, the TTS switch plus ccTts.engine. A stack whose setting is off
+is skipped and reported as skipped, never as broken; naming it explicitly runs it
+anyway, because asking by name is consent.
+
+Every published port binds 127.0.0.1 only and none of these services
+authenticate, which is why "ts-stack doctor" audits the bindings even when
+everything else is failing.
+'@
+
+# Help before anything else, like the bash twin: it must work on a box where the
+# clone, the config store or docker is the thing that is broken.
+if ($ShowHelp -or $Command -in '-h', '--help', 'help') { Write-Host $HELP; exit 0 }
+
+$ROOT = Split-Path -Parent $PSScriptRoot
+$STACK_ROOT = if ($env:TS_STACK_ROOT) { $env:TS_STACK_ROOT } else { Join-Path $ROOT 'services\stacks' }
+if (-not (Test-Path -LiteralPath $STACK_ROOT)) {
+    Write-Error "ts-stack: cannot locate the service tree at $STACK_ROOT"
+    exit 1
 }
-if (-not $stacks) { throw "no stacks found under $root" }
+. (Join-Path $PSScriptRoot '_config.ps1')
 
-# Default action
-if (-not ($List -or $Status -or $Up -or $Down -or $Logs)) { $List = $true }
-if ($Follow -and $stacks.Count -gt 1) { throw '-Follow needs a single stack — pass -Stack <name>' }
+$script:Issues = 0
+function Ok  ([string]$m) { Write-Host "  ok  $m" }
+function Bad ([string]$m) { Write-Host "  !!  $m" -ForegroundColor Yellow; $script:Issues++ }
+function Skip([string]$m) { Write-Host "  --  $m" -ForegroundColor DarkGray }
+function Note([string]$m) { Write-Host "      $m" -ForegroundColor DarkGray }
+function Section([string]$m) { Write-Host ''; Write-Host "=== $m ===" -ForegroundColor Cyan }
 
-# Which compose files a stack will actually merge, per its .env. `docker compose
-# ls` reports the files a project was *created* with, which goes stale the moment
-# you add an overlay — so read the current intent instead.
-function Get-ComposeFiles($dir) {
-    $sep = ':'
-    $spec = $null
-    $envFile = Join-Path $dir '.env'
-    if (Test-Path $envFile) {
-        foreach ($line in (Get-Content $envFile)) {
-            if ($line -match '^\s*COMPOSE_PATH_SEPARATOR\s*=\s*(.+?)\s*$') { $sep  = $Matches[1] }
-            if ($line -match '^\s*COMPOSE_FILE\s*=\s*(.+?)\s*$')           { $spec = $Matches[1] }
-        }
+# ── stacks ──────────────────────────────────────────────────────────────────────
+function Get-TsStackList {
+    Get-ChildItem -LiteralPath $STACK_ROOT -Directory -ErrorAction SilentlyContinue |
+        Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'docker-compose.yml') } |
+        Select-Object -ExpandProperty Name | Sort-Object
+}
+function Get-TsStackDir([string]$Name) { Join-Path $STACK_ROOT $Name }
+
+# Twin of tss_toggle_for. kokoro is gated on the TTS engine as well as the
+# switch, so the caller checks both; this only names the primary key.
+function Get-TsStackToggle([string]$Name) {
+    switch ($Name) {
+        'agentmemory' { 'agentmemoryEnabled' }
+        'headroom'    { 'headroomEnabled' }
+        'playwright'  { 'playwrightEnabled' }
+        'kokoro'      { 'ccTts' }
+        default       { '' }
     }
-    if (-not $spec) { return @('docker-compose.yml') }
-    return @($spec -split [regex]::Escape($sep) | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 }
 
-# A stack that ships a .env.example but has no .env is misconfigured: compose
-# silently falls back to the base file only, which for kokoro means starting the
-# GPU image with no GPU access. Surface it on every action.
-function Test-EnvSeeded($dir) {
-    $ex = Join-Path $dir '.env.example'
-    $en = Join-Path $dir '.env'
-    if ((Test-Path $ex) -and -not (Test-Path $en)) { return $false }
-    return $true
+# '' = enabled here; otherwise the reason it is deliberately not running.
+function Get-TsStackState([string]$Name) {
+    $key = Get-TsStackToggle $Name
+    if (-not $key) { return '' }
+    if ($key -eq 'ccTts') {
+        $tts = Get-CcTtsConfig
+        if (-not $tts.enabled) { return 'voice notifications are off' }
+        if ($tts.engine -ne 'kokoro') { return "ccTts.engine=$($tts.engine)" }
+        return ''
+    }
+    if ((Get-TsAgentSetting $key) -eq 'on') { return '' }
+    return "$key=off"
 }
 
-foreach ($s in $stacks) {
-    if (-not (Test-EnvSeeded $s.FullName)) {
-        Warn "$($s.Name): .env.example exists but .env does not — run .\bootstrap.ps1 -Apply first, or this stack will start with the wrong profile"
+# ── engine ──────────────────────────────────────────────────────────────────────
+# Returns: native | absent | denied. (wsl-shim is a bash-side condition only —
+# on Windows the pipe either answers or it does not.)
+function Get-TsDockerKind {
+    if ($env:TS_STACK_DOCKER_PROBE) { return $env:TS_STACK_DOCKER_PROBE }
+    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { return 'absent' }
+    'native'
+}
+function Test-TsEngineUp {
+    # The pipe is the cheap check; docker info is the honest one. Docker Desktop
+    # publishes the pipe before the engine is ready, so both are needed.
+    if (-not (Test-Path '\\.\pipe\dockerDesktopLinuxEngine')) {
+        if (-not (Get-Process 'Docker Desktop' -ErrorAction SilentlyContinue)) { return $false }
+    }
+    & docker info *> $null
+    return ($LASTEXITCODE -eq 0)
+}
+# PURE. Twin of tss_engine_advice, so a failed probe still hands back a fix.
+function Get-TsEngineAdvice([string]$Kind) {
+    switch ($Kind) {
+        'absent' { @('no container engine found.',
+                     '  fix:  winget install --id Docker.DockerDesktop --exact') }
+        'denied' { @('the engine is there but this user may not talk to it.',
+                     '  fix:  add yourself to the docker-users group, then sign out and in') }
+        default  { @('the engine is not answering.',
+                     '  fix:  start Docker Desktop, or re-run with --start-engine') }
     }
 }
 
-foreach ($s in $stacks) {
-    Push-Location $s.FullName
-    try {
-        if ($List) {
-            $files = Get-ComposeFiles $s.FullName
-            $running = @((& docker compose ps -q --status running 2>$null) -split "`n" | Where-Object { $_.Trim() }).Count
-            $total   = @((& docker compose ps -aq 2>$null) -split "`n" | Where-Object { $_.Trim() }).Count
-            $state   = if ($total -eq 0) { 'not created' } elseif ($running -eq $total) { "running ($running/$total)" } else { "partial ($running/$total)" }
-            $colour  = if ($total -eq 0) { 'DarkGray' } elseif ($running -eq $total) { 'Green' } else { 'Yellow' }
-            Write-Host ('{0,-14} {1}' -f $s.Name, $state) -ForegroundColor $colour
-            Info ("compose files: " + ($files -join ' + '))
-        }
-
-        if ($Status) {
-            Section $s.Name
-            & docker compose ps
-        }
-
-        if ($Logs) {
-            Section "$($s.Name) logs"
-            if ($Follow) { & docker compose logs --tail $Tail -f }
-            else         { & docker compose logs --tail $Tail }
-        }
-
-        if ($Up) {
-            Section $s.Name
-            Step 'docker compose up -d'
-            if ($Apply) {
-                & docker compose up -d
-                if ($LASTEXITCODE -ne 0) { Warn "up failed for $($s.Name) — see the output above" }
-            }
-        }
-
-        if ($Down) {
-            Section $s.Name
-            Step 'docker compose down   (containers only; named volumes and cached images are kept)'
-            if ($Apply) {
-                & docker compose down
-                if ($LASTEXITCODE -ne 0) { Warn "down failed for $($s.Name) — see the output above" }
-            }
-        }
+# ── the compose choke point ─────────────────────────────────────────────────────
+# EVERY docker invocation goes through here: -v never reaches `down`, the billing
+# overlay always gets --env-file .env BEFORE --env-file .billing.env (a lone
+# --env-file REPLACES the interpolation source, so every LLM_* display value
+# silently resolves to ''), and -DryRun prints the argv and runs nothing.
+# NB: not $Args — that is an automatic variable, so a parameter of that name is
+# never bound and every compose call silently loses its arguments.
+function Invoke-TsStackCompose([string]$Name, [string[]]$ComposeArgs) {
+    $dir = Get-TsStackDir $Name
+    $pre = @()
+    if (Test-Path -LiteralPath (Join-Path $dir '.billing.env')) {
+        $pre = @('--env-file', '.env', '--env-file', '.billing.env')
     }
+    if ($DryRun) {
+        Write-Host ("({0}) docker compose {1}{2}" -f $Name, (($pre -join ' ') + $(if ($pre) { ' ' })), ($ComposeArgs -join ' '))
+        return 0
+    }
+    Push-Location $dir
+    try { & docker compose @pre @ComposeArgs; return $LASTEXITCODE }
     finally { Pop-Location }
 }
 
-Write-Host ''
-if (($Up -or $Down) -and -not $Apply) {
-    Write-Host 'Nothing changed (preview). Add -Apply to perform.' -ForegroundColor White
-} elseif ($Up -or $Down) {
-    Write-Host 'Done. Verify with: .\stack.ps1 -Status' -ForegroundColor Green
+# ── selection ───────────────────────────────────────────────────────────────────
+$stackNames = @(Get-TsStackList)
+if (-not $stackNames.Count) { Write-Error "ts-stack: no stacks found under $STACK_ROOT"; exit 1 }
+if ($Stack) {
+    if ($stackNames -notcontains $Stack) {
+        Write-Error "ts-stack: no stack named '$Stack' — have: $($stackNames -join ' ')"
+        exit 2
+    }
+    $chosen = @($Stack)
+    $All = [switch]$true          # naming a stack is consent
+} else {
+    $chosen = $stackNames
 }
+function Selected {
+    $chosen | Where-Object { $All -or -not (Get-TsStackState $_) }
+}
+
+$kind = Get-TsDockerKind
+$engineOk = ($kind -eq 'native') -and (Test-TsEngineUp)
+
+if (-not $engineOk -and $StartEngine -and $kind -eq 'native') {
+    $exe = Join-Path $env:ProgramFiles 'Docker\Docker\Docker Desktop.exe'
+    if (Test-Path -LiteralPath $exe) {
+        Write-Host "[DO]    launch $exe"
+        if (-not $DryRun) {
+            Start-Process -FilePath $exe | Out-Null
+            # Cold starts are slow. 60s produces false failures.
+            for ($i = 0; $i -lt 90; $i++) {
+                if (Test-TsEngineUp) { $engineOk = $true; break }
+                Start-Sleep -Seconds 2
+            }
+        }
+    } else { Bad "Docker Desktop not found at $exe" }
+}
+
+if (-not $engineOk -and -not $DryRun -and $Command -in 'up', 'down', 'restart', 'logs', 'config') {
+    Bad 'container engine unreachable'
+    Get-TsEngineAdvice $kind | ForEach-Object { Note $_ }
+    exit 1
+}
+
+# ── verbs ───────────────────────────────────────────────────────────────────────
+function Show-TsStackStatus {
+    foreach ($s in $chosen) {
+        $state = Get-TsStackState $s
+        $dir = Get-TsStackDir $s
+        $running = 0; $total = 0
+        if ($engineOk) {
+            Push-Location $dir
+            try {
+                $running = @(& docker compose ps -q --status running 2>$null).Where({ $_ }).Count
+                $total = @(& docker compose ps -aq 2>$null).Where({ $_ }).Count
+            } finally { Pop-Location }
+        }
+        if ($state -and $total -eq 0) { Skip ("{0,-12} {1}" -f $s, $state); continue }
+        if ($state) {
+            # Intent and reality disagree. A warn, not a failure: that is what a
+            # doctor exists to surface, and it is not "broken".
+            Bad ("{0,-12} running, but {1}" -f $s, $state)
+            Note "ts-config agents $s on   (keep it)   |   ts-stack down $s   (stop it)"
+            continue
+        }
+        if (-not $engineOk) { Note ("{0,-12} enabled (engine unreachable, state unknown)" -f $s) }
+        elseif ($total -eq 0) { Bad ("{0,-12} not created" -f $s) }
+        elseif ($running -eq $total) { Ok ("{0,-12} running ({1}/{2})" -f $s, $running, $total) }
+        else { Bad ("{0,-12} partial ({1}/{2})" -f $s, $running, $total) }
+    }
+}
+
+# A stack that ships a .env.example but has no .env is misconfigured: compose
+# falls back to the base file only, which for kokoro means starting the GPU image
+# with no GPU.
+function Test-TsStackEnvSeeded([string]$Name) {
+    $dir = Get-TsStackDir $Name
+    if (-not (Test-Path -LiteralPath (Join-Path $dir '.env.example'))) { return $true }
+    Test-Path -LiteralPath (Join-Path $dir '.env')
+}
+
+switch ($Command) {
+    'status' { Show-TsStackStatus }
+
+    'config' { foreach ($s in Selected) { Section $s; Invoke-TsStackCompose $s @('config') | Out-Null } }
+
+    'logs' {
+        if (-not $Stack) { Write-Error 'ts-stack: logs needs a stack name'; exit 2 }
+        $a = @('logs', '--tail', $Tail); if ($Follow) { $a += '-f' }
+        Invoke-TsStackCompose $Stack $a | Out-Null
+    }
+
+    'up' {
+        foreach ($s in $chosen) {
+            if (-not (Test-TsStackEnvSeeded $s)) {
+                Bad "$s`: .env.example exists but .env does not — the stack will start with the wrong profile"
+            }
+        }
+        foreach ($s in Selected) {
+            Section $s
+            if ((Invoke-TsStackCompose $s @('up', '-d')) -ne 0) { Bad "up failed for $s" }
+        }
+    }
+
+    'down' {
+        # -v is NEVER in this argv. Volumes are only destroyed by an explicitly
+        # gated path, and that is enforced by test, not by comment.
+        foreach ($s in Selected) {
+            Section $s
+            if ((Invoke-TsStackCompose $s @('down')) -ne 0) { Bad "down failed for $s" }
+        }
+    }
+
+    'restart' {
+        # down + up, not `docker compose restart`: restart reuses the existing
+        # container, so it ignores the changed .env that is the reason to restart.
+        foreach ($s in Selected) {
+            Section $s
+            Invoke-TsStackCompose $s @('down') | Out-Null
+            if ((Invoke-TsStackCompose $s @('up', '-d')) -ne 0) { Bad "restart failed for $s" }
+        }
+    }
+
+    'doctor' {
+        Section 'engine'
+        if ($engineOk) {
+            $v = (& docker version --format '{{.Server.Version}}' 2>$null)
+            Ok "engine reachable ($(if ($v) { $v } else { '?' }))"
+        } else {
+            Bad "engine unreachable (kind: $kind)"
+            Get-TsEngineAdvice $kind | ForEach-Object { Note $_ }
+        }
+        Section 'stacks'
+        Show-TsStackStatus
+        Section 'configuration'
+        foreach ($s in $chosen) {
+            if (Test-TsStackEnvSeeded $s) { Ok "$s`: .env present or not needed" }
+            else { Bad "$s`: .env.example exists but .env does not" }
+        }
+        if ($engineOk) {
+            foreach ($s in Selected) {
+                if ((Invoke-TsStackCompose $s @('config', '-q')) -eq 0) { Ok "$s`: compose config parses" }
+                else { Bad "$s`: compose config failed — a required value is missing" }
+            }
+        } else {
+            Skip 'compose config, health and the port audit need the engine'
+        }
+    }
+
+    default { Write-Error "ts-stack: unknown command '$Command' (try -h)"; exit 2 }
+}
+
+if ($Command -in 'doctor', 'status') {
+    Write-Host ''
+    if ($script:Issues -eq 0) { Write-Host "ts-stack $Command`: all checks passed" }
+    else { Write-Host "ts-stack $Command`: $($script:Issues) issue(s) found"; exit 1 }
+}
+if ($DryRun) { Write-Host ''; Write-Host 'Nothing changed (--dry-run).' }

@@ -20,10 +20,10 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "$_self")" && pwd -P)"
 # shellcheck source=../_common.sh
 . "$SCRIPT_DIR/../_common.sh"
 
-backup_root="$(dl_backup_root)"
+backup_root="$(tss_backup_root)"
 while [ $# -gt 0 ]; do
-    arg="$(dl_normalise_flag "$1")"
-    if dl_parse_common_flag "$arg" "${2:-}"; then shift "$DL_FLAG_CONSUMED"; continue; fi
+    arg="$(tss_normalise_flag "$1")"
+    if tss_parse_common_flag "$arg" "${2:-}"; then shift "$TSS_FLAG_CONSUMED"; continue; fi
     case "$arg" in
         --backup-root) backup_root="${2:?--backup-root needs a value}"; shift 2 ;;
         *) die "unknown option: $1 (try --help)" ;;
@@ -36,17 +36,17 @@ stack_dir="$SCRIPT_DIR"
 cd "$stack_dir"
 
 mkdir -p "$backup_root" 2>/dev/null || true
-backup_root_full="$(dl_realpath "$backup_root")" || die "cannot resolve backup root: $backup_root"
-dl_backup_root_sane "$backup_root_full" \
+backup_root_full="$(tss_realpath "$backup_root")" || die "cannot resolve backup root: $backup_root"
+tss_backup_root_sane "$backup_root_full" \
     || die "backup root is too broad or outside \$HOME: $backup_root_full
-Set DOCKER_LOCAL_ALLOW_ANY_BACKUP_ROOT=1 to override, or pass --backup-root."
-dl_assert_docker_shareable "$backup_root_full" \
+Set TS_STACK_ALLOW_ANY_BACKUP_ROOT=1 to override, or pass --backup-root."
+tss_assert_docker_shareable "$backup_root_full" \
     || die "Docker Desktop for Mac cannot bind-mount $backup_root_full — it only shares \$HOME, /tmp, /private and /Volumes by default. Pick a path under \$HOME or add it in Settings -> Resources -> File sharing."
 
 backup_dir="$backup_root_full/$(stamp)"
 
-dl_mode >/dev/null
-printf '%smigrate-durable-llm  mode=%s  stack=%s%s\n' "$C_WHITE" "$DL_MODE" "$stack_dir" "$C_RESET"
+tss_mode >/dev/null
+printf '%smigrate-durable-llm  mode=%s  stack=%s%s\n' "$C_WHITE" "$TSS_MODE" "$stack_dir" "$C_RESET"
 
 section 'Preflight'
 docker compose config --quiet || die 'docker compose config failed'
@@ -58,12 +58,12 @@ info 'compose config, external volume, and HMAC are present'
 section 'Cold backup'
 step 'stop console and agentmemory'
 step "create $backup_dir/agentmemory-volume.tgz"
-if [ "$DL_APPLY" = 1 ]; then
+if [ "$TSS_APPLY" = 1 ]; then
     mkdir -p "$backup_dir"
-    resolved_backup="$(dl_realpath "$backup_dir")" || die "cannot resolve $backup_dir"
+    resolved_backup="$(tss_realpath "$backup_dir")" || die "cannot resolve $backup_dir"
     # The resolved path is bind-mounted into a container that writes into it, so
     # a symlinked or ..-bearing root must not be able to escape.
-    dl_assert_within "$backup_root_full" "$resolved_backup" \
+    tss_assert_within "$backup_root_full" "$resolved_backup" \
         || die "resolved backup directory escaped backup root: $resolved_backup"
 
     docker compose stop console agentmemory || die 'failed to stop stack for backup'
@@ -71,7 +71,7 @@ if [ "$DL_APPLY" = 1 ]; then
     # Derive the image rather than hardcoding agentmemory-agentmemory:latest,
     # which is right only because the compose project name happens to match the
     # directory name. reconcile-llm-queue.ps1 already derives it properly.
-    image="$(dl_compose_image "$stack_dir" agentmemory)" || die 'could not resolve the agentmemory image'
+    image="$(tss_compose_image "$stack_dir" agentmemory)" || die 'could not resolve the agentmemory image'
     info "backup image: $image"
     docker run --rm --entrypoint sh \
         -v 'agentmemory_iii-data:/source:ro' -v "${resolved_backup}:/backup" \
@@ -87,14 +87,14 @@ fi
 
 section 'Deploy'
 step 'build the patched AgentMemory image and recreate the stack'
-if [ "$DL_APPLY" = 1 ]; then
+if [ "$TSS_APPLY" = 1 ]; then
     docker compose build agentmemory console || die 'image build failed'
     docker compose up -d || die 'stack start failed'
 fi
 
 section 'Verify graph migration'
 step 'wait for authenticated graph migration status=complete'
-if [ "$DL_APPLY" = 1 ]; then
+if [ "$TSS_APPLY" = 1 ]; then
     done_ok=0; attempt=0
     while [ $attempt -lt 120 ]; do
         attempt=$((attempt + 1))
@@ -125,7 +125,7 @@ fi
 
 section 'Verify durable LLM work'
 step 'confirm startup recovery requeued raw observations, reconciled counts, and exposed queue/DLQ telemetry'
-if [ "$DL_APPLY" = 1 ]; then
+if [ "$TSS_APPLY" = 1 ]; then
     t="$(http_get_auth 'http://127.0.0.1:3110/agentmemory/llm/telemetry?limit=20' "$secret" 30)" \
         || die 'could not read LLM telemetry'
     read -r depth active dlq <<EOF
@@ -147,5 +147,5 @@ EOF
     info 'bypass, proxy, and console health checks returned 200'
 fi
 
-printf '\n%sdone (%s)%s\n' "$C_WHITE" "$DL_MODE" "$C_RESET"
-[ "$DL_APPLY" = 1 ] || printf '%sre-run with --apply to back up, deploy, migrate, and verify%s\n' "$C_DIM" "$C_RESET"
+printf '\n%sdone (%s)%s\n' "$C_WHITE" "$TSS_MODE" "$C_RESET"
+[ "$TSS_APPLY" = 1 ] || printf '%sre-run with --apply to back up, deploy, migrate, and verify%s\n' "$C_DIM" "$C_RESET"

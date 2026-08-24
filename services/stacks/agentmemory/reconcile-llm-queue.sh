@@ -25,21 +25,21 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "$_self")" && pwd -P)"
 # shellcheck source=../_common.sh
 . "$SCRIPT_DIR/../_common.sh"
 
-backup_root="$(dl_backup_root)"
+backup_root="$(tss_backup_root)"
 max_terra=25
 max_cost=1.00
 recovery_timeout=600
 soak_seconds=105
 
 while [ $# -gt 0 ]; do
-    arg="$(dl_normalise_flag "$1")"
-    if dl_parse_common_flag "$arg" "${2:-}"; then shift "$DL_FLAG_CONSUMED"; continue; fi
+    arg="$(tss_normalise_flag "$1")"
+    if tss_parse_common_flag "$arg" "${2:-}"; then shift "$TSS_FLAG_CONSUMED"; continue; fi
     case "$arg" in
         --backup-root)                backup_root="${2:?needs a value}"; shift 2 ;;
-        --max-planned-terra-calls)    max_terra="${2:?needs a value}";   dl_require_int  --max-planned-terra-calls "$max_terra" 1 1000; shift 2 ;;
-        --max-estimated-cost-usd)     max_cost="${2:?needs a value}";    dl_require_num  --max-estimated-cost-usd "$max_cost" 0.01 1000; shift 2 ;;
-        --recovery-timeout-seconds)   recovery_timeout="${2:?needs a value}"; dl_require_int --recovery-timeout-seconds "$recovery_timeout" 60 3600; shift 2 ;;
-        --post-recovery-soak-seconds) soak_seconds="${2:?needs a value}"; dl_require_int --post-recovery-soak-seconds "$soak_seconds" 90 600; shift 2 ;;
+        --max-planned-terra-calls)    max_terra="${2:?needs a value}";   tss_require_int  --max-planned-terra-calls "$max_terra" 1 1000; shift 2 ;;
+        --max-estimated-cost-usd)     max_cost="${2:?needs a value}";    tss_require_num  --max-estimated-cost-usd "$max_cost" 0.01 1000; shift 2 ;;
+        --recovery-timeout-seconds)   recovery_timeout="${2:?needs a value}"; tss_require_int --recovery-timeout-seconds "$recovery_timeout" 60 3600; shift 2 ;;
+        --post-recovery-soak-seconds) soak_seconds="${2:?needs a value}"; tss_require_int --post-recovery-soak-seconds "$soak_seconds" 90 600; shift 2 ;;
         *) die "unknown option: $1 (try --help)" ;;
     esac
 done
@@ -57,10 +57,10 @@ printf '%s' "$quarantine_name" | grep -qE '^queue_store\.quarantine-[0-9]{8}-[0-
     || die "unexpected quarantine name: $quarantine_name"
 
 mkdir -p "$backup_root" 2>/dev/null || true
-backup_root_full="$(dl_realpath "$backup_root")" || die "cannot resolve backup root: $backup_root"
-dl_backup_root_sane "$backup_root_full" \
+backup_root_full="$(tss_realpath "$backup_root")" || die "cannot resolve backup root: $backup_root"
+tss_backup_root_sane "$backup_root_full" \
     || die "backup root is too broad or outside \$HOME: $backup_root_full
-Set DOCKER_LOCAL_ALLOW_ANY_BACKUP_ROOT=1 to override, or pass --backup-root."
+Set TS_STACK_ALLOW_ANY_BACKUP_ROOT=1 to override, or pass --backup-root."
 backup_dir="$backup_root_full/$st"
 
 # ---- embedded programs -------------------------------------------------------
@@ -295,19 +295,19 @@ stop_stack_then_die() {                   # <message>
 }
 
 # ---- preflight ---------------------------------------------------------------
-dl_mode >/dev/null
-printf '%sreconcile-llm-queue  mode=%s  stack=%s%s\n' "$C_WHITE" "$DL_MODE" "$stack_dir" "$C_RESET"
-[ "$DL_APPLY" = 1 ] || info 'read-only preview; add --apply to back up, quarantine, and reconcile'
+tss_mode >/dev/null
+printf '%sreconcile-llm-queue  mode=%s  stack=%s%s\n' "$C_WHITE" "$TSS_MODE" "$stack_dir" "$C_RESET"
+[ "$TSS_APPLY" = 1 ] || info 'read-only preview; add --apply to back up, quarantine, and reconcile'
 
 section 'Preflight'
 docker compose config --quiet || die 'docker compose config failed'
 docker volume inspect "$volume_name" >/dev/null 2>&1 || die "Docker volume $volume_name does not exist"
-image="$(dl_compose_image "$stack_dir" agentmemory)" || die 'could not resolve the agentmemory image'
+image="$(tss_compose_image "$stack_dir" agentmemory)" || die 'could not resolve the agentmemory image'
 docker image inspect "$image" >/dev/null 2>&1 || die "AgentMemory image is not built: $image"
 
 # Must run BEFORE anything stops the stack: if the bind mount is unusable, the
 # stack would otherwise already be down when the backup fails.
-dl_assert_docker_shareable "$backup_root_full" \
+tss_assert_docker_shareable "$backup_root_full" \
     || die "Docker Desktop for Mac cannot bind-mount $backup_root_full — it only shares \$HOME, /tmp, /private and /Volumes by default."
 
 secret="$(agentmemory_secret "$stack_dir" || true)"
@@ -350,10 +350,10 @@ step "write full-volume backup to $backup_dir/agentmemory-volume.tgz"
 step "move /data/queue_store to /data/$quarantine_name and create a fresh queue store"
 
 archive=''
-if [ "$DL_APPLY" = 1 ]; then
+if [ "$TSS_APPLY" = 1 ]; then
     mkdir -p "$backup_dir"
-    resolved_backup="$(dl_realpath "$backup_dir")" || die "cannot resolve $backup_dir"
-    dl_assert_within "$backup_root_full" "$resolved_backup" \
+    resolved_backup="$(tss_realpath "$backup_dir")" || die "cannot resolve $backup_dir"
+    tss_assert_within "$backup_root_full" "$resolved_backup" \
         || die "resolved backup directory escaped backup root: $resolved_backup"
 
     docker compose stop console agentmemory || die 'failed to stop the stack'
@@ -380,7 +380,7 @@ step 'start the stack and allow exactly one startup reconciliation pass'
 step "require an empty healthy queue for $soak_seconds seconds (covers the full retry window)"
 step "enforce Terra provider-call limit $max_terra and estimated-cost limit \$$max_cost"
 
-if [ "$DL_APPLY" = 1 ]; then
+if [ "$TSS_APPLY" = 1 ]; then
     docker compose up -d || die 'stack start failed'
     wait_http_200 "$API/livez" 180 || stop_stack_then_die "timed out waiting for $API/livez"
     wait_http_200 'http://127.0.0.1:3114/healthz' 180 || stop_stack_then_die 'timed out waiting for the console'
@@ -441,5 +441,5 @@ EOF
 fi
 
 printf '\n'
-if [ "$DL_APPLY" = 1 ]; then printf '%sDone (APPLY): stale queue records quarantined and current state reconciled.%s\n' "$C_GREEN" "$C_RESET"
+if [ "$TSS_APPLY" = 1 ]; then printf '%sDone (APPLY): stale queue records quarantined and current state reconciled.%s\n' "$C_GREEN" "$C_RESET"
 else printf '%sNothing changed (preview). Re-run with --apply after reviewing the counts above.%s\n' "$C_WHITE" "$C_RESET"; fi

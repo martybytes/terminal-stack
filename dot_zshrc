@@ -887,6 +887,21 @@ ts-mux() {
   TERMINAL_STACK_DIR="$src" TERMINAL_STACK_CHEZMOI="$cz" bash "$src/bootstrap/ts-mux.sh" "$@"
 }
 
+# The local Docker service stacks: `ts-stack` (status), `ts-stack up|down|restart`,
+# `ts-stack logs <stack>`, `ts-stack doctor`. Thin wrapper over the shared
+# bootstrap/ts-stack.sh in the clone. On WSL, Docker Desktop's `docker` may be a
+# stub that exits 1 for every command; the script detects that and re-runs the
+# Windows twin over interop rather than pretending the engine is down.
+ts-stack() {
+  local cz src
+  cz="$(_ts_chezmoi)" || { echo "ts-stack: chezmoi not found on PATH." >&2; return 1 }
+  src="$(_ts_src "$cz" ts-stack)" || return 1
+  if [[ ! -f "$src/bootstrap/ts-stack.sh" ]]; then
+    echo "ts-stack: $src/bootstrap/ts-stack.sh not found. Run 'ts-update'." >&2; return 1
+  fi
+  TERMINAL_STACK_DIR="$src" TERMINAL_STACK_CHEZMOI="$cz" bash "$src/bootstrap/ts-stack.sh" "$@"
+}
+
 # rclone's stock config wizard opens with a 60+ item provider list and calls the
 # provider type "Storage", which is easy to mistake for a folder/location. Only
 # the exact interactive `rclone config` gets the guided terminal-stack front end.

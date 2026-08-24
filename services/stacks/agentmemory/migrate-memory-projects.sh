@@ -26,8 +26,8 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "$_self")" && pwd -P)"
 . "$SCRIPT_DIR/../_common.sh"
 
 while [ $# -gt 0 ]; do
-    arg="$(dl_normalise_flag "$1")"
-    if dl_parse_common_flag "$arg" "${2:-}"; then shift "$DL_FLAG_CONSUMED"; continue; fi
+    arg="$(tss_normalise_flag "$1")"
+    if tss_parse_common_flag "$arg" "${2:-}"; then shift "$TSS_FLAG_CONSUMED"; continue; fi
     die "unknown option: $1 (try --help)"
 done
 
@@ -38,9 +38,9 @@ cd "$stack_dir"
 # 3110 is the direct API; 3111 is the console proxy.
 API='http://127.0.0.1:3110/agentmemory'
 
-mode="$([ "$DL_APPLY" = 1 ] && printf 'APPLY' || printf 'DRY RUN')"
+mode="$([ "$TSS_APPLY" = 1 ] && printf 'APPLY' || printf 'DRY RUN')"
 printf '%smigrate-memory-projects  mode=%s%s\n' "$C_WHITE" "$mode" "$C_RESET"
-[ "$DL_APPLY" = 1 ] || printf '%s(no writes; add --apply to run the real backfill)%s\n' "$C_DIM" "$C_RESET"
+[ "$TSS_APPLY" = 1 ] || printf '%s(no writes; add --apply to run the real backfill)%s\n' "$C_DIM" "$C_RESET"
 
 # ---- secret: never stored in a tracked file --------------------------------
 hmac="$(agentmemory_secret "$stack_dir" || true)"
@@ -70,7 +70,7 @@ let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{
 # --------------------------------------------------------------------------
 section 'What AgentMemory can infer'
 
-dry="$([ "$DL_APPLY" = 1 ] && printf 'false' || printf 'true')"
+dry="$([ "$TSS_APPLY" = 1 ] && printf 'false' || printf 'true')"
 if result="$(http_post_json_auth "$API/migrate" "$hmac" "{\"step\":\"infer-memory-projects\",\"dryRun\":$dry}" 300)"; then
     # The step reports updated/skipped/ambiguous; shapes vary by version, so
     # print whatever came back rather than assuming one shape.
@@ -88,7 +88,7 @@ else
     warn 'migrate step failed — the API rejected the request or timed out'
 fi
 
-if [ "$DL_APPLY" = 1 ]; then step 'ran infer-memory-projects for real (ambiguous records untouched)'
+if [ "$TSS_APPLY" = 1 ]; then step 'ran infer-memory-projects for real (ambiguous records untouched)'
 else                          step 'would run infer-memory-projects; nothing was written'; fi
 
 # --------------------------------------------------------------------------
@@ -122,5 +122,5 @@ let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{
 });'
 
 printf '\n'
-if [ "$DL_APPLY" = 1 ]; then printf '%sDone (APPLY).%s\n' "$C_GREEN" "$C_RESET"
+if [ "$TSS_APPLY" = 1 ]; then printf '%sDone (APPLY).%s\n' "$C_GREEN" "$C_RESET"
 else printf '%sNothing changed (dry run). Add --apply to backfill the inferable records.%s\n' "$C_WHITE" "$C_RESET"; fi

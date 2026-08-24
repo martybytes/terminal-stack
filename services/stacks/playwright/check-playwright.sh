@@ -22,8 +22,8 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "$_self")" && pwd -P)"
 . "$SCRIPT_DIR/../_common.sh"
 
 while [ $# -gt 0 ]; do
-    arg="$(dl_normalise_flag "$1")"
-    if dl_parse_common_flag "$arg" "${2:-}"; then shift "$DL_FLAG_CONSUMED"; continue; fi
+    arg="$(tss_normalise_flag "$1")"
+    if tss_parse_common_flag "$arg" "${2:-}"; then shift "$TSS_FLAG_CONSUMED"; continue; fi
     die "unknown option: $1 (try --help)"
 done
 

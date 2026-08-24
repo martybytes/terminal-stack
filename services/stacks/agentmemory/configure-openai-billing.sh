@@ -25,8 +25,8 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "$_self")" && pwd -P)"
 
 admin_key_file=''; project_id=''; refresh_hints=0
 while [ $# -gt 0 ]; do
-    arg="$(dl_normalise_flag "$1")"
-    if dl_parse_common_flag "$arg" "${2:-}"; then shift "$DL_FLAG_CONSUMED"; continue; fi
+    arg="$(tss_normalise_flag "$1")"
+    if tss_parse_common_flag "$arg" "${2:-}"; then shift "$TSS_FLAG_CONSUMED"; continue; fi
     case "$arg" in
         --admin-key-file)     admin_key_file="${2:?--admin-key-file needs a value}"; shift 2 ;;
         --project-id)         project_id="${2:?--project-id needs a value}"; shift 2 ;;
@@ -69,7 +69,7 @@ key_hint() {                              # <key>
 # it for its fingerprint only — the key itself never enters .billing.env.
 inference_key_hint() {
     local v
-    v="$(dl_env_value "$root_env_path" OPENAI_API_KEY 2>/dev/null || true)"
+    v="$(tss_env_value "$root_env_path" OPENAI_API_KEY 2>/dev/null || true)"
     v="${v%\"}"; v="${v#\"}"; v="${v%\'}"; v="${v#\'}"
     [ -n "$v" ] || return 1
     case "$v" in *replace-me*|'sk-proj-...'*) return 1 ;; esac
@@ -97,16 +97,16 @@ write_billing_env() {                     # <id> <name-json> <admin-host-path> <
 # ---------------------------------------------------------------------------
 if [ "$refresh_hints" = 1 ]; then
     [ -f "$output_path" ] || die "No $output_path to refresh. Run this script with --admin-key-file and --project-id first."
-    existing_id="$(dl_env_value "$output_path" OPENAI_BILLING_PROJECT_ID 2>/dev/null || true)"
-    existing_name="$(dl_env_value "$output_path" OPENAI_BILLING_PROJECT_NAME 2>/dev/null || true)"
-    admin_host_path="$(dl_env_value "$output_path" OPENAI_ADMIN_KEY_FILE_HOST 2>/dev/null || true)"
+    existing_id="$(tss_env_value "$output_path" OPENAI_BILLING_PROJECT_ID 2>/dev/null || true)"
+    existing_name="$(tss_env_value "$output_path" OPENAI_BILLING_PROJECT_NAME 2>/dev/null || true)"
+    admin_host_path="$(tss_env_value "$output_path" OPENAI_ADMIN_KEY_FILE_HOST 2>/dev/null || true)"
     [ -n "$existing_id" ] || die "$output_path has no OPENAI_BILLING_PROJECT_ID — re-run full configuration."
     [ -n "$admin_host_path" ] || die "$output_path has no OPENAI_ADMIN_KEY_FILE_HOST — re-run full configuration."
     [ -n "$existing_name" ] || existing_name="$(json_str 'OpenAI project')"
 
     admin_hint=''
     if [ -f "$admin_host_path" ]; then
-        admin_value="$(dl_read_raw_secret "$admin_host_path" 'Admin key')" || die 'Admin key file rejected.'
+        admin_value="$(tss_read_raw_secret "$admin_host_path" 'Admin key')" || die 'Admin key file rejected.'
         admin_hint="$(key_hint "$admin_value")"
     else
         warn "Admin key file not found at $admin_host_path — leaving LLM_ADMIN_KEY_HINT unset."
@@ -116,7 +116,7 @@ if [ "$refresh_hints" = 1 ]; then
 
     info "Inference key fingerprint: ${inference_hint:-(none)}"
     info "Admin key fingerprint:     ${admin_hint:-(none)}"
-    if [ "$DL_APPLY" != 1 ]; then
+    if [ "$TSS_APPLY" != 1 ]; then
         printf '%sPreview only. Re-run with --apply to update .billing.env.%s\n' "$C_YELLOW" "$C_RESET"
         exit 0
     fi
@@ -135,8 +135,8 @@ esac
 printf '%s' "$project_id" | grep -qE '^proj_[A-Za-z0-9]+$' \
     || die 'project-id must be an OpenAI project ID beginning with proj_.'
 
-admin_value="$(dl_read_raw_secret "$admin_key_file" 'Admin key')" || die 'Admin key file rejected.'
-admin_path="$(dl_realpath "$admin_key_file")"
+admin_value="$(tss_read_raw_secret "$admin_key_file" 'Admin key')" || die 'Admin key file rejected.'
+admin_path="$(tss_realpath "$admin_key_file")"
 
 escaped_project_id="$(node -e 'process.stdout.write(encodeURIComponent(process.argv[1]))' "$project_id")"
 
@@ -183,7 +183,7 @@ printf '%sValidated active OpenAI project '\''%s'\'' and project-scoped Costs AP
 info "Billing settings: $output_path"
 info "Inference key fingerprint: ${inference_hint:-(none)}"
 info "Admin key fingerprint:     $admin_hint"
-if [ "$DL_APPLY" != 1 ]; then
+if [ "$TSS_APPLY" != 1 ]; then
     printf '%sPreview only. Re-run with --apply to write .billing.env.%s\n' "$C_YELLOW" "$C_RESET"
     exit 0
 fi

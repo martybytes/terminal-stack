@@ -1,128 +1,337 @@
 #!/usr/bin/env bash
-# stack.sh — drive every Docker stack in this repo from one place: list, status,
-# up, down, logs. Read-only actions run immediately; --up and --down preview
-# unless you pass --apply.
-# macOS/Linux twin of stack.ps1 (canonical). Port changes both ways.
+# ts-stack.sh — the local Docker service stacks: bring them up, prove they work.
+# Driven by the `ts-stack` shell wrapper (zsh) and runnable standalone.
 #
-# Usage:  ./stack.sh [--list|--status|--up|--down|--logs] [--stack <name>]
-#                    [--tail <n>] [--follow] [--apply]
-# When:   Day to day: bringing the local stacks up after a reboot, checking
-#         what's healthy, or tailing a container that misbehaves. Run
-#         ./bootstrap.sh first on a new machine.
+# The pwsh `ts-stack` (bootstrap/ts-stack.ps1) is the PARALLEL implementation for
+# Windows-standalone installs, not a wrapper: change one, change the other, and
+# keep the -h output byte-identical.
+#
+# This is the ONLY thing in the repo that starts, stops or builds a container.
+# `ts-agents` may probe one and print a verb from here; it may never run docker
+# (tests/test_agent_tools.py pins that, as a substring match over the whole file,
+# so not even in a comment). services/ is the service side; everything outside it
+# configures a program running on this host. See docs/decisions.md.
+#
+# On WSL with Docker Desktop's integration switched off, `docker` on PATH is
+# Desktop's stub: it exits 1 for every command and prints its complaint on
+# STDOUT. Mutating verbs re-exec the pwsh twin through interop rather than
+# proxying docker.exe, because compose resolves -f, build contexts and bind
+# mounts as WINDOWS paths and a \\wsl.localhost 9p share is not reliably
+# bind-mountable — a failure that would land after the stack was already down.
 set -euo pipefail
 
-_self="${BASH_SOURCE[0]}"
-while [ -L "$_self" ]; do
-    _d="$(cd -- "$(dirname -- "$_self")" && pwd)"; _self="$(readlink "$_self")"
-    case "$_self" in /*) ;; *) _self="$_d/$_self" ;; esac
-done
-SCRIPT_DIR="$(cd -- "$(dirname -- "$_self")" && pwd -P)"
-# shellcheck source=_common.sh
-. "$SCRIPT_DIR/_common.sh"
+HELP='ts-stack — the local Docker service stacks: bring them up, prove they work.
 
-want_stack=''
-do_list=0; do_status=0; do_up=0; do_down=0; do_logs=0
-tail_n=50; follow=0
+Usage:
+  ts-stack [status]            one line per stack: state, health, published ports
+  ts-stack up [<stack>]        docker compose up -d
+  ts-stack down [<stack>]      docker compose down          (every volume kept)
+  ts-stack restart [<stack>]   down, then up
+  ts-stack logs <stack>        docker compose logs
+  ts-stack config [<stack>]    what compose actually resolves to on this machine
+  ts-stack doctor              engine, .env files, health, ports, toggle drift
+  ts-stack -h                  this help
 
+  --dry-run          print the exact docker argv and change nothing
+  -a, --all          include stacks whose saved terminal-stack setting is off
+  -n, --tail <N>     logs: lines of history (default 50)
+  -f, --follow       logs: follow (needs a single stack)
+  --start-engine     doctor/up: launch the container engine and wait for it
+  --no-colour
+
+A stack is any directory under services/stacks/ holding a docker-compose.yml —
+there is nothing to register. Which stacks take part comes from the saved
+settings you already have: agentmemoryEnabled, headroomEnabled, playwrightEnabled
+and, for kokoro, the TTS switch plus ccTts.engine. A stack whose setting is off
+is skipped and reported as skipped, never as broken; naming it explicitly runs it
+anyway, because asking by name is consent.
+
+Every published port binds 127.0.0.1 only and none of these services
+authenticate, which is why "ts-stack doctor" audits the bindings even when
+everything else is failing.'
+
+# Help before anything else: `ts-stack -h` must work on a box where the clone,
+# chezmoi or docker is the very thing that is broken.
+case "${1:-}" in -h|--help|help) printf '%s\n' "$HELP"; exit 0 ;; esac
+
+CZ="${TERMINAL_STACK_CHEZMOI:-}"
+if [ -z "$CZ" ]; then
+    if [ -x "$HOME/.local/bin/chezmoi" ]; then CZ="$HOME/.local/bin/chezmoi"
+    elif command -v chezmoi >/dev/null 2>&1; then CZ="$(command -v chezmoi)"
+    else CZ=""; fi
+fi
+SRC="${TERMINAL_STACK_DIR:-}"
+if [ -z "$SRC" ] && [ -n "$CZ" ]; then SRC="$("$CZ" source-path 2>/dev/null || true)"; fi
+if [ -z "$SRC" ]; then
+    # Standalone: this script sits in <clone>/bootstrap/.
+    _self="${BASH_SOURCE[0]}"
+    while [ -L "$_self" ]; do
+        _d="$(cd -- "$(dirname -- "$_self")" && pwd)"; _self="$(readlink "$_self")"
+        case "$_self" in /*) ;; *) _self="$_d/$_self" ;; esac
+    done
+    SRC="$(cd -- "$(dirname -- "$_self")/.." && pwd -P)"
+fi
+if [ ! -d "$SRC/services/stacks" ]; then
+    echo "ts-stack: cannot locate the service tree (set TERMINAL_STACK_DIR)." >&2
+    exit 1
+fi
+
+# ── args ────────────────────────────────────────────────────────────────────────
+cmd=""; want_stack=""; tail_n=50; follow=0; all=0; start_engine=0
 while [ $# -gt 0 ]; do
-    arg="$(dl_normalise_flag "$1")"
-    if dl_parse_common_flag "$arg" "${2:-}"; then shift "$DL_FLAG_CONSUMED"; continue; fi
-    case "$arg" in
-        --list)   do_list=1;   shift ;;
-        --status) do_status=1; shift ;;
-        --up)     do_up=1;     shift ;;
-        --down)   do_down=1;   shift ;;
-        --logs)   do_logs=1;   shift ;;
-        --follow) follow=1;    shift ;;
-        --stack)  want_stack="${2:?--stack needs a value}"; shift 2 ;;
-        --tail)   tail_n="${2:?--tail needs a value}"; dl_require_int --tail "$tail_n" 0 100000; shift 2 ;;
-        *) die "unknown option: $1 (try --help)" ;;
+    case "$1" in
+        status|up|down|restart|logs|config|doctor)
+            [ -z "$cmd" ] || { echo "ts-stack: two commands given ($cmd, $1)" >&2; exit 2; }
+            cmd="$1"; shift ;;
+        --dry-run)      TS_STACK_DRY_RUN=1; shift ;;
+        -a|--all)       all=1; shift ;;
+        -f|--follow)    follow=1; shift ;;
+        -n|--tail)      tail_n="${2:?--tail needs a value}"; shift 2 ;;
+        --start-engine) start_engine=1; shift ;;
+        --no-colour|--no-color) NO_COLOR=1; shift ;;
+        --stack)        want_stack="${2:?--stack needs a value}"; shift 2 ;;
+        -*)             echo "ts-stack: unknown option: $1 (try -h)" >&2; exit 2 ;;
+        *)              [ -z "$want_stack" ] || { echo "ts-stack: two stacks given" >&2; exit 2; }
+                        want_stack="$1"; shift ;;
     esac
 done
+cmd="${cmd:-status}"
+export TS_STACK_DRY_RUN="${TS_STACK_DRY_RUN:-0}"
+export NO_COLOR="${NO_COLOR:-}"
+case "$tail_n" in *[!0-9]*|'') echo "ts-stack: --tail wants a number" >&2; exit 2 ;; esac
 
-require_docker
+# ── libraries ───────────────────────────────────────────────────────────────────
+# shellcheck source=_config.sh
+. "$SRC/bootstrap/_config.sh"
+# shellcheck source=_cc_tts.sh
+. "$SRC/bootstrap/_cc_tts.sh"
+# shellcheck source=../services/_stack.sh
+. "$SRC/services/_stack.sh"
 
-# A "stack" is any top-level directory holding a docker-compose.yml. New stacks
-# need no registration here — drop the directory in and it is picked up. The
-# glob is already lexically sorted, so no explicit sort is needed.
-stacks=''
-for d in "$DL_ROOT"/*/; do
-    [ -f "$d/docker-compose.yml" ] || continue
-    stacks="$stacks $(basename "$d")"
-done
-stacks="${stacks# }"
+# ── WSL: hand mutating work to the Windows twin ─────────────────────────────────
+if [ "$(tss_docker_kind)" = wsl-shim ] && [ "$TS_STACK_DRY_RUN" != 1 ]; then
+    case "$cmd" in
+        up|down|restart|logs|config)
+            ps=""
+            for p in "/mnt/c/Program Files/PowerShell/7/pwsh.exe" \
+                     "/mnt/c/Program Files/PowerShell/7-preview/pwsh.exe"; do
+                [ -x "$p" ] && { ps="$p"; break; }
+            done
+            if [ -n "$ps" ]; then
+                echo "ts-stack: no Linux Docker CLI in this WSL distro — re-running the Windows twin."
+                win="$(wslpath -w "$SRC/bootstrap/ts-stack.ps1")"
+                set -- "$cmd"
+                [ -n "$want_stack" ] && set -- "$@" "$want_stack"
+                exec "$ps" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass \
+                    -File "$win" "$@"
+            fi
+            echo "ts-stack: no Linux Docker CLI in this WSL distro, and no pwsh 7 to hand off to." >&2
+            tss_engine_advice "$(tss_os)" wsl-shim >&2
+            exit 1 ;;
+    esac
+fi
 
+# ── which stacks ────────────────────────────────────────────────────────────────
+# "" = enabled, "off:<why>" = deliberately not running here.
+stack_state() {                             # <stack>
+    local key; key="$(tss_toggle_for "$1")"
+    case "$key" in
+        '') printf '' ;;
+        ccTts)
+            local on engine
+            on="$(ts_cc_tts_get enabled 2>/dev/null || echo true)"
+            engine="$(ts_cc_tts_get engine 2>/dev/null || echo kokoro)"
+            if [ "$on" != true ]; then printf 'off:voice notifications are off'
+            elif [ "$engine" != kokoro ]; then printf 'off:ccTts.engine=%s' "$engine"
+            else printf ''; fi ;;
+        *)
+            if [ "$(ts_agent_get "$key" 2>/dev/null || echo off)" = on ]; then printf ''
+            else printf 'off:%s=off' "$key"; fi ;;
+    esac
+}
+
+all_stacks="$(tss_stack_list)"
+[ -n "$all_stacks" ] || { echo "ts-stack: no stacks found under $TSS_STACKS" >&2; exit 1; }
 if [ -n "$want_stack" ]; then
-    found=''
-    for s in $stacks; do [ "$s" = "$want_stack" ] && found="$s"; done
-    [ -n "$found" ] || die "no stack named '$want_stack' — run ./stack.sh --list to see what exists"
-    stacks="$found"
-fi
-[ -n "$stacks" ] || die "no stacks found under $DL_ROOT"
-
-# Default action
-if [ $((do_list + do_status + do_up + do_down + do_logs)) -eq 0 ]; then do_list=1; fi
-
-n_stacks=0
-for s in $stacks; do n_stacks=$((n_stacks + 1)); done
-if [ "$follow" = 1 ] && [ "$n_stacks" -gt 1 ]; then
-    die '--follow needs a single stack — pass --stack <name>'
+    printf '%s\n' "$all_stacks" | grep -qx -- "$want_stack" \
+        || { echo "ts-stack: no stack named '$want_stack' — have: $(printf '%s' "$all_stacks" | tr '\n' ' ')" >&2; exit 2; }
+    stacks="$want_stack"; all=1        # naming a stack is consent
+else
+    stacks="$all_stacks"
 fi
 
-# A stack that ships a .env.example but has no .env is misconfigured: compose
-# silently falls back to the base file only, which for kokoro means starting the
-# GPU image with no GPU access. Surface it on every action.
-for s in $stacks; do
-    dl_env_seeded "$DL_ROOT/$s" || \
-        warn "$s: .env.example exists but .env does not — run ./bootstrap.sh --apply first, or this stack will start with the wrong profile"
-done
+# ── engine ──────────────────────────────────────────────────────────────────────
+kind="$(tss_docker_kind)"
+engine_ok=0
+[ "$kind" = native ] && docker info >/dev/null 2>&1 && engine_ok=1
 
-for s in $stacks; do
-    dir="$DL_ROOT/$s"
+if [ "$engine_ok" = 0 ] && [ "$start_engine" = 1 ] && [ "$kind" = native ]; then
+    case "$(tss_os)" in
+        darwin) step 'open -a Docker'; [ "$TS_STACK_DRY_RUN" = 1 ] || open -a Docker 2>/dev/null || true ;;
+        linux)  step 'systemctl start docker'; [ "$TS_STACK_DRY_RUN" = 1 ] || sudo systemctl start docker || true ;;
+    esac
+    # Cold starts are slow; 60s produces false failures.
+    i=0
+    while [ "$i" -lt 90 ]; do
+        docker info >/dev/null 2>&1 && { engine_ok=1; break; }
+        i=$((i + 1)); sleep 2
+    done
+fi
 
-    if [ "$do_list" = 1 ]; then
-        files="$(dl_compose_files "$dir" | tr '\n' ' ' | sed 's/ $//; s/ / + /g')"
-        # grep -c exits 1 on zero matches, which set -e would treat as fatal.
-        running="$( ( cd "$dir" && docker compose ps -q --status running 2>/dev/null ) | grep -c . || true )"
-        total="$(   ( cd "$dir" && docker compose ps -aq 2>/dev/null )               | grep -c . || true )"
-        if [ "$total" -eq 0 ]; then state='not created'; colour="$C_DIM"
-        elif [ "$running" -eq "$total" ]; then state="running ($running/$total)"; colour="$C_GREEN"
-        else state="partial ($running/$total)"; colour="$C_YELLOW"; fi
-        printf '%s%-14s %s%s\n' "$colour" "$s" "$state" "$C_RESET"
-        info "compose files: $files"
+need_engine=0
+case "$cmd" in up|down|restart|logs|config|status) need_engine=1 ;; esac
+if [ "$need_engine" = 1 ] && [ "$engine_ok" = 0 ] && [ "$TS_STACK_DRY_RUN" != 1 ]; then
+    if [ "$cmd" = status ]; then
+        warn "container engine unreachable — reporting the settings only"
+    else
+        warn "container engine unreachable"
+        tss_engine_advice "$(tss_os)" "$kind" >&2
+        exit 1
     fi
+fi
 
-    if [ "$do_status" = 1 ]; then
-        section "$s"
-        ( cd "$dir" && docker compose ps )
-    fi
+# ── output ──────────────────────────────────────────────────────────────────────
+# terminal-stack's doctor vocabulary, so `ts-doctor` can indent this straight in.
+# The absorbed tree keeps its own OK/X/! gutter in services/**; two dialects in
+# one command is worse than either.
+issues=0
+_ok()   { printf '  ok  %s
+' "$1"; }
+_bad()  { printf '  %s %s
+' "$WARN" "$1"; issues=$((issues + 1)); }
+_skip() { printf '  --  %s
+' "$1"; }
+_note() { printf '      %s
+' "$1"; }
 
-    if [ "$do_logs" = 1 ]; then
-        section "$s logs"
-        if [ "$follow" = 1 ]; then ( cd "$dir" && docker compose logs --tail "$tail_n" -f )
-        else                        ( cd "$dir" && docker compose logs --tail "$tail_n" ); fi
-    fi
+# ── verbs ───────────────────────────────────────────────────────────────────────
 
-    if [ "$do_up" = 1 ]; then
-        section "$s"
-        step 'docker compose up -d'
-        if [ "$DL_APPLY" = 1 ]; then
-            ( cd "$dir" && docker compose up -d ) || warn "up failed for $s — see the output above"
+cmd_status() {
+    local s state dir running total ports
+    for s in $stacks; do
+        state="$(stack_state "$s")"
+        dir="$(tss_stack_dir "$s")"
+        running=0; total=0
+        if [ "$engine_ok" = 1 ]; then
+            running="$( ( cd "$dir" && docker compose ps -q --status running 2>/dev/null ) | grep -c . || true )"
+            total="$(   ( cd "$dir" && docker compose ps -aq 2>/dev/null )               | grep -c . || true )"
         fi
-    fi
-
-    if [ "$do_down" = 1 ]; then
-        section "$s"
-        step 'docker compose down   (containers only; named volumes and cached images are kept)'
-        if [ "$DL_APPLY" = 1 ]; then
-            ( cd "$dir" && docker compose down ) || warn "down failed for $s — see the output above"
+        if [ -n "$state" ] && [ "$total" = 0 ]; then
+            printf '  --  %-12s %s\n' "$s" "${state#off:}"
+            continue
         fi
-    fi
-done
+        if [ -n "$state" ]; then
+            # Intent and reality disagree. A warn, not a failure: this is exactly
+            # what a doctor exists to surface, and it is not "broken".
+            printf '  %s   %-12s running, but %s\n' "$WARN" "$s" "${state#off:}"
+            printf '      %s\n' "ts-config agents ${s} on   (keep it)   |   ts-stack down $s   (stop it)"
+            issues=$((issues + 1))
+            continue
+        fi
+        if [ "$engine_ok" = 0 ]; then
+            printf '      %-12s enabled (engine unreachable, state unknown)\n' "$s"
+        elif [ "$total" = 0 ]; then
+            printf '  %s   %-12s not created\n' "$WARN" "$s"; issues=$((issues + 1))
+        elif [ "$running" = "$total" ]; then
+            ports="$( ( cd "$dir" && docker compose ps --format '{{.Publishers}}' 2>/dev/null ) \
+                      | tr ',' '\n' | sed -n 's/.*127\.0\.0\.1:\([0-9]*\).*/\1/p' | sort -un | tr '\n' ' ' )"
+            printf '  ok  %-12s running (%s/%s)  %s\n' "$s" "$running" "$total" "$ports"
+        else
+            printf '  %s   %-12s partial (%s/%s)\n' "$WARN" "$s" "$running" "$total"; issues=$((issues + 1))
+        fi
+    done
+}
 
-printf '\n'
-if [ $((do_up + do_down)) -gt 0 ] && [ "$DL_APPLY" != 1 ]; then
-    printf '%sNothing changed (preview). Add --apply to perform.%s\n' "$C_WHITE" "$C_RESET"
-elif [ $((do_up + do_down)) -gt 0 ]; then
-    printf '%sDone. Verify with: ./stack.sh --status%s\n' "$C_GREEN" "$C_RESET"
+# Every action warns when a stack ships a .env.example but has no .env: compose
+# then silently falls back to the base file, which for kokoro means starting the
+# GPU image with no GPU.
+warn_unseeded() {
+    local s
+    for s in $stacks; do
+        tss_env_seeded "$(tss_stack_dir "$s")" \
+            || warn "$s: .env.example exists but .env does not — the stack will start with the wrong profile"
+    done
+}
+
+selected() {                                # stacks that actually take part
+    local s state out=''
+    for s in $stacks; do
+        state="$(stack_state "$s")"
+        if [ -n "$state" ] && [ "$all" != 1 ]; then continue; fi
+        out="$out $s"
+    done
+    printf '%s' "${out# }"
+}
+
+case "$cmd" in
+    status) cmd_status ;;
+
+    config)
+        for s in $(selected); do
+            section "$s"
+            tss_compose "$s" config
+        done ;;
+
+    logs)
+        [ -n "$want_stack" ] || { echo "ts-stack: logs needs a stack name" >&2; exit 2; }
+        if [ "$follow" = 1 ]; then tss_compose "$want_stack" logs --tail "$tail_n" -f
+        else                       tss_compose "$want_stack" logs --tail "$tail_n"; fi ;;
+
+    up)
+        warn_unseeded
+        for s in $(selected); do
+            section "$s"
+            tss_compose "$s" up -d || _bad "up failed for $s"
+        done ;;
+
+    down)
+        # -v is NEVER in this argv. Volumes are only ever destroyed by an
+        # explicitly gated path, and that is enforced by test, not by comment.
+        for s in $(selected); do
+            section "$s"
+            tss_compose "$s" down || _bad "down failed for $s"
+        done ;;
+
+    restart)
+        # down + up, not `docker compose restart`: restart reuses the existing
+        # container, so it does not pick up the changed .env or overlay that is
+        # the reason anyone restarts.
+        for s in $(selected); do
+            section "$s"
+            tss_compose "$s" down || true
+            tss_compose "$s" up -d || _bad "restart failed for $s"
+        done ;;
+
+    doctor)
+        section 'engine'
+        if [ "$engine_ok" = 1 ]; then
+            _ok "engine reachable ($(docker version --format '{{.Server.Version}}' 2>/dev/null || echo '?'))"
+        else
+            _bad "engine unreachable (kind: $kind)"
+            tss_engine_advice "$(tss_os)" "$kind" | sed 's/^/      /'
+        fi
+        section 'stacks'
+        cmd_status
+        section 'configuration'
+        for s in $stacks; do
+            if tss_env_seeded "$(tss_stack_dir "$s")"; then _ok "$s: .env present or not needed"
+            else _bad "$s: .env.example exists but .env does not"; fi
+        done
+        if [ "$engine_ok" = 1 ]; then
+            for s in $(selected); do
+                if tss_compose "$s" config -q >/dev/null 2>&1; then _ok "$s: compose config parses"
+                else _bad "$s: compose config failed — a required value is missing"; fi
+            done
+        else
+            _skip 'compose config, health and the port audit need the engine'
+        fi ;;
+esac
+
+if [ "$cmd" = doctor ] || [ "$cmd" = status ]; then
+    printf '\n'
+    if [ "$issues" = 0 ]; then printf 'ts-stack %s: all checks passed\n' "$cmd"
+    else printf 'ts-stack %s: %s issue(s) found\n' "$cmd" "$issues"; exit 1; fi
+fi
+if [ "$TS_STACK_DRY_RUN" = 1 ]; then
+    printf '\n%s\n' 'Nothing changed (--dry-run).'
 fi

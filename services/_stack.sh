@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
-# _common.sh — shared helpers for every .sh script in this repo: preview/apply
+# _stack.sh — shared helpers for every .sh script under services/: preview/apply
 # output, prerequisite checks, security assertions, HTTP, JSON, secrets, paths
-# and compose wrappers. Sourced by bootstrap.sh, stack.sh and each stack's
+# and compose wrappers. Sourced by bootstrap/ts-stack.sh and each stack's own
 # scripts. macOS/Linux side only; the .ps1 scripts keep their own copies of
-# these helpers by design (see docs/conventions.md, "Scripts").
+# these helpers by design (see docs/service-conventions.md, "Scripts").
+#
+# Deliberately NOT merged into bootstrap/_config.sh. That file is sourced on
+# shell-startup paths and will never need Docker, GPU or loopback helpers; and
+# this one owns bare `die`/`have`/`warn`/`info`/`pass`/`fail`/`step`/`compose`,
+# which would sit next to _config.sh's $WARN/$INFO variables — legal in bash and
+# a review hazard. See docs/decisions.md.
 #
 # This file is sourced, not executed. Do not `exit`; return non-zero instead.
 # The one exception is `die`, whose whole job is to end the calling script.
@@ -15,7 +21,7 @@
 # Resolved from this file, not from $0, so a script in a stack sub-directory
 # never has to guess at "..". Symlink-safe without readlink -f / realpath:
 # BSD readlink had no -f for years and realpath is not on older macOS.
-_dl_resolve_dir() {                       # <path> -> absolute dir, symlinks resolved
+_tss_resolve_dir() {                       # <path> -> absolute dir, symlinks resolved
     local p="$1" d
     while [ -L "$p" ]; do
         d="$(cd -- "$(dirname -- "$p")" && pwd)"
@@ -24,37 +30,42 @@ _dl_resolve_dir() {                       # <path> -> absolute dir, symlinks res
     done
     cd -- "$(dirname -- "$p")" 2>/dev/null && pwd -P
 }
-DL_ROOT="${DL_ROOT:-$(_dl_resolve_dir "${BASH_SOURCE[0]}")}"
+TSS_ROOT="${TSS_ROOT:-$(_tss_resolve_dir "${BASH_SOURCE[0]}")}"
+# Where the compose stacks live. A stack is any directory under here holding a
+# docker-compose.yml — there is no registry, so adding one requires no edit
+# anywhere (that property is why services/** is a single .chezmoiignore line).
+# TS_STACK_ROOT overrides it for the pytest fixture tree.
+TSS_STACKS="${TS_STACK_ROOT:-$TSS_ROOT/stacks}"
 
 # ── Mode globals ─────────────────────────────────────────────────────────────
-# One DL_APPLY that `step` reads. The .ps1 copies close over either $execute or
+# One TSS_APPLY that `step` reads. The .ps1 copies close over either $execute or
 # $Apply depending on the script, which is identical only by accident; here the
 # two spellings cannot coexist.
-: "${DL_APPLY:=0}"
-: "${DL_UNDO:=0}"
-: "${DL_CHECK:=0}"
-: "${DL_PROBLEMS:=0}"
-: "${DL_FLAG_CONSUMED:=0}"
-DL_MODE=""
+: "${TSS_APPLY:=0}"
+: "${TSS_UNDO:=0}"
+: "${TSS_CHECK:=0}"
+: "${TSS_PROBLEMS:=0}"
+: "${TSS_FLAG_CONSUMED:=0}"
+TSS_MODE=""
 # Declared so `set -u` is safe before the first HTTP call. See http_status.
-: "${DL_HTTP_STATUS:=}"
-: "${DL_HTTP_TIME_MS:=}"
+: "${TSS_HTTP_STATUS:=}"
+: "${TSS_HTTP_TIME_MS:=}"
 
-dl_mode() {
-    if [ "$DL_CHECK" = 1 ]; then DL_MODE=CHECK
-    elif [ "$DL_UNDO" = 1 ] && [ "$DL_APPLY" = 1 ]; then DL_MODE=UNDO
-    elif [ "$DL_APPLY" = 1 ]; then DL_MODE=APPLY
-    else DL_MODE=PREVIEW
+tss_mode() {
+    if [ "$TSS_CHECK" = 1 ]; then TSS_MODE=CHECK
+    elif [ "$TSS_UNDO" = 1 ] && [ "$TSS_APPLY" = 1 ]; then TSS_MODE=UNDO
+    elif [ "$TSS_APPLY" = 1 ]; then TSS_MODE=APPLY
+    else TSS_MODE=PREVIEW
     fi
-    printf '%s' "$DL_MODE"
+    printf '%s' "$TSS_MODE"
 }
 
 # ── Colour ───────────────────────────────────────────────────────────────────
 # Honours NO_COLOR, a non-tty stdout (piping to a file or a pager), TERM=dumb,
-# and DL_COLOR=always|never|auto for forcing either way.
-dl_use_colour() {
+# and TSS_COLOR=always|never|auto for forcing either way.
+tss_use_colour() {
     [ -n "${NO_COLOR:-}" ] && return 1
-    case "${DL_COLOR:-auto}" in
+    case "${TSS_COLOR:-auto}" in
         always) return 0 ;;
         never)  return 1 ;;
     esac
@@ -62,7 +73,7 @@ dl_use_colour() {
     [ -n "${TERM:-}" ] && [ "$TERM" != dumb ]
 }
 
-if dl_use_colour; then
+if tss_use_colour; then
     : "${C_CYAN:=$'\033[36m'}"  ; : "${C_GREEN:=$'\033[32m'}"
     : "${C_YELLOW:=$'\033[33m'}"; : "${C_DIM:=$'\033[90m'}"
     : "${C_WHITE:=$'\033[97m'}" ; : "${C_RESET:=$'\033[0m'}"
@@ -80,24 +91,24 @@ fi
 # the tag. See the divergence register in docs/conventions.md.
 section() { printf '\n%s=== %s ===%s\n' "$C_CYAN" "$1" "$C_RESET"; }
 step() {
-    if [ "$DL_APPLY" = 1 ]; then printf '%s[DO]    %s%s\n' "$C_GREEN" "$1" "$C_RESET"
+    if [ "$TSS_APPLY" = 1 ]; then printf '%s[DO]    %s%s\n' "$C_GREEN" "$1" "$C_RESET"
     else printf '%s[would] %s%s\n' "$C_YELLOW" "$1" "$C_RESET"; fi
 }
 info() { printf '%s       %s%s\n' "$C_DIM" "$1" "$C_RESET"; }
 warn() { printf '%s  !    %s%s\n' "$C_YELLOW" "$1" "$C_RESET"; }
 pass() { printf '%s  OK   %s%s\n' "$C_GREEN" "$1" "$C_RESET"; }
-fail() { DL_PROBLEMS=$((DL_PROBLEMS + 1)); printf '%s  X    %s%s\n' "$C_YELLOW" "$1" "$C_RESET"; }
+fail() { TSS_PROBLEMS=$((TSS_PROBLEMS + 1)); printf '%s  X    %s%s\n' "$C_YELLOW" "$1" "$C_RESET"; }
 die()  { printf '%s\n' "$1" >&2; exit "${2:-1}"; }
 
-dl_banner() {                             # <script-name>
-    dl_mode >/dev/null
-    printf '%s%s  mode=%s  repo=%s%s\n' "$C_WHITE" "$1" "$DL_MODE" "$DL_ROOT" "$C_RESET"
-    [ "$DL_APPLY" = 1 ] || printf '%s(preview only — re-run with --apply to perform)%s\n' "$C_DIM" "$C_RESET"
+tss_banner() {                             # <script-name>
+    tss_mode >/dev/null
+    printf '%s%s  mode=%s  repo=%s%s\n' "$C_WHITE" "$1" "$TSS_MODE" "$TSS_ROOT" "$C_RESET"
+    [ "$TSS_APPLY" = 1 ] || printf '%s(preview only — re-run with --apply to perform)%s\n' "$C_DIM" "$C_RESET"
 }
 
-dl_summary() {
+tss_summary() {
     printf '\n'
-    if [ "$DL_APPLY" = 1 ]; then printf '%sDone (%s).%s\n' "$C_GREEN" "$DL_MODE" "$C_RESET"
+    if [ "$TSS_APPLY" = 1 ]; then printf '%sDone (%s).%s\n' "$C_GREEN" "$TSS_MODE" "$C_RESET"
     else printf '%sNothing changed (preview). Add --apply to perform.%s\n' "$C_WHITE" "$C_RESET"; fi
 }
 
@@ -106,7 +117,7 @@ dl_summary() {
 # --max-planned-terra-calls. Lets the PowerShell spelling work from muscle
 # memory without every script listing both. Short flags like -h are untouched
 # because the pattern requires an uppercase first letter.
-dl_normalise_flag() {
+tss_normalise_flag() {
     case "$1" in
         --*) printf '%s' "$1" ;;
         -[[:upper:]]*) printf '%s' "$1" | LC_ALL=C sed 's/^-//; s/\([a-z0-9]\)\([A-Z]\)/\1-\2/g' \
@@ -115,18 +126,18 @@ dl_normalise_flag() {
     esac
 }
 
-# Handles the flags every script shares. Sets DL_FLAG_CONSUMED to how many
+# Handles the flags every script shares. Sets TSS_FLAG_CONSUMED to how many
 # arguments to shift and returns 0; returns 1 when the flag is not ours.
-dl_parse_common_flag() {                  # <normalised-arg> [next-arg]
-    DL_FLAG_CONSUMED=1
+tss_parse_common_flag() {                  # <normalised-arg> [next-arg]
+    TSS_FLAG_CONSUMED=1
     case "$1" in
-        --apply)     DL_APPLY=1 ;;
-        --undo)      DL_UNDO=1 ;;
-        --check)     DL_CHECK=1 ;;
+        --apply)     TSS_APPLY=1 ;;
+        --undo)      TSS_UNDO=1 ;;
+        --check)     TSS_CHECK=1 ;;
         --no-color|--no-colour)
                      C_CYAN='' ; C_GREEN='' ; C_YELLOW='' ; C_DIM='' ; C_WHITE='' ; C_RESET='' ;;
-        -h|--help)   dl_usage; exit 0 ;;
-        *)           DL_FLAG_CONSUMED=0; return 1 ;;
+        -h|--help)   tss_usage; exit 0 ;;
+        *)           TSS_FLAG_CONSUMED=0; return 1 ;;
     esac
     return 0
 }
@@ -134,13 +145,13 @@ dl_parse_common_flag() {                  # <normalised-arg> [next-arg]
 # The header comment IS the usage text — no second copy to drift. Stops at the
 # first non-comment line rather than a fixed range, so a header can grow or
 # shrink without anyone remembering to retune a line number.
-dl_usage() {
+tss_usage() {
     awk 'NR==1 {next} /^#/ {sub(/^# ?/, ""); print; next} {exit}' "$0"
 }
 
 # PowerShell gets [ValidateRange] free; bash gets nothing free. These bound
 # scripts that spend money and quarantine a queue, so they are not optional.
-dl_require_int() {                        # <name> <value> <min> <max>
+tss_require_int() {                        # <name> <value> <min> <max>
     case "$2" in
         ''|*[!0-9-]*) die "$1: '$2' is not an integer" ;;
     esac
@@ -148,7 +159,7 @@ dl_require_int() {                        # <name> <value> <min> <max>
         || die "$1: $2 is outside the allowed range $3..$4"
 }
 
-dl_require_num() {                        # <name> <value> <min> <max>
+tss_require_num() {                        # <name> <value> <min> <max>
     awk -v v="$2" -v lo="$3" -v hi="$4" 'BEGIN{
         if (v+0 != v && v !~ /^-?[0-9]*\.?[0-9]+$/) exit 2
         exit (v+0 >= lo+0 && v+0 <= hi+0) ? 0 : 1
@@ -159,7 +170,7 @@ dl_require_num() {                        # <name> <value> <min> <max>
 # PREDICATES. Everything in this section that returns non-zero does so as a
 # VALUE, so only ever call them in a condition context (`if have docker; then`)
 # or with `|| true`. Under `set -e` a bare call will end the script.
-dl_os() {
+tss_os() {
     case "$(uname -s | tr '[:upper:]' '[:lower:]')" in
         darwin) printf 'darwin' ;;
         linux)  printf 'linux' ;;
@@ -175,23 +186,23 @@ require_docker() {
     docker info >/dev/null 2>&1 || die 'Docker daemon not responding — is Docker Desktop running?'
 }
 
-# Sets DL_GPU_PROFILE (A|B|C) and DL_GPU_REASON. Returns 0 always.
+# Sets TSS_GPU_PROFILE (A|B|C) and TSS_GPU_REASON. Returns 0 always.
 #
 # On macOS the answer is C unconditionally and nvidia-smi is never probed:
 # Docker Desktop for Mac has no GPU passthrough of any kind — not CUDA, and not
 # Metal/MPS — so a Linux container cannot reach the Apple GPU under any
 # configuration. The reason string says that rather than the .ps1's generic
 # "no NVIDIA GPU detected", which reads like something you could go and fix.
-dl_gpu_profile() {
-    DL_GPU_PROFILE=C
-    DL_GPU_REASON=''
-    case "$(dl_os)" in
+tss_gpu_profile() {
+    TSS_GPU_PROFILE=C
+    TSS_GPU_REASON=''
+    case "$(tss_os)" in
         darwin)
-            DL_GPU_REASON='Docker Desktop for Mac has no NVIDIA passthrough (and no Metal/MPS passthrough either) — C is the only profile that can run here'
+            TSS_GPU_REASON='Docker Desktop for Mac has no NVIDIA passthrough (and no Metal/MPS passthrough either) — C is the only profile that can run here'
             return 0 ;;
     esac
     if ! have nvidia-smi; then
-        DL_GPU_REASON='nvidia-smi not on PATH — treating this as a CPU-only machine'
+        TSS_GPU_REASON='nvidia-smi not on PATH — treating this as a CPU-only machine'
         return 0
     fi
     local name
@@ -199,15 +210,15 @@ dl_gpu_profile() {
     # take SIGPIPE, and pipefail would surface that as a fatal 141.
     name="$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -n 1 || true)"
     if [ -z "$name" ]; then
-        DL_GPU_REASON='nvidia-smi present but reported no GPU — treating this as a CPU-only machine'
+        TSS_GPU_REASON='nvidia-smi present but reported no GPU — treating this as a CPU-only machine'
         return 0
     fi
     # Blackwell consumer cards (RTX 50-series, sm_120) need the CUDA 12.8 build;
     # the cu126 build starts fine then crash-loops on the first synthesis.
     if printf '%s' "$name" | grep -Eq 'RTX[[:space:]]*50[0-9]{2}'; then
-        DL_GPU_PROFILE=A; DL_GPU_REASON="$name is Blackwell (RTX 50-series) — Profile A (cu128)"
+        TSS_GPU_PROFILE=A; TSS_GPU_REASON="$name is Blackwell (RTX 50-series) — Profile A (cu128)"
     else
-        DL_GPU_PROFILE=B; DL_GPU_REASON="$name is pre-Blackwell — Profile B (cu126) is the narrower match"
+        TSS_GPU_PROFILE=B; TSS_GPU_REASON="$name is pre-Blackwell — Profile B (cu126) is the narrower match"
     fi
     # On native Linux the NVIDIA Container Toolkit is a SEPARATE install, so a
     # working host nvidia-smi proves nothing about the container runtime. This
@@ -218,14 +229,14 @@ dl_gpu_profile() {
     # SIGPIPE, and pipefail then reports the pipeline as FAILED on a match.
     runtimes="$(docker info --format '{{.Runtimes}}' 2>/dev/null || true)"
     case "$runtimes" in *nvidia*) : ;; *)
-        DL_GPU_REASON="$DL_GPU_REASON; NOTE the nvidia container runtime is not registered with this docker — install the NVIDIA Container Toolkit or the GPU overlay will fail to start" ;;
+        TSS_GPU_REASON="$TSS_GPU_REASON; NOTE the nvidia container runtime is not registered with this docker — install the NVIDIA Container Toolkit or the GPU overlay will fail to start" ;;
     esac
     return 0
 }
 
 # PREDICATE. 0 = image publishes that arch, 1 = it does not, 2 = could not tell
 # (no network, private registry, old CLI). Callers must distinguish 1 from 2.
-dl_image_has_arch() {                     # <image> <arch>
+tss_image_has_arch() {                     # <image> <arch>
     local out
     out="$(docker manifest inspect "$1" 2>/dev/null)" || return 2
     [ -n "$out" ] || return 2
@@ -233,7 +244,7 @@ dl_image_has_arch() {                     # <image> <arch>
 }
 
 # ── Paths and files ──────────────────────────────────────────────────────────
-dl_realpath() {                           # <path> -> absolute, symlinks resolved
+tss_realpath() {                           # <path> -> absolute, symlinks resolved
     if [ -d "$1" ]; then (cd -- "$1" 2>/dev/null && pwd -P)
     else
         local d b
@@ -253,27 +264,30 @@ dl_realpath() {                           # <path> -> absolute, symlinks resolve
 # Deliberately case-SENSITIVE: the .ps1 uses OrdinalIgnoreCase because NTFS is,
 # but pwd -P returns on-disk casing, so plain matching is correct on Linux and
 # strictly safer on a case-insensitive APFS volume.
-dl_assert_within() {                      # <root> <path>
+tss_assert_within() {                      # <root> <path>
     local rroot rpath
-    rroot="$(dl_realpath "$1")" || return 1
-    rpath="$(dl_realpath "$2")" || return 1
+    rroot="$(tss_realpath "$1")" || return 1
+    rpath="$(tss_realpath "$2")" || return 1
     case "$rpath/" in "$rroot"/*) return 0 ;; *) return 1 ;; esac
 }
 
 # There is no Unix C:\DATA. XDG state under $HOME is the equivalent, and it is
 # also the only place Docker Desktop for Mac shares by default — a backup root
 # outside $HOME fails to bind-mount.
-dl_backup_root() {
-    printf '%s' "${DOCKER_LOCAL_BACKUP_ROOT:-${XDG_STATE_HOME:-$HOME/.local/state}/docker-local/backups}"
+# DOCKER_LOCAL_BACKUP_ROOT is honoured as a deprecated alias: someone may have
+# exported it before the repos merged, and silently ignoring it would write the
+# backup somewhere they are not looking.
+tss_backup_root() {
+    printf '%s' "${TS_STACK_BACKUP_ROOT:-${DOCKER_LOCAL_BACKUP_ROOT:-${XDG_STATE_HOME:-$HOME/.local/state}/terminal-stack/stack-backups}}"
 }
 
 # PREDICATE. Reject a backup root that is far too broad. The .ps1 only rejects
 # the drive root; the Unix analogue of that (/) is a very weak floor, so also
 # reject $HOME itself and anything outside $HOME or /Volumes.
-dl_backup_root_sane() {                   # <resolved-root>
-    [ -n "${DOCKER_LOCAL_ALLOW_ANY_BACKUP_ROOT:-}" ] && return 0
+tss_backup_root_sane() {                   # <resolved-root>
+    [ -n "${TS_STACK_ALLOW_ANY_BACKUP_ROOT:-${DOCKER_LOCAL_ALLOW_ANY_BACKUP_ROOT:-}}" ] && return 0
     local r="$1" home
-    home="$(dl_realpath "$HOME")" || return 1
+    home="$(tss_realpath "$HOME")" || return 1
     [ "$r" = / ] && return 1
     [ "$r" = "$home" ] && return 1
     case "$r/" in "$home"/*|/Volumes/*) return 0 ;; *) return 1 ;; esac
@@ -283,11 +297,11 @@ dl_backup_root_sane() {                   # <resolved-root>
 # /Volumes by default; a bind mount from anywhere else fails at run time. Must
 # be checked BEFORE a script stops the stack, or the stack is already down when
 # the mount fails.
-dl_assert_docker_shareable() {            # <absolute-path>
-    case "$(dl_os)" in linux) return 0 ;; esac
+tss_assert_docker_shareable() {            # <absolute-path>
+    case "$(tss_os)" in linux) return 0 ;; esac
     local p home
-    p="$(dl_realpath "$1")" || return 1
-    home="$(dl_realpath "$HOME")" || return 1
+    p="$(tss_realpath "$1")" || return 1
+    home="$(tss_realpath "$HOME")" || return 1
     case "$p/" in "$home"/*|/tmp/*|/private/*|/Volumes/*) return 0 ;; *) return 1 ;; esac
 }
 
@@ -305,7 +319,7 @@ stamp() { date -u +%Y%m%d-%H%M%S; }
 # enough bytes, tr takes SIGPIPE, and under `set -o pipefail` that surfaces as
 # exit 141 which `set -e` turns into a silent death of the calling script.
 # node is already a hard prerequisite and has no such race.
-dl_rand_hex() {
+tss_rand_hex() {
     node -e 'const n=Number(process.argv[1])||12;process.stdout.write(require("node:crypto").randomBytes(n).toString("hex").slice(0,n))' "${1:-12}"
 }
 
@@ -321,8 +335,8 @@ dl_rand_hex() {
 #
 # Returns 0 on a change, 3 when the pattern matched nothing (the caller decides
 # whether that is an error), 4 if the result would be empty.
-dl_replace_in_file() {                    # <file> <js-regex> <replacement>
-    node - "$1" "$2" "$3" <<'DL_NODE_EOF'
+tss_replace_in_file() {                    # <file> <js-regex> <replacement>
+    node - "$1" "$2" "$3" <<'TSS_NODE_EOF'
 const fs = require("node:fs");
 // `node -` keeps "-" as argv[1], so the real arguments start at 2.
 const [f, re, rep] = process.argv.slice(2);
@@ -333,14 +347,14 @@ if (!after.length) process.exit(4);
 const tmp = f + ".tmp" + process.pid;
 fs.writeFileSync(tmp, after);
 fs.renameSync(tmp, f);
-DL_NODE_EOF
+TSS_NODE_EOF
 }
 
 # ── Listening sockets ────────────────────────────────────────────────────────
 # Prints one bare address per line (no :port) for whatever is listening on
 # <port>. Returns 2 when no tool is available to tell — callers MUST treat 2
 # differently from "nothing listening", which is an empty result with status 0.
-_dl_listen_addrs() {                      # <port>
+_tss_listen_addrs() {                      # <port>
     local port="$1" line
     if have lsof; then
         lsof -nP -iTCP:"$port" -sTCP:LISTEN -Fn 2>/dev/null | sed -n 's/^n//p' \
@@ -360,7 +374,7 @@ _dl_listen_addrs() {                      # <port>
     return 2
 }
 
-_dl_addr_is_loopback() {
+_tss_addr_is_loopback() {
     case "$1" in
         127.*|::1|'[::1]'|localhost) return 0 ;;
         *) return 1 ;;
@@ -373,7 +387,7 @@ _dl_addr_is_loopback() {
 # because nothing has started yet.
 port_listening() {                        # <port>
     local addrs
-    addrs="$(_dl_listen_addrs "$1")" || return 1
+    addrs="$(_tss_listen_addrs "$1")" || return 1
     [ -n "$addrs" ]
 }
 
@@ -386,7 +400,7 @@ port_listening() {                        # <port>
 assert_loopback_only() {                  # <port>...
     local port addrs addr rc bad=0
     for port in "$@"; do
-        addrs="$(_dl_listen_addrs "$port")"; rc=$?
+        addrs="$(_tss_listen_addrs "$port")"; rc=$?
         if [ "$rc" = 2 ]; then
             fail "cannot verify port $port is loopback-only — no lsof, ss or netstat on PATH"
             bad=1; continue
@@ -399,7 +413,7 @@ assert_loopback_only() {                  # <port>...
         fi
         while IFS= read -r addr; do
             [ -n "$addr" ] || continue
-            if _dl_addr_is_loopback "$addr"; then
+            if _tss_addr_is_loopback "$addr"; then
                 pass "port $port bound to $addr"
             else
                 fail "port $port is listening on $addr — reachable beyond this machine. These services have no authentication; the bind must be 127.0.0.1."
@@ -416,7 +430,7 @@ EOF
 # to com.docker.backend, so lsof proves the host binding but says nothing about
 # the publish SPEC — and the spec is what a bad compose edit gets wrong. This
 # catches it even before the container is reachable.
-dl_assert_publish_loopback() {
+tss_assert_publish_loopback() {
     local out line bad=0
     out="$(docker ps --format '{{.Names}}|{{.Ports}}' 2>/dev/null)" || return 0
     while IFS= read -r line; do
@@ -433,23 +447,23 @@ EOF
 }
 
 # ── HTTP ─────────────────────────────────────────────────────────────────────
-# DL_HTTP_STATUS and DL_HTTP_TIME_MS are set by http_status. curl's
+# TSS_HTTP_STATUS and TSS_HTTP_TIME_MS are set by http_status. curl's
 # %{time_total} replaces [Diagnostics.Stopwatch]: $SECONDS is whole-second only
 # and `date +%s%3N` does not exist on macOS.
 #
 # CAVEAT: those globals only survive when http_status is called directly --
-#   http_status "$url" 8 >/dev/null; echo "$DL_HTTP_TIME_MS"
+#   http_status "$url" 8 >/dev/null; echo "$TSS_HTTP_TIME_MS"
 # Calling it as `s=$(http_status "$url")` runs it in a subshell, so you get the
 # printed status but the timing globals keep their previous values.
 http_status() {                           # <url> [timeout] -> prints status code
     # No pipeline here on purpose: a `... | read` puts the read in a subshell,
-    # so DL_HTTP_STATUS would never reach the caller.
+    # so TSS_HTTP_STATUS would never reach the caller.
     local out t
     out="$(curl -sS -o /dev/null -w '%{http_code} %{time_total}' --max-time "${2:-20}" "$1" 2>/dev/null)" || out='000 0'
-    DL_HTTP_STATUS="${out%% *}"
+    TSS_HTTP_STATUS="${out%% *}"
     t="${out#* }"
-    DL_HTTP_TIME_MS="$(awk -v t="${t:-0}" 'BEGIN{printf "%.0f", t*1000}')"
-    printf '%s' "$DL_HTTP_STATUS"
+    TSS_HTTP_TIME_MS="$(awk -v t="${t:-0}" 'BEGIN{printf "%.0f", t*1000}')"
+    printf '%s' "$TSS_HTTP_STATUS"
 }
 
 http_get() {                              # <url> [timeout] -> body on stdout
@@ -498,19 +512,19 @@ wait_http_200() {                         # <url> <timeout-seconds>
 # .mjs helpers, whereas jq is required by nothing today. The hard cases here are
 # round-trip edits of a user's agent config, where a safe read-modify-write plus
 # atomic replace is less code in node than in jq.
-json_get() { node "$DL_ROOT/_json.mjs" get "$1" "$2"; }
-json_set() { node "$DL_ROOT/_json.mjs" set "$1" "$2" "$3"; }
-json_eq()  { node "$DL_ROOT/_json.mjs" eq  "$1" "$2" "$3"; }
-json_str() { node "$DL_ROOT/_json.mjs" str "$1"; }
+json_get() { node "$TSS_ROOT/_json.mjs" get "$1" "$2"; }
+json_set() { node "$TSS_ROOT/_json.mjs" set "$1" "$2" "$3"; }
+json_eq()  { node "$TSS_ROOT/_json.mjs" eq  "$1" "$2" "$3"; }
+json_str() { node "$TSS_ROOT/_json.mjs" str "$1"; }
 
 # GNU `date -d` is not on macOS and BSD `date -j -f` is not on Linux, so a
 # per-OS split here would mean two incompatible dialects to maintain.
-dl_iso_age_minutes() {                    # <iso8601> -> whole minutes, or empty
+tss_iso_age_minutes() {                    # <iso8601> -> whole minutes, or empty
     node -e 'const t=Date.parse(process.argv[1]); if(!isNaN(t)) console.log(Math.floor((Date.now()-t)/60000))' "$1" 2>/dev/null
 }
 
 # ── .env reading ─────────────────────────────────────────────────────────────
-dl_env_value() {                          # <env-file> <key> -> value, or non-zero
+tss_env_value() {                          # <env-file> <key> -> value, or non-zero
     local f="$1" k="$2" line v
     [ -f "$f" ] || return 1
     while IFS= read -r line || [ -n "$line" ]; do
@@ -528,9 +542,9 @@ dl_env_value() {                          # <env-file> <key> -> value, or non-ze
 }
 
 # ── Secrets ──────────────────────────────────────────────────────────────────
-_dl_file_mode() { stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1" 2>/dev/null; }
+_tss_file_mode() { stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1" 2>/dev/null; }
 
-dl_secret_cache_path() {
+tss_secret_cache_path() {
     printf '%s' "${XDG_CONFIG_HOME:-$HOME/.config}/docker-local/agentmemory.secret"
 }
 
@@ -546,15 +560,15 @@ dl_secret_cache_path() {
 agentmemory_secret() {                    # [stack-dir]
     local cache mode dir out
     if [ -n "${AGENTMEMORY_SECRET:-}" ]; then printf '%s' "$AGENTMEMORY_SECRET"; return 0; fi
-    cache="$(dl_secret_cache_path)"
+    cache="$(tss_secret_cache_path)"
     if [ -f "$cache" ]; then
-        mode="$(_dl_file_mode "$cache")"
+        mode="$(_tss_file_mode "$cache")"
         if [ "$mode" = 600 ]; then
             tr -d '\r\n' < "$cache"; return 0
         fi
         warn "$cache is mode ${mode:-unknown}, not 600 — refusing to use it. chmod 600 it, or delete it."
     fi
-    dir="${1:-$DL_ROOT/agentmemory}"
+    dir="${1:-$TSS_STACKS/agentmemory}"
     out="$( cd "$dir" 2>/dev/null && docker compose exec -T agentmemory cat /data/.hmac 2>/dev/null )" || return 1
     [ -n "$out" ] || return 1
     printf '%s' "$out" | tr -d '\r\n'
@@ -562,10 +576,10 @@ agentmemory_secret() {                    # [stack-dir]
 
 # Read a raw credential file, refusing anything that looks wrong. The mode check
 # is Unix-only and deliberate: these files hold provider admin keys.
-dl_read_raw_secret() {                    # <path> <label>
+tss_read_raw_secret() {                    # <path> <label>
     local p="$1" label="$2" mode v
     [ -f "$p" ] || { printf '%s not found: %s\n' "$label" "$p" >&2; return 1; }
-    mode="$(_dl_file_mode "$p")"
+    mode="$(_tss_file_mode "$p")"
     case "$mode" in
         600|400) ;;
         *) printf '%s is mode %s — chmod 600 %s before using it.\n' "$label" "${mode:-unknown}" "$p" >&2; return 1 ;;
@@ -598,11 +612,11 @@ compose_capture() { docker compose "$@" 2>&1; }
 # Which compose files a stack will actually merge, per its .env. `docker compose
 # ls` reports the files a project was *created* with, which goes stale the
 # moment you add an overlay — so read the current intent instead.
-dl_compose_files() {                      # <stack-dir> -> one file per line
+tss_compose_files() {                      # <stack-dir> -> one file per line
     local dir="$1" sep spec
-    sep="$(dl_env_value "$dir/.env" COMPOSE_PATH_SEPARATOR 2>/dev/null)" || sep=':'
+    sep="$(tss_env_value "$dir/.env" COMPOSE_PATH_SEPARATOR 2>/dev/null)" || sep=':'
     [ -n "$sep" ] || sep=':'
-    spec="$(dl_env_value "$dir/.env" COMPOSE_FILE 2>/dev/null)" || spec=''
+    spec="$(tss_env_value "$dir/.env" COMPOSE_FILE 2>/dev/null)" || spec=''
     if [ -z "$spec" ]; then printf 'docker-compose.yml\n'; return 0; fi
     printf '%s\n' "$spec" | tr "$sep" '\n' | sed '/^[[:space:]]*$/d; s/^[[:space:]]*//; s/[[:space:]]*$//'
 }
@@ -610,7 +624,7 @@ dl_compose_files() {                      # <stack-dir> -> one file per line
 # PREDICATE. A stack shipping a .env.example with no .env is misconfigured:
 # compose silently falls back to the base file only, which for kokoro means
 # starting the GPU image with no GPU access.
-dl_env_seeded() {                         # <stack-dir>
+tss_env_seeded() {                         # <stack-dir>
     [ -f "$1/.env.example" ] || return 0
     [ -f "$1/.env" ]
 }
@@ -618,12 +632,12 @@ dl_env_seeded() {                         # <stack-dir>
 # Derive a service's image rather than hardcoding it. migrate-durable-llm.ps1:56
 # hardcodes `agentmemory-agentmemory:latest`, which is right only because the
 # compose project name happens to derive from the directory name.
-dl_compose_image() {                      # <stack-dir> <service>
+tss_compose_image() {                      # <stack-dir> <service>
     local cfg img proj
     cfg="$( cd "$1" && docker compose config --format json 2>/dev/null )" || return 1
-    img="$(printf '%s' "$cfg" | node "$DL_ROOT/_json.mjs" get - "services.$2.image" 2>/dev/null)"
+    img="$(printf '%s' "$cfg" | node "$TSS_ROOT/_json.mjs" get - "services.$2.image" 2>/dev/null)"
     if [ -n "$img" ] && [ "$img" != null ]; then printf '%s' "$img"; return 0; fi
-    proj="$(printf '%s' "$cfg" | node "$DL_ROOT/_json.mjs" get - name 2>/dev/null)"
+    proj="$(printf '%s' "$cfg" | node "$TSS_ROOT/_json.mjs" get - name 2>/dev/null)"
     [ -n "$proj" ] && [ "$proj" != null ] || proj="$(basename "$1")"
     printf '%s-%s' "$proj" "$2"
 }
@@ -637,19 +651,146 @@ dl_compose_image() {                      # <stack-dir> <service>
 # The derived location is a hint of LAST resort — it is a four-level layout
 # assumption, and this repo deliberately refuses that kind of guess in tracked
 # files. Absent is not an error; this is optional tooling.
-dl_agentmemory_source() {
+tss_agentmemory_source() {
     local p
     if [ -n "${AGENTMEMORY_SOURCE_PATH:-}" ]; then p="$AGENTMEMORY_SOURCE_PATH"
     else
-        p="$(dl_env_value "$DL_ROOT/agentmemory/.env" AGENTMEMORY_SOURCE_PATH 2>/dev/null)" || p=''
-        [ -n "$p" ] || p="$DL_ROOT/../../../../public/github.com/agentmemory"
+        p="$(tss_env_value "$TSS_STACKS/agentmemory/.env" AGENTMEMORY_SOURCE_PATH 2>/dev/null)" || p=''
+        [ -n "$p" ] || p="$TSS_ROOT/../../../../../public/github.com/agentmemory"
     fi
     [ -f "$p/package.json" ] || return 1
-    dl_realpath "$p"
+    tss_realpath "$p"
 }
 
 # The pinned version this repo builds, from the compose build args.
-dl_agentmemory_pinned_version() {
+tss_agentmemory_pinned_version() {
     sed -n 's/^[[:space:]]*AGENTMEMORY_VERSION:[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}[[:space:]]*$/\1/p' \
-        "$DL_ROOT/agentmemory/docker-compose.yml" 2>/dev/null | head -n 1 || true
+        "$TSS_STACKS/agentmemory/docker-compose.yml" 2>/dev/null | head -n 1 || true
+}
+
+# ── ts-stack: discovery, toggles, engine, compose ────────────────────────────
+# Everything below is used by bootstrap/ts-stack.sh. Its pwsh twin carries the
+# same logic inline (bootstrap/ts-stack.ps1) — change one, change the other.
+
+# Every stack, one per line, lexically sorted. A stack is a directory holding a
+# docker-compose.yml; there is no registry.
+tss_stack_list() {
+    local d
+    for d in "$TSS_STACKS"/*/; do
+        [ -f "$d/docker-compose.yml" ] || continue
+        basename "$d"
+    done
+}
+
+tss_stack_dir() { printf '%s' "$TSS_STACKS/$1"; }
+
+# PURE. Which saved terminal-stack setting gates this stack, or "" for none.
+# `kokoro` is special: it is gated on the TTS engine as well as the switch, so
+# the caller checks both — this only names the primary key.
+tss_toggle_for() {
+    case "$1" in
+        agentmemory) printf 'agentmemoryEnabled' ;;
+        headroom)    printf 'headroomEnabled' ;;
+        playwright)  printf 'playwrightEnabled' ;;
+        kokoro)      printf 'ccTts' ;;
+        *)           printf '' ;;
+    esac
+}
+
+# ── engine ───────────────────────────────────────────────────────────────────
+# `docker` on PATH is not evidence. Inside WSL with Docker Desktop's integration
+# switched off, PATH still holds Desktop's stub, which exits 1 for every command
+# and prints "could not be found in this WSL 2 distro" ON STDOUT. `have docker`
+# is therefore true and useless, and the old require_docker diagnosed it as "is
+# Docker Desktop running?" — the wrong answer when the engine is perfectly
+# healthy on the Windows side.
+#
+# Returns exactly one of: native | wsl-shim | absent | denied
+# TS_STACK_DOCKER_PROBE overrides the whole probe for tests.
+tss_docker_kind() {
+    [ -n "${TS_STACK_DOCKER_PROBE:-}" ] && { printf '%s' "$TS_STACK_DOCKER_PROBE"; return 0; }
+
+    local bin out
+    bin="$(command -v docker 2>/dev/null)" || { printf 'absent'; return 0; }
+
+    # The shim lives under a Windows mount and there is no Linux docker beside it.
+    case "$bin" in
+        /mnt/[a-z]/*)
+            [ -x /usr/bin/docker ] || { printf 'wsl-shim'; return 0; } ;;
+    esac
+    # Belt and braces: the stub prints to STDOUT, so 2>&1 is not enough on its own.
+    out="$(docker version 2>&1 || true)"
+    case "$out" in
+        *"could not be found in this WSL"*) printf 'wsl-shim'; return 0 ;;
+    esac
+
+    if docker info >/dev/null 2>&1; then printf 'native'; return 0; fi
+    out="$(docker info 2>&1 || true)"
+    case "$out" in
+        *"permission denied while trying to connect"*) printf 'denied'; return 0 ;;
+    esac
+    printf 'native'   # CLI present, engine down — the caller reports that
+}
+
+tss_engine_up() { [ "$(tss_docker_kind)" = native ] && docker info >/dev/null 2>&1; }
+
+# PURE. <os> <kind> -> the advice line(s). Split out so it is unit-testable with
+# no Docker anywhere: the string IS the deliverable of a failed probe.
+tss_engine_advice() {                       # <os> <kind>
+    case "$2" in
+        wsl-shim)
+            printf '%s\n' \
+                'the `docker` on PATH is Docker Desktop'"'"'s stub — it exits 1 for every' \
+                'command and says nothing about whether the engine is healthy.' \
+                '  fix either way:' \
+                '    Docker Desktop -> Settings -> Resources -> WSL Integration -> enable this distro' \
+                '    or run the Windows twin:  ts-stack <command>   (from PowerShell)' ;;
+        denied)
+            printf '%s\n' \
+                'the engine is there but this user may not talk to it.' \
+                '  fix:  sudo usermod -aG docker "$USER"   then LOG OUT and back in' \
+                '        (a new shell in the same session does not pick the group up)' ;;
+        absent)
+            case "$1" in
+                darwin) printf '%s\n' 'no container engine found.' \
+                    '  fix:  brew install --cask docker      (Docker Desktop)' \
+                    '        brew install colima && colima start   (lighter, no GUI)' ;;
+                linux)  printf '%s\n' 'no container engine found.' \
+                    '  fix:  see `doc docker` for the docker-ce install for your distro' ;;
+                *)      printf '%s\n' 'no container engine found.' \
+                    '  fix:  winget install --id Docker.DockerDesktop --exact' ;;
+            esac ;;
+        *)
+            case "$1" in
+                darwin) printf '%s\n' 'the engine is not answering.' \
+                    '  fix:  open -a Docker      (or: colima start)' ;;
+                linux)  printf '%s\n' 'the engine is not answering.' \
+                    '  fix:  sudo systemctl start docker    (rootless: systemctl --user start docker)' ;;
+                *)      printf '%s\n' 'the engine is not answering.' \
+                    '  fix:  start Docker Desktop, or re-run with --start-engine' ;;
+            esac ;;
+    esac
+}
+
+# ── the compose choke point ──────────────────────────────────────────────────
+# EVERY docker invocation goes through here, which is what makes three
+# invariants testable rather than merely intended:
+#   * `down` never receives -v (the two paths that do are explicit and gated)
+#   * the billing overlay always gets --env-file .env BEFORE --env-file
+#     .billing.env — a lone --env-file REPLACES the interpolation source, so
+#     every ${OPENAI_*}-derived LLM_* display value silently resolves to ""
+#   * TS_STACK_DRY_RUN=1 prints the exact argv and runs nothing
+tss_compose() {                             # <stack> <compose args...>
+    local stack="$1"; shift
+    local dir; dir="$(tss_stack_dir "$stack")"
+    local -a pre; pre=()
+    if [ -f "$dir/.billing.env" ]; then
+        pre=(--env-file .env --env-file .billing.env)
+    fi
+    if [ "${TS_STACK_DRY_RUN:-0}" = 1 ]; then
+        printf '(%s) docker compose %s%s\n' "$stack" \
+            "$([ ${#pre[@]} -gt 0 ] && printf '%s ' "${pre[@]}")" "$*"
+        return 0
+    fi
+    ( cd "$dir" && docker compose ${pre[@]+"${pre[@]}"} "$@" )
 }
