@@ -172,10 +172,27 @@ tss_require_num() {                        # <name> <value> <min> <max>
 # or with `|| true`. Under `set -e` a bare call will end the script.
 tss_os() {
     case "$(uname -s | tr '[:upper:]' '[:lower:]')" in
-        darwin) printf 'darwin' ;;
-        linux)  printf 'linux' ;;
-        *)      printf 'other' ;;
+        darwin)                printf 'darwin' ;;
+        linux)                 printf 'linux' ;;
+        # Git Bash / MSYS2 / Cygwin. Not 'other': this shell drives a WINDOWS
+        # Docker Desktop, which cannot bind-mount an MSYS path, and whose state
+        # directory convention is %LOCALAPPDATA%, not ~/.local/state.
+        mingw*|msys*|cygwin*)  printf 'windows' ;;
+        *)                     printf 'other' ;;
     esac
+}
+
+# A host path in the form the DOCKER ENGINE understands. Identical everywhere
+# except under Git Bash, where the engine is a Windows process: it cannot mount
+# /c/Users/... and the failure surfaces INSIDE the container as tar saying
+# "Cannot open: No such file or directory" -- which reads as a broken archive
+# rather than a broken mount, after the stack has already been stopped.
+tss_docker_path() {                        # <path>
+    if [ "$(tss_os)" = windows ] && command -v cygpath >/dev/null 2>&1; then
+        cygpath -w "$1"
+    else
+        printf '%s' "$1"
+    fi
 }
 
 have() { command -v "$1" >/dev/null 2>&1; }
@@ -278,7 +295,18 @@ tss_assert_within() {                      # <root> <path>
 # exported it before the repos merged, and silently ignoring it would write the
 # backup somewhere they are not looking.
 tss_backup_root() {
-    printf '%s' "${TS_STACK_BACKUP_ROOT:-${DOCKER_LOCAL_BACKUP_ROOT:-${XDG_STATE_HOME:-$HOME/.local/state}/terminal-stack/stack-backups}}"
+    if [ -n "${TS_STACK_BACKUP_ROOT:-${DOCKER_LOCAL_BACKUP_ROOT:-}}" ]; then
+        printf '%s' "${TS_STACK_BACKUP_ROOT:-$DOCKER_LOCAL_BACKUP_ROOT}"
+        return 0
+    fi
+    # Under Git Bash this has to agree with the pwsh twin, which writes to
+    # %LOCALAPPDATA%/terminal-stack/stack-backups. Two conventions on one machine
+    # means a restore looks in the wrong place.
+    if [ "$(tss_os)" = windows ] && [ -n "${LOCALAPPDATA:-}" ]; then
+        printf '%s' "$(cygpath -u "$LOCALAPPDATA" 2>/dev/null || printf '%s' "$LOCALAPPDATA")/terminal-stack/stack-backups"
+        return 0
+    fi
+    printf '%s' "${XDG_STATE_HOME:-$HOME/.local/state}/terminal-stack/stack-backups"
 }
 
 # PREDICATE. Reject a backup root that is far too broad. The .ps1 only rejects
@@ -298,7 +326,9 @@ tss_backup_root_sane() {                   # <resolved-root>
 # be checked BEFORE a script stops the stack, or the stack is already down when
 # the mount fails.
 tss_assert_docker_shareable() {            # <absolute-path>
-    case "$(tss_os)" in linux) return 0 ;; esac
+    # Windows shares whole drives rather than a fixed list of trees, and the
+    # path is translated by tss_docker_path before it reaches the engine.
+    case "$(tss_os)" in linux|windows) return 0 ;; esac
     local p home
     p="$(tss_realpath "$1")" || return 1
     home="$(tss_realpath "$HOME")" || return 1
@@ -1146,9 +1176,10 @@ tss_backup_volume() {                      # <volume> <dir>
     docker volume inspect "$vol" >/dev/null 2>&1 || { info "$vol does not exist — skipped"; return 0; }
     step "backup $vol"
     [ "$TSS_APPLY" = 1 ] || return 0
-    docker run --rm -v "$vol:/from:ro" -v "$dir:/to" alpine \
+    local mnt; mnt="$(tss_docker_path "$dir")"
+    docker run --rm -v "$vol:/from:ro" -v "$mnt:/to" alpine \
         sh -c "tar -C /from -czf /to/$vol.tgz ." || { warn "$vol: tar failed"; return 1; }
-    docker run --rm -v "$dir:/to:ro" alpine sh -c "tar -tzf /to/$vol.tgz >/dev/null" \
+    docker run --rm -v "$mnt:/to:ro" alpine sh -c "tar -tzf /to/$vol.tgz >/dev/null" \
         || { warn "$vol: the archive does not read back"; return 1; }
     bytes="$(file_size "$out" 2>/dev/null || echo 0)"
     [ "$bytes" -gt 100 ] || { warn "$vol: archive is suspiciously small ($bytes bytes)"; return 1; }

@@ -309,7 +309,14 @@ state_analysis() {
 }
 
 llm_telemetry() {                         # <secret>
-    http_get_auth "$API/llm/telemetry?limit=500" "$1" 30
+    # 90s and one retry, not a single 30s attempt. This is a single-threaded Node
+    # process working through a recovery backlog, and /llm/telemetry?limit=500 is
+    # not a cheap read: a 30s timeout during the busiest moment of the run tripped
+    # `telemetry read failed during recovery`, which STOPS THE STACK for
+    # inspection over what was only a slow answer.
+    http_get_auth "$API/llm/telemetry?limit=500" "$1" 90 && return 0
+    sleep 5
+    http_get_auth "$API/llm/telemetry?limit=500" "$1" 90
 }
 
 # The safety guards must stop the stack BEFORE failing. Deliberately an explicit
@@ -317,6 +324,10 @@ llm_telemetry() {                         # <secret>
 stop_stack_then_die() {                   # <message>
     am_console stop >/dev/null 2>&1 || true
     docker compose stop agentmemory >/dev/null 2>&1 || true
+    # Say how to get it back. The stack is deliberately left down so the state
+    # can be inspected, and someone reading only the last line of a long run
+    # should not have to work out which command undoes that.
+    warn 'the stack is stopped for inspection; bring it back with: ts-stack up agentmemory && ts-stack up agent007memory'
     die "$1"
 }
 
@@ -402,10 +413,16 @@ if [ "$TSS_APPLY" = 1 ]; then
     tss_assert_within "$backup_root_full" "$resolved_backup" \
         || die "resolved backup directory escaped backup root: $resolved_backup"
 
+    # The path the ENGINE gets, which is not the path this shell uses: under
+    # Git Bash the engine is a Windows process and cannot mount /c/Users/...
+    # It fails inside the container as tar "Cannot open: No such file or
+    # directory" -- read as a broken archive, after the stack is already down.
+    backup_mount="$(tss_docker_path "$resolved_backup")"
+
     am_console stop || die 'failed to stop the console'
     docker compose stop agentmemory || die 'failed to stop the stack'
     docker run --rm --entrypoint sh \
-        -v "${volume_name}:/source:ro" -v "${resolved_backup}:/backup" "$image" \
+        -v "${volume_name}:/source:ro" -v "${backup_mount}:/backup" "$image" \
         -c 'tar -C /source -czf /backup/agentmemory-volume.tgz .' \
         || die 'volume backup failed; stack remains stopped and queue is unchanged'
 

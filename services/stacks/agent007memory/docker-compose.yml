@@ -24,6 +24,11 @@ services:
   console:
     container_name: ts-agent007memory
     image: ts-agent007memory:local
+    # This image only ever exists locally, so compose must not try a registry
+    # first: it printed "pull access denied for ts-agent007memory" on every up,
+    # built the image anyway, and still exited non-zero -- so `ts-stack up`
+    # reported a failure over a stack that had just started cleanly.
+    pull_policy: build
     build:
       # The console's source is in this repo, so the build context is a relative
       # path and what runs is always what you have checked out. It used to be a
