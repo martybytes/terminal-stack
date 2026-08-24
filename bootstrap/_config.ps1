@@ -284,6 +284,7 @@ function Get-TsAgentSetting([string]$Name) {
         'headroomCursorMode'{ 'TS_HEADROOM_CURSOR' }
         'cavemanEnabled'    { 'TS_CAVEMAN' }
         'agentmemoryEnabled'{ 'TS_AGENTMEMORY' }
+        'playwrightEnabled' { 'TS_PLAYWRIGHT' }
     }
     if ($envName) {
         $override = [Environment]::GetEnvironmentVariable($envName, 'Process')
@@ -342,7 +343,8 @@ function Save-TsConfig {
         [ValidateSet('on','off')][string]$HeadroomEnabled = 'off',
         [ValidateSet('mcp','byok','off')][string]$HeadroomCursorMode = 'mcp',
         [ValidateSet('on','off')][string]$CavemanEnabled = 'off',
-        [ValidateSet('on','off')][string]$AgentmemoryEnabled = 'off'
+        [ValidateSet('on','off')][string]$AgentmemoryEnabled = 'off',
+        [ValidateSet('on','off')][string]$PlaywrightEnabled = 'off'
     )
     $l = ConvertTo-TsLeader $LeaderChord
     $existing = Get-TsConfig
@@ -372,7 +374,8 @@ function Save-TsConfig {
         @{ Param = 'HeadroomEnabled'; Name = 'headroomEnabled'; Default = 'off' },
         @{ Param = 'HeadroomCursorMode'; Name = 'headroomCursorMode'; Default = 'mcp' },
         @{ Param = 'CavemanEnabled'; Name = 'cavemanEnabled'; Default = 'off' },
-        @{ Param = 'AgentmemoryEnabled'; Name = 'agentmemoryEnabled'; Default = $(Get-TsAgentSetting agentmemoryEnabled) }
+        @{ Param = 'AgentmemoryEnabled'; Name = 'agentmemoryEnabled'; Default = $(Get-TsAgentSetting agentmemoryEnabled) },
+        @{ Param = 'PlaywrightEnabled'; Name = 'playwrightEnabled'; Default = 'off' }
     )) {
         if (-not $PSBoundParameters.ContainsKey($pair.Param)) {
             Set-Variable -Name $pair.Param -Value (Get-TsProp $existing $pair.Name $pair.Default)
@@ -395,6 +398,7 @@ function Save-TsConfig {
         headroomCursorMode = $HeadroomCursorMode
         cavemanEnabled     = $CavemanEnabled
         agentmemoryEnabled = $AgentmemoryEnabled
+        playwrightEnabled = $PlaywrightEnabled
     }
     $p = Get-TsConfigPath
     New-Item -ItemType Directory -Force -Path (Split-Path $p) | Out-Null

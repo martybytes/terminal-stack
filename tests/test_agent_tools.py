@@ -108,7 +108,13 @@ def test_headroom_enable_requires_authenticated_proxy_and_disable_restores_direc
     assert "function Test-TsHeadroomAuth" in ps_adapter
     assert "if (-not (Test-TsHeadroomAuth))" in ps_adapter
     assert "MCP sidecar not reachable" in ps_adapter and "optional separate process" in ps_adapter
-    assert 'off) run_agent_adapter "$tool" off; ts_agent_set "$key" off' in config
+    # `off` must BOTH remove the client wiring and clear the saved setting, in that
+    # order. Asserted as intent rather than one exact line: playwright has no
+    # adapter to call, so the arm is no longer a single statement.
+    off_arm = config[config.index("        off)"):]
+    off_arm = off_arm[:off_arm.index(";;")]
+    assert 'run_agent_adapter "$tool" off' in off_arm
+    assert 'ts_agent_set "$key" off' in off_arm
 
 
 def test_pwsh_profile_caches_tool_init_instead_of_respawning():

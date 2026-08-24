@@ -107,6 +107,10 @@ headroomEnabled = {{ index . "headroomEnabled" | default "off" | quote }}
 headroomCursorMode = {{ index . "headroomCursorMode" | default "mcp" | quote }}
 cavemanEnabled = {{ index . "cavemanEnabled" | default "off" | quote }}
 agentmemoryEnabled = {{ index . "agentmemoryEnabled" | default "off" | quote }}
+# The Playwright browser MCP stack. Off by default like headroom: it reserves
+# 2GB of shared memory for a browser, which is not something to spend on a
+# machine that never asked for it.
+playwrightEnabled = {{ index . "playwrightEnabled" | default "off" | quote }}
 {{- if hasKey . "apps" }}
 apps = [{{ range $i, $a := .apps }}{{ if $i }}, {{ end }}{{ $a | quote }}{{ end }}]
 {{- end }}

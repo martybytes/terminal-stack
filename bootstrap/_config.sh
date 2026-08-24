@@ -730,7 +730,7 @@ TS_MIRROR_DATA_KEYS="
     ccTtsSummarizer ccTtsTemplateError ccTtsTemplatePermission ccTtsTemplateQuestion 
     ccTtsTemplateWaiting ccTtsVoicePool leaderChord tmuxPrefix windowsUsername
     weztermMux weztermRestore atuinEnabled headroomEnabled headroomCursorMode
-    cavemanEnabled agentmemoryEnabled
+    cavemanEnabled agentmemoryEnabled playwrightEnabled
 "
 
 ts_data_prefetch() {
@@ -783,6 +783,7 @@ ts_agent_get() {
         headroomCursorMode) env_name=TS_HEADROOM_CURSOR ;;
         cavemanEnabled) env_name=TS_CAVEMAN ;;
         agentmemoryEnabled) env_name=TS_AGENTMEMORY ;;
+        playwrightEnabled) env_name=TS_PLAYWRIGHT ;;
         *) echo "ts_agent_get: unknown key '$key'" >&2; return 2 ;;
     esac
     eval "v=\${$env_name:-}"
@@ -804,7 +805,7 @@ ts_agent_get() {
 ts_agent_set() {
     local key="$1" value="$2"
     case "$key:$value" in
-        headroomEnabled:on|headroomEnabled:off|cavemanEnabled:on|cavemanEnabled:off|agentmemoryEnabled:on|agentmemoryEnabled:off|headroomCursorMode:mcp|headroomCursorMode:byok|headroomCursorMode:off) ;;
+        headroomEnabled:on|headroomEnabled:off|cavemanEnabled:on|cavemanEnabled:off|agentmemoryEnabled:on|agentmemoryEnabled:off|headroomCursorMode:mcp|headroomCursorMode:byok|headroomCursorMode:off|playwrightEnabled:on|playwrightEnabled:off) ;;
         *) echo "ts_agent_set: invalid $key=$value" >&2; return 2 ;;
     esac
     ts_data_set "$key" "$value"
@@ -1034,6 +1035,7 @@ EOF
   "headroomCursorMode": "$(ts_agent_get headroomCursorMode)",
   "cavemanEnabled": "$(ts_agent_get cavemanEnabled)",
   "agentmemoryEnabled": "$(ts_agent_get agentmemoryEnabled)",
+  "playwrightEnabled": "$(ts_agent_get playwrightEnabled)",
   "apps": [$jsonapps],
 $(ts_cc_tts_json_for_mirror)
 }
