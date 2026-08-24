@@ -590,6 +590,38 @@ PY
             done
         else
             _skip 'compose config, health and the port audit need the engine'
+        fi
+        section 'memory backend'
+        _mb="$(ts_agent_get memoryBackend 2>/dev/null || echo agentmemory)"
+        _am="$(ts_agent_get agentmemoryEnabled 2>/dev/null || echo off)"
+        _ok "backend: $_mb"
+        # Derived state that has drifted is worse than either state on its own:
+        # it means something wrote agentmemoryEnabled without going through
+        # ts-config memory, and the machine is now half-configured for two
+        # memory systems.
+        case "$_mb:$_am" in
+            agentmemory:on|headroom:off|none:off) ;;
+            *) _bad "memoryBackend is '$_mb' but agentmemoryEnabled is '$_am' — fix: ts-config memory $_mb" ;;
+        esac
+        if [ "$engine_ok" = 1 ]; then
+            _cmd="$(docker inspect ts-headroom-proxy --format '{{json .Config.Cmd}}' 2>/dev/null || true)"
+            _qd="$(docker ps --filter 'name=ts-headroom-qdrant' --format '{{.Names}}' 2>/dev/null || true)"
+            _n4="$(docker ps --filter 'name=ts-headroom-neo4j' --format '{{.Names}}' 2>/dev/null || true)"
+            if [ "$_mb" = headroom ]; then
+                case "$_cmd" in
+                    *--memory*) _ok 'the proxy is running with --memory' ;;
+                    '')         _skip 'headroom proxy is not running' ;;
+                    # THE bug this whole setting came from: databases up, memory
+                    # never engaged, everything reporting healthy.
+                    *) _bad 'memoryBackend is headroom but the proxy is running WITHOUT --memory: it stores nothing, and Qdrant and Neo4j will stay empty — ts-stack restart headroom' ;;
+                esac
+                [ -n "$_qd" ] && [ -n "$_n4" ] || _bad 'headroom memory is selected but Qdrant/Neo4j are not both running — ts-stack up headroom'
+            else
+                if [ -n "$_qd" ] || [ -n "$_n4" ]; then
+                    echo "  note: Qdrant/Neo4j are still running but this machine's memory backend is '$_mb', so nothing writes to them."
+                    echo "        Clear them out with:  ts-stack down headroom && ts-stack up headroom"
+                fi
+            fi
         fi ;;
 esac
 

@@ -3,6 +3,9 @@
 What gets captured, how each agent retrieves it, and what to run when it stops.
 Long-form reference: `services/stacks/agentmemory/README.md`.
 
+> Only one memory backend runs on a machine. `ts-config memory status` says which,
+> and `ts-config memory headroom` swaps AgentMemory out for Headroom's own store.
+
 ## The shape
 
 ```

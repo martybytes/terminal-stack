@@ -23,7 +23,7 @@ OrbStack and Rancher Desktop if that is what you use.
 ## VM resources
 
 Everything runs inside a Linux VM, so its allocation is the real limit. 4 CPUs
-and 8 GB is comfortable for all four stacks; the memory server's first build is
+and 8 GB is comfortable for every stack; the memory server's first build is
 the heaviest moment. Docker Desktop: Settings → Resources. Colima: the flags
 above, or `colima stop && colima start --memory 8`.
 

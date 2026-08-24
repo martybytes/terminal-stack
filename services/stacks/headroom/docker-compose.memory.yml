@@ -1,0 +1,104 @@
+# headroom memory overlay — the Qdrant + Neo4j semantic-memory backend.
+#
+# Merged on top of docker-compose.yml only when .env sets
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.memory.yml
+# which `ts-config memory headroom` does for you. Never edit COMPOSE_FILE by
+# hand: `memoryBackend` is the setting, and the two must agree or `ts-doctor`
+# reports drift.
+#
+# ONLY ONE MEMORY BACKEND RUNS. Enabling this means AgentMemory is not installed
+# on this machine — they do the same job, and two stores means two half-filled
+# ones. See docs/decisions.md, "Why only one memory backend runs".
+#
+# The `command:` below is the whole point. Setting QDRANT_URL and NEO4J_URI is
+# NOT enough and never was: `headroom proxy` engages memory only when it is
+# passed --memory, and there is no environment variable for that flag (there are
+# HEADROOM_* variables for --memory-db-path, --memory-top-k and the two
+# negations, but none for --memory itself). Before this file existed the base
+# compose set both URLs and started both databases, and the proxy never once
+# contacted either: 0 memories, 0 Qdrant collections, 0 Neo4j nodes, 899 MB of
+# JVM. A future edit that drops --memory from this list restores that exact
+# silent failure, so a test asserts it is here.
+services:
+  headroom-proxy:
+    command: ["--host", "0.0.0.0", "--memory", "--memory-qdrant-url", "http://qdrant:6333"]
+    environment:
+      # --memory-qdrant-url is also passed on the command line above. Belt and
+      # braces on purpose: the flag reads HEADROOM_QDRANT_URL, not QDRANT_URL,
+      # and the un-prefixed name is what the datastores themselves were wired
+      # with, so leaving only that would have looked correct and done nothing.
+      HEADROOM_QDRANT_URL: "http://qdrant:6333"
+      QDRANT_URL: "http://qdrant:6333"
+      NEO4J_URI: "bolt://neo4j:7687"
+      NEO4J_USER: "${NEO4J_USER:-neo4j}"
+      NEO4J_PASSWORD: "${NEO4J_PASSWORD:?set NEO4J_PASSWORD in headroom/.env — see .env.example}"
+    depends_on:
+      - qdrant
+      - neo4j
+
+  # Vector database: embeddings, so the proxy can retrieve similar context.
+  qdrant:
+    image: qdrant/qdrant:v1.17.1
+    container_name: ts-headroom-qdrant
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${QDRANT_REST_PORT:-6333}:6333"   # REST
+      - "127.0.0.1:${QDRANT_GRPC_PORT:-6334}:6334"   # gRPC
+    environment:
+      QDRANT__SERVICE__GRPC_PORT: "6334"
+    volumes:
+      - qdrant:/qdrant/storage
+    # The image ships no curl or wget, so the check runs the qdrant binary's own
+    # entrypoint-adjacent tooling: bash's /dev/tcp is present and is enough to
+    # prove the REST port is accepting connections.
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/6333' || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Graph database: relationships and multi-hop reasoning behind the memory
+  # features that traverse links between stored items.
+  neo4j:
+    image: neo4j:5.26
+    container_name: ts-headroom-neo4j
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${NEO4J_HTTP_PORT:-7474}:7474"   # Browser
+      - "127.0.0.1:${NEO4J_BOLT_PORT:-7687}:7687"   # Bolt
+    environment:
+      NEO4J_AUTH: "${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:?set NEO4J_PASSWORD in headroom/.env — see .env.example}"
+      # APOC is Neo4j's standard procedure library, needed by Headroom's queries.
+      # Its file import/export stays disabled (the Neo4j default) — that grants
+      # filesystem read/write via stored procedures. Do not enable it.
+      NEO4J_PLUGINS: '["apoc"]'
+      # Bounded on purpose: the default heap sizing is a fraction of host RAM,
+      # and this stack shares an 8 GB Docker VM with agentmemory and kokoro.
+      NEO4J_server_memory_heap_initial__size: "${NEO4J_HEAP:-512m}"
+      NEO4J_server_memory_heap_max__size: "${NEO4J_HEAP:-512m}"
+      NEO4J_server_memory_pagecache_size: "${NEO4J_PAGECACHE:-256m}"
+    volumes:
+      - neo4j:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:7474 >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      start_period: 45s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  qdrant:
+    name: ts-headroom-qdrant
+  neo4j:
+    name: ts-headroom-neo4j

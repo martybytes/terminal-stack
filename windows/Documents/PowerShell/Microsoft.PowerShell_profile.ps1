@@ -1098,6 +1098,7 @@ function Set-TerminalStackConfig {
     $headroomCursor = Get-TsAgentSetting headroomCursorMode
     $caveman = Get-TsAgentSetting cavemanEnabled
     $agentmemory = Get-TsAgentSetting agentmemoryEnabled
+    $memoryBackend = Get-TsAgentSetting memoryBackend
 
     # Re-run the whole questionnaire, not just one answer. `ts-config apps`
     # re-asks the apps question alone; this replays every prompt the installer
@@ -1119,7 +1120,9 @@ function Set-TerminalStackConfig {
         Save-TsConfig -LeaderChord $w.Leader -ThemeMode $w.Theme -TmuxPrefix $tmux -Apps @($w.Apps) -CcTts $ccTts `
             -WeztermMux $w.WezMux -WeztermRestore $w.WezRestore `
             -HeadroomEnabled $w.Headroom -HeadroomCursorMode $w.HeadroomCursor `
-            -CavemanEnabled $w.Caveman -AgentmemoryEnabled $w.Agentmemory | Out-Null
+            -CavemanEnabled $w.Caveman -AgentmemoryEnabled $w.Agentmemory `
+            -MemoryBackend $w.MemoryBackend | Out-Null
+        Set-TsMemoryComposeFile $w.MemoryBackend
         Export-CcTtsJson
         Save-TsWorkspaceOverride $w.Workspace
         Invoke-TsSync $src
@@ -1132,7 +1135,8 @@ function Set-TerminalStackConfig {
         param($Tts = $ccTts)
         Save-TsConfig -LeaderChord $leader -ThemeMode $theme -TmuxPrefix $tmux -Apps $apps -CcTts $Tts `
             -HeadroomEnabled $headroom -HeadroomCursorMode $headroomCursor `
-            -CavemanEnabled $caveman -AgentmemoryEnabled $agentmemory | Out-Null
+            -CavemanEnabled $caveman -AgentmemoryEnabled $agentmemory `
+            -MemoryBackend $memoryBackend | Out-Null
         Export-CcTtsJson
         Invoke-TsSync $src
         Write-Host '==> done.'
@@ -1142,7 +1146,7 @@ function Set-TerminalStackConfig {
         Write-Host 'coding agents (user-global on this computer):'
         Write-Host "  headroom   : $headroom   (Cursor: $headroomCursor)"
         Write-Host "  caveman    : $caveman"
-        Write-Host "  agentmemory: $agentmemory"
+        Write-Host "  agentmemory: $agentmemory   (memory backend: $memoryBackend)"
     }
     $agentsRun = {
         param([string]$Tool, [string]$Verb, [string]$CursorMode = $headroomCursor)
@@ -1275,6 +1279,67 @@ function Set-TerminalStackConfig {
                 & $save $Tts
             }
         }
+        # Which memory system runs. ONE slot: AgentMemory and Headroom do the same
+        # job, and running both leaves two half-filled stores with no way to know
+        # which one holds the answer. POSIX twin: memory_show / memory_set in
+        # bootstrap/ts-config.sh -- keep the verbs and the reported facts aligned.
+        'memory' {
+            $want = if ($Value) { $Value } else { 'status' }
+            if ($want -in 'status','show') {
+                Write-Host "memory backend: $memoryBackend"
+                switch ($memoryBackend) {
+                    'agentmemory' { Write-Host '  AgentMemory remembers (3111), Headroom compresses (8787).' }
+                    'headroom'    { Write-Host '  Headroom remembers and compresses; AgentMemory is not installed.' }
+                    'none'        { Write-Host '  No memory. Headroom still compresses if it is enabled.' }
+                }
+                Write-Host "  agentmemory wiring: $agentmemory   headroom: $headroom"
+                $envFile = Get-TsStackEnvFile 'headroom'
+                if (Test-Path -LiteralPath $envFile) {
+                    $spec = 'docker-compose.yml'
+                    $hit = Get-Content -LiteralPath $envFile | Where-Object { $_ -match '^COMPOSE_FILE=' } | Select-Object -First 1
+                    if ($hit) { $spec = $hit -replace '^COMPOSE_FILE=', '' }
+                    Write-Host "  headroom COMPOSE_FILE: $spec"
+                    # Named rather than silently corrected: a hand-edited COMPOSE_FILE
+                    # is somebody trying to do something, and quietly undoing it is
+                    # worse than saying the two disagree.
+                    if ($spec -ne (Get-TsMemoryComposeSpec $memoryBackend)) {
+                        Write-Warning "COMPOSE_FILE does not match the backend - fix: ts-config memory $memoryBackend"
+                    }
+                }
+                return
+            }
+            if ($want -notin 'agentmemory','headroom','none') {
+                Write-Warning 'usage: ts-config memory [agentmemory|headroom|none|status]'
+                return
+            }
+            $before = $memoryBackend
+            $memoryBackend = $want
+            $agentmemory = if ($want -eq 'agentmemory') { 'on' } else { 'off' }
+            & $save
+            Set-TsMemoryComposeFile $want
+            Write-Host "saved: memoryBackend = $want"
+
+            # The agent wiring is what actually captures, so it moves with the
+            # setting rather than waiting for a second command nobody runs.
+            if ($want -eq 'agentmemory') {
+                if (-not (& $agentsRun agentmemory on)) {
+                    Write-Warning 'AgentMemory wiring failed; retry: ts-config agents agentmemory repair'
+                }
+            } elseif ($before -eq 'agentmemory') {
+                & $agentsRun agentmemory off | Out-Null
+                Write-Host '  AgentMemory hooks removed from Claude/Codex/Cursor.'
+            }
+
+            # Restart rather than print the command: the setting and the running
+            # state must not disagree, and a headroom still running the old compose
+            # file is exactly the silent mismatch this change exists to remove.
+            $stack = Join-Path $src 'bootstrap\ts-stack.ps1'
+            if (Test-Path -LiteralPath $stack) {
+                Write-Host '  restarting headroom so the change takes effect...'
+                & pwsh -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $stack restart headroom | Out-Host
+                if ($LASTEXITCODE -ne 0) { Write-Warning 'headroom restart failed - run: ts-stack restart headroom' }
+            }
+        }
         'agents' {
             $agentTool = $Value
             $verb = if ($Rest.Count) { $Rest[0] } else { '' }
@@ -1294,6 +1359,14 @@ function Set-TerminalStackConfig {
                 & $save
                 if ($headroom -eq 'on') { & $agentsRun headroom repair $mode | Out-Null }
                 & $agentsShow
+                return
+            }
+            # AgentMemory is DERIVED from memoryBackend, so turning it on directly
+            # while the backend is something else would create a two-memory-system
+            # machine -- the combination the wizard is built to make unreachable.
+            if ($agentTool -eq 'agentmemory' -and $verb -eq 'on' -and $memoryBackend -ne 'agentmemory') {
+                Write-Warning "memoryBackend is '$memoryBackend', so AgentMemory is not this machine's memory system."
+                Write-Host   '      Only one runs. To switch:  ts-config memory agentmemory'
                 return
             }
             if (-not $verb) { $verb = 'status' }
@@ -1420,7 +1493,7 @@ function Set-TerminalStackConfig {
             $muxArgs = @(@($Value) + @($Rest) | Where-Object { $_ })
             Invoke-TsMux @muxArgs
         }
-        default { Write-Warning "ts-config: unknown command '$Action' (show, leader, theme, tmux, apps, tts, mux, restore, ghostty, agents, wezterm, wizard)" }
+        default { Write-Warning "ts-config: unknown command '$Action' (show, leader, theme, tmux, apps, tts, mux, restore, ghostty, memory, agents, wezterm, wizard)" }
     }
 }
 Set-Alias -Name ts-config -Value Set-TerminalStackConfig

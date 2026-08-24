@@ -546,6 +546,47 @@ ts_prompt_agent_toggle() {
         "on|on|$onnote"
 }
 
+# ONE question, replacing the two independent "Headroom?" / "AgentMemory?"
+# toggles that used to sit here. They ask about two things that do the same job,
+# so every combination was reachable, including the one nobody wants: two memory
+# systems, each holding half the story.
+#
+# The probes still speak. A recommendation in this repo says what it FOUND, and
+# a machine that already has memories is a different question from a fresh one.
+ts_prompt_memory_backend() {
+    local value=""
+    value="${TS_MEMORY_BACKEND:-}"
+    if [ -n "$value" ]; then
+        case "$value" in agentmemory|headroom|none) echo "$value" ;; *) echo agentmemory ;; esac
+        return
+    fi
+    # A pre-merge unattended install only knew the two booleans. Honour them
+    # rather than ignoring them, so an old script cannot land on a combination
+    # this menu will not offer.
+    if [ -n "${TS_AGENTMEMORY:-}" ] || [ -n "${TS_HEADROOM:-}" ]; then
+        if [ "${TS_AGENTMEMORY:-off}" = on ]; then echo agentmemory; else echo none; fi
+        return
+    fi
+
+    local am_report hr_report
+    am_report="$(ts_probe_agentmemory 2>/dev/null || true)"
+    hr_report="$(ts_probe_headroom 2>/dev/null || true)"
+
+    ts_prompt_choice agentmemory 'Memory and compression:' \
+"  RECOMMENDATION: AgentMemory remembers, Headroom compresses.
+  Only ONE memory system runs. They overlap, and two stores means two
+  half-filled ones with no way to tell which holds the answer you want.
+${am_report}${hr_report}
+  Compression is not a memory feature and is unaffected by this: Headroom
+  compresses by trimming tool schemas and code, and calls no model of its own.
+  Headroom's memory additionally runs Qdrant and Neo4j (about 940 MB); the
+  other answers never pull those images." \
+        'agentmemory|AgentMemory remembers, Headroom compresses|the default' \
+        'headroom|Headroom does both|AgentMemory is not installed' \
+        'none|Headroom compresses only|no memory at all' \
+        'off|Neither|no proxy, no memory'
+}
+
 ts_prompt_headroom_cursor() {
     [ -n "${TS_HEADROOM_CURSOR:-}" ] && { case "$TS_HEADROOM_CURSOR" in mcp|byok|off) echo "$TS_HEADROOM_CURSOR";; *) echo mcp;; esac; return; }
     ts_prompt_choice mcp 'Cursor Headroom mode:' \
@@ -579,7 +620,7 @@ ts_wizard_review() {
     [ "${TS_WIZ_CC_TTS:-off}" = on ] && printf '    TTS daemon       %s\n' "${TS_WIZ_CC_TTS_DAEMON:-off}"
     printf '    Headroom         %s (Cursor: %s)\n' "${TS_WIZ_HEADROOM:-off}" "${TS_WIZ_HEADROOM_CURSOR:-mcp}"
     printf '    Caveman          %s\n' "${TS_WIZ_CAVEMAN:-off}"
-    printf '    AgentMemory      %s\n' "${TS_WIZ_AGENTMEMORY:-off}"
+    printf '    Memory backend   %s\n' "${TS_WIZ_MEMORY_BACKEND:-agentmemory}"
 }
 
 # Ask each question once. Env vars skip their prompt individually.
@@ -592,7 +633,7 @@ ts_wizard_review() {
 # and prompting anyway would block forever when /dev/tty exists but nobody is
 # watching it (CI, a detached install).
 ts_wizard_ask() {
-    local _hr_report="" _hr_def=off _hr_note="" _am_report="" _am_def=off _am_note=""
+    local _mem=""
     TS_WIZ_CC_TTS_MESSAGE="${TS_WIZ_CC_TTS_MESSAGE:-template}"
     TS_WIZ_ASKED=0
 
@@ -671,34 +712,25 @@ ts_wizard_ask() {
 
     if command -v ts_is_headless >/dev/null 2>&1 && ts_is_headless; then
         TS_WIZ_HEADROOM="${TS_HEADROOM:-off}"; TS_WIZ_CAVEMAN="${TS_CAVEMAN:-off}"; TS_WIZ_AGENTMEMORY="${TS_AGENTMEMORY:-off}"
+        TS_WIZ_MEMORY_BACKEND="${TS_MEMORY_BACKEND:-none}"
+        [ "$TS_WIZ_AGENTMEMORY" = on ] && TS_WIZ_MEMORY_BACKEND=agentmemory
     else
-        # Interrogate before offering. Wiring an agent to a service that is not
-        # running fails LATER and silently, so the probe decides the default and
-        # the question says what it actually found.
-        _hr_report="$(ts_probe_headroom 2>/dev/null || true)"
-        if ts_probe_headroom >/dev/null 2>&1; then _hr_def=on; _hr_note='user-global on this computer'
-        else _hr_def=off; _hr_note='proxy is NOT answering — agents would fall back to direct'; fi
-        TS_WIZ_HEADROOM="$(ts_prompt_agent_toggle TS_HEADROOM 'Headroom prompt compression and monitoring?' \
-"  RECOMMENDATION: ${_hr_def}, based on probing this machine just now.
-${_hr_report}
-  ts-stack starts and stops these containers; this installer never does.
-  Turning it on only points Claude/Codex/Cursor at the proxy, and each launch
-  falls back to the provider directly if the proxy is down — so it degrades
-  rather than breaking." "$_hr_def" "$_hr_note")"
-        [ -n "${TS_HEADROOM:-}" ] || TS_WIZ_ASKED=$((TS_WIZ_ASKED + 1))
+        # ONE question. Headroom and AgentMemory used to be asked separately,
+        # which made "both memory systems on" a single keystroke away.
+        #
+        # Interrogate before offering: wiring an agent to a service that is not
+        # running fails LATER and silently, so the probes decide what the
+        # question says about this machine.
+        _mem="$(ts_prompt_memory_backend)"
+        [ -n "${TS_MEMORY_BACKEND:-}" ] || TS_WIZ_ASKED=$((TS_WIZ_ASKED + 1))
+        case "$_mem" in
+            agentmemory) TS_WIZ_MEMORY_BACKEND=agentmemory; TS_WIZ_AGENTMEMORY=on;  TS_WIZ_HEADROOM=on ;;
+            headroom)    TS_WIZ_MEMORY_BACKEND=headroom;    TS_WIZ_AGENTMEMORY=off; TS_WIZ_HEADROOM=on ;;
+            none)        TS_WIZ_MEMORY_BACKEND=none;        TS_WIZ_AGENTMEMORY=off; TS_WIZ_HEADROOM=on ;;
+            *)           TS_WIZ_MEMORY_BACKEND=none;        TS_WIZ_AGENTMEMORY=off; TS_WIZ_HEADROOM=off ;;
+        esac
         TS_WIZ_CAVEMAN="$(ts_prompt_agent_toggle TS_CAVEMAN 'Caveman terse output for all projects?' '  Installs the pinned user-scope plugin/skill; no project files are changed.')"
         [ -n "${TS_CAVEMAN:-}" ] || TS_WIZ_ASKED=$((TS_WIZ_ASKED + 1))
-        _am_report="$(ts_probe_agentmemory 2>/dev/null || true)"
-        if ts_probe_agentmemory >/dev/null 2>&1; then _am_def=on; _am_note='user-global on this computer'
-        else _am_def=off; _am_note='service is NOT answering — nothing would be captured'; fi
-        TS_WIZ_AGENTMEMORY="$(ts_prompt_agent_toggle TS_AGENTMEMORY 'AgentMemory for all projects?' \
-"  RECOMMENDATION: ${_am_def}, based on probing this machine just now.
-${_am_report}
-  ts-stack runs the service; ts-config agents owns only the agent wiring.
-  Note the hooks fail silently by design — they swallow errors and exit 0 — so
-  a machine wired to a service that is not running captures nothing and says
-  nothing about it. That is why this is probed rather than guessed." "$_am_def" "$_am_note")"
-        [ -n "${TS_AGENTMEMORY:-}" ] || TS_WIZ_ASKED=$((TS_WIZ_ASKED + 1))
     fi
     if [ "$TS_WIZ_HEADROOM" = on ]; then
         TS_WIZ_HEADROOM_CURSOR="$(ts_prompt_headroom_cursor)"
@@ -725,7 +757,7 @@ ts_wizard_collect() {
         esac
     done
 
-    export TS_WIZ_LEADER TS_WIZ_THEME TS_WIZ_APPS TS_WIZ_TMUX TS_WIZ_CC_TTS TS_WIZ_CC_TTS_DAEMON TS_WIZ_CC_TTS_MESSAGE TS_WIZ_TERMINALS TS_WIZ_WEZ_MUX TS_WIZ_WEZ_RESTORE TS_WIZ_HEADROOM TS_WIZ_HEADROOM_CURSOR TS_WIZ_CAVEMAN TS_WIZ_AGENTMEMORY TS_WIZ_ATUIN
+    export TS_WIZ_LEADER TS_WIZ_THEME TS_WIZ_APPS TS_WIZ_TMUX TS_WIZ_CC_TTS TS_WIZ_CC_TTS_DAEMON TS_WIZ_CC_TTS_MESSAGE TS_WIZ_TERMINALS TS_WIZ_WEZ_MUX TS_WIZ_WEZ_RESTORE TS_WIZ_HEADROOM TS_WIZ_HEADROOM_CURSOR TS_WIZ_CAVEMAN TS_WIZ_AGENTMEMORY TS_WIZ_MEMORY_BACKEND TS_WIZ_ATUIN
     # These two lines summarise the CHOICES. They are printed before anything is
     # written, and used to read exactly like a save confirmation — which is how a
     # run that lost every answer still looked successful. The bootstraps now

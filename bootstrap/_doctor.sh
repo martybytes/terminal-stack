@@ -234,6 +234,19 @@ ts_doctor() {
         fi
     fi
 
+    # One memory backend, and the derived key must agree with it. Drift here
+    # means something wrote agentmemoryEnabled directly, which is how a machine
+    # ends up half-configured for two memory systems that do the same job.
+    if command -v ts_agent_get >/dev/null 2>&1; then
+        local _mb _am
+        _mb="$(ts_agent_get memoryBackend 2>/dev/null || echo agentmemory)"
+        _am="$(ts_agent_get agentmemoryEnabled 2>/dev/null || echo off)"
+        case "$_mb:$_am" in
+            agentmemory:on|headroom:off|none:off) _ok "memory backend: $_mb" ;;
+            *) _bad "memoryBackend is '$_mb' but agentmemoryEnabled is '$_am' — fix: ts-config memory $_mb" ;;
+        esac
+    fi
+
     # Claude TTS (only when the feature is on). An enabled-but-dead daemon is a
     # failure — the hooks are silently degraded to direct playback and the user
     # chose otherwise.
