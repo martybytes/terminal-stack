@@ -73,7 +73,8 @@ Use `ts-config agents headroom off` for immediate direct mode without stopping
 Docker or deleting data. Use `ts-config agents headroom on` to return: it checks
 authenticated `/stats` access before saving the enabled state. `repair` performs
 the same preflight and repairs registrations. The 8788 MCP sidecar is optional
-and reported independently.
+and reported independently; it is registered only while reachable, and stale
+registrations are removed without disabling the separate 8787 model proxy.
 
 `ts-config agents caveman on` installs the pinned user-scope Claude plugin. Its
 hooks make terse output always-on without replacing this stack's status line.

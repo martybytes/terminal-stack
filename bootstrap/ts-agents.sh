@@ -108,10 +108,20 @@ headroom_status() {
 
 headroom_apply() {
     local url; url="$(json_get headroom.mcpUrl)"
-    command -v claude >/dev/null 2>&1 && { claude mcp remove --scope user headroom >/dev/null 2>&1 || true; claude mcp add --transport http --scope user headroom "$url"; }
-    command -v codex >/dev/null 2>&1 && { codex mcp remove headroom >/dev/null 2>&1 || true; codex mcp add headroom --url "$url"; }
-    if [ "$cursor_mode" = mcp ] && [ -d "$HOME/.cursor" ]; then cursor_mcp headroom "$url"
-    else cursor_mcp headroom ""; fi
+    # The proxy container on 8787 does not provide this optional MCP service.
+    # Do not leave clients pointing at a dead 8788 endpoint: Codex attempts every
+    # registered MCP server at startup and warns on every launch.
+    if am_probe "$url" >/dev/null 2>&1; then
+        command -v claude >/dev/null 2>&1 && { claude mcp remove --scope user headroom >/dev/null 2>&1 || true; claude mcp add --transport http --scope user headroom "$url"; }
+        command -v codex >/dev/null 2>&1 && { codex mcp remove headroom >/dev/null 2>&1 || true; codex mcp add headroom --url "$url"; }
+        if [ "$cursor_mode" = mcp ] && [ -d "$HOME/.cursor" ]; then cursor_mcp headroom "$url"
+        else cursor_mcp headroom ""; fi
+    else
+        command -v claude >/dev/null 2>&1 && claude mcp remove --scope user headroom >/dev/null 2>&1 || true
+        command -v codex >/dev/null 2>&1 && codex mcp remove headroom >/dev/null 2>&1 || true
+        cursor_mcp headroom ""
+        echo "  --  optional Headroom MCP is offline; removed stale client registrations"
+    fi
     if [ "$cursor_mode" = byok ]; then
         echo "Cursor BYOK: set its global provider base URL to http://127.0.0.1:8787 and use a provider API key."
     fi

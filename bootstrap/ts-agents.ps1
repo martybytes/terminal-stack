@@ -128,7 +128,8 @@ function Invoke-TsMcpRegistration([ValidateSet('add','remove')][string]$Verb) {
     $url = [string]$manifest.headroom.mcpUrl
     $claude = Get-TsNativeCommand 'claude'
     $codex = Get-TsNativeCommand 'codex'
-    if ($Verb -eq 'add') {
+    $mcpReady = Test-TsTcp '127.0.0.1' 8788
+    if ($Verb -eq 'add' -and $mcpReady) {
         if ($claude) {
             & $claude mcp remove --scope user headroom *> $null
             Invoke-TsNative $claude @('mcp','add','--transport','http','--scope','user','headroom',$url) | Out-Null
@@ -149,6 +150,7 @@ function Invoke-TsMcpRegistration([ValidateSet('add','remove')][string]$Verb) {
         if ($claude) { & $claude mcp remove --scope user headroom *> $null }
         if ($codex) { & $codex mcp remove headroom *> $null }
         Set-TsCursorMcp headroom $null
+        if ($Verb -eq 'add') { Info 'optional Headroom MCP is offline; removed stale client registrations' }
     }
 }
 
@@ -165,12 +167,14 @@ function Show-TsHeadroomStatus {
         $claudeCfg = Read-TsJson $claudeJson ([ordered]@{})
         if ($claudeCfg.ContainsKey('mcpServers') -and $claudeCfg.mcpServers.ContainsKey('headroom') -and $claudeCfg.mcpServers.headroom.url -eq $mcpUrl) {
             Good 'Claude user-scope MCP registration present'
-        } else { Bad 'Claude user-scope MCP registration missing' }
+        } elseif (Test-TsTcp '127.0.0.1' 8788) { Bad 'Claude user-scope MCP registration missing' }
+        else { Info 'Claude Headroom MCP registration absent while sidecar is offline (expected)' }
     } catch { Bad "could not inspect $claudeJson" }
     $codexCfg = Join-Path $(if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE '.codex' }) 'config.toml'
     $codexText = if (Test-Path -LiteralPath $codexCfg) { Get-Content -LiteralPath $codexCfg -Raw } else { '' }
     if ($codexText -match '(?ms)^\[mcp_servers\.headroom\]\s+url\s*=\s*"http://127\.0\.0\.1:8788/mcp"') { Good 'Codex user-scope MCP registration present' }
-    else { Bad 'Codex user-scope MCP registration missing' }
+    elseif (Test-TsTcp '127.0.0.1' 8788) { Bad 'Codex user-scope MCP registration missing' }
+    else { Info 'Codex Headroom MCP registration absent while sidecar is offline (expected)' }
     if ((Get-TsAgentRuntimeCursorMode) -eq 'mcp' -and (Test-Path -LiteralPath (Join-Path $env:USERPROFILE '.cursor'))) {
         if (Test-TsCursorMcp headroom $mcpUrl) { Good 'Cursor user-scope MCP registration present' }
         else { Bad 'Cursor user-scope MCP registration missing' }

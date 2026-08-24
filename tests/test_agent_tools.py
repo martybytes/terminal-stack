@@ -80,6 +80,17 @@ def test_headroom_enable_requires_authenticated_proxy_and_disable_restores_direc
     assert 'off) run_agent_adapter "$tool" off; ts_agent_set "$key" off' in config
 
 
+def test_offline_optional_headroom_mcp_is_removed_instead_of_registered():
+    adapter = (ROOT / "bootstrap/ts-agents.sh").read_text(encoding="utf-8")
+    ps_adapter = PS_ADAPTER.read_text(encoding="utf-8")
+    apply = adapter[adapter.index("headroom_apply() {"):adapter.index("\ncaveman_rule() {")]
+    assert 'if am_probe "$url"' in apply
+    assert 'codex mcp remove headroom' in apply
+    assert "removed stale client registrations" in apply
+    assert "$mcpReady = Test-TsTcp '127.0.0.1' 8788" in ps_adapter
+    assert "if ($Verb -eq 'add' -and $mcpReady)" in ps_adapter
+
+
 def test_claude_instructions_fit_claude_code_limit():
     assert (ROOT / "CLAUDE.md").stat().st_size <= 40_000
 

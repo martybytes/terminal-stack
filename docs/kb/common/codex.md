@@ -86,7 +86,10 @@ ts-config agents headroom repair  # re-check and repair registrations
 Public `/readyz` and `/health` responses are insufficient because Headroom keeps
 them available even when data-plane authentication would reject every request.
 The optional MCP sidecar on 8788 is reported separately and does not decide
-whether model routing is usable.
+whether model routing is usable. Reconciliation registers it only while it is
+reachable; otherwise it removes stale client registrations so Codex does not
+print an MCP startup failure on every launch. The authenticated 8787 model proxy
+continues to work independently.
 
 Caveman installs only the pinned global `caveman` skill and a marked block in the
 active global `~/.codex/AGENTS.md`. The rest of Caveman's skill collection is not

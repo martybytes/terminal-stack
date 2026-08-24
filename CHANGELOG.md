@@ -6,6 +6,14 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Added
 
+- **Offline Headroom MCP no longer breaks every Codex startup (08/23/2026).**
+  Headroom's model proxy on 8787 and optional MCP sidecar on 8788 are separate
+  services, but reconciliation registered the latter even when it was absent.
+  Codex consequently warned that MCP startup was incomplete on every launch.
+  `headroom on` and `repair` now register MCP only after it answers, and remove
+  stale Claude, Codex, and Cursor registrations while leaving authenticated
+  model proxying enabled.
+
 - **The wizard now asks what the voice should say, and the docs can be found (08/23/2026).** The TTS question was a single on/off; engine, voice and message mode were never asked. It now probes what could actually speak here — Kokoro, Chatterbox, edge-tts, and the new `say` floor — recommends accordingly, and asks a follow-up: `self` (the agent writes its own line), `template` (fixed wording) or `hook` (last message raw). `self` states up front that it appends a marker block to `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md`, an edit that previously happened with no consent. `haiku` and `ollama` are never offered on a host without a daemon.
 
   Two new pages: **`doc ts-config`**, which matched *zero* labels before — the material was inside `common/stack.md`, where nobody would guess — and **`doc tts`**, carrying the cross-platform half that was stranded in `windows/tts-daemon.md` where the picker hides it from every other OS, led by a macOS/Windows support matrix. `_index.md` advertised `windows/` as "pwsh, winget" and omitted the TTS page entirely.
