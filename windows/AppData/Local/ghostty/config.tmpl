@@ -65,11 +65,15 @@ window-padding-balance = true
 window-padding-color = extend
 # NOT window-colorspace = display-p3: macOS colour management only. Windows
 # renders the sRGB palette hexes as authored, which is byte-exact with WezTerm.
-# Matches the macOS twin. background-blur requests the DWM system backdrop on
-# Windows 11 22H2+ and is accepted-but-inert below that; the number is treated
-# as on/off rather than a radius, and is kept at 20 only to match the twin.
-background-opacity = 0.97
-background-blur = 20
+# OPAQUE on Windows, deliberately diverging from the macOS twin's 0.97 + blur.
+# noctty turns `background-opacity < 1` plus a blur into a DWM tabbed backdrop
+# (shouldUseSystemBackdrop in src/apprt/win32.zig), and that backdrop is drawn
+# under the Win32 chrome as well as the terminal — which washes out the overlay
+# surfaces, most visibly the Ctrl+Shift+P command palette, whose text becomes
+# hard to read. WezTerm on Windows is fully opaque for its own reasons, so this
+# also keeps the two terminals matching on this machine. Set 0.97 + blur 20 back
+# if you want the macOS look and can live with the palette.
+background-opacity = 1
 # Windows restores window rect, tabs, splits, profiles, cwds and titles — not
 # terminal contents or child processes. Same line, narrower promise than macOS.
 window-save-state = always
@@ -90,6 +94,30 @@ mouse-hide-while-typing = true
 # Defaults are left alone for the same reason as on macOS: this stack multiplexes
 # INSIDE the terminal with WezTerm and tmux, so Ctrl+Shift+T/W/E and the rest are
 # working keys with nothing to forward them to.
+
+# ── Shell ─────────────────────────────────────────────────────────────────────
+# Pin PowerShell 7, matching windows/.wezterm.lua.tmpl's
+#   config.default_prog = { 'pwsh.exe', '-NoLogo' }
+# so every terminal in this stack opens the same shell.
+#
+# This is NOT cosmetic. noctty's own default order is WSL -> pwsh -> powershell
+# -> cmd, but the shell picker will happily hand you "Windows PowerShell", which
+# is PowerShell 5.1 — a shell this stack does not configure at all: no Starship,
+# no ws/doc/cc, none of $PROFILE. The stack's profile is
+# Documents\PowerShell\Microsoft.PowerShell_profile.ps1, which is pwsh 7 only.
+#
+# 5.1 also runs under its own execution policy, tracked separately from pwsh 7's
+# in the registry, and defaults to Restricted on client Windows — so it refuses
+# to dot-source any profile at all, ours or anyone else's:
+#   "cannot be loaded because running scripts is disabled on this system"
+# Pinning pwsh sidesteps that entirely. If you DO want 5.1 usable, that is a
+# machine setting, not a terminal one:
+#   powershell.exe -Command "Set-ExecutionPolicy -Scope CurrentUser RemoteSigned"
+#
+# The picker still works: a profile's own command overrides this at launch
+# (win32.zig assigns config.command from the chosen profile), so this only sets
+# what a new window opens with.
+command = pwsh.exe -NoLogo
 
 # ── Behaviour ─────────────────────────────────────────────────────────────────
 copy-on-select = clipboard

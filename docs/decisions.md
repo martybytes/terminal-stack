@@ -1657,3 +1657,26 @@ One PowerShell trap this uncovered, unrelated to Ghostty but caught by it: a
 concatenated strings instead of appending and produced the single nonsense key
 `wezterm-nightlyghostty` — leaving the entire question unticked. The `@( )` around
 the switch is load-bearing, and a test pins it.
+
+**The Windows config pins pwsh and goes opaque, and both are deliberate.**
+`command = pwsh.exe -NoLogo` mirrors WezTerm's `default_prog`, because noctty's
+picker will happily hand you "Windows PowerShell" — PowerShell **5.1**, which
+this stack configures not at all (the managed profile is
+`Documents\PowerShell\Microsoft.PowerShell_profile.ps1`, pwsh 7 only). Worse,
+5.1 carries its own execution policy, tracked separately from pwsh 7's, and
+defaults to Restricted on client Windows, so it refuses to dot-source *any*
+profile — ours, or the unrelated `Documents\WindowsPowerShell\profile.ps1` that
+other installers drop there. The result is a wall of `SecurityError` on every
+launch that looks like a terminal fault and is not one. Pinning the shell avoids
+it; raising the policy is a machine decision and stays the user's.
+
+Opacity is the second divergence: the macOS twin's `background-opacity = 0.97`
+plus `background-blur = 20` reads well on a Mac, but on Windows
+`shouldUseSystemBackdrop` turns exactly that pair into a DWM tabbed backdrop, and
+the backdrop is painted under the **Win32 chrome** as well as the terminal
+surface — washing out the overlay surfaces, most visibly the `Ctrl+Shift+P`
+command palette. The Windows config therefore sets `background-opacity = 1` and
+leaves `background-blur` unset, which fails both halves of that condition. It
+also matches WezTerm on Windows, which is fully opaque already. A test pins the
+pair *and* asserts macOS is still translucent, so the divergence stays visible
+rather than quietly converging.

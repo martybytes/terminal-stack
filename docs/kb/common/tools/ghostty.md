@@ -65,6 +65,21 @@ Windows-side copy over `/mnt/c/`). Two differences from macOS worth knowing:
   *nothing* for an unknown key or a bad value. `status` says
   `validate: unavailable on this build` rather than claiming a check it did not
   run.
+- **The shell is pinned to `pwsh.exe -NoLogo`**, matching WezTerm. The picker
+  still offers the others, but do not pick **Windows PowerShell** expecting the
+  stack: that is PowerShell 5.1, which nothing here configures — no Starship, no
+  `ws`/`doc`/`cc` — and it runs under its own execution policy (tracked
+  separately from pwsh 7's), which defaults to Restricted and refuses to
+  dot-source *any* profile:
+  `... cannot be loaded because running scripts is disabled on this system`.
+  If you want 5.1 usable in its own right, that is a machine setting:
+  `powershell.exe -Command "Set-ExecutionPolicy -Scope CurrentUser RemoteSigned"`.
+- **It is opaque here**, unlike the macOS twin's `background-opacity = 0.97` +
+  `background-blur = 20`. noctty turns opacity-below-1 *plus* a blur into a DWM
+  tabbed backdrop, and that backdrop is painted under the Win32 chrome as well as
+  the terminal — which washes out the overlay surfaces, the `Ctrl+Shift+P`
+  command palette worst of all. Put the pair back if you want the macOS look and
+  can live with the palette.
 - **A few macOS directives are dropped**, not carried: `macos-option-as-alt`
   (absent from the Windows option set — silently ignored, not diagnosed),
   `font-thicken` and `window-colorspace` (macOS rendering), and the `cmd+…`

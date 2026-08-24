@@ -1251,6 +1251,38 @@ def test_pwsh_preticked_list_survives_appending():
         "wrap the switch in @( ) or += will concatenate instead of append"
 
 
+def test_windows_ghostty_pins_the_same_shell_as_wezterm():
+    """noctty's shell picker will hand you "Windows PowerShell" — PowerShell 5.1,
+    which this stack does not configure at all (its profile is pwsh-7-only) and
+    which runs under a separately-tracked execution policy that defaults to
+    Restricted, so it refuses to dot-source any profile. WezTerm pins pwsh; this
+    must too, or the two terminals on one machine open different shells."""
+    cfg = (ROOT / WIN_GHOSTTY / "config.tmpl").read_text(encoding="utf-8")
+    body = [l.strip() for l in cfg.splitlines() if not l.strip().startswith("#")]
+    assert any(l.startswith("command =") and "pwsh" in l for l in body), \
+        "the Windows Ghostty config must pin pwsh, like WezTerm's default_prog"
+    wez = (ROOT / "windows/.wezterm.lua.tmpl").read_text(encoding="utf-8")
+    assert "'pwsh.exe'" in wez, "WezTerm's default_prog moved; keep the pair aligned"
+
+
+def test_windows_ghostty_is_opaque_so_the_dwm_backdrop_stays_off():
+    """noctty turns `background-opacity < 1` PLUS a blur into a DWM tabbed
+    backdrop, which is drawn under the Win32 chrome as well as the terminal and
+    washes out the command palette. The macOS twin's 0.97 + blur 20 is therefore
+    a deliberate divergence, not drift."""
+    cfg = (ROOT / WIN_GHOSTTY / "config.tmpl").read_text(encoding="utf-8")
+    body = [l.strip() for l in cfg.splitlines() if not l.strip().startswith("#")]
+    opacity = [l for l in body if l.startswith("background-opacity")]
+    assert opacity == ["background-opacity = 1"], \
+        "anything below 1 re-enables the backdrop: %r" % opacity
+    assert not [l for l in body if l.startswith("background-blur")], \
+        "a blur is the other half of shouldUseSystemBackdrop; leave it unset"
+    # The macOS side keeps the translucent look; this pair is meant to differ.
+    mac = (ROOT / "dot_config/ghostty/config.tmpl").read_text(encoding="utf-8")
+    assert "background-opacity = 0.97" in mac, \
+        "if macOS went opaque too, this test's premise needs revisiting"
+
+
 # ── agentmemory bash port ───────────────────────────────────────────────────────
 
 def _uncommented(text):
