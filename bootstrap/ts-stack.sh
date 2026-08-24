@@ -29,6 +29,7 @@ Usage:
   ts-stack restart [<stack>]   down, then up
   ts-stack logs <stack>        docker compose logs
   ts-stack config [<stack>]    what compose actually resolves to on this machine
+  ts-stack bootstrap           first run here: .env files, secrets, volumes
   ts-stack doctor              engine, .env files, health, ports, toggle drift
   ts-stack migrate-volumes     the one-time rename to the ts- volume names
   ts-stack -h                  this help
@@ -81,7 +82,7 @@ fi
 cmd=""; want_stack=""; tail_n=50; follow=0; all=0; start_engine=0
 while [ $# -gt 0 ]; do
     case "$1" in
-        status|up|down|restart|logs|config|doctor|migrate-volumes)
+        status|up|down|restart|logs|config|doctor|bootstrap|migrate-volumes)
             [ -z "$cmd" ] || { echo "ts-stack: two commands given ($cmd, $1)" >&2; exit 2; }
             cmd="$1"; shift ;;
         --dry-run)      TS_STACK_DRY_RUN=1; shift ;;
@@ -312,6 +313,70 @@ case "$cmd" in
             tss_compose "$s" down || true
             tss_compose "$s" up -d || _bad "restart failed for $s"
         done ;;
+
+    bootstrap)
+        # First run on this machine. Idempotent by design: every step reports
+        # "left untouched" when it has already been done, so re-running after
+        # adding a stack is the normal way to use it.
+        # The library's step/info helpers read TSS_APPLY, so --dry-run maps onto it.
+        TSS_APPLY=1
+        [ "$TS_STACK_DRY_RUN" = 1 ] && TSS_APPLY=0
+        section 'per-machine .env files'
+        for s in $all_stacks; do tss_seed_env "$(tss_stack_dir "$s")"; done
+        if [ -f "$SRC/services/.env" ]; then info 'services/.env already exists — left untouched'
+        elif [ -f "$SRC/services/.env.example" ]; then
+            step 'copy services/.env.example -> .env'
+            [ "$TSS_APPLY" = 1 ] && cp "$SRC/services/.env.example" "$SRC/services/.env"
+        fi
+
+        section 'generated secrets'
+        # headroom refuses to `compose config` without these two: both are
+        # :?-required, deliberately, so a missing one fails loudly instead of
+        # starting an open data plane. They are arbitrary strings, so there is no
+        # reason to make a human paste them out of `openssl rand -hex 32`.
+        python3 - "$SRC/bootstrap/agent-tools.json" <<'PY' | while IFS=$'\t' read -r key placeholder bytes; do
+import json, sys
+cfg = json.load(open(sys.argv[1], encoding="utf-8"))
+for item in cfg.get("headroom", {}).get("generatedSecrets", []):
+    print("%s\t%s\t%s" % (item["key"], item["placeholder"], item["bytes"]))
+PY
+            tss_fill_secret "$(tss_stack_dir headroom)/.env" "$key" "$placeholder" "$bytes"
+        done
+
+        section 'named volumes'
+        # The two external volumes have to exist before the first `up`, because
+        # external means compose will not create them. This is where every memory
+        # you have ever saved lives, so an existing one is never touched.
+        vols='ts-agentmemory-data'
+        case "$(tss_compose_files "$(tss_stack_dir agentmemory)" | tr '\n' ' ')" in
+            *docker-compose.console.yml*) vols="$vols ts-agentmemory-console-history" ;;
+            *) info 'agentmemory .env selects no console profile — skipping the console volume' ;;
+        esac
+        for v in $vols; do
+            if [ "$TSS_APPLY" = 0 ]; then step "docker volume create $v (if absent)"; continue; fi
+            if docker volume inspect "$v" >/dev/null 2>&1; then
+                info "'$v' already exists — left untouched (this is where your data lives)"
+                continue
+            fi
+            # Creating it here would DEFEAT the migration guard: pending pairs are
+            # only reported while the new name is absent, so an empty replacement
+            # turns "your memories are in the old volume" into a silent success.
+            legacy=""
+            for pair in $(tss_volume_renames | tr ' ' ':'); do
+                case "$pair" in *:"$v") legacy="${pair%%:*}" ;; esac
+            done
+            if [ -n "$legacy" ] && docker volume inspect "$legacy" >/dev/null 2>&1; then
+                _bad "'$legacy' still holds this stack's data — NOT creating an empty '$v'"
+                _note 'run:  ts-stack migrate-volumes'
+                continue
+            fi
+            step "docker volume create $v"
+            docker volume create "$v" >/dev/null || _bad "docker volume create failed for $v"
+        done
+
+        section 'next'
+        _note 'ts-stack up        start the stacks your settings enable'
+        _note 'ts-stack doctor    check the engine, the .env files and the ports' ;;
 
     migrate-volumes)
         # With the engine down `docker volume inspect` fails for BOTH names, so an

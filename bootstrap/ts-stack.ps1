@@ -40,6 +40,7 @@ Usage:
   ts-stack restart [<stack>]   down, then up
   ts-stack logs <stack>        docker compose logs
   ts-stack config [<stack>]    what compose actually resolves to on this machine
+  ts-stack bootstrap           first run here: .env files, secrets, volumes
   ts-stack doctor              engine, .env files, health, ports, toggle drift
   ts-stack migrate-volumes     the one-time rename to the ts- volume names
   ts-stack -h                  this help
@@ -143,6 +144,51 @@ function Get-TsEngineAdvice([string]$Kind) {
         default  { @('the engine is not answering.',
                      '  fix:  start Docker Desktop, or re-run with --start-engine') }
     }
+}
+
+# ── first-run setup ─────────────────────────────────────────────────────────────
+function Step([string]$m) {
+    if ($DryRun) { Write-Host "[would] $m" -ForegroundColor Yellow }
+    else { Write-Host "[DO]    $m" -ForegroundColor Green }
+}
+
+# A stack with a .env.example and no .env is not "unconfigured", it is
+# MIS-configured: compose falls back to the base file only, which for kokoro
+# means starting the GPU image with no GPU.
+function Initialize-TsStackEnv([string]$Name) {
+    $dir = Get-TsStackDir $Name
+    $ex = Join-Path $dir '.env.example'
+    $env_ = Join-Path $dir '.env'
+    if (-not (Test-Path -LiteralPath $ex)) { return }
+    if (Test-Path -LiteralPath $env_) { Note "$Name/.env already exists — left untouched"; return }
+    Step "copy $Name/.env.example -> .env"
+    if (-not $DryRun) {
+        Copy-Item -LiteralPath $ex -Destination $env_
+        Note 'seeded with the default profile — review it before starting the stack'
+    }
+}
+
+# Replace a still-placeholder value with real random bytes. Never rotates a value
+# somebody set: that is what makes a re-run idempotent, and what stops a second
+# bootstrap silently invalidating a live proxy token.
+function Set-TsGeneratedSecret([string]$File, [string]$Key, [string]$Placeholder, [int]$Bytes) {
+    if (-not (Test-Path -LiteralPath $File)) { return }
+    $lines = Get-Content -LiteralPath $File
+    $current = ($lines | Where-Object { $_ -match "^$Key=" } | Select-Object -First 1) -replace "^$Key=", ''
+    if ($current -and $current -ne $Placeholder) { Note "$Key already set — left untouched"; return }
+    Step "generate $Key ($Bytes random bytes)"
+    if ($DryRun) { return }
+    # Get-Random is NOT a CSPRNG. This is a credential.
+    $buf = [byte[]]::new($Bytes)
+    [System.Security.Cryptography.RandomNumberGenerator]::Fill($buf)
+    $secret = -join ($buf | ForEach-Object { $_.ToString('x2') })
+    # Collect into an array and pass -Value: a Where-Object piped straight into
+    # Set-Content writes nothing at all when the pipeline is empty.
+    $out = @($lines | ForEach-Object { if ($_ -match "^$Key=") { "$Key=$secret" } else { $_ } })
+    Set-Content -LiteralPath $File -Value $out
+    # A fingerprint, never the value: a secret echoed to a terminal lives in
+    # scrollback, and this one is also in `docker logs` until rotation.
+    Note "$Key set ($($secret.Substring(0,6))...$($secret.Substring($secret.Length-4)))"
 }
 
 # ── the pre-ts- volume names ────────────────────────────────────────────────────
@@ -338,6 +384,54 @@ switch ($Command) {
             Invoke-TsStackCompose $s @('down') | Out-Null
             if ((Invoke-TsStackCompose $s @('up', '-d')) -ne 0) { Bad "restart failed for $s" }
         }
+    }
+
+    'bootstrap' {
+        # First run on this machine. Idempotent by design: every step reports
+        # "left untouched" when it has already been done.
+        Section 'per-machine .env files'
+        foreach ($s in $stackNames) { Initialize-TsStackEnv $s }
+
+        Section 'generated secrets'
+        # headroom refuses to `compose config` without these two: both are
+        # :?-required, deliberately, so a missing one fails loudly instead of
+        # starting an open data plane. They are arbitrary strings, so there is no
+        # reason to make a human paste them out of `openssl rand -hex 32`.
+        $manifest = Get-Content -Raw (Join-Path $PSScriptRoot 'agent-tools.json') | ConvertFrom-Json
+        foreach ($item in @($manifest.headroom.generatedSecrets)) {
+            Set-TsGeneratedSecret (Join-Path (Get-TsStackDir 'headroom') '.env') `
+                $item.key $item.placeholder $item.bytes
+        }
+
+        Section 'named volumes'
+        # external means compose will NOT create these, and this is where every
+        # memory you have ever saved lives.
+        $vols = @('ts-agentmemory-data')
+        $amEnv = Join-Path (Get-TsStackDir 'agentmemory') '.env'
+        if ((Test-Path -LiteralPath $amEnv) -and
+            (Select-String -LiteralPath $amEnv -Pattern 'docker-compose\.console\.yml' -Quiet)) {
+            $vols += 'ts-agentmemory-console-history'
+        } else { Note 'agentmemory .env selects no console profile — skipping the console volume' }
+        foreach ($v in $vols) {
+            if ($DryRun) { Step "docker volume create $v (if absent)"; continue }
+            if (Test-TsVolume $v) { Note "'$v' already exists — left untouched (this is where your data lives)"; continue }
+            # Creating it here would DEFEAT the migration guard: pending pairs are
+            # only reported while the new name is absent, so an empty replacement
+            # turns "your memories are in the old volume" into a silent success.
+            $legacy = ($VOLUME_RENAMES.GetEnumerator() | Where-Object { $_.Value -eq $v } | Select-Object -First 1).Key
+            if ($legacy -and (Test-TsVolume $legacy)) {
+                Bad "'$legacy' still holds this stack's data — NOT creating an empty '$v'"
+                Note 'run:  ts-stack migrate-volumes'
+                continue
+            }
+            Step "docker volume create $v"
+            & docker volume create $v *> $null
+            if ($LASTEXITCODE -ne 0) { Bad "docker volume create failed for $v" }
+        }
+
+        Section 'next'
+        Note 'ts-stack up        start the stacks your settings enable'
+        Note 'ts-stack doctor    check the engine, the .env files and the ports'
     }
 
     'migrate-volumes' {

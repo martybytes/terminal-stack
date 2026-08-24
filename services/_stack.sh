@@ -341,7 +341,9 @@ const fs = require("node:fs");
 // `node -` keeps "-" as argv[1], so the real arguments start at 2.
 const [f, re, rep] = process.argv.slice(2);
 const before = fs.readFileSync(f, "utf8");
-const after = before.replace(new RegExp(re, "g"), rep);
+// "m" as well as "g": callers anchor line-oriented patterns with ^ and $, and
+// without it ^ only ever matches the start of the file.
+const after = before.replace(new RegExp(re, "gm"), rep);
 if (after === before) process.exit(3);
 if (!after.length) process.exit(4);
 const tmp = f + ".tmp" + process.pid;
@@ -873,4 +875,45 @@ tss_volume_copy() {                        # <old> <new>
         return 1
     fi
     pass "$old -> $new ($after files)"
+}
+
+# ── first-run setup ──────────────────────────────────────────────────────────
+# Seed <stack>/.env from its .env.example. A stack with a .env.example and no
+# .env is not "unconfigured", it is MIS-configured: compose falls back to the
+# base file only, which for kokoro means starting the GPU image with no GPU.
+tss_seed_env() {                           # <stack-dir>
+    local ex="$1/.env.example" env="$1/.env"
+    [ -f "$ex" ] || return 0
+    if [ -f "$env" ]; then
+        info "$(basename "$1")/.env already exists — left untouched"
+        return 0
+    fi
+    step "copy $(basename "$1")/.env.example -> .env"
+    [ "$TSS_APPLY" = 1 ] || return 0
+    cp "$ex" "$env" || return 1
+    info 'seeded with the default profile — review it before starting the stack'
+}
+
+# Replace a still-placeholder value with real random bytes. Never rotates a value
+# somebody set: that is what makes a re-run idempotent, and what stops a second
+# bootstrap silently invalidating a live proxy token.
+tss_fill_secret() {                        # <env-file> <key> <placeholder> <bytes>
+    local file="$1" key="$2" placeholder="$3" bytes="${4:-32}" current secret
+    [ -f "$file" ] || return 0
+    current="$(tss_env_value "$file" "$key" 2>/dev/null || true)"
+    if [ -n "$current" ] && [ "$current" != "$placeholder" ]; then
+        info "$key already set — left untouched"
+        return 0
+    fi
+    step "generate $key ($bytes random bytes)"
+    [ "$TSS_APPLY" = 1 ] || return 0
+    secret="$(tss_rand_hex "$bytes")" || { warn "could not generate $key"; return 1; }
+    # tss_replace_in_file, not sed: `sed -i` needs -i '' on BSD and rejects it on
+    # GNU, and sed appends a trailing newline to a file that lacked one. Its
+    # pattern is a JS regex, so anchor to the start of a line and match the rest
+    # of it rather than trusting the current value to be regex-safe.
+    tss_replace_in_file "$file" "^$key=.*$" "$key=$secret" || return 1
+    # A fingerprint, never the value: a secret echoed to a terminal lives in
+    # scrollback, and this one is also in `docker logs` until rotation.
+    info "$key set (${secret%"${secret#??????}"}...${secret#"${secret%????}"})"
 }
