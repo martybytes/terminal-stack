@@ -101,14 +101,6 @@ networks:
   default:
     name: ts-agentmemory-net
 
-networks:
-  # Named, not left as ts-agentmemory_default. agent007memory joins this network
-  # from its own compose project to reach ts-agentmemory-server by name, and a
-  # project-derived default name would change under it the day this project is
-  # renamed. Anything that reaches across projects has to be pinned.
-  default:
-    name: ts-agentmemory-net
-
 volumes:
   # Declared external so the volume name is stable and identical on every
   # machine — no project-name prefix, and no per-machine edit to this file.
