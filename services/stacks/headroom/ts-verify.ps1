@@ -41,7 +41,12 @@ try {
         -ContentType 'application/json' -Body '{"model":"x","messages":[]}'
     $body = $r.Content
 } catch {
-    if ($_.Exception.Response) {
+    # ErrorDetails FIRST. pwsh 7 throws on 4xx with the response stream already
+    # consumed, so GetResponseStream() throws and the body reads as EMPTY -- which
+    # made this check report a refused connection against a proxy that had just
+    # answered 401 {"error":"unauthorized"}. The stream stays as the 5.1 fallback.
+    if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $body = $_.ErrorDetails.Message }
+    elseif ($_.Exception.Response) {
         try { $body = (New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())).ReadToEnd() } catch {}
     }
 }
