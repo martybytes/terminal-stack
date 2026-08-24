@@ -292,17 +292,17 @@ export function ProjectCard({
             </span>
           </div>
 
-          <div className="grid grid-cols-[minmax(0,0.72fr)_minmax(0,0.9fr)_minmax(0,1.38fr)] gap-1.5">
+          <div className="grid grid-cols-3 gap-1.5">
             <div className="min-w-0 rounded-md border border-line bg-side/55 px-1.5 py-1.5">
-              <div className="whitespace-nowrap font-display text-[10px] font-medium leading-tight text-fg3" data-readable-text><HelpTerm id="save-reliability">Saved</HelpTerm></div>
+              <div className="font-display text-[10px] font-medium leading-tight text-fg3 [overflow-wrap:anywhere]" data-readable-text><HelpTerm id="save-reliability">Saved</HelpTerm></div>
               <div className="whitespace-nowrap font-display text-sm font-bold text-turq" data-readable-text>{fmtNum(storedCount(summary.memory))}<span className="text-[10px] font-normal text-fg3">/{fmtNum(storageAttempts(summary.memory))}</span></div>
             </div>
             <div className="min-w-0 rounded-md border border-line bg-side/55 px-1.5 py-1.5">
-              <div className="whitespace-nowrap font-display text-[10px] font-medium leading-tight text-fg3" data-readable-text><HelpTerm id="automatic-recall">Recall rate</HelpTerm></div>
+              <div className="font-display text-[10px] font-medium leading-tight text-fg3 [overflow-wrap:anywhere]" data-readable-text><HelpTerm id="automatic-recall">Recall rate</HelpTerm></div>
               <div className="whitespace-nowrap font-display text-sm font-bold text-peri" data-readable-text>{automaticRate}</div>
             </div>
             <div className="min-w-0 rounded-md border border-line bg-side/55 px-1.5 py-1.5">
-              <div className="whitespace-nowrap font-display text-[10px] font-medium leading-tight text-fg3" data-readable-text><HelpTerm id="estimated-context-avoided">Context avoided</HelpTerm></div>
+              <div className="font-display text-[10px] font-medium leading-tight text-fg3 [overflow-wrap:anywhere]" data-readable-text><HelpTerm id="estimated-context-avoided">Context avoided</HelpTerm></div>
               <div className="whitespace-nowrap font-display text-sm font-bold text-fg1" title={avoidedExact} aria-label={avoidedExact ?? "No modeled context avoided"} data-readable-text>{avoided}</div>
             </div>
           </div>
@@ -323,7 +323,7 @@ export function ProjectCard({
                   <span className="text-[10px] text-fg3">No attributed activity</span>
                 )}
               </div>
-              <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 font-mono text-[10px] leading-[1.25] text-fg3">
+              <div className="grid gap-x-2 gap-y-0.5 font-mono text-[10px] leading-[1.25] text-fg3 [grid-template-columns:repeat(auto-fit,minmax(84px,1fr))]">
                 <span className="whitespace-nowrap"><span className="text-fg1">{fmtNum(summary.requestsPerMinute)}</span> rpm</span>
                 <span className="whitespace-nowrap"><span className="text-turq">{fmtNum(summary.economics.automaticHits)}/{fmtNum(summary.economics.automaticAttempts)}</span> auto</span>
                 <span className="whitespace-nowrap"><span className="text-peri">{fmtNum(summary.lifecycle.observation_capture + summary.lifecycle.memory_save)}</span> captured</span>
@@ -627,7 +627,7 @@ export default function Projects() {
           />
         </Card>
       ) : (
-        <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-2 2xl:grid-cols-3">
+        <div className="grid gap-3.5 [grid-template-columns:repeat(auto-fit,minmax(380px,1fr))]">
           {visibleProjects.map((project) => (
             <ProjectCard
               key={project.project}

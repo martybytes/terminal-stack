@@ -245,7 +245,24 @@ interface StoredPreferences {
   version: 2;
   theme: ThemeMode;
   helpMode: HelpMode;
+  /** Whole-console zoom, percent. GLOBAL rather than per page: a zoom that
+   *  resets when you change page is not a zoom, it is a per-page layout tweak,
+   *  and it is why people reached for the browser's zoom instead. */
+  scale: number;
   pages: Partial<Record<PageId, Partial<PagePreference>>>;
+}
+
+/** Wider than the old per-page 80-125: this is a replacement for browser zoom,
+ *  and browser zoom goes from 25% to 500%. 5% steps because that is the size of
+ *  adjustment that actually fixes "one row is clipped". */
+export const SCALE_MIN = 50;
+export const SCALE_MAX = 200;
+export const SCALE_STEP = 5;
+
+export function clampScale(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 100;
+  const stepped = Math.round(value / SCALE_STEP) * SCALE_STEP;
+  return Math.min(SCALE_MAX, Math.max(SCALE_MIN, stepped));
 }
 
 function defaultPage(id: PageId): PagePreference {
@@ -311,7 +328,7 @@ function normalizePage(id: PageId, raw?: Partial<PagePreference>): PagePreferenc
 }
 
 function loadPreferences(): StoredPreferences {
-  const fallback: StoredPreferences = { version: 2, theme: "dark", helpMode: "adaptive", pages: {} };
+  const fallback: StoredPreferences = { version: 2, theme: "dark", helpMode: "adaptive", scale: 100, pages: {} };
   if (typeof window === "undefined") return fallback;
   try {
     const parsed = JSON.parse(window.localStorage.getItem(PREFERENCES_KEY) ?? "null") as (Partial<Omit<StoredPreferences, "version">> & { version?: number }) | null;
@@ -320,7 +337,17 @@ function loadPreferences(): StoredPreferences {
     const helpMode: HelpMode = parsed.helpMode === "minimal" || parsed.helpMode === "off" ? parsed.helpMode : "adaptive";
     const pages: StoredPreferences["pages"] = {};
     for (const id of Object.keys(PAGE_DEFINITIONS) as PageId[]) pages[id] = normalizePage(id, parsed.pages?.[id]);
-    return { version: 2, theme, helpMode, pages };
+    // Migrate the old per-page scale: whichever page was zoomed becomes the
+    // global one, so an existing preference is honoured rather than silently
+    // reset to 100 the first time this build loads.
+    let scale = clampScale((parsed as { scale?: unknown }).scale);
+    if (typeof (parsed as { scale?: unknown }).scale !== "number") {
+      const zoomed = Object.values(parsed.pages ?? {})
+        .map((page) => (page as Partial<PagePreference> | undefined)?.scale)
+        .find((value) => typeof value === "number" && value !== 100);
+      if (typeof zoomed === "number") scale = clampScale(zoomed);
+    }
+    return { version: 2, theme, helpMode, scale, pages };
   } catch {
     return fallback;
   }
@@ -339,6 +366,9 @@ interface PreferencesContextValue {
   updatePage(id: PageId, updater: (current: PagePreference) => PagePreference): void;
   setTheme(theme: ThemeMode): void;
   setHelpMode(mode: HelpMode): void;
+  scale: number;
+  setScale(value: number): void;
+  nudgeScale(delta: number): void;
   resetPage(id: PageId): void;
   applyFocused(id: PageId): void;
   resetAll(): void;
@@ -387,12 +417,14 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
   }, []);
   const setTheme = useCallback((theme: ThemeMode) => setPreferences((current) => ({ ...current, theme })), []);
   const setHelpMode = useCallback((helpMode: HelpMode) => setPreferences((current) => ({ ...current, helpMode })), []);
+  const setScale = useCallback((value: number) => setPreferences((current) => ({ ...current, scale: clampScale(value) })), []);
+  const nudgeScale = useCallback((delta: number) => setPreferences((current) => ({ ...current, scale: clampScale(clampScale(current.scale) + delta) })), []);
   const resetPage = useCallback((id: PageId) => setPreferences((current) => ({ ...current, pages: { ...current.pages, [id]: defaultPage(id) } })), []);
   const applyFocused = useCallback((id: PageId) => {
     const focused = PAGE_DEFINITIONS[id].focused ?? {};
     setPreferences((current) => ({ ...current, pages: { ...current.pages, [id]: normalizePage(id, { ...defaultPage(id), ...focused }) } }));
   }, []);
-  const resetAll = useCallback(() => setPreferences({ version: 2, theme: "dark", helpMode: "adaptive", pages: {} }), []);
+  const resetAll = useCallback(() => setPreferences({ version: 2, theme: "dark", helpMode: "adaptive", scale: 100, pages: {} }), []);
   const registerProjects = useCallback((id: PageId, values: string[]) => {
     const next = [...new Set(values.filter(Boolean))].sort((a, b) => a.localeCompare(b));
     setProjects((current) => JSON.stringify(current[id] ?? []) === JSON.stringify(next) ? current : { ...current, [id]: next });
@@ -400,8 +432,9 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<PreferencesContextValue>(() => ({
     preferences, theme: preferences.theme, helpMode: preferences.helpMode, page, updatePage, setTheme, setHelpMode, resetPage, applyFocused, resetAll,
+    scale: clampScale(preferences.scale), setScale, nudgeScale,
     drawerPage, openDrawer: setDrawerPage, closeDrawer: () => setDrawerPage(null), projects, registerProjects,
-  }), [preferences, page, updatePage, setTheme, setHelpMode, resetPage, applyFocused, resetAll, drawerPage, projects, registerProjects]);
+  }), [preferences, page, updatePage, setTheme, setHelpMode, setScale, nudgeScale, resetPage, applyFocused, resetAll, drawerPage, projects, registerProjects]);
 
   return <PreferencesContext.Provider value={value}>{children}{drawerPage ? <CustomizerDrawer pageId={drawerPage} /> : null}</PreferencesContext.Provider>;
 }
@@ -448,7 +481,8 @@ function Toggle({ on, onChange, disabled = false }: { on: boolean; onChange: () 
 }
 
 function CustomizerDrawer({ pageId }: { pageId: PageId }) {
-  const { theme, setTheme, helpMode, setHelpMode, page, updatePage, resetPage, applyFocused, resetAll, closeDrawer, projects } = usePreferences();
+  const context = usePreferences();
+  const { theme, setTheme, helpMode, setHelpMode, page, updatePage, resetPage, applyFocused, resetAll, closeDrawer, projects } = context;
   const definition = PAGE_DEFINITIONS[pageId];
   const preference = page(pageId);
   const [dragged, setDragged] = useState<string | null>(null);
@@ -488,8 +522,9 @@ function CustomizerDrawer({ pageId }: { pageId: PageId }) {
             <label className="text-[11px] text-fg3"><span className="mb-1.5 block font-display font-semibold uppercase tracking-[0.05em]">Density</span><select value={preference.density} onChange={(event) => update({ density: event.target.value as PageDensity })} className="w-full rounded-lg border border-line bg-side px-3 py-2 text-xs text-fg1"><option value="comfortable">Comfortable</option><option value="compact">Compact</option></select></label>
           </section>
           <section>
-            <div className="mb-1 flex items-center justify-between text-[11px] text-fg3"><span className="font-display font-semibold uppercase tracking-[0.05em]">UI scale</span><span className="font-mono text-fg1">{preference.scale}%</span></div>
-            <input type="range" min="80" max="125" step="5" value={preference.scale} onChange={(event) => update({ scale: Number(event.target.value) })} className="w-full accent-turq" />
+            <div className="mb-1 flex items-center justify-between text-[11px] text-fg3"><span className="font-display font-semibold uppercase tracking-[0.05em]">UI scale</span><span className="font-mono text-fg1">{context.scale}%</span></div>
+            <input type="range" min={SCALE_MIN} max={SCALE_MAX} step={SCALE_STEP} value={context.scale} onChange={(event) => context.setScale(Number(event.target.value))} className="w-full accent-turq" />
+            <div className="mt-1 text-[10px] text-fg3">Applies to every page. The same control is in the sidebar.</div>
           </section>
           {(definition.counts ?? []).length > 0 ? <section className="grid grid-cols-2 gap-3">{definition.counts?.map((count) => <label key={count.id} className="text-[11px] text-fg3"><span className="mb-1.5 block font-display font-semibold uppercase tracking-[0.05em]">{count.label}</span><input type="number" min={count.min} max={count.max} step={count.step ?? 1} value={preference.counts[count.id] ?? count.defaultValue} onChange={(event) => update({ counts: { ...preference.counts, [count.id]: Number(event.target.value) } })} className="w-full rounded-lg border border-line bg-side px-3 py-2 font-mono text-xs text-fg1" /></label>)}</section> : null}
           <section>

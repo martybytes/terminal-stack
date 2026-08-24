@@ -238,7 +238,7 @@ export default function Overview() {
           />
         </Card>
       ) : (
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 2xl:grid-cols-6" data-testid="overview-projects">
+        <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(260px,1fr))]" data-testid="overview-projects">
           {latestProjects.map((project: ProjectSummary) => (
             <ProjectCard
               key={project.project}
@@ -296,7 +296,7 @@ export default function Overview() {
               </div>
               <div className="text-[10px] text-fg3">rolling {Math.round(llmSnapshot.windowMs / 60_000)} minutes</div>
             </div>
-            <div className="grid grid-cols-1 gap-3 xl:grid-cols-2 2xl:grid-cols-4">
+            <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(240px,1fr))]">
               {llmSnapshot.functions.map((summary) => (
                 (() => {
                   const throughput = llmOutputThroughput(llmSnapshot.calls, { since: now - llmSnapshot.windowMs, family: llmFamilyForFunction(summary.functionId) });
