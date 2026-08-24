@@ -50,7 +50,7 @@ printf '%smigrate-durable-llm  mode=%s  stack=%s%s\n' "$C_WHITE" "$TSS_MODE" "$s
 
 section 'Preflight'
 docker compose config --quiet || die 'docker compose config failed'
-docker volume inspect agentmemory_iii-data >/dev/null 2>&1 || die 'Docker volume agentmemory_iii-data does not exist'
+docker volume inspect ts-agentmemory-data >/dev/null 2>&1 || die 'Docker volume ts-agentmemory-data does not exist'
 secret="$(docker compose exec -T agentmemory cat /data/.hmac 2>/dev/null | tr -d '\r\n' || true)"
 [ -n "$secret" ] || die 'could not read AgentMemory HMAC before backup'
 info 'compose config, external volume, and HMAC are present'
@@ -74,7 +74,7 @@ if [ "$TSS_APPLY" = 1 ]; then
     image="$(tss_compose_image "$stack_dir" agentmemory)" || die 'could not resolve the agentmemory image'
     info "backup image: $image"
     docker run --rm --entrypoint sh \
-        -v 'agentmemory_iii-data:/source:ro' -v "${resolved_backup}:/backup" \
+        -v 'ts-agentmemory-data:/source:ro' -v "${resolved_backup}:/backup" \
         "$image" -c 'tar -C /source -czf /backup/agentmemory-volume.tgz .' \
         || die 'volume backup failed; stack remains stopped'
 

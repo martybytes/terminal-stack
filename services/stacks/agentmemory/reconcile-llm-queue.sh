@@ -46,7 +46,7 @@ done
 
 stack_dir="$SCRIPT_DIR"
 compose_file="$stack_dir/docker-compose.yml"
-volume_name='agentmemory_iii-data'
+volume_name='ts-agentmemory-data'
 API='http://127.0.0.1:3110/agentmemory'
 [ -f "$compose_file" ] || die "docker-compose.yml missing in $stack_dir"
 cd "$stack_dir"

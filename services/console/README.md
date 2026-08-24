@@ -324,7 +324,7 @@ The two script sets are twins and take the same steps; `docker-local` keeps the 
 canonical and ports changes both ways. `--local` / `-Local` changes the Docker build context; it
 does not bind mount the checkout or enable hot reload. Re-run the command after each local change.
 The deployed console remains an immutable compiled image. It mounts AgentMemory's volume read-only
-for the HMAC secret and a separate external `agent007memory_history` volume read/write at `/data`
+for the HMAC secret and a separate external `ts-agentmemory-console-history` volume read/write at `/data`
 for aggregate reporting.
 
 When OpenAI inference is active, enable authoritative costs by creating a dedicated **Agentmemory** project, putting its inference
@@ -361,19 +361,19 @@ For a consistent backup, stop only the console, archive its history volume, then
 
 ```bash
 docker compose stop console
-docker run --rm -v agent007memory_history:/data:ro -v "$PWD":/backup alpine tar czf /backup/agent007memory-history.tgz -C /data .
+docker run --rm -v ts-agentmemory-console-history:/data:ro -v "$PWD":/backup alpine tar czf /backup/agent007memory-history.tgz -C /data .
 docker compose start console
 ```
 
 ```powershell
 docker compose stop console
-docker run --rm -v agent007memory_history:/data:ro -v ${PWD}:/backup alpine tar czf /backup/agent007memory-history.tgz -C /data .
+docker run --rm -v ts-agentmemory-console-history:/data:ro -v ${PWD}:/backup alpine tar czf /backup/agent007memory-history.tgz -C /data .
 docker compose start console
 ```
 
 Restore only into an empty volume while the console is stopped. The volume is external, so
 `docker compose down -v` does not remove it; only an explicit
-`docker volume rm agent007memory_history` does.
+`docker volume rm ts-agentmemory-console-history` does.
 
 ### Platform notes
 

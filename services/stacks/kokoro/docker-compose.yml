@@ -5,13 +5,20 @@
 # in only when your .env says to. Which files load, and which image is pulled,
 # are both selected in .env — copy .env.example to .env and pick your profile.
 # See README.md ("Picking your machine profile").
+# The compose PROJECT name, pinned here rather than inherited from the
+# directory: every container, network and default volume this stack creates
+# is then prefixed ts-, so `docker ps` and `docker network ls` show at a
+# glance what belongs to terminal-stack and nothing can collide with an
+# unrelated project of the same name.
+name: ts-kokoro
+
 services:
   kokoro:
     # container_name is load-bearing on Windows: claude-local's
     # tools/windows/diagnostics/gpu-tts-diagnose.ps1 and gpu-tts-quiet.ps1 find
     # this container by the literal name "kokoro". Those tools are Windows- and
     # NVIDIA-only, but keep the name stable everywhere so the stacks match.
-    container_name: kokoro
+    container_name: ts-kokoro-tts
 
     # Default targets Blackwell (RTX 50-series, sm_120). Kokoro-FastAPI's ':latest'
     # GPU tag ships a CUDA 12.6 PyTorch build whose kernels only cover GTX 900

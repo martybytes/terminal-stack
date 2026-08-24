@@ -89,16 +89,16 @@ build error.
 
 ```yaml
 volumes:
-  agentmemory_iii-data:
+  ts-agentmemory-data:
     external: true
-  agent007memory_history:
+  ts-agentmemory-console-history:
     external: true
 ```
 
 `external: true` means Compose will **use** the volumes but never **create** them. The upside: their
 names are stable on every machine, with no project-name prefix and no per-machine edit. The cost:
 something has to create them first — `..\bootstrap.ps1` creates both. `update-console.sh --apply`
-also creates `agent007memory_history` when deploying to an existing machine.
+also creates `ts-agentmemory-console-history` when deploying to an existing machine.
 
 Skip bootstrap on a new machine and `docker compose up` fails immediately with an external-volume
 error. That's the intended failure: loud, not silent.
@@ -108,17 +108,17 @@ The volume holds everything that matters — `state_store.db` (the memories them
 
 ```powershell
 # tar the volume into the current directory
-docker run --rm -v agentmemory_iii-data:/data -v ${PWD}:/backup alpine tar czf /backup/agentmemory-data.tgz -C /data .
+docker run --rm -v ts-agentmemory-data:/data -v ${PWD}:/backup alpine tar czf /backup/agentmemory-data.tgz -C /data .
 
 # restore into a fresh volume
-docker volume create agentmemory_iii-data
-docker run --rm -v agentmemory_iii-data:/data -v ${PWD}:/backup alpine tar xzf /backup/agentmemory-data.tgz -C /data
+docker volume create ts-agentmemory-data
+docker run --rm -v ts-agentmemory-data:/data -v ${PWD}:/backup alpine tar xzf /backup/agentmemory-data.tgz -C /data
 ```
 
-`docker compose down` never touches it. `docker volume rm agentmemory_iii-data` does, and there is
+`docker compose down` never touches it. `docker volume rm ts-agentmemory-data` does, and there is
 no undo.
 
-`agent007memory_history` is separate and contains only the console's SQLite database and WAL files.
+`ts-agentmemory-console-history` is separate and contains only the console's SQLite database and WAL files.
 It retains one year of aggregate request/project/agent, observation, LLM provider/model/family token
 and estimated-cost counters, authoritative daily provider costs, and process counts for
 the Reports page. It contains no prompts, responses, request bodies, paths, memory content,
@@ -127,7 +127,7 @@ consistent snapshot:
 
 ```powershell
 docker compose stop console
-docker run --rm -v agent007memory_history:/data:ro -v ${PWD}:/backup alpine tar czf /backup/agent007memory-history.tgz -C /data .
+docker run --rm -v ts-agentmemory-console-history:/data:ro -v ${PWD}:/backup alpine tar czf /backup/agent007memory-history.tgz -C /data .
 docker compose start console
 ```
 
@@ -919,7 +919,7 @@ scrolling. Its project reorder dropdown uses the same persistent cadence as the 
 and its persisted collapsible sidebar can recover an additional 160px of horizontal workspace.
 
 `http://127.0.0.1:3114/#/reports` retains one year of privacy-safe minute aggregates in the separate
-`agent007memory_history` volume. Its default Overview tab follows the live watch view with global
+`ts-agentmemory-console-history` volume. Its default Overview tab follows the live watch view with global
 totals, the six busiest projects, LLM completion/cost health, and historical activity charts. Queue depth
 and wait remain live-only because they are not persisted in the reporting database.
 

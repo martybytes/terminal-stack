@@ -27,7 +27,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $stackDir = [System.IO.Path]::GetFullPath($PSScriptRoot)
 $composeFile = Join-Path $stackDir 'docker-compose.yml'
-$volumeName = 'agentmemory_iii-data'
+$volumeName = 'ts-agentmemory-data'
 $api = 'http://127.0.0.1:3110/agentmemory'
 $mode = if ($Apply) { 'APPLY' } else { 'PREVIEW' }
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'

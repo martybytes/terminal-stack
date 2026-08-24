@@ -30,6 +30,7 @@ Usage:
   ts-stack logs <stack>        docker compose logs
   ts-stack config [<stack>]    what compose actually resolves to on this machine
   ts-stack doctor              engine, .env files, health, ports, toggle drift
+  ts-stack migrate-volumes     the one-time rename to the ts- volume names
   ts-stack -h                  this help
 
   --dry-run          print the exact docker argv and change nothing
@@ -80,7 +81,7 @@ fi
 cmd=""; want_stack=""; tail_n=50; follow=0; all=0; start_engine=0
 while [ $# -gt 0 ]; do
     case "$1" in
-        status|up|down|restart|logs|config|doctor)
+        status|up|down|restart|logs|config|doctor|migrate-volumes)
             [ -z "$cmd" ] || { echo "ts-stack: two commands given ($cmd, $1)" >&2; exit 2; }
             cmd="$1"; shift ;;
         --dry-run)      TS_STACK_DRY_RUN=1; shift ;;
@@ -278,6 +279,16 @@ case "$cmd" in
         else                       tss_compose "$want_stack" logs --tail "$tail_n"; fi ;;
 
     up)
+        # A legacy volume with no ts- replacement means compose would create an
+        # EMPTY one and start the stack reporting success, with every memory left
+        # behind in a volume nothing mounts. Refuse, and name the one command.
+        pending="$(tss_volumes_pending 2>/dev/null || true)"
+        if [ -n "$pending" ] && [ "$TS_STACK_DRY_RUN" != 1 ]; then
+            _bad 'volumes still carry their pre-ts- names:'
+            printf '%s\n' "$pending" | sed 's/^/        /'
+            _note 'run:  ts-stack migrate-volumes     (copies, verifies, keeps the old volume)'
+            exit 1
+        fi
         warn_unseeded
         for s in $(selected); do
             section "$s"
@@ -302,6 +313,40 @@ case "$cmd" in
             tss_compose "$s" up -d || _bad "restart failed for $s"
         done ;;
 
+    migrate-volumes)
+        # With the engine down `docker volume inspect` fails for BOTH names, so an
+        # empty pending list means "unknown", not "current". Saying otherwise is a
+        # false all-clear about the one operation that touches data.
+        if [ "$engine_ok" = 0 ]; then
+            _bad 'the engine is unreachable, so the volume names cannot be read'
+            tss_engine_advice "$(tss_os)" "$kind" | sed 's/^/      /'
+            exit 1
+        fi
+        pending="$(tss_volumes_pending 2>/dev/null || true)"
+        if [ -z "$pending" ]; then
+            _ok 'volume names are already current'
+        else
+            section 'migrate volumes'
+            printf '%s\n' "$pending" | sed 's/^/  would copy: /'
+            if [ "$TS_STACK_DRY_RUN" = 1 ]; then
+                _note 'no --dry-run: the copy runs in a container and leaves the old volume in place'
+            else
+                # Nothing is destroyed here, so this needs consent but not a typed
+                # phrase: the old volume survives as the rollback.
+                printf 'Copy these now? The old volumes are kept. [y/N]: '
+                read -r reply </dev/tty || reply=n
+                case "$reply" in
+                    [yY]*)
+                        printf '%s\n' "$pending" | while read -r o n; do
+                            [ -n "$o" ] || continue
+                            tss_volume_copy "$o" "$n" || _bad "$o -> $n failed"
+                        done
+                        _note 'when the stack is proven on the new volumes: docker volume rm <old>' ;;
+                    *) _note 'nothing copied' ;;
+                esac
+            fi
+        fi ;;
+
     doctor)
         section 'engine'
         if [ "$engine_ok" = 1 ]; then
@@ -312,6 +357,14 @@ case "$cmd" in
         fi
         section 'stacks'
         cmd_status
+        section 'volumes'
+        pending="$(tss_volumes_pending 2>/dev/null || true)"
+        if [ "$engine_ok" = 0 ]; then _skip 'volume names need the engine'
+        elif [ -z "$pending" ]; then _ok 'volume names are current'
+        else
+            _bad 'volumes still carry their pre-ts- names — ts-stack migrate-volumes'
+            printf '%s\n' "$pending" | sed 's/^/        /'
+        fi
         section 'configuration'
         for s in $stacks; do
             if tss_env_seeded "$(tss_stack_dir "$s")"; then _ok "$s: .env present or not needed"

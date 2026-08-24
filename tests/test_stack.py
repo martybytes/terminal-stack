@@ -100,7 +100,7 @@ def test_down_never_receives_dash_v():
     invariant is that -v cannot reach this argv, and it is a test rather than a
     comment because a comment is what stack.sh had."""
     out = _dry_run("down", "--all")
-    assert "docker compose down" in out
+    assert re.search(r"docker compose\b.*\bdown\b", out), out
     assert re.search(r"docker compose\b.*\s-v\b", out) is None, out
     assert "docker volume rm" not in out
 
@@ -110,7 +110,8 @@ def test_restart_is_down_then_up_not_compose_restart():
     """`docker compose restart` reuses the existing container, so it ignores the
     changed .env or overlay that is the whole reason anyone restarts."""
     out = _dry_run("restart", "agentmemory")
-    assert "docker compose down" in out and "docker compose up -d" in out
+    assert re.search(r"docker compose\b.*\bdown\b", out), out
+    assert re.search(r"docker compose\b.*\bup -d\b", out), out
     assert "docker compose restart" not in out
     assert out.index("down") < out.index("up -d")
 
@@ -120,7 +121,7 @@ def test_naming_a_stack_overrides_its_saved_toggle():
     """Asking by name is consent; otherwise a machine with the setting off could
     never start the stack to try it."""
     out = _dry_run("up", "headroom")
-    assert "(headroom) docker compose up -d" in out
+    assert re.search(r"\(headroom\) docker compose\b.*\bup -d\b", out), out
 
 
 @pytest.mark.skipif(not shutil.which("bash"), reason="bash is unavailable")
@@ -225,3 +226,88 @@ def test_every_published_port_binds_loopback_only():
             if m.group(1) != "127.0.0.1:":
                 bad.append(f"{f.relative_to(ROOT)}: {m.group(0).strip()}")
     assert not bad, "\n".join(bad)
+
+
+# ── naming ────────────────────────────────────────────────────────────────────
+def test_every_project_container_and_volume_is_ts_prefixed():
+    """`docker ps` on this machine also shows three unrelated work stacks, so the
+    prefix is what tells you at a glance which containers belong here. Projects
+    used to be the directory name, containers mixed three conventions (bare
+    `kokoro`, `headroom-proxy`, and nothing at all for the memory server -- which
+    Docker then called `agentmemory-agentmemory-1`), and volumes were split
+    between prefixed and bare."""
+    expected_projects = {"agentmemory": "ts-agentmemory", "headroom": "ts-headroom",
+                         "kokoro": "ts-kokoro", "playwright": "ts-playwright"}
+    for stack, project in expected_projects.items():
+        base = (ROOT / "services/stacks" / stack / "docker-compose.yml").read_text(encoding="utf-8")
+        assert f"\nname: {project}\n" in base, f"{stack}: project name not pinned"
+
+    for f in sorted((ROOT / "services/stacks").rglob("docker-compose*.yml")):
+        for line in f.read_text(encoding="utf-8").splitlines():
+            t = line.strip()
+            if t.startswith("container_name:"):
+                assert t.split(":", 1)[1].strip().startswith("ts-"), f"{f.name}: {t}"
+
+
+def test_the_memory_volumes_are_external_and_the_headroom_ones_are_not():
+    """The asymmetry IS the safety property. `down -v` cannot remove an external
+    volume, which is why every memory ever saved lives in one; headroom's three
+    are removable by design and ts-stack gates that behind --destroy-data."""
+    am = (ROOT / "services/stacks/agentmemory/docker-compose.yml").read_text(encoding="utf-8")
+    con = (ROOT / "services/stacks/agentmemory/docker-compose.console.yml").read_text(encoding="utf-8")
+    hr = (ROOT / "services/stacks/headroom/docker-compose.yml").read_text(encoding="utf-8")
+    assert "ts-agentmemory-data:\n    external: true" in am
+    assert "ts-agentmemory-console-history:\n    external: true" in con
+    assert "external: true" not in hr.split("volumes:")[-1]
+    # ...and pinned by name, or a plain key under a project called ts-headroom
+    # would produce ts-headroom_ts-headroom-workspace.
+    for name in ("ts-headroom-workspace", "ts-headroom-qdrant", "ts-headroom-neo4j"):
+        assert f"name: {name}" in hr
+
+
+def test_the_volume_rename_map_names_the_volumes_as_they_are_on_disk():
+    """Checked against a live `docker volume ls`: headroom's three carry their old
+    project prefix because they were plain named volumes under a project called
+    headroom, while the two agentmemory volumes are external and never had one.
+    Getting this wrong means the guard never fires and compose starts the stack
+    on an empty volume, reporting success."""
+    lib = (ROOT / "services/_stack.sh").read_text(encoding="utf-8")
+    ps = PS.read_text(encoding="utf-8")
+    for old, new in (("agentmemory_iii-data", "ts-agentmemory-data"),
+                     ("agent007memory_history", "ts-agentmemory-console-history"),
+                     ("headroom_headroom_workspace", "ts-headroom-workspace"),
+                     ("headroom_qdrant_data", "ts-headroom-qdrant"),
+                     ("headroom_neo4j_data", "ts-headroom-neo4j")):
+        assert f"{old} {new}" in lib, f"bash map missing {old}"
+        assert old in ps and new in ps, f"pwsh map missing {old}"
+
+
+def test_up_refuses_while_a_legacy_volume_has_no_replacement():
+    """Compose would create an empty ts- volume and start the stack with no
+    memories in it, reporting success. Both twins refuse and name one command."""
+    for text, name in ((SH.read_text(encoding="utf-8"), "bash"),
+                       (PS.read_text(encoding="utf-8"), "pwsh")):
+        i = text.index("    'up' {") if name == "pwsh" else text.index("    up)")
+        window = text[i:i + 1200]
+        assert "migrate-volumes" in window, f"the {name} up path does not name the fix"
+        assert "pre-ts- names" in window, f"the {name} up path does not explain the refusal"
+
+
+@pytest.mark.skipif(not shutil.which("bash"), reason="bash is unavailable")
+def test_the_billing_overlay_never_replaces_the_default_env_file():
+    """A lone `--env-file .billing.env` REPLACES .env as compose's interpolation
+    source, so every ${OPENAI_*}-derived LLM_* display value resolves to empty:
+    a blank provider panel in the console, no error, everything healthy. The
+    ordering used to live in update-console.*, which this replaced."""
+    # The bash choke point is tss_compose in the shared library; the pwsh one is
+    # Invoke-TsStackCompose in the script itself.
+    for text in ((ROOT / "services/_stack.sh").read_text(encoding="utf-8"),
+                 PS.read_text(encoding="utf-8")):
+        i = text.index(".billing.env")
+        window = text[max(0, i - 600):i + 200]
+        assert "--env-file" in window
+        assert window.index(".env") < window.index(".billing.env")
+    # And when this machine actually has one, the emitted argv proves it.
+    out = _dry_run("up", "agentmemory")
+    if "--env-file" in out:
+        assert out.index("--env-file .env") < out.index("--env-file .billing.env"), out

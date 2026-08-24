@@ -35,8 +35,8 @@ try {
     Section 'Preflight'
     & docker compose config --quiet
     if ($LASTEXITCODE -ne 0) { throw 'docker compose config failed' }
-    & docker volume inspect agentmemory_iii-data *> $null
-    if ($LASTEXITCODE -ne 0) { throw 'Docker volume agentmemory_iii-data does not exist' }
+    & docker volume inspect ts-agentmemory-data *> $null
+    if ($LASTEXITCODE -ne 0) { throw 'Docker volume ts-agentmemory-data does not exist' }
     $secret = (& docker compose exec -T agentmemory cat /data/.hmac).Trim()
     if (-not $secret) { throw 'could not read AgentMemory HMAC before backup' }
     Info 'compose config, external volume, and HMAC are present'
@@ -53,7 +53,7 @@ try {
         }
         & docker compose stop console agentmemory
         if ($LASTEXITCODE -ne 0) { throw 'failed to stop stack for backup' }
-        & docker run --rm --entrypoint sh -v 'agentmemory_iii-data:/source:ro' -v "${resolvedBackup}:/backup" agentmemory-agentmemory:latest -c 'tar -C /source -czf /backup/agentmemory-volume.tgz .'
+        & docker run --rm --entrypoint sh -v 'ts-agentmemory-data:/source:ro' -v "${resolvedBackup}:/backup" agentmemory-agentmemory:latest -c 'tar -C /source -czf /backup/agentmemory-volume.tgz .'
         if ($LASTEXITCODE -ne 0) { throw 'volume backup failed; stack remains stopped' }
         $archive = Join-Path $resolvedBackup 'agentmemory-volume.tgz'
         if (-not (Test-Path -LiteralPath $archive -PathType Leaf) -or (Get-Item -LiteralPath $archive).Length -lt 1MB) { throw "backup archive is missing or unexpectedly small: $archive" }

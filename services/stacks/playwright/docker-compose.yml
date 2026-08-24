@@ -1,6 +1,13 @@
+# The compose PROJECT name, pinned here rather than inherited from the
+# directory: every container, network and default volume this stack creates
+# is then prefixed ts-, so `docker ps` and `docker network ls` show at a
+# glance what belongs to terminal-stack and nothing can collide with an
+# unrelated project of the same name.
+name: ts-playwright
+
 services:
   playwright:
-    container_name: playwright-mcp
+    container_name: ts-playwright-mcp
 
     # Official Playwright MCP release, pinned by both version and manifest digest.
     # The digest is the multi-platform v0.0.79 manifest (amd64 + arm64).

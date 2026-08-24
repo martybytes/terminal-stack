@@ -14,7 +14,7 @@
 # tagging, or OpenAI billing sync — see agentmemory/README.md.
 services:
   console:
-    container_name: agent007memory
+    container_name: ts-agentmemory-console
     build:
       # Pinned to a commit SHA per ../docs/conventions.md — a locally built
       # image from a git context gets an immutable ref, never a branch.
@@ -98,8 +98,8 @@ services:
       # tracked file or .env, and rotation self-heals (re-read on 401).
       SECRET_FILE: "/upstream-data/.hmac"
     volumes:
-      - agentmemory_iii-data:/upstream-data:ro
-      - agent007memory_history:/data
+      - ts-agentmemory-data:/upstream-data:ro
+      - ts-agentmemory-console-history:/data
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3114/healthz || exit 1"]
       interval: 30s
@@ -115,5 +115,5 @@ services:
 volumes:
   # Console-owned aggregate reporting database. External protects the history
   # from `docker compose down -v` and keeps the same name on every machine.
-  agent007memory_history:
+  ts-agentmemory-console-history:
     external: true

@@ -17,6 +17,13 @@
 # to a dev password. Publishing any of them on 0.0.0.0 would hand any peer on
 # the network a relay through the proxy plus read/write on the embeddings and
 # graph derived from your prompts.
+# The compose PROJECT name, pinned here rather than inherited from the
+# directory: every container, network and default volume this stack creates
+# is then prefixed ts-, so `docker ps` and `docker network ls` show at a
+# glance what belongs to terminal-stack and nothing can collide with an
+# unrelated project of the same name.
+name: ts-headroom
+
 services:
   # The OpenAI-compatible endpoint your client talks to, plus the dashboard.
   headroom-proxy:
@@ -26,8 +33,8 @@ services:
       context: .
       args:
         HEADROOM_IMAGE: ${HEADROOM_IMAGE:-ghcr.io/headroomlabs-ai/headroom:0.36.5}
-    image: headroom-local:0.36.5-authfix
-    container_name: headroom-proxy
+    image: ts-headroom:0.36.5-authfix
+    container_name: ts-headroom-proxy
     restart: unless-stopped
     # Bind 0.0.0.0 INSIDE the container: a container-internal loopback bind is
     # unreachable through any published port mapping, on every platform. The
@@ -58,7 +65,7 @@ services:
     ports:
       - "127.0.0.1:${HEADROOM_PORT:-8787}:8787"
     volumes:
-      - headroom_workspace:/home/nonroot/.headroom
+      - workspace:/home/nonroot/.headroom
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8787/readyz || exit 1"]
       interval: 30s
@@ -81,7 +88,7 @@ services:
   # plane still requires the real token from every caller, unchanged.
   dashboard-gateway:
     image: nginx:1.27.4-alpine
-    container_name: headroom-dashboard
+    container_name: ts-headroom-dashboard
     restart: unless-stopped
     environment:
       HEADROOM_PROXY_TOKEN: "${HEADROOM_PROXY_TOKEN:?set HEADROOM_PROXY_TOKEN in headroom/.env — see .env.example}"
@@ -107,7 +114,7 @@ services:
   # Vector database: embeddings, so the proxy can retrieve similar context.
   qdrant:
     image: qdrant/qdrant:v1.17.1
-    container_name: headroom-qdrant
+    container_name: ts-headroom-qdrant
     restart: unless-stopped
     ports:
       - "127.0.0.1:${QDRANT_REST_PORT:-6333}:6333"   # REST
@@ -115,7 +122,7 @@ services:
     environment:
       QDRANT__SERVICE__GRPC_PORT: "6334"
     volumes:
-      - qdrant_data:/qdrant/storage
+      - qdrant:/qdrant/storage
     # The image ships no curl or wget, so the check runs the qdrant binary's own
     # entrypoint-adjacent tooling: bash's /dev/tcp is present and is enough to
     # prove the REST port is accepting connections.
@@ -135,7 +142,7 @@ services:
   # features that traverse links between stored items.
   neo4j:
     image: neo4j:5.26
-    container_name: headroom-neo4j
+    container_name: ts-headroom-neo4j
     restart: unless-stopped
     ports:
       - "127.0.0.1:${NEO4J_HTTP_PORT:-7474}:7474"   # Browser
@@ -152,7 +159,7 @@ services:
       NEO4J_server_memory_heap_max__size: "${NEO4J_HEAP:-512m}"
       NEO4J_server_memory_pagecache_size: "${NEO4J_PAGECACHE:-256m}"
     volumes:
-      - neo4j_data:/data
+      - neo4j:/data
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:7474 >/dev/null 2>&1 || exit 1"]
       interval: 30s
@@ -165,14 +172,21 @@ services:
         max-size: "10m"
         max-file: "3"
 
-# Plain named volumes rather than `external: true`. agentmemory declares its
-# external because it adopted a volume an earlier npx setup had already created
-# and needs the name stable; nothing here pre-exists, so the project-prefixed
-# default is simpler and `../bootstrap.sh` has nothing extra to create.
+# Plain named volumes rather than `external: true`, and that asymmetry IS the
+# safety property: agentmemory's two are external so `down -v` cannot touch them,
+# while these three are removable by design and `ts-stack` gates that behind an
+# explicit --destroy-data plus a verified backup.
+#
+# `name:` is pinned so the volume is exactly this, with no <project>_ prefix. A
+# plain key would give ts-headroom_ts-headroom-workspace once the project itself
+# is named ts-headroom.
 volumes:
-  headroom_workspace:   # dashboard history, logs, config, memory state
-  qdrant_data:
-  neo4j_data:
+  workspace:
+    name: ts-headroom-workspace   # dashboard history, logs, config, memory state
+  qdrant:
+    name: ts-headroom-qdrant
+  neo4j:
+    name: ts-headroom-neo4j
 
 # Explicit, deterministic subnet (rather than Docker's dynamic default) so
 # HEADROOM_PROXY_TRUSTED_DASHBOARD_CLIENT_CIDRS above names a fixed, known

@@ -1,5 +1,15 @@
+# The compose PROJECT name, pinned here rather than inherited from the
+# directory: every container, network and default volume this stack creates
+# is then prefixed ts-, so `docker ps` and `docker network ls` show at a
+# glance what belongs to terminal-stack and nothing can collide with an
+# unrelated project of the same name.
+name: ts-agentmemory
+
 services:
   agentmemory:
+    # Named explicitly: without this Docker calls it <project>-agentmemory-1,
+    # which is the one container in this stack that used to be hard to name.
+    container_name: ts-agentmemory-server
     build:
       context: .
       dockerfile: Dockerfile
@@ -57,7 +67,7 @@ services:
       AGENTMEMORY_GRAPH_STORAGE_V2: "${AGENTMEMORY_GRAPH_STORAGE_V2:-true}"
       NODE_OPTIONS: "${AGENTMEMORY_NODE_OPTIONS:---max-old-space-size=2048}"
     volumes:
-      - agentmemory_iii-data:/data
+      - ts-agentmemory-data:/data
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:3111/agentmemory/livez || exit 1"]
       interval: 30s
@@ -75,8 +85,8 @@ volumes:
   # machine — no project-name prefix, and no per-machine edit to this file.
   # Here it reuses the volume already populated by the earlier
   # `npx @agentmemory/agentmemory` setup; on a fresh machine ../bootstrap.sh/.ps1
-  # creates it (`docker volume create agentmemory_iii-data`) before first run.
+  # creates it (`docker volume create ts-agentmemory-data`) before first run.
   # Run ../bootstrap.sh --apply (or ..\bootstrap.ps1 -Apply) first, or `up` fails with
   # "external volume not found". See ../docs/new-machine.md.
-  agentmemory_iii-data:
+  ts-agentmemory-data:
     external: true

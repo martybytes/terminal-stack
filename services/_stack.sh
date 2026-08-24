@@ -823,3 +823,54 @@ tss_compose() {                             # <stack> <compose args...>
     fi
     ( cd "$dir" && docker compose ${pre[@]+"${pre[@]}"} "$@" )
 }
+
+# ── the pre-ts- volume names ─────────────────────────────────────────────────
+# Renaming a volume is the only part of the naming sweep that touches data.
+# `docker compose up` would create an empty replacement and start the stack with
+# no memories in it, reporting success, so `ts-stack up` refuses while a legacy
+# volume exists and its new name does not.
+#
+# One "old new" pair per line. The headroom three carry their old project
+# prefix because they were plain named volumes under a project called headroom;
+# the two agentmemory volumes are external, so they never had one.
+tss_volume_renames() {
+    cat <<'EOF'
+agentmemory_iii-data ts-agentmemory-data
+agent007memory_history ts-agentmemory-console-history
+headroom_headroom_workspace ts-headroom-workspace
+headroom_qdrant_data ts-headroom-qdrant
+headroom_neo4j_data ts-headroom-neo4j
+EOF
+}
+
+tss_volume_exists() { docker volume inspect "$1" >/dev/null 2>&1; }
+
+# Pairs still needing migration, one "old new" per line. Empty output = nothing
+# to do, which is also the answer on a machine that never had the old names.
+tss_volumes_pending() {
+    local old new
+    tss_volume_renames | while read -r old new; do
+        [ -n "$old" ] || continue
+        if tss_volume_exists "$old" && ! tss_volume_exists "$new"; then
+            printf '%s %s\n' "$old" "$new"
+        fi
+    done
+}
+
+# Copy one volume's contents into a new volume, in a container, and verify the
+# file count came across. The old volume is left ALONE: it is the rollback.
+tss_volume_copy() {                        # <old> <new>
+    local old="$1" new="$2" before after
+    before="$(docker run --rm -v "$old:/from:ro" alpine sh -c 'find /from -type f | wc -l' 2>/dev/null | tr -d ' \r')"
+    [ -n "$before" ] || { warn "$old: could not be read"; return 1; }
+    docker volume create "$new" >/dev/null || return 1
+    # -a preserves modes and times; /data/.hmac is 0600 and must stay that way.
+    docker run --rm -v "$old:/from:ro" -v "$new:/to" alpine \
+        sh -c 'cp -a /from/. /to/ 2>/dev/null || cp -R /from/. /to/' || return 1
+    after="$(docker run --rm -v "$new:/to:ro" alpine sh -c 'find /to -type f | wc -l' 2>/dev/null | tr -d ' \r')"
+    if [ "$before" != "$after" ]; then
+        warn "$old -> $new: $before files in, $after out — NOT removing anything, and the new volume is suspect"
+        return 1
+    fi
+    pass "$old -> $new ($after files)"
+}

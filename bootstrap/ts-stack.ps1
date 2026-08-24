@@ -41,6 +41,7 @@ Usage:
   ts-stack logs <stack>        docker compose logs
   ts-stack config [<stack>]    what compose actually resolves to on this machine
   ts-stack doctor              engine, .env files, health, ports, toggle drift
+  ts-stack migrate-volumes     the one-time rename to the ts- volume names
   ts-stack -h                  this help
 
   --dry-run          print the exact docker argv and change nothing
@@ -142,6 +143,49 @@ function Get-TsEngineAdvice([string]$Kind) {
         default  { @('the engine is not answering.',
                      '  fix:  start Docker Desktop, or re-run with --start-engine') }
     }
+}
+
+# ── the pre-ts- volume names ────────────────────────────────────────────────────
+# Renaming a volume is the only part of the naming sweep that touches data.
+# `docker compose up` would create an empty replacement and start the stack with
+# no memories in it, reporting success, so `up` refuses while a legacy volume
+# exists and its new name does not. Twin of tss_volume_renames.
+$VOLUME_RENAMES = [ordered]@{
+    'agentmemory_iii-data'   = 'ts-agentmemory-data'
+    'agent007memory_history' = 'ts-agentmemory-console-history'
+    # Project-prefixed because they were plain named volumes under a project
+    # called headroom; the two agentmemory volumes are external, so they were not.
+    'headroom_headroom_workspace' = 'ts-headroom-workspace'
+    'headroom_qdrant_data'        = 'ts-headroom-qdrant'
+    'headroom_neo4j_data'         = 'ts-headroom-neo4j'
+}
+function Test-TsVolume([string]$Name) {
+    & docker volume inspect $Name *> $null
+    return ($LASTEXITCODE -eq 0)
+}
+function Get-TsVolumesPending {
+    foreach ($old in $VOLUME_RENAMES.Keys) {
+        $new = $VOLUME_RENAMES[$old]
+        if ((Test-TsVolume $old) -and -not (Test-TsVolume $new)) {
+            [pscustomobject]@{ Old = $old; New = $new }
+        }
+    }
+}
+# Copy in a container and verify the file count came across. The old volume is
+# left ALONE: it is the rollback.
+function Copy-TsVolume([string]$From, [string]$To) {
+    $before = (& docker run --rm -v "$From`:/from:ro" alpine sh -c 'find /from -type f | wc -l' 2>$null) -join ''
+    if (-not $before.Trim()) { Bad "$From`: could not be read"; return $false }
+    & docker volume create $To *> $null
+    & docker run --rm -v "$From`:/from:ro" -v "$To`:/to" alpine sh -c 'cp -a /from/. /to/ 2>/dev/null || cp -R /from/. /to/'
+    if ($LASTEXITCODE -ne 0) { return $false }
+    $after = (& docker run --rm -v "$To`:/to:ro" alpine sh -c 'find /to -type f | wc -l' 2>$null) -join ''
+    if ($before.Trim() -ne $after.Trim()) {
+        Bad "$From -> $To`: $($before.Trim()) files in, $($after.Trim()) out — nothing removed, and the new volume is suspect"
+        return $false
+    }
+    Ok "$From -> $To ($($after.Trim()) files)"
+    return $true
 }
 
 # ── the compose choke point ─────────────────────────────────────────────────────
@@ -256,6 +300,16 @@ switch ($Command) {
     }
 
     'up' {
+        # A legacy volume with no ts- replacement means compose would create an
+        # EMPTY one and start the stack reporting success, with every memory left
+        # behind in a volume nothing mounts. Refuse, and name the one command.
+        $pending = @(if ($engineOk) { Get-TsVolumesPending })
+        if ($pending.Count -and -not $DryRun) {
+            Bad 'volumes still carry their pre-ts- names:'
+            $pending | ForEach-Object { Note "$($_.Old) -> $($_.New)" }
+            Note 'run:  ts-stack migrate-volumes     (copies, verifies, keeps the old volume)'
+            exit 1
+        }
         foreach ($s in $chosen) {
             if (-not (Test-TsStackEnvSeeded $s)) {
                 Bad "$s`: .env.example exists but .env does not — the stack will start with the wrong profile"
@@ -286,6 +340,33 @@ switch ($Command) {
         }
     }
 
+    'migrate-volumes' {
+        if (-not $engineOk) {
+            Bad 'the engine is unreachable, so the volume names cannot be read'
+            Get-TsEngineAdvice $kind | ForEach-Object { Note $_ }
+            exit 1
+        }
+        $pending = @(Get-TsVolumesPending)
+        if (-not $pending.Count) { Ok 'volume names are already current' }
+        else {
+            Section 'migrate volumes'
+            $pending | ForEach-Object { Write-Host "  would copy: $($_.Old) $($_.New)" }
+            if ($DryRun) {
+                Note 'no --dry-run: the copy runs in a container and leaves the old volume in place'
+            } else {
+                # Nothing is destroyed here, so this needs consent but not a typed
+                # phrase: the old volume survives as the rollback.
+                $reply = Read-Host 'Copy these now? The old volumes are kept. [y/N]'
+                if ($reply -match '^[yY]') {
+                    foreach ($v in $pending) {
+                        if (-not (Copy-TsVolume $v.Old $v.New)) { Bad "$($v.Old) -> $($v.New) failed" }
+                    }
+                    Note 'when the stack is proven on the new volumes: docker volume rm <old>'
+                } else { Note 'nothing copied' }
+            }
+        }
+    }
+
     'doctor' {
         Section 'engine'
         if ($engineOk) {
@@ -297,6 +378,16 @@ switch ($Command) {
         }
         Section 'stacks'
         Show-TsStackStatus
+        Section 'volumes'
+        if (-not $engineOk) { Skip 'volume names need the engine' }
+        else {
+            $pending = @(Get-TsVolumesPending)
+            if (-not $pending.Count) { Ok 'volume names are current' }
+            else {
+                Bad 'volumes still carry their pre-ts- names — ts-stack migrate-volumes'
+                $pending | ForEach-Object { Note "$($_.Old) -> $($_.New)" }
+            }
+        }
         Section 'configuration'
         foreach ($s in $chosen) {
             if (Test-TsStackEnvSeeded $s) { Ok "$s`: .env present or not needed" }
