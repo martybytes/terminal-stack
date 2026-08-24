@@ -6,6 +6,12 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Added
 
+- **`ts-update` now finishes the shell handoff (08/23/2026).** When an update
+  changes zsh configuration, it explains why the current process still has old
+  functions and offers a safe immediate restart when interactive with no
+  background jobs; otherwise it prints `exec zsh`. PowerShell gives the matching
+  new-tab instruction when its profile changes.
+
 - **`ts-update` now owns chezmoi conflict resolution (08/23/2026).** Codex hook
   trust state survives profile refreshes instead of triggering an overwrite
   prompt. Unknown two-sided conflicts are reviewed one at a time with explained

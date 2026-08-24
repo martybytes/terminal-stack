@@ -786,6 +786,10 @@ function Update-TerminalStack {
     [CmdletBinding()]
     param([string]$SourceDir)
 
+    $profileHashBefore = if (Test-Path -LiteralPath $PROFILE) {
+        (Get-FileHash -LiteralPath $PROFILE -Algorithm SHA256).Hash
+    } else { '' }
+
     $SourceDir = Resolve-TsSourceDir $SourceDir
     if (-not $SourceDir) { return }
 
@@ -916,6 +920,15 @@ function Update-TerminalStack {
                 }
             }
         } catch {}
+    }
+    $profileHashAfter = if (Test-Path -LiteralPath $PROFILE) {
+        (Get-FileHash -LiteralPath $PROFILE -Algorithm SHA256).Hash
+    } else { '' }
+    if ($profileHashBefore -ne $profileHashAfter) {
+        Write-Host ''
+        Write-Host '==> PowerShell profile changed.'
+        Write-Host 'The files on disk are current, but this shell still has the old functions loaded.'
+        Write-Host 'Open a new PowerShell tab after this command finishes to activate the update.'
     }
 }
 Set-Alias -Name ts-update -Value Update-TerminalStack

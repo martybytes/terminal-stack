@@ -61,6 +61,12 @@ is an update bug rather than something the user is expected to understand.
 The runtime clone must be clean. If it is dirty, `ts-update` stops before fetch,
 pull, or apply and lists the files. Make the change in a workspace dev clone,
 commit it, then rerun `ts-update`.
+
+If the update changes `~/.zshrc`, the current shell still has the previous
+functions in memory. Interactive zsh runs with no background jobs explain this
+and offer to restart the shell immediately (default yes); noninteractive runs
+and shells with jobs print `exec zsh` as the next step. PowerShell reports when
+its profile changed and asks you to open a fresh tab.
 Resolves the **runtime** clone — the pin (`$TERMINAL_STACK_DIR`) first, else the
 canonical location, else legacy defaults; a pin with no clone behind it is warned
 about and skipped rather than obeyed. Dev clones at workspace tier paths are

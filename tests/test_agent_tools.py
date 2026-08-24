@@ -77,7 +77,12 @@ def test_ts_update_owns_chezmoi_conflict_handling_and_runtime_guard():
     assert "apply --error-on-conflict --no-tty" in update
     assert "apply --force --no-tty" in update
     assert "runtime clone has uncommitted changes" in update
+    assert "Shell configuration changed" in update
+    assert "Restart this shell now to activate the update? [Y/n]" in update
+    assert "jobs -p" in update and "exec zsh" in update
     assert "runtime clone has uncommitted changes" in ps
+    assert "PowerShell profile changed" in ps
+    assert "Open a new PowerShell tab" in ps
     assert ps.index("runtime clone has uncommitted changes") < ps.index("fetch --quiet")
 
 

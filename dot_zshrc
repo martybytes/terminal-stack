@@ -678,11 +678,37 @@ _ts_chezmoi_apply_guided() {
   fi
 }
 
+_ts_offer_zsh_restart() {
+  local before="$1" after jobs_running ans
+  after="$(cksum "$HOME/.zshrc" 2>/dev/null || true)"
+  [[ "$before" != "$after" ]] || return 0
+  echo
+  echo "==> Shell configuration changed."
+  echo "The files on disk are current, but this shell still has the old functions loaded."
+  if [[ ! -o interactive || ! -t 0 || ! -t 1 ]]; then
+    echo "Start a fresh shell to activate them: exec zsh"
+    return 0
+  fi
+  jobs_running="$(jobs -p 2>/dev/null)"
+  if [[ -n "$jobs_running" ]]; then
+    echo "This shell has background jobs, so ts-update will not replace it automatically."
+    echo "When those jobs are safe to leave, run: exec zsh"
+    return 0
+  fi
+  echo "Restarting replaces only this shell process; your directory and terminal stay open."
+  read -r "ans?Restart this shell now to activate the update? [Y/n]: "
+  case "$ans" in
+    n|N|no|NO) echo "Update installed. Activate it later with: exec zsh" ;;
+    *) exec zsh ;;
+  esac
+}
+
 # Pull the latest terminal-stack from GitHub and re-apply via chezmoi.
 # Shows incoming commits and records the pre-update SHA so ts-rollback can undo.
 # Same name as the PowerShell alias for cross-shell muscle memory.
 ts-update() {
-  local cz src
+  local cz src zshrc_before
+  zshrc_before="$(cksum "$HOME/.zshrc" 2>/dev/null || true)"
   cz="$(_ts_chezmoi)" || { echo "ts-update: chezmoi not found on PATH." >&2; return 1 }
   src="$(_ts_src "$cz" ts-update)" || return 1
   # Preflight: a sourceDir pointing at a non-terminal-stack clone means a stale
@@ -802,6 +828,7 @@ ts-update() {
   if [[ -n "$_tts_note" ]]; then
     echo "ts-update: note — the tts daemon is running the previous build; 'ts-config tts daemon restart' when convenient." >&2
   fi
+  _ts_offer_zsh_restart "$zshrc_before"
 }
 
 # Undo the last ts-update: reset the clone to the recorded pre-update SHA and
