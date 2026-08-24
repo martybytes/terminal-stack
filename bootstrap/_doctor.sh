@@ -234,15 +234,30 @@ ts_doctor() {
         fi
     fi
 
-    # Claude TTS (only when the feature is on). Kokoro down is a note (edge-tts
-    # covers it); an enabled-but-dead daemon is a failure — the hooks are
-    # silently degraded to direct playback and the user chose otherwise.
+    # Claude TTS (only when the feature is on). An enabled-but-dead daemon is a
+    # failure — the hooks are silently degraded to direct playback and the user
+    # chose otherwise.
     if command -v ts_cc_tts_get >/dev/null 2>&1 && [ "$(ts_cc_tts_get ccTtsEnabled 2>/dev/null)" = true ]; then
-        if ts_cc_tts_probe 2>/dev/null | grep -q '^kokoro: up'; then
-            _ok "kokoro TTS engine reachable"
-        else
-            echo "  note: kokoro TTS engine not reachable (edge-tts fallback will be used)"
-        fi
+        # CAPTURED first, matched in the shell. `ts_cc_tts_probe | grep -q` looks
+        # right and is not: grep -q exits on the first match, closing the pipe, so
+        # the producing function takes SIGPIPE and exits 141 — which `pipefail`
+        # makes the pipeline's status. A match was reported as a failure, so this
+        # said "kokoro not reachable" on EVERY run whatever the truth.
+        local _tts_probe _tts_engine
+        _tts_probe="$(ts_cc_tts_probe 2>/dev/null || true)"
+        _tts_engine="$(ts_cc_tts_get ccTtsEngine 2>/dev/null || echo kokoro)"
+        case "$_tts_probe" in
+            "kokoro: up"*) _ok "kokoro TTS engine reachable" ;;
+            *)
+                # A note only when something else is the engine: edge-tts covering
+                # for kokoro is a fallback, not a silent loss. When kokoro IS the
+                # chosen engine and it is down, voice notifications are gone.
+                if [ "$_tts_engine" = kokoro ]; then
+                    _bad "kokoro is the chosen TTS engine (ccTtsEngine=kokoro) and it is not reachable — voice notifications are silently off; start it: ts-stack up kokoro"
+                else
+                    echo "  note: kokoro TTS engine not reachable (engine is $_tts_engine, so this is only the fallback)"
+                fi ;;
+        esac
         # One line of forensics from the utterance history. Both numbers below are
         # invisible otherwise: every hook exits 0 whether it spoke once, three times, or
         # fell back to the direct path for fifteen hours.

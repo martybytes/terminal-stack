@@ -171,8 +171,16 @@ stack_state() {                             # <stack>
 all_stacks="$(tss_stack_list)"
 [ -n "$all_stacks" ] || { echo "ts-stack: no stacks found under $TSS_STACKS" >&2; exit 1; }
 if [ -n "$want_stack" ]; then
-    printf '%s\n' "$all_stacks" | grep -qx -- "$want_stack" \
-        || { echo "ts-stack: no stack named '$want_stack' — have: $(printf '%s' "$all_stacks" | tr '\n' ' ')" >&2; exit 2; }
+    # Matched in the shell, not through `| grep -q`: that exits on the first match
+    # and SIGPIPEs the producer, which `pipefail` turns into a failed pipeline.
+    case "
+$all_stacks
+" in
+        *"
+$want_stack
+"*) ;;
+        *) echo "ts-stack: no stack named '$want_stack' — have: $(printf '%s' "$all_stacks" | tr '\n' ' ')" >&2; exit 2 ;;
+    esac
     stacks="$want_stack"; all=1        # naming a stack is consent
 else
     stacks="$all_stacks"
