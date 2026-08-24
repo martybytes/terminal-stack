@@ -243,27 +243,27 @@ cmd_status() {
             total="$(   ( cd "$dir" && docker compose ps -aq 2>/dev/null )               | grep -c . || true )"
         fi
         if [ -n "$state" ] && [ "$total" = 0 ]; then
-            printf '  --  %-12s %s\n' "$s" "${state#off:}"
+            printf '  --  %-15s %s\n' "$s" "${state#off:}"
             continue
         fi
         if [ -n "$state" ]; then
             # Intent and reality disagree. A warn, not a failure: this is exactly
             # what a doctor exists to surface, and it is not "broken".
-            printf '  %s   %-12s running, but %s\n' "$WARN" "$s" "${state#off:}"
+            printf '  %s   %-15s running, but %s\n' "$WARN" "$s" "${state#off:}"
             printf '      %s\n' "ts-config agents ${s} on   (keep it)   |   ts-stack down $s   (stop it)"
             issues=$((issues + 1))
             continue
         fi
         if [ "$engine_ok" = 0 ]; then
-            printf '      %-12s enabled (engine unreachable, state unknown)\n' "$s"
+            printf '      %-15s enabled (engine unreachable, state unknown)\n' "$s"
         elif [ "$total" = 0 ]; then
-            printf '  %s   %-12s not created\n' "$WARN" "$s"; issues=$((issues + 1))
+            printf '  %s   %-15s not created\n' "$WARN" "$s"; issues=$((issues + 1))
         elif [ "$running" = "$total" ]; then
             ports="$( ( cd "$dir" && docker compose ps --format '{{.Publishers}}' 2>/dev/null ) \
                       | tr ',' '\n' | sed -n 's/.*127\.0\.0\.1:\([0-9]*\).*/\1/p' | sort -un | tr '\n' ' ' )"
-            printf '  ok  %-12s running (%s/%s)  %s\n' "$s" "$running" "$total" "$ports"
+            printf '  ok  %-15s running (%s/%s)  %s\n' "$s" "$running" "$total" "$ports"
         else
-            printf '  %s   %-12s partial (%s/%s)\n' "$WARN" "$s" "$running" "$total"; issues=$((issues + 1))
+            printf '  %s   %-15s partial (%s/%s)\n' "$WARN" "$s" "$running" "$total"; issues=$((issues + 1))
         fi
     done
 }

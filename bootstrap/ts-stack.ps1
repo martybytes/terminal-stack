@@ -97,7 +97,11 @@ function Get-TsStackList {
     $names = @(Get-ChildItem -LiteralPath $STACK_ROOT -Directory -ErrorAction SilentlyContinue |
         Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'docker-compose.yml') } |
         Select-Object -ExpandProperty Name | Sort-Object)
-    return ,(Get-TsStackOrder $names)
+    # NOT `return ,(...)`: Get-TsStackOrder already returns a wrapped array, and
+    # wrapping it again produced an array whose single element was the array --
+    # so the membership check saw one entry called "System.String[]" and every
+    # stack name was rejected as unknown.
+    return (Get-TsStackOrder $names)
 }
 
 # Twin of tss_stack_order. Start order, because lexical order is wrong the
@@ -452,7 +456,13 @@ function Invoke-TsStackCompose([string]$Name, [string[]]$ComposeArgs) {
         return 0
     }
     Push-Location $dir
-    try { & docker compose @pre @ComposeArgs; return $LASTEXITCODE }
+    # Out-Host, NOT a bare call. This function RETURNS its exit code, and a bare
+    # `& docker` puts every line docker writes to stdout on the same output
+    # stream -- so the caller's `if ((Invoke-TsStackCompose ...) -ne 0)` compared
+    # an array of build log lines against 0 and took it as a failure. It only
+    # showed up on the one stack that builds an image locally, because compose
+    # writes progress to stderr and build output to stdout.
+    try { & docker compose @pre @ComposeArgs | Out-Host; return $LASTEXITCODE }
     finally { Pop-Location }
 }
 
@@ -510,18 +520,18 @@ function Show-TsStackStatus {
                 $total = @(& docker compose ps -aq 2>$null).Where({ $_ }).Count
             } finally { Pop-Location }
         }
-        if ($state -and $total -eq 0) { Skip ("{0,-12} {1}" -f $s, $state); continue }
+        if ($state -and $total -eq 0) { Skip ("{0,-15} {1}" -f $s, $state); continue }
         if ($state) {
             # Intent and reality disagree. A warn, not a failure: that is what a
             # doctor exists to surface, and it is not "broken".
-            Bad ("{0,-12} running, but {1}" -f $s, $state)
+            Bad ("{0,-15} running, but {1}" -f $s, $state)
             Note "ts-config agents $s on   (keep it)   |   ts-stack down $s   (stop it)"
             continue
         }
-        if (-not $engineOk) { Note ("{0,-12} enabled (engine unreachable, state unknown)" -f $s) }
-        elseif ($total -eq 0) { Bad ("{0,-12} not created" -f $s) }
-        elseif ($running -eq $total) { Ok ("{0,-12} running ({1}/{2})" -f $s, $running, $total) }
-        else { Bad ("{0,-12} partial ({1}/{2})" -f $s, $running, $total) }
+        if (-not $engineOk) { Note ("{0,-15} enabled (engine unreachable, state unknown)" -f $s) }
+        elseif ($total -eq 0) { Bad ("{0,-15} not created" -f $s) }
+        elseif ($running -eq $total) { Ok ("{0,-15} running ({1}/{2})" -f $s, $running, $total) }
+        else { Bad ("{0,-15} partial ({1}/{2})" -f $s, $running, $total) }
     }
 }
 
