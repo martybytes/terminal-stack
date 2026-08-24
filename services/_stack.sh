@@ -942,8 +942,11 @@ tss_run_checks() {                         # <stack>   -> 0 all passed
                 if tss_wait_http "$target" "$secs" 2xx; then pass "$stack/$id 2xx"
                 else fail "$stack/$id not 2xx from $target in ${secs}s"; rc=1; fi ;;
             port)
-                if tss_assert_loopback_port "$target"; then pass "$stack/$id published on 127.0.0.1:$target"
-                else fail "$stack/$id port $target is not loopback-only"; rc=1; fi ;;
+                tss_port_publication "$target"; case $? in
+                    0) pass "$stack/$id published on 127.0.0.1:$target" ;;
+                    1) fail "$stack/$id port $target is published BEYOND loopback"; rc=1 ;;
+                    2) fail "$stack/$id port $target is not published at all"; rc=1 ;;
+                esac ;;
             *) warn "$stack: unknown check kind '$kind'" ;;
         esac
     done < "$conf"
@@ -986,19 +989,45 @@ tss_wait_http() {
 # Published AND loopback-only. Never skipped by a toggle: a service here that is
 # reachable off-box is a security incident, not an outage, and none of them
 # authenticate.
-tss_assert_loopback_port() {               # <port>
-    local port="$1" out
-    out="$(docker ps --format '{{.Ports}}' 2>/dev/null | tr ',' '\n' | grep -E "(^| )[0-9.]+:$port->" || true)"
-    [ -n "$out" ] || return 1
-    printf '%s\n' "$out" | grep -qv '127\.0\.0\.1:' && return 1
+#
+# Returns 0 loopback-only, 1 published beyond loopback, 2 NOT PUBLISHED AT ALL.
+# Three outcomes, not two, because a check that cannot tell "absent" from "bad"
+# reports the wrong one -- which is exactly what happened here.
+#
+# Docker collapses contiguous ports into a range, so 3113 appears as
+# `127.0.0.1:3112-3113->3112-3113/tcp` and a literal `:3113->` finds nothing.
+tss_port_publication() {                   # <port> -> 0 loopback | 1 exposed | 2 absent
+    local port="$1" line addr lo hi found=0
+    while IFS= read -r line; do
+        case "$line" in *"->"*) ;; *) continue ;; esac
+        addr="${line%%:*}"; addr="${addr# }"
+        lo="${line#*:}"; lo="${lo%%->*}"
+        hi="$lo"
+        case "$lo" in *-*) hi="${lo#*-}"; lo="${lo%%-*}" ;; esac
+        case "$lo$hi" in *[!0-9]*) continue ;; esac
+        [ "$port" -ge "$lo" ] && [ "$port" -le "$hi" ] || continue
+        found=1
+        [ "$addr" = "127.0.0.1" ] || return 1
+    done <<EOF
+$(docker ps --format '{{.Ports}}' 2>/dev/null | tr ',' '\n')
+EOF
+    [ "$found" = 1 ] || return 2
     return 0
 }
 
-# Every published port of every running container, or the one that is not
-# loopback. Runs even when everything else failed.
+tss_assert_loopback_port() {               # <port>
+    tss_port_publication "$1"
+}
+
+# Every published port of every container THIS STACK owns. Runs even when
+# everything else failed.
+#
+# Scoped to ts- containers on purpose: a developer's own projects legitimately
+# publish on 0.0.0.0, and failing this check on them is noise -- which is how the
+# one check that must never be skipped ends up ignored.
 tss_audit_loopback() {
     local bad
-    bad="$(docker ps --format '{{.Names}} {{.Ports}}' 2>/dev/null \
+    bad="$(docker ps --filter 'name=ts-' --format '{{.Names}} {{.Ports}}' 2>/dev/null \
            | tr ',' '\n' | grep -E '[0-9]+->' | grep -v '127\.0\.0\.1:' || true)"
     [ -z "$bad" ] || { printf '%s\n' "$bad"; return 1; }
     return 0
