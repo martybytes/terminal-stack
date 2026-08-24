@@ -3,7 +3,7 @@ import test from "node:test";
 import { assessLlmEndpoint, isActiveLocalLlmCall } from "../src/shared/llmEndpoint.js";
 
 test("private vLLM endpoints are local and fee-free", () => {
-  const result = assessLlmEndpoint("vLLM", "http://192.0.2.10:8000/v1", "qwen3-8b-awq");
+  const result = assessLlmEndpoint("vLLM", "http://10.0.2.10:8000/v1", "qwen3-8b-awq");
   assert.equal(result.costApplicability, "local");
   assert.equal(result.inferenceActive, true);
 });
@@ -17,7 +17,7 @@ test("public self-hostable endpoints stay unknown rather than silently free", ()
 });
 
 test("only calls matching the configured local model are marked fee-free", () => {
-  const assessment = assessLlmEndpoint("vLLM", "http://192.0.2.10:8000/v1", "qwen3-8b-awq");
+  const assessment = assessLlmEndpoint("vLLM", "http://10.0.2.10:8000/v1", "qwen3-8b-awq");
   assert.equal(isActiveLocalLlmCall(assessment, "qwen3-8b-awq", "QWEN3-8B-AWQ"), true);
   assert.equal(isActiveLocalLlmCall(assessment, "qwen3-8b-awq", "gpt-5"), false);
 });

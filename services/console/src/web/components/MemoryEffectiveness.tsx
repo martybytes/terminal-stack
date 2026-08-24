@@ -77,7 +77,7 @@ function Mini({
         <HelpTerm id={helpIdForLabel(label)}>{displayLabel ?? label}</HelpTerm>
       </div>
       <div className="whitespace-nowrap font-display text-[16px] font-bold leading-tight text-fg1" title={valueTitle} aria-label={valueTitle ?? `${label}: ${value}`} data-readable-text>{value}</div>
-      <div className="whitespace-nowrap text-[10px] leading-tight text-fg3" title={subTitle} data-readable-text>{sub}</div>
+      <div className="text-[10px] leading-tight text-fg3 [overflow-wrap:anywhere]" title={subTitle} data-readable-text>{sub}</div>
     </div>
   );
 }
@@ -112,12 +112,12 @@ function ContextAvoidedMini({
     { label: "All", value: historicValue(history?.allTracked ?? null), title: historicTitle("All tracked history", history?.allTracked ?? null, history?.trackingSince) },
   ];
   return (
-    <div className="col-span-2 min-w-0 border-l border-line pl-2.5 2xl:col-span-3">
+    <div className="col-span-2 min-w-0 border-l border-line pl-2.5">
       <div className="flex min-h-[22px] min-w-0 items-start gap-1.5 font-display text-[10px] font-medium leading-[1.15] tracking-[0.01em] text-fg3" data-readable-text>
         <span className="mt-px flex-none text-turq"><Sparkles size={14} /></span>
         <HelpTerm id="estimated-context-avoided">Context avoided</HelpTerm>
       </div>
-      <div className="grid grid-cols-4 gap-1">
+      <div className="grid gap-1 [grid-template-columns:repeat(auto-fit,minmax(58px,1fr))]">
         {windows.map((window, index) => (
           <div key={window.label} className={`${index === 0 ? "" : "border-l border-line pl-1.5"} min-w-0`} title={window.title} aria-label={window.title}>
             <div className="whitespace-nowrap text-[10px] leading-none text-fg3" data-readable-text>{window.label}</div>
@@ -173,7 +173,7 @@ export function MemoryEffectiveness({ snapshot, compact = false, avoidedHistory 
           <div className="mb-0.5 flex justify-between text-[8px] text-fg3"><span>stored ↑</span><span>automatic / manual context ↓</span></div>
           <ResponsiveContainer width="100%" height="90%"><BarChart data={chartData} barCategoryGap="16%"><ReferenceLine y={0} stroke="var(--color-linestrong)" /><Tooltip cursor={{ fill: "rgb(var(--rgb-fg) / 0.05)" }} contentStyle={{ background: "var(--color-tooltip)", border: "1px solid var(--color-linestrong)", borderRadius: 8, color: "var(--color-fg2)", fontSize: 10 }} /><Bar dataKey="saved" fill="var(--color-turq)" isAnimationActive={false} /><Bar dataKey="automatic" stackId="out" fill="var(--color-peri)" isAnimationActive={false} /><Bar dataKey="manual" stackId="out" fill="var(--color-s1)" isAnimationActive={false} /><Bar dataKey="empty" stackId="out" fill="var(--color-warn)" isAnimationActive={false} /></BarChart></ResponsiveContainer>
         </div>
-        <div className={`grid grid-cols-2 gap-2 md:grid-cols-4 ${compact ? "2xl:grid-cols-9" : "2xl:grid-cols-7"}`}>
+        <div className="grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(132px,1fr))]">
         {itemVisible("memoryFlow", "saveReliability") ? <Mini label="Save reliability" value={pct(saveRate)} sub={`${fmtNum(snapshot.memory.observationStored)} obs · ${fmtNum(snapshot.memory.explicitMemoriesStored)} explicit`} subTitle={`${fmtNum(snapshot.memory.observationStored)} observations · ${fmtNum(snapshot.memory.explicitMemoriesStored)} explicit memories`} icon={<CheckCircle2 size={14} />} /> : null}
         {itemVisible("memoryFlow", "automaticRecall") ? <Mini label="Automatic recall" displayLabel="Recall rate" value={pct(automaticRate)} sub={`${fmtCompactNum(snapshot.economics.automaticContextTokens)} tokens delivered`} icon={<SearchCheck size={14} />} /> : null}
         {itemVisible("memoryFlow", "estimatedAvoided") ? compact

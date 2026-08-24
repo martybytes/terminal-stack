@@ -17,12 +17,14 @@ import {
   Users,
   Wrench,
   CircleHelp,
+  Minus,
   Moon,
+  Plus,
   Settings2,
   Sun,
 } from "lucide-react";
 import { useLive } from "../lib/ws";
-import { usePagePreferences, usePreferences, type PageId } from "../lib/preferences";
+import { SCALE_MAX, SCALE_MIN, SCALE_STEP, usePagePreferences, usePreferences, type PageId } from "../lib/preferences";
 import SystemBar from "./SystemBar";
 
 const SIDEBAR_COLLAPSED_KEY = "agent007memory.sidebar.collapsed";
@@ -136,11 +138,60 @@ function StatusCard({ collapsed }: { collapsed: boolean }) {
   );
 }
 
+// Zoom the console applies to itself, in 5% steps, persisted with the rest of
+// the preferences.
+//
+// Not the browser's zoom, which is what people reach for otherwise: browser
+// zoom shrinks the VIEWPORT, so the app frame gets shorter and the SystemBar
+// pinned at its bottom goes off the end of the window. This scales the content
+// inside a frame that stays exactly as tall as the window, so nothing can fall
+// off it however far you zoom in.
+function ZoomStepper({ collapsed }: { collapsed: boolean }) {
+  const { scale, setScale, nudgeScale } = usePreferences();
+  const button = "flex h-7 w-7 flex-none items-center justify-center rounded-md border border-line bg-surface/60 text-fg3 transition-colors hover:border-turq/40 hover:text-turq disabled:opacity-35 disabled:hover:border-line disabled:hover:text-fg3";
+
+  if (collapsed) {
+    return (
+      <div className="mb-1 flex flex-col items-center gap-1">
+        <button type="button" className={button} onClick={() => nudgeScale(SCALE_STEP)} disabled={scale >= SCALE_MAX} aria-label="Zoom in" title={`Zoom in (${scale}%)`}>
+          <Plus size={13} />
+        </button>
+        <button type="button" onClick={() => setScale(100)} className="font-mono text-[10px] text-fg3 hover:text-turq" aria-label={`Zoom ${scale}%, click to reset`} title="Reset zoom to 100%">
+          {scale}
+        </button>
+        <button type="button" className={button} onClick={() => nudgeScale(-SCALE_STEP)} disabled={scale <= SCALE_MIN} aria-label="Zoom out" title={`Zoom out (${scale}%)`}>
+          <Minus size={13} />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mb-1 flex items-center gap-1">
+      <button type="button" className={button} onClick={() => nudgeScale(-SCALE_STEP)} disabled={scale <= SCALE_MIN} aria-label="Zoom out" title="Zoom out 5%">
+        <Minus size={13} />
+      </button>
+      <button
+        type="button"
+        onClick={() => setScale(100)}
+        className="flex h-7 flex-1 items-center justify-center rounded-md border border-line bg-surface/60 font-mono text-[11px] text-fg2 transition-colors hover:border-turq/40 hover:text-turq"
+        aria-label={`Zoom ${scale} percent, click to reset to 100 percent`}
+        title="Click to reset to 100%"
+      >
+        {scale}%
+      </button>
+      <button type="button" className={button} onClick={() => nudgeScale(SCALE_STEP)} disabled={scale >= SCALE_MAX} aria-label="Zoom in" title="Zoom in 5%">
+        <Plus size={13} />
+      </button>
+    </div>
+  );
+}
+
 export default function Shell(): JSX.Element {
   const location = useLocation();
   const pageId = PAGE_BY_PATH[location.pathname] ?? "overview";
   const { preference } = usePagePreferences(pageId);
-  const { theme, setTheme, openDrawer } = usePreferences();
+  const { theme, setTheme, openDrawer, scale } = usePreferences();
   const [collapsed, setCollapsed] = useState(() => {
     if (typeof window === "undefined") return false;
     try {
@@ -159,7 +210,19 @@ export default function Shell(): JSX.Element {
   }, [collapsed]);
 
   return (
-    <div className="min-h-screen h-screen flex overflow-hidden bg-app">
+    // The zoom lives HERE, on the frame, not on the routed content: everything
+    // chrome included scales together, and because the frame is sized in
+    // inverse-scaled viewport units it still occupies exactly one screen. Zoom
+    // to 150% and the SystemBar is still on screen -- it is the content inside
+    // that scrolls, which is the whole difference from browser zoom.
+    <div
+      className="flex overflow-hidden bg-app"
+      style={{
+        zoom: scale / 100,
+        width: `${100 / (scale / 100)}vw`,
+        height: `${100 / (scale / 100)}vh`,
+      }}
+    >
       <aside
         className={`flex flex-none flex-col overflow-y-auto border-r border-line bg-side pb-4 pt-5 transition-[width,padding] duration-200 ${
           collapsed ? "w-[72px] px-2" : "w-[232px] px-3.5"
@@ -228,6 +291,7 @@ export default function Shell(): JSX.Element {
             {theme === "light" ? <Moon size={14} /> : <Sun size={14} />}{collapsed ? null : <span className="text-[10px] font-semibold">Theme</span>}
           </button>
         </div>
+        <ZoomStepper collapsed={collapsed} />
         <StatusCard collapsed={collapsed} />
       </aside>
 
@@ -240,7 +304,6 @@ export default function Shell(): JSX.Element {
             style={{
               maxWidth: preference.width === "wide" ? 1600 : preference.width === "focused" ? 1280 : undefined,
               marginInline: "auto",
-              zoom: preference.scale / 100,
             }}
           >
             <Outlet />

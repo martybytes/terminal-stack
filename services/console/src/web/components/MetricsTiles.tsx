@@ -85,7 +85,7 @@ export function MetricsTiles({ tick, empty }: { tick: MetricsTick | null; empty?
   const order = preference.itemOrder.metrics ?? Object.keys(tiles);
   const visible = order.filter((id) => itemVisible("metrics", id) && tiles[id]);
   return (
-    <div className="grid grid-cols-2 gap-3.5 md:grid-cols-3 xl:grid-cols-6">
+    <div className="grid gap-3.5 [grid-template-columns:repeat(auto-fit,minmax(170px,1fr))]">
       {visible.map((id) => tiles[id])}
     </div>
   );
