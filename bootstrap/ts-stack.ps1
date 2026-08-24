@@ -183,8 +183,11 @@ function Invoke-TsStackChecks([string]$Name) {
                 else { Bad "$Name/$id no $mode from $target in ${secs}s"; $ok = $false }
             }
             'port' {
-                if (Test-TsLoopbackPort $target) { Ok "$Name/$id published on 127.0.0.1:$target" }
-                else { Bad "$Name/$id port $target is not loopback-only"; $ok = $false }
+                switch (Get-TsPortPublication ([int]$target)) {
+                    'loopback' { Ok "$Name/$id published on 127.0.0.1:$target" }
+                    'exposed'  { Bad "$Name/$id port $target is published BEYOND loopback"; $ok = $false }
+                    'absent'   { Bad "$Name/$id port $target is not published at all"; $ok = $false }
+                }
             }
             default { Note "$Name`: unknown check kind '$kind'" }
         }
@@ -222,15 +225,31 @@ function Wait-TsHttp([string]$Url, [int]$Seconds, [string]$Mode) {
 
 # Published AND loopback-only. None of these services authenticate, so a port
 # reachable off-box is a security incident, not an outage.
-function Test-TsLoopbackPort([string]$Port) {
-    $rows = @(& docker ps --format '{{.Ports}}' 2>$null) -split ',' |
-        Where-Object { $_ -match "[0-9.]+:$Port->" }
-    if (-not $rows) { return $false }
-    return -not ($rows | Where-Object { $_ -notmatch '127\.0\.0\.1:' })
+#
+# Returns 'loopback' | 'exposed' | 'absent'. Three outcomes, not two: a check
+# that cannot tell "absent" from "bad" reports the wrong one. And Docker
+# collapses contiguous ports into a range (127.0.0.1:3112-3113->3112-3113/tcp),
+# so a literal ":3113->" finds nothing at all.
+function Get-TsPortPublication([int]$Port) {
+    $found = $false
+    foreach ($entry in (@(& docker ps --format '{{.Ports}}' 2>$null) -split ',')) {
+        if ($entry -notmatch '->') { continue }
+        if ($entry.Trim() -notmatch '^([0-9.]+):(\d+)(?:-(\d+))?->') { continue }
+        $addr = $Matches[1]; $lo = [int]$Matches[2]
+        $hi = if ($Matches[3]) { [int]$Matches[3] } else { $lo }
+        if ($Port -lt $lo -or $Port -gt $hi) { continue }
+        $found = $true
+        if ($addr -ne '127.0.0.1') { return 'exposed' }
+    }
+    if (-not $found) { return 'absent' }
+    return 'loopback'
 }
 
+# Scoped to ts- containers on purpose: a developer's own projects legitimately
+# publish on 0.0.0.0, and failing on those is noise -- which is how the one check
+# that must never be skipped ends up ignored.
 function Get-TsLoopbackViolations {
-    @(& docker ps --format '{{.Names}} {{.Ports}}' 2>$null) -split ',' |
+    @(& docker ps --filter 'name=ts-' --format '{{.Names}} {{.Ports}}' 2>$null) -split ',' |
         Where-Object { $_ -match '\d+->' -and $_ -notmatch '127\.0\.0\.1:' }
 }
 
