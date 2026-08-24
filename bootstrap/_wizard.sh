@@ -367,6 +367,13 @@ ts_prompt_multi() {
     exclusive() {
         local keep="$1" j first=-1
         [ "$excl" = "  " ] && return 0
+        # A winner only wins its OWN group. Ticking an option outside the group
+        # used to collapse it anyway — $keep was an index no member could equal,
+        # so every ticked member failed the `$j = $keep` test and was cleared.
+        # On macOS that meant ticking Ghostty silently unticked WezTerm.
+        if [ "$keep" -ge 0 ]; then
+            case "$excl" in *" ${keys[$keep]} "*) ;; *) return 0 ;; esac
+        fi
         for j in $(seq 0 $((n - 1))); do
             case "$excl" in *" ${keys[$j]} "*) ;; *) continue ;; esac
             [ "${ticks[$j]}" = "1" ] || continue

@@ -272,11 +272,14 @@ function Get-TsWsLastActivity([string]$Dir) {
 # ------------------------------------------------------------------- moves ----
 
 function Test-TsWsSameVolume([string]$A, [string]$B) {
-    $b = $B
-    while ($b -and -not (Test-Path -LiteralPath $b)) { $b = Split-Path -Parent $b }
-    if (-not $b) { return $false }
+    # $probe, not $b: PowerShell variable names are case-insensitive, so $b IS
+    # the $B parameter. Harmless here (both are strings), but the same shape in
+    # Read-TsMulti coerced a scriptblock into a string and broke the wizard.
+    $probe = $B
+    while ($probe -and -not (Test-Path -LiteralPath $probe)) { $probe = Split-Path -Parent $probe }
+    if (-not $probe) { return $false }
     $ra = [System.IO.Path]::GetPathRoot((Resolve-Path -LiteralPath $A).Path)
-    $rb = [System.IO.Path]::GetPathRoot((Resolve-Path -LiteralPath $b).Path)
+    $rb = [System.IO.Path]::GetPathRoot((Resolve-Path -LiteralPath $probe).Path)
     return ($ra -and $ra -eq $rb)
 }
 

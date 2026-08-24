@@ -158,16 +158,27 @@ foreach ($pkg in $requiredPackages) { Install-WingetPackage -Id $pkg -Because 'r
 Install-TsTerminals -Selected $wizard.Terminals
 
 # Selected toggleable apps (catalog id -> winget id). Uses Install-WingetPackage
-# rather than Install-TsApps so a failure lands in the end-of-run report.
+# rather than Install-TsApps so a failure lands in the end-of-run report — which
+# is also why the two non-winget routes below are repeated here rather than
+# delegated: skip either one and the tools it owns are silently never installed.
 foreach ($id in $selectedApps) {
     if (Test-TsAppIsAi $id) { continue }   # not winget packages; handled below
+    if (Test-TsAppIsPy $id) { continue }   # PyPI, not winget; handled below
     if ($script:TsWingetIds.ContainsKey($id)) {
         Install-WingetPackage -Id $script:TsWingetIds[$id] -Because $id | Out-Null
     } else {
         Write-Host "==> ${id}: no Windows package available; skipped"
     }
 }
+# Python tools before the agent CLIs: `python` and `uv` are winget entries above,
+# and Install-TsPyTool prefers uv. Refresh PATH so one installed moments ago is
+# visible to this process.
+if (@($selectedApps | Where-Object { Test-TsAppIsPy $_ }).Count) {
+    Update-TsSessionPath
+    foreach ($id in $selectedApps) { if (Test-TsAppIsPy $id) { Install-TsPyTool $id } }
+}
 foreach ($id in $selectedApps) { if (Test-TsAppIsAi $id) { Install-TsAiCli $id } }
+Update-TsSessionPath
 Show-TsInstalledApps $selectedApps
 
 # Save the chosen config to %LOCALAPPDATA%\terminal-stack\config.json — read by

@@ -237,6 +237,62 @@ def test_zshrc_parses_under_zsh():
     assert result.returncode == 0, result.stderr
 
 
+# PowerShell variable names are case-insensitive, so a local named $foo inside a
+# function that takes a parameter $Foo IS that parameter. When the parameter is
+# typed, its converter stays attached to the variable and coerces every later
+# assignment: Read-TsMulti assigned a scriptblock to $exclusive alongside a
+# [string[]]$Exclusive parameter, the block became a one-element string array of
+# its own source text, and `& $exclusive -1` tried to run that text as a command
+# name. Every Read-TsMulti call died, which is the entire Windows wizard. The
+# bug is invisible in review and the bash twins cannot have it (bash keeps
+# functions and variables in separate namespaces), so it needs a gate.
+_PS_COLLISION_SCAN = r"""
+$bad = @()
+foreach ($f in (Get-ChildItem -Path . -Recurse -Include *.ps1,*.psm1 -File |
+                Where-Object { $_.FullName -notmatch '[\\/]\.git[\\/]' })) {
+    $errs = $null
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile(
+        $f.FullName, [ref]$null, [ref]$errs)
+    if ($errs -and $errs.Count) { $bad += "PARSE $($f.Name): $($errs[0].Message)"; continue }
+    foreach ($fn in $ast.FindAll({ param($n)
+            $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)) {
+        $ps = @()
+        if ($fn.Parameters) { $ps += $fn.Parameters }
+        if ($fn.Body.ParamBlock) { $ps += $fn.Body.ParamBlock.Parameters }
+        $typed = @{}
+        foreach ($p in $ps) {
+            if ($p.StaticType -and $p.StaticType.FullName -ne 'System.Object') {
+                $typed[$p.Name.VariablePath.UserPath] = $p.StaticType.FullName
+            }
+        }
+        if ($typed.Count -eq 0) { continue }
+        foreach ($a in $fn.Body.FindAll({ param($n)
+                $n -is [System.Management.Automation.Language.AssignmentStatementAst] }, $true)) {
+            if ($a.Left -isnot [System.Management.Automation.Language.VariableExpressionAst]) { continue }
+            $name = $a.Left.VariablePath.UserPath
+            foreach ($k in $typed.Keys) {
+                if ($name -ceq $k) { continue }
+                if ($name -ieq $k) {
+                    $bad += ("{0}:{1} {2}() assigns `${3}, which IS the [{4}]`${5} parameter" -f
+                        $f.Name, $a.Left.Extent.StartLineNumber, $fn.Name, $name, $typed[$k], $k)
+                }
+            }
+        }
+    }
+}
+if ($bad) { $bad | ForEach-Object { Write-Output $_ }; exit 1 }
+exit 0
+"""
+
+
+@pytest.mark.skipif(not shutil.which("pwsh"), reason="PowerShell 7 is unavailable")
+def test_no_pwsh_local_shadows_a_typed_parameter():
+    result = subprocess.run([shutil.which("pwsh"), "-NoLogo", "-NoProfile",
+                             "-NonInteractive", "-Command", _PS_COLLISION_SCAN],
+                            cwd=ROOT, text=True, capture_output=True, check=False)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 # --- agent CLI resolution ----------------------------------------------------
 # Regression cover for the bug where `ccd` died with "claude executable was not
 # found on PATH when this shell loaded" in every top-level login shell: the
@@ -1301,6 +1357,80 @@ def test_terminal_tick_list_enforces_one_wezterm_channel_live():
     # The env path returned early without the constraint on both sides.
     assert "ts_terminals_one_channel" in wiz
     assert wiz.count("ts_terminals_one_channel") >= 3   # def + env path + picker
+
+
+# The exclusive collapse is driven by the index of whatever was just ticked. That
+# index is only a "winner" when it is IN the group: ticking an option outside it
+# gave every ticked member a $keep no member could equal, so the whole group was
+# cleared. On macOS the terminal question is the only exclusive one and Ghostty is
+# the only non-member, so ticking Ghostty returned Ghostty ALONE — WezTerm dropped
+# out of the selection with nothing on screen to say so. Both twins had it; the
+# pwsh side was unreachable behind the Read-TsMulti crash.
+_EXCL_CASES = [
+    # answers typed,  expected selection
+    (["3", ""],       ["wezterm-nightly", "ghostty"]),   # non-member must not collapse
+    (["2", ""],       ["wezterm-stable"]),               # member still evicts its rival
+    (["3", "2", ""],  ["wezterm-stable", "ghostty"]),
+    (["2", "3", ""],  ["wezterm-stable", "ghostty"]),
+    (["a", ""],       ["wezterm-nightly", "ghostty"]),   # all: group collapses to the tie-break
+    (["1", ""],       []),
+]
+
+# ts_prompt_multi reads its answer inside a nested $( ), so a shell-variable
+# cursor would reset on every call. Keep it on disk.
+_EXCL_BASH = """
+. bootstrap/_config.sh >/dev/null 2>&1
+. bootstrap/_wizard.sh
+ts_is_interactive() { return 0; }
+Q=$(mktemp); N=$(mktemp); echo 0 > "$N"
+printf '%s\n' ANSWERS > "$Q"
+ts_tty_prompt() { local i; i=$(cat "$N"); sed -n "$((i+1))p" "$Q"; echo $((i+1)) > "$N"; }
+TS_MULTI_EXCLUSIVE="wezterm-nightly wezterm-stable" ts_prompt_multi \
+    "wezterm-nightly" "T:" "" \
+    "wezterm-nightly|nightly|" "wezterm-stable|stable|" "ghostty|ghostty|"
+rm -f "$Q" "$N"
+"""
+
+_EXCL_PWSH = (
+    ". ./bootstrap/_config.ps1; "
+    "function Test-TsInteractive { $true }; "
+    "$script:q = [System.Collections.Queue]::new(@(ANSWERS)); "
+    "function Read-Host { param([string]$Prompt) "
+    "if ($script:q.Count) { $script:q.Dequeue() } else { '' } }; "
+    "$r = Read-TsMulti -Title 'T:' -Options @("
+    "@{Key='wezterm-nightly';Label='nightly'},"
+    "@{Key='wezterm-stable';Label='stable'},"
+    "@{Key='ghostty';Label='ghostty'}) "
+    "-Preticked @('wezterm-nightly') "
+    "-Exclusive @('wezterm-nightly','wezterm-stable') 6>$null; "
+    "Write-Output ('RESULT=' + ($r -join ' '))")
+
+
+@pytest.mark.skipif(not shutil.which("bash"), reason="bash is unavailable")
+def test_exclusive_group_survives_a_non_member_tick_bash():
+    for answers, want in _EXCL_CASES:
+        script = _EXCL_BASH.replace(
+            "ANSWERS", " ".join('"%s"' % a for a in answers))
+        r = subprocess.run([shutil.which("bash"), "-c", script], cwd=ROOT,
+                           text=True, capture_output=True, check=False,
+                           stdin=subprocess.DEVNULL, timeout=60)
+        assert r.stdout.split() == want, f"{answers}: got {r.stdout.split()!r}"
+
+
+@pytest.mark.skipif(not shutil.which("pwsh"), reason="PowerShell 7 is unavailable")
+def test_exclusive_group_survives_a_non_member_tick_pwsh():
+    """The pwsh twin must reach the same six answers as the bash one."""
+    for answers, want in _EXCL_CASES:
+        command = _EXCL_PWSH.replace(
+            "ANSWERS", ",".join("'%s'" % a for a in answers))
+        r = subprocess.run([shutil.which("pwsh"), "-NoLogo", "-NoProfile",
+                            "-NonInteractive", "-Command", command],
+                           cwd=ROOT, text=True, capture_output=True, check=False)
+        line = next((l for l in r.stdout.splitlines()
+                     if l.startswith("RESULT=")), None)
+        assert line is not None, r.stdout + r.stderr
+        assert line[len("RESULT="):].split() == want, f"{answers}: got {line!r}"
+
 
 
 @pytest.mark.skipif(not shutil.which("bash"), reason="bash is unavailable")

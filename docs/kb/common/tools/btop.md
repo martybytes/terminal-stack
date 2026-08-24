@@ -16,5 +16,10 @@ Keys: `Esc`/`m` menu, `1`-`4` toggle the CPU/memory/network/process boxes,
 selected process, `q` quit. Settings live in `~/.config/btop/btop.conf` and the
 menu writes them for you.
 
+**On Windows the command is `btop4win`, not `btop`.** winget's
+`aristocratos.btop4win` is a separate port with its own executable name; there is
+no `btop.exe`. `ts-update` probed for `btop` and so offered to install it on
+every run even though it was already there.
+
 `bottom` (`btm`) is the leaner alternative; `glances` adds a web UI and remote
 mode; `nvtop` covers GPUs.

@@ -20,3 +20,8 @@ Keys: `h` help, `1` per-core, `d` disk I/O, `n` network, `f` filesystems,
 
 Heavier than `btop`/`btm` (it is Python), so prefer those for a local terminal
 and `glances -w`/`-s` for remote.
+
+Being Python is also how it installs: brew on macOS, and on Windows through
+`uv tool install glances` rather than winget, which has no glances package (the
+`nicolargo.glances` id the stack used to carry does not exist). See
+`doc node-python`.

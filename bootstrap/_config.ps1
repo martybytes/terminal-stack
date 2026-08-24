@@ -32,16 +32,13 @@ $script:TsWingetIds = @{
     gdu        = 'dundee.gdu'
     btop       = 'aristocratos.btop4win'
     bottom     = 'Clement.bottom'
-    glances    = 'nicolargo.glances'
     gping      = 'orf.gping'
     rclone     = 'Rclone.Rclone'
     fnm        = 'Schniz.fnm'
     node       = 'OpenJS.NodeJS'
     python     = 'Python.Python.3.13'
     uv         = 'astral-sh.uv'
-    pipx       = 'pypa.pipx'
     ruff       = 'astral-sh.ruff'
-    poetry     = 'Python-Poetry.Poetry'
     yazi       = 'sxyazi.yazi'
     # Deliberately absent: ncdu, bandwhich, tree and atuin. The first three have
     # no reliable winget id (or, for bandwhich, no Windows build). atuin has no
@@ -49,8 +46,16 @@ $script:TsWingetIds = @{
     # shells are zsh/bash/fish/nu/xonsh — so even a hand-installed binary would
     # get no Ctrl+R integration here; on a Windows box atuin belongs in WSL.
     # An id that always fails is worse than an honest "not available on this
-    # platform" — Get-TsAppsPending skips anything not in this table, so they
-    # simply never nag on Windows.
+    # platform" — Test-TsAppInstallable skips anything no path here can install,
+    # so they simply never nag on Windows.
+    #
+    # Also absent, for the opposite reason: pipx, poetry, glances, ipython,
+    # httpie and pre-commit. pypa.pipx, Python-Poetry.Poetry and
+    # nicolargo.glances were all in this table and all three answer "No package
+    # found matching input criteria" — pipx is in the recommended set, so it
+    # failed on every Windows machine on every run. They are real, installable
+    # tools that simply do not come from winget; $TsPyTools routes them through
+    # Install-TsPyTool instead.
 }
 $script:TsAppsRecommended = @('eza','fzf','bat','fd','delta','ripgrep','zoxide','atuin','glow','micro','neovim','gh','ghq','lazygit','prettymark','duf','dust','btop','fnm','python','uv','pipx','ruff','ipython','claude','codex','cursor-agent','grok','gemini','pi')
 $script:TsAppsOptional    = @('zed','yazi','gdu','bottom','glances','gping','rclone','node','httpie','poetry','pre-commit')
@@ -58,7 +63,7 @@ $script:TsAppsAll         = $script:TsAppsRecommended + $script:TsAppsOptional
 
 # Groups exist for the picker only — the saved `apps` array stays flat, so this
 # adds no chezmoi [data] key. Twin of ts_app_group_* in bootstrap/_config.sh;
-# ids absent on Windows are simply not in $TsWingetIds and are skipped.
+# ids no route here can install are skipped by Test-TsAppInstallable.
 $script:TsAppGroups = [ordered]@{
     shell   = @{ Desc = 'shell essentials';    Members = @('tmux','eza','bat','tree','zoxide','fzf','atuin') }
     search  = @{ Desc = 'search and find';     Members = @('ripgrep','fd') }
@@ -79,6 +84,26 @@ function Get-TsAppGroupOf([string]$id) {
 }
 function Test-TsAppIsAi([string]$id) { return ($script:TsAppGroups['ai'].Members -contains $id) }
 
+# Python CLI tools. None of these has a winget manifest — pypa.pipx,
+# Python-Poetry.Poetry and nicolargo.glances were all in $TsWingetIds and all
+# three were dead ids — but every one installs cleanly from PyPI, so they route
+# through Install-TsPyTool rather than being declared unavailable. macOS/Linux
+# get the same set from brew (ts_install_apps in bootstrap/_config.sh).
+$script:TsPyTools = @('pipx','ipython','httpie','poetry','pre-commit','glances')
+function Test-TsAppIsPy([string]$id) { return ($script:TsPyTools -contains $id) }
+
+# Can this platform actually install <id>? Twin of ts_app_installable in
+# bootstrap/_config.sh. This used to be a bare $TsWingetIds.ContainsKey, which
+# quietly meant "is it in winget" rather than "can we install it": the agent
+# CLIs are recommended and installable via Install-TsAiCli, yet a Windows box
+# missing grok/gemini/pi/cursor-agent was never once told so.
+function Test-TsAppInstallable([string]$id) {
+    if ($script:TsWingetIds.ContainsKey($id)) { return $true }
+    if (Test-TsAppIsAi $id) { return $true }
+    if (Test-TsAppIsPy $id) { return $true }
+    return $false
+}
+
 # The binary an app id actually puts on PATH. Mostly identity; a few differ.
 function Get-TsAppBin([string]$id) {
     switch ($id) {
@@ -87,6 +112,13 @@ function Get-TsAppBin([string]$id) {
         'bottom'  { 'btm' }
         'python'  { 'python3' }
         'cursor-agent' { 'cursor-agent' }
+        # The Windows port is a different program with a different name: winget's
+        # aristocratos.btop4win installs btop4win.exe, never btop.exe. Probing for
+        # `btop` therefore never found it, so Get-TsAppsPending offered it on every
+        # single ts-update and winget answered "No available upgrade found" every
+        # time. Deliberately NOT mirrored into ts_app_bin in bootstrap/_config.sh —
+        # apt and brew both install it as plain `btop`.
+        'btop'    { 'btop4win' }
         default   { $id }
     }
 }
@@ -121,7 +153,7 @@ function Get-TsAppsPending {
         $seen[$id] = $true
         if (Test-TsAppInstalled $id) { continue }
         # Only offer what this platform can actually install.
-        if (-not $script:TsWingetIds.ContainsKey($id)) { continue }
+        if (-not (Test-TsAppInstallable $id)) { continue }
         $out += $id
     }
     return $out
@@ -455,9 +487,22 @@ function Read-TsMulti {
     # Keep at most one group member ticked. $keep is the index that just won;
     # -1 means no winner, in which case the FIRST ticked member survives —
     # matching Get-TsTerminalsChannel's nightly-wins tie-break.
-    $exclusive = {
+    #
+    # NOT $exclusive. PowerShell variable names are case-insensitive, so that
+    # name IS the $Exclusive parameter — and a parameter keeps its type
+    # converter, so assigning a scriptblock to it silently coerces the block to
+    # a one-element [string[]] holding its own source text. `& $exclusive -1`
+    # then tries to run that text as a command name, which killed every
+    # Read-TsMulti call (the whole Windows wizard) until it was renamed. Any
+    # local here must not collide with a parameter, whatever the casing.
+    $applyExclusive = {
         param($keep)
         if (-not $Exclusive) { return }
+        # A winner only wins its OWN group. Ticking an option outside the group
+        # used to collapse it anyway — $keep was an index no member could equal,
+        # so every ticked member failed the `$j -ne $keep` test and was cleared.
+        # On macOS that meant ticking Ghostty silently unticked WezTerm.
+        if ($keep -ge 0 -and ($Exclusive -notcontains $Options[$keep].Key)) { return }
         $first = -1
         for ($j = 0; $j -lt $Options.Count; $j++) {
             if ($Exclusive -notcontains $Options[$j].Key) { continue }
@@ -468,7 +513,7 @@ function Read-TsMulti {
             else { $ticks[$j] = $false }
         }
     }
-    & $exclusive -1
+    & $applyExclusive -1
     $render = {
         Write-Host ''
         Write-Host $Title
@@ -497,7 +542,7 @@ function Read-TsMulti {
         }
         if ($ans -imatch '^(a|all)$') {
             for ($i = 0; $i -lt $Options.Count; $i++) { $ticks[$i] = $true }
-            & $exclusive -1
+            & $applyExclusive -1
             & $render; continue
         }
         if ($ans -imatch '^(n|no|none)$') {
@@ -508,7 +553,7 @@ function Read-TsMulti {
         if ($picks) {
             foreach ($i in $picks) {
                 $ticks[$i - 1] = -not $ticks[$i - 1]
-                if ($ticks[$i - 1]) { & $exclusive ($i - 1) }
+                if ($ticks[$i - 1]) { & $applyExclusive ($i - 1) }
             }
         } else {
             Write-Host "  ? enter a number 1-$($Options.Count) (several are fine), a, n, s, or Enter"
@@ -1031,6 +1076,32 @@ function Install-TsTerminals {
     }
 }
 
+# Pull Machine + User Path back out of the environment and rebuild the process
+# PATH from them. An installer that ran a moment ago edited the persisted Path,
+# but this process was started before that, so Get-Command still cannot see what
+# was just installed — which is how Show-TsInstalledApps came to report a tool
+# as "NOT FOUND on PATH" seconds after installing it successfully. This is the
+# pwsh counterpart of ts_load_node_env's role in ts_apps_pending. Prepending the
+# live process PATH keeps anything a session set by hand (fnm's per-shell entry,
+# a manual prepend) from being dropped.
+function Update-TsSessionPath {
+    try {
+        $persisted = @(
+            [Environment]::GetEnvironmentVariable('Path', 'Machine'),
+            [Environment]::GetEnvironmentVariable('Path', 'User')
+        ) -join ';'
+        $seen = @{}; $merged = @()
+        foreach ($dir in (($env:PATH + ';' + $persisted) -split ';')) {
+            $d = $dir.Trim()
+            if (-not $d) { continue }
+            if ($seen.ContainsKey($d.ToLower())) { continue }
+            $seen[$d.ToLower()] = $true
+            $merged += $d
+        }
+        $env:PATH = $merged -join ';'
+    } catch { }   # never fatal: a stale PATH only costs an inaccurate report
+}
+
 function Install-TsApps([string[]]$Apps) {
     if (-not $Apps -or $Apps.Count -eq 0) {
         Write-Host '==> No optional apps selected; skipping app install'
@@ -1039,6 +1110,7 @@ function Install-TsApps([string[]]$Apps) {
     if (Get-Command winget -ErrorAction SilentlyContinue) {
         foreach ($id in $Apps) {
             if (Test-TsAppIsAi $id) { continue }   # handled by Install-TsAiCli below
+            if (Test-TsAppIsPy $id) { continue }   # handled by Install-TsPyTool below
             if ($script:TsWingetIds.ContainsKey($id)) {
                 $wid = $script:TsWingetIds[$id]
                 Write-Host "==> winget install $wid"
@@ -1051,7 +1123,50 @@ function Install-TsApps([string[]]$Apps) {
     } else {
         Write-Warning 'winget not available; recorded selection only.'
     }
+    # Python tools go after the winget pass and before the agent CLIs: `python`
+    # and `uv` are themselves winget entries, and Install-TsPyTool prefers uv.
+    # Refresh PATH first so a uv installed seconds ago is actually visible.
+    if (@($Apps | Where-Object { Test-TsAppIsPy $_ }).Count) {
+        Update-TsSessionPath
+        foreach ($id in $Apps) { if (Test-TsAppIsPy $id) { Install-TsPyTool $id } }
+    }
     foreach ($id in $Apps) { if (Test-TsAppIsAi $id) { Install-TsAiCli $id } }
+    Update-TsSessionPath
+}
+
+# The Python CLI tools, none of which winget carries. Idempotent, never fatal,
+# and only ever runs for an id in $TsPyTools. Twin of the brew half of
+# ts_install_apps in bootstrap/_config.sh.
+#
+# uv first: it is already in the recommended set, it puts real shims on PATH
+# (%USERPROFILE%\.local\bin, which its own installer adds), and it needs no
+# ambient Python.
+# `py -m pip install --user` is the fallback for a machine that declined uv.
+function Install-TsPyTool([string]$id) {
+    $bin = Get-TsAppBin $id
+    $existing = Get-Command $bin -CommandType Application -ErrorAction SilentlyContinue
+    if ($existing) { Write-Host "==> ${id}: already installed ($($existing.Source))"; return }
+    # The PyPI distribution name is the catalog id for every tool in $TsPyTools.
+    # If one ever differs, map it here rather than at the call sites.
+    $pkg = $id
+
+    if (Get-Command uv -CommandType Application -ErrorAction SilentlyContinue) {
+        Write-Host "==> ${id}: uv tool install $pkg"
+        & uv tool install $pkg 2>&1 | Select-Object -Last 3
+        if ($LASTEXITCODE -eq 0) { return }
+        Write-Warning "${id}: uv tool install failed; trying pip"
+    }
+    $py = Get-Command py -CommandType Application -ErrorAction SilentlyContinue
+    if (-not $py) { $py = Get-Command python -CommandType Application -ErrorAction SilentlyContinue }
+    if (-not $py) {
+        Write-Warning "${id}: no uv and no Python found; install one, then: uv tool install $pkg"
+        return
+    }
+    Write-Host "==> ${id}: $($py.Name) -m pip install --user $pkg"
+    & $py.Source -m pip install --user --disable-pip-version-check $pkg 2>&1 | Select-Object -Last 3
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "${id}: install failed; run manually: uv tool install $pkg"
+    }
 }
 
 # The agent CLIs do not come from winget, so they get their own path. Idempotent

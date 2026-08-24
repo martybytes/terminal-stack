@@ -56,6 +56,25 @@ global.
 | `ipython` | the REPL |
 | `http GET api.example.com/x` | HTTP request, pretty-printed |
 
+### How they install on Windows
+
+Only the compiled two come from winget — `python` (`Python.Python.3.13`) and
+`ruff` (`astral-sh.ruff`), plus `uv` (`astral-sh.uv`). **The rest do not have a
+winget package at all**, so `pipx`, `poetry`, `glances`, `ipython`, `httpie` and
+`pre-commit` install through `Install-TsPyTool`: `uv tool install <name>` when uv
+is present, falling back to `py -m pip install --user <name>`.
+
+Three of them used to be listed as winget ids that do not exist — `pypa.pipx`,
+`Python-Poetry.Poetry` and `nicolargo.glances`. `pipx` is in the recommended set,
+so every Windows machine was offered it on every `ts-update`, accepted, and got
+"No package found matching input criteria" back, forever. `ipython`, `httpie` and
+`pre-commit` had no id and were skipped silently. Both halves are fixed; the
+whole group installs on Windows now.
+
+`uv tool` puts its shims in `%USERPROFILE%\.local\bin`, which uv's own installer
+adds to PATH — but not to the PATH of a shell that was already open, which is why
+the installer refreshes the process PATH before reporting what landed.
+
 ## The `agent` name
 
 Both the grok and cursor-agent installers create a generic `agent` symlink in

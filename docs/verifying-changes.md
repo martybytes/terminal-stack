@@ -24,6 +24,22 @@ $e   # empty = clean
 `ParseFile` is the pwsh equivalent of `-n`: it parses without executing, so it is
 safe on `$PROFILE` and the bootstraps.
 
+**`ParseFile` is weaker than it looks too — pwsh has no `set -u`.** PowerShell
+variable names are case-insensitive, so a local `$foo` inside a function taking a
+parameter `$Foo` *is* that parameter, and a typed parameter keeps its converter:
+assigning a scriptblock to it coerces the block into a `[string[]]` holding its
+own source text, so `& $foo` then tries to run that text as a command name. That
+parses perfectly and kills the function at runtime — it took out every
+`Read-TsMulti` call, i.e. the whole Windows wizard. There is a gate for it:
+
+```sh
+python -m pytest tests/test_agent_tools.py -k shadows -q
+```
+
+It walks the AST of every `.ps1`/`.psm1` in the repo and fails on any assignment
+whose target matches a typed parameter case-insensitively but not
+case-sensitively. Run it after touching any PowerShell file.
+
 **`bash -n` is weaker than it looks.** It only proves the file parses. A mangled
 `printf 'x\n'` that became a literal two-line string is still valid shell and passes
 cleanly. After any programmatic edit that touched an escape sequence, check the bytes:
@@ -494,6 +510,27 @@ is not multibyte-aware, so `"$desired…"` parses the name as `desired\xE2` and
 ```sh
 bash -uc 'desired=/tmp; echo "$desired…"'    # bash: desired?: unbound variable
 ```
+
+**A catalog entry is a claim about a package manager — check it.** A winget id
+that does not resolve costs nothing at parse time and never stops failing:
+`pypa.pipx` sat in `$TsWingetIds` while `pipx` was in the *recommended* set, so
+every Windows machine was offered it on every `ts-update`, accepted, and watched
+winget answer "No package found matching input criteria". Two of the other three
+Python entries were dead the same way. Sweep the whole table after touching it:
+
+```powershell
+. bootstrap\_config.ps1
+foreach ($k in ($script:TsWingetIds.Keys | Sort-Object)) {
+    $out = winget show --id $script:TsWingetIds[$k] --exact --accept-source-agreements 2>&1 | Out-String
+    if ($out -match 'No package found') { Write-Host "BAD $k -> $($script:TsWingetIds[$k])" }
+}
+```
+
+And check the id's **binary name**, which is a separate claim: winget's
+`aristocratos.btop4win` installs `btop4win.exe`, so probing for `btop` reported
+it missing forever even though it was installed. `Get-TsAppBin` must name what
+actually lands on PATH — confirm with `Get-Command` after a real install, and
+confirm `Get-TsAppsPending` then stops listing it.
 
 ## 5. What you cannot verify from a dev clone
 

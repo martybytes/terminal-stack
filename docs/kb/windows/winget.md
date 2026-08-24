@@ -44,19 +44,36 @@ it, so a failure can't scroll past unnoticed.
 | `zed` | `ZedIndustries.Zed` | optional |
 | `gdu` | `dundee.gdu` | optional (fast disk-usage TUI) |
 | `bottom` | `Clement.bottom` | optional (binary is `btm`) |
-| `glances` | `nicolargo.glances` | optional |
 | `gping` | `orf.gping` | optional |
-| `claude` `codex` `cursor-agent` `grok` `gemini` | — | the **`ai` group** — pre-ticked but always asked, and not winget packages (see below) |
+| `claude` `codex` `cursor-agent` `grok` `gemini` `pi` | — | the **`ai` group** — pre-ticked but always asked, and not winget packages (see below) |
 
 Also on Windows: `fnm` (`Schniz.fnm`), `node` (`OpenJS.NodeJS`), `python`
-(`Python.Python.3.13`), `uv`, `pipx`, `ruff` and `poetry` — the `runtimes` and
-`python` groups.
+(`Python.Python.3.13`), `uv` (`astral-sh.uv`) and `ruff` (`astral-sh.ruff`) —
+the `runtimes` group and the compiled half of `python`.
+
+**The rest of the `python` group does not come from winget.** `pipx`, `poetry`,
+`glances`, `ipython`, `httpie` and `pre-commit` have no winget manifest, so they
+route through `Install-TsPyTool`: `uv tool install <name>` when uv is present
+(it is in the recommended set, and its shims land on PATH), falling back to
+`py -m pip install --user <name>`.
+
+Three of them — `pypa.pipx`, `Python-Poetry.Poetry` and `nicolargo.glances` —
+*were* in the winget table and none of the three ids exists. `pipx` is
+recommended, so every Windows machine was offered it on every `ts-update` and
+winget answered "No package found matching input criteria" every time. Check a
+new id resolves (`winget show --id <id> --exact`) before adding it here.
 
 **Not available on Windows** — `ncdu`, `bandwhich` and `tree` have no reliable
-winget id (bandwhich has no Windows build at all), and `tmux`, `tldr`, `nvtop`
+winget id (bandwhich has no Windows build at all), `atuin` has no winget
+manifest *and* no PowerShell `atuin init` target, and `tmux`, `tldr`, `nvtop`
 and `lazydocker` are WSL/Linux-only. They are absent from the winget table
 rather than mapped to something that always fails, so `ts-update` never nags
 about them here.
+
+What `ts-update` offers is decided by `Test-TsAppInstallable`, which means *"can
+this platform install it"*, not *"is it in winget"* — winget ids, the `ai` group
+and the Python group all qualify. It used to be a bare winget lookup, so a
+machine missing `grok`, `gemini`, `pi` or `cursor-agent` was never told.
 
 **The `ai` group installs differently.** None of the five come from winget, so
 they route through `Install-TsAiCli` instead: **claude** and **grok** via their

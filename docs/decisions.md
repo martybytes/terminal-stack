@@ -1446,3 +1446,131 @@ Two notes for whoever writes it. The store's `flags` directive carries a
 free-form tail, so a pwsh `-split '\s+'` destroys it — split with a limit of 3
 and parse the remainder. And the credential layer maps to Credential Manager, not
 to `security`/`secret-tool`.
+
+## Why a PowerShell local may never share a parameter's name
+
+PowerShell variable names are case-insensitive. A local `$foo` inside a function
+that takes a parameter `$Foo` is not a shadowing local — it *is* that parameter.
+And a parameter keeps the type converter that its declaration attached, for the
+life of the variable. So this, in `Read-TsMulti`:
+
+```powershell
+param([string[]]$Exclusive = @())
+$exclusive = { param($keep) ... }     # assigns to $Exclusive
+& $exclusive -1                        # runs a STRING as a command name
+```
+
+silently coerced the scriptblock into a one-element `[string[]]` holding its own
+source text, and the call then tried to run that text as a command. The error it
+produced — `The term ' param($keep) ... ' is not recognized as a name of a
+cmdlet` — names the whole function body, which is why it reads as gibberish.
+
+It parses cleanly, so `ParseFile` (our pwsh equivalent of `bash -n`) cannot see
+it, and there is no `set -u` for PowerShell to catch the aliasing. It killed
+every `Read-TsMulti` call — the terminal question, the tool-group pickers, and so
+`install.ps1`, `windows-bootstrap.ps1` and `ts-config apps` — while every test
+and the whole POSIX side stayed green, because bash keeps functions and variables
+in separate namespaces and cannot have this bug at all.
+
+The rule is therefore blunt: **no local may match a parameter name, whatever the
+casing**. `test_no_pwsh_local_shadows_a_typed_parameter` walks the AST of every
+`.ps1`/`.psm1` in the repo and fails on any assignment whose target matches a
+*typed* parameter case-insensitively but not case-sensitively. It found one other
+instance (`Test-TsWsSameVolume`'s `$b` against `[string]$B`) which was harmless —
+both sides were strings — and was renamed anyway, because "harmless today"
+depends entirely on what type is assigned tomorrow.
+
+Untyped parameters are excluded deliberately: with no converter attached the
+aliasing is still confusing but not silently destructive, and including them
+turns a precise gate into noise.
+
+## Why the exclusive collapse only fires for a member of the group
+
+`ts_prompt_multi` / `Read-TsMulti` take a set of mutually exclusive keys — today
+only `wezterm-nightly` / `wezterm-stable`, because both casks own
+`/Applications/WezTerm.app`. Ticking one visibly unticks the other, so the screen
+can never show a combination the caller will refuse.
+
+The collapse is driven by the index of whatever was just ticked, passed as
+`$keep`: every ticked group member that is not `$keep` gets cleared. That is
+correct only when `$keep` is *itself* in the group. When it is not, no member can
+equal it, so all of them fail the test and the entire group is cleared.
+
+The terminal question is the only exclusive prompt in the stack, and Ghostty is
+its only non-member — so on macOS, ticking Ghostty returned Ghostty **alone**.
+WezTerm dropped out of the selection with nothing on screen to say so, and the
+install simply did not install it. Both twins had it. The Windows half was
+unreachable behind the `Read-TsMulti` crash above, which is the only reason this
+surfaced now: fixing the crash made the toggle loop runnable for the first time.
+
+Both implementations now return early when `$keep` is outside the group. The
+guard lives inside the helper rather than at the call sites so the `-1`
+normalisation path (which has no winner and must still collapse a both-ticked
+pre-selection) keeps working unchanged.
+
+A six-case matrix pins the two implementations to identical answers —
+`test_exclusive_group_survives_a_non_member_tick_bash` / `_pwsh`. Driving the
+loop needs a fake TTY on both sides, and the bash half has a trap worth keeping:
+`ts_prompt_multi` reads its answer inside a nested `$( )`, so a shell-variable
+answer cursor resets on every call and the test loops forever. The cursor has to
+live on disk.
+
+## Why the Python CLI tools bypass winget
+
+`$TsWingetIds` is the catalog's claim about what winget can install, and three of
+its entries were not real: `pypa.pipx`, `Python-Poetry.Poetry` and
+`nicolargo.glances` all answer *"No package found matching input criteria"*.
+`pipx` is in the recommended set, so every Windows machine was offered it on
+every `ts-update`, accepted, and watched the install fail — permanently, because
+a failed install leaves the tool missing and therefore still pending.
+
+The existing rule for this (`ncdu`, `bandwhich`, `tree`, `atuin`) is that an id
+which always fails is worse than an honest "not available on this platform". But
+that rule assumes the tool genuinely cannot be installed here, and these can: they
+are PyPI packages. Declaring them unavailable would have been an accurate
+statement about winget and a false one about Windows.
+
+So they route through `Install-TsPyTool`, the Python sibling of the existing
+`Install-TsAiCli` — `uv tool install <name>` first, `py -m pip install --user`
+as the fallback. uv is already in the recommended set, needs no ambient Python,
+and puts real shims on PATH. This also picks up `ipython`, `httpie` and
+`pre-commit`, which had no winget id at all and were being skipped in silence.
+
+Ordering is load-bearing: the Python pass runs **after** the winget pass, because
+`python` and `uv` are themselves winget entries, and **before** the agent CLIs.
+Both Windows install paths need it — `Install-TsApps` and the separate loop in
+`windows-bootstrap.ps1`, which deliberately uses `Install-WingetPackage` so
+failures land in the end-of-run report. Skip either and the tools it owns are
+silently never installed.
+
+## Why the pending gate asks "can we install it", not "is it in winget"
+
+`Get-TsAppsPending` decides what `ts-update` offers. It gated on
+`$TsWingetIds.ContainsKey($id)` under a comment reading *"Only offer what this
+platform can actually install"* — which those two things stopped meaning the same
+day the agent CLIs arrived. `claude`, `codex`, `cursor-agent`, `grok`, `gemini`
+and `pi` are all recommended and all installable through `Install-TsAiCli`, and
+none of them is in `$TsWingetIds`. A Windows machine missing four of them was
+never told, on any run.
+
+The POSIX twin `ts_app_installable` had it right and its comment even cites the
+Windows behaviour as the model it was copying — the Windows side had drifted out
+from under the comment. `Test-TsAppInstallable` restores the intended meaning:
+true for a winget id, an agent CLI, or a Python tool.
+
+The visible consequence is that Windows users are now offered agent CLIs they are
+missing. That is the point, and it matches macOS and Linux — but it does mean the
+first `ts-update` after this change has more to say than the last one did.
+
+## Why `Update-TsSessionPath` exists
+
+An installer that ran seconds ago edited the persisted `Path`, but the current
+process was started before that, so `Get-Command` cannot see what was just
+installed. `Show-TsInstalledApps` therefore reported a tool as `NOT FOUND on
+PATH` immediately after installing it successfully — alarming, and wrong.
+
+`Update-TsSessionPath` rebuilds `$env:PATH` from the Machine and User values,
+prepending the live process PATH so anything a session set by hand (fnm's
+per-shell entry, a manual prepend) survives. It is the pwsh counterpart of
+`ts_load_node_env`'s role in `ts_apps_pending`, and it is wrapped in a `try` that
+swallows everything: a stale PATH costs an inaccurate report, never an install.
