@@ -311,3 +311,27 @@ def test_the_billing_overlay_never_replaces_the_default_env_file():
     out = _dry_run("up", "agentmemory")
     if "--env-file" in out:
         assert out.index("--env-file .env") < out.index("--env-file .billing.env"), out
+
+
+def test_line_endings_and_bom_are_scoped_to_the_service_tree():
+    """Two conventions, both right in their own scope, and a blanket `sed -i` over
+    the working tree quietly broke one of them.
+
+    Inside services/: UTF-8 WITH BOM and CRLF. Those .ps1 run standalone, possibly
+    under Windows PowerShell 5.1, which reads a BOM-less file as ANSI and then
+    dies on the non-ASCII they print.
+
+    Outside: LF and no BOM. Those files are chezmoi source or sync-hook inputs,
+    where CRLF breaks ~/.zshrc under zsh and makes `#!/usr/bin/env bash\r`
+    non-executable.
+    """
+    inside = sorted((ROOT / "services").rglob("*.ps1"))
+    assert inside, "the service tree has no .ps1 files to check"
+    for f in inside:
+        raw = f.read_bytes()
+        assert raw.startswith(b"\xef\xbb\xbf"), f"{f.relative_to(ROOT)}: needs a UTF-8 BOM"
+        assert b"\r\n" in raw, f"{f.relative_to(ROOT)}: needs CRLF"
+    for f in sorted(ROOT.glob("bootstrap/*.ps1")) + sorted(ROOT.glob("scripts/*.ps1")):
+        raw = f.read_bytes()
+        assert not raw.startswith(b"\xef\xbb\xbf"), f"{f.name}: must not carry a BOM"
+        assert b"\r" not in raw, f"{f.name}: must be LF"
