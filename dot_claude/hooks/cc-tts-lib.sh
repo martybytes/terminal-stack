@@ -143,6 +143,99 @@ PY
     esac
 }
 
+cc_tts_assistant_text() {
+    # Extract the last assistant message from hook JSON. jq is preferred, but
+    # Git Bash and minimal POSIX hosts may have Python without jq.
+    local input="${1:-}" mode="${2:-transcript}" py
+    [ -n "$input" ] || return 0
+
+    if command -v jq >/dev/null 2>&1; then
+        if [ "$mode" = direct ]; then
+            if printf '%s' "$input" | jq -r '
+                (.last_assistant_message // .text // empty) as $direct
+                | if ($direct | type) == "string" and ($direct | length) > 0 then $direct else
+                [.. | objects
+                 | select(.role? == "assistant" or .type? == "assistant")
+                 | (.content // .message // empty)
+                 | if type == "array" then
+                     [ .[] | select(.type? == "text") | .text ] | join(" ")
+                   elif type == "string" then .
+                   else empty end
+                ] | last // empty end' 2>/dev/null; then
+                return 0
+            fi
+        elif printf '%s' "$input" | jq -r '
+            [.. | objects
+             | select(.role? == "assistant" or .type? == "assistant")
+             | (.content // .message // empty)
+             | if type == "array" then
+                 [ .[] | select(.type? == "text") | .text ] | join(" ")
+               elif type == "string" then .
+               else empty end
+            ] | last // empty' 2>/dev/null; then
+            return 0
+        fi
+    fi
+
+    if command -v python3 >/dev/null 2>&1; then
+        py="$(command -v python3)"
+    elif command -v python >/dev/null 2>&1; then
+        py="$(command -v python)"
+    else
+        return 0
+    fi
+
+    printf '%s' "$input" | "$py" -c '
+import json
+import sys
+
+
+def objects(value):
+    if isinstance(value, dict):
+        yield value
+        for child in value.values():
+            yield from objects(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from objects(child)
+
+
+def assistant_text(value):
+    if not isinstance(value, dict):
+        return ""
+    if value.get("role") != "assistant" and value.get("type") != "assistant":
+        return ""
+    content = value.get("content")
+    if content is None:
+        content = value.get("message")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return " ".join(
+            item.get("text", "")
+            for item in content
+            if isinstance(item, dict) and item.get("type") == "text"
+        )
+    return ""
+
+
+try:
+    payload = json.load(sys.stdin)
+except Exception:
+    raise SystemExit(0)
+
+if sys.argv[1] == "direct" and isinstance(payload, dict):
+    direct = payload.get("last_assistant_message") or payload.get("text")
+    if isinstance(direct, str) and direct:
+        print(direct, end="")
+        raise SystemExit(0)
+
+messages = [text for item in objects(payload) if (text := assistant_text(item))]
+if messages:
+    print(messages[-1], end="")
+' "$mode" 2>/dev/null || true
+}
+
 cc_tts_event_enabled() {
     local ev="$1"
     if command -v jq >/dev/null 2>&1 && [ -f "$CONFIG" ]; then
@@ -265,17 +358,7 @@ cc_tts_build_speech() {
         text="$override_text"
     elif [ "$message_mode" = hook ] && [ -n "${CC_TTS_HOOK_JSON:-}" ]; then
         hook_json="${CC_TTS_HOOK_JSON}"
-        if command -v jq >/dev/null 2>&1; then
-            text="$(printf '%s' "$hook_json" | jq -r '
-                [.. | objects
-                 | select(.role? == "assistant" or .type? == "assistant")
-                 | (.content // .message // empty)
-                 | if type == "array" then
-                     [ .[] | select(.type? == "text") | .text ] | join(" ")
-                   elif type == "string" then .
-                   else empty end
-                ] | last // empty' 2>/dev/null || true)"
-        fi
+        text="$(cc_tts_assistant_text "$hook_json" transcript)"
         [ -z "${text:-}" ] && message_mode=template
     fi
 
@@ -288,19 +371,9 @@ cc_tts_build_speech() {
     # renders on every platform, so this needs no new key.
     if [ -z "$override_text" ] && [ "$state" = waiting ] \
        && [ "$(cc_tts_json .summarize.mode template)" = self ] \
-       && [ -n "${CC_TTS_HOOK_JSON:-}" ] && command -v jq >/dev/null 2>&1; then
+       && [ -n "${CC_TTS_HOOK_JSON:-}" ]; then
         local final_text self_line
-        final_text="$(printf '%s' "${CC_TTS_HOOK_JSON}" | jq -r '
-            (.last_assistant_message // .text // empty) as $direct
-            | if ($direct | type) == "string" and ($direct | length) > 0 then $direct else
-            [.. | objects
-             | select(.role? == "assistant" or .type? == "assistant")
-             | (.content // .message // empty)
-             | if type == "array" then
-                 [ .[] | select(.type? == "text") | .text ] | join(" ")
-               elif type == "string" then .
-               else empty end
-            ] | last // empty end' 2>/dev/null || true)"
+        final_text="$(cc_tts_assistant_text "${CC_TTS_HOOK_JSON}" direct)"
         if [ -n "$final_text" ]; then
             self_line="$(cc_tts_self_summary "$final_text")"
             if [ -n "$self_line" ]; then

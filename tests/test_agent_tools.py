@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.shell_support import BASH, bash_path
+
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "bootstrap/agent-tools.json"
@@ -302,7 +304,7 @@ def test_existing_agentmemory_install_migrates_missing_toggle_to_on(tmp_path):
     assert cfg["agentmemoryEnabled"] == "on"
 
 
-@pytest.mark.skipif(not shutil.which("bash"), reason="bash is unavailable")
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_shell_entrypoints_parse():
     # dot_zshrc is deliberately NOT in this list: it is a zsh file and uses zsh-only
     # syntax (glob patterns in [[ ]], ${(P)var}, typeset -g "$var=..."), so `bash -n`
@@ -320,7 +322,7 @@ def test_shell_entrypoints_parse():
         "bootstrap/ts-smb.sh", "bootstrap/_smb.sh", "bootstrap/_smb_setup.sh",
         "bootstrap/ts-rclone-config.sh",
     ]
-    result = subprocess.run([shutil.which("bash"), "-n", *files], cwd=ROOT,
+    result = subprocess.run([BASH, "-n", *files], cwd=ROOT,
                             text=True, capture_output=True, check=False)
     assert result.returncode == 0, result.stderr
 
@@ -593,7 +595,7 @@ def test_wezterm_env_vars_map_onto_channels():
     assert "nightly is retired" not in sh and "nightly is retired" not in ps
 
 
-@pytest.mark.skipif(not shutil.which("bash"), reason="bash is unavailable")
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_wezterm_env_var_channel_mapping_is_exact():
     """TS_TERMINALS / TS_WEZTERM must resolve to the channel the user named."""
     cases = {
@@ -609,7 +611,7 @@ def test_wezterm_env_var_channel_mapping_is_exact():
     for env, (want_sel, want_chan) in cases.items():
         k, v = env.split("=", 1)
         r = subprocess.run(
-            [shutil.which("bash"), "-c",
+            [BASH, "-c",
              '. bootstrap/_config.sh >/dev/null 2>&1; . bootstrap/_wizard.sh; '
              'sel="$(ts_prompt_terminals)"; printf "%s|%s" "$sel" "$(ts_terminals_channel "$sel")"'],
             cwd=ROOT, env={**os.environ, k: v}, text=True, capture_output=True, check=False)
@@ -619,11 +621,11 @@ def test_wezterm_env_var_channel_mapping_is_exact():
         assert chan.strip() == want_chan, f"{env}: got channel {chan!r}"
 
 
-@pytest.mark.skipif(not shutil.which("bash"), reason="bash is unavailable")
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_wezterm_version_string_parses_to_a_date():
     """The build date is IN the release name, so it needs no network call."""
     r = subprocess.run(
-        [shutil.which("bash"), "-c",
+        [BASH, "-c",
          '. bootstrap/_wezterm.sh; ts_wez_version_parse "wezterm 20240203-110809-5046fc22"; '
          'ts_wez_version_parse "20260331-040028-577474d8"; ts_wez_version_parse "not a version"'],
         cwd=ROOT, text=True, capture_output=True, check=False)
@@ -634,14 +636,14 @@ def test_wezterm_version_string_parses_to_a_date():
     assert len(lines) == 2, "unparseable input must produce nothing, not a bad guess"
 
 
-@pytest.mark.skipif(not shutil.which("bash"), reason="bash is unavailable")
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_changelog_slicer_counts_against_a_fixture():
     """Pinned to a saved copy of upstream's changelog, so the assertion does not
     drift as upstream adds bullets."""
     fixture = ROOT / "tests/fixtures/wezterm-changelog.md"
     assert fixture.exists()
     r = subprocess.run(
-        [shutil.which("bash"), "-c",
+        [BASH, "-c",
          f'. bootstrap/_wezterm.sh; ts_wez_changelog_fetch() {{ printf "%s\n" "{fixture}"; }}; '
          'ts_wez_changes_tally 20240203-110809-5046fc22'],
         cwd=ROOT, text=True, capture_output=True, check=False)
@@ -656,7 +658,7 @@ def test_changelog_slicer_counts_against_a_fixture():
     # A version that is not in the changelog slices nothing away — everything is
     # newer than it — so the count must be strictly larger.
     r2 = subprocess.run(
-        [shutil.which("bash"), "-c",
+        [BASH, "-c",
          f'. bootstrap/_wezterm.sh; ts_wez_changelog_fetch() {{ printf "%s\n" "{fixture}"; }}; '
          'ts_wez_changes_tally 19700101-000000-00000000'],
         cwd=ROOT, text=True, capture_output=True, check=False)
@@ -664,11 +666,11 @@ def test_changelog_slicer_counts_against_a_fixture():
     assert sum(older.values()) > sum(counts.values())
 
 
-@pytest.mark.skipif(not shutil.which("bash"), reason="bash is unavailable")
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_wezterm_queries_fail_open_when_offline():
     """No network must degrade to version-and-date, never block or error."""
     r = subprocess.run(
-        [shutil.which("bash"), "-c",
+        [BASH, "-c",
          '. bootstrap/_wezterm.sh; gh() { return 1; }; curl() { return 1; }; '
          'ts_wezterm_status; echo "RC=$?"'],
         cwd=ROOT, text=True, capture_output=True, check=False)
@@ -735,14 +737,14 @@ def test_ts_config_exposes_wezterm():
 
 def _sh_eval(snippet):
     """Run a snippet with bootstrap/_config.sh sourced, return stdout."""
-    r = subprocess.run([shutil.which("bash"), "-c",
+    r = subprocess.run([BASH, "-c",
                         f'. bootstrap/_config.sh >/dev/null 2>&1; {snippet}'],
                        cwd=ROOT, text=True, capture_output=True, check=False)
     assert r.returncode == 0, r.stderr
     return r.stdout.strip()
 
 
-@pytest.mark.skipif(not shutil.which("bash"), reason="bash is unavailable")
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_every_catalog_id_belongs_to_exactly_one_group():
     """An id in no group is unreachable from the group picker; one in two is ambiguous."""
     all_ids = _sh_eval('echo "$TS_APPS_ALL"').split()
@@ -758,7 +760,7 @@ def test_every_catalog_id_belongs_to_exactly_one_group():
     )
 
 
-@pytest.mark.skipif(not shutil.which("bash"), reason="bash is unavailable")
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_new_tools_are_in_the_catalog_with_descriptions():
     all_ids = _sh_eval('echo "$TS_APPS_ALL"').split()
     for tool in ("duf", "ncdu", "dust", "gdu", "btop", "bottom", "glances",
@@ -776,7 +778,7 @@ def test_new_tools_are_in_the_catalog_with_descriptions():
     assert "needs `fd`" in (ROOT / "README.md").read_text(encoding="utf-8")
 
 
-@pytest.mark.skipif(not shutil.which("bash"), reason="bash is unavailable")
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_agent_clis_are_asked_about_and_default_to_all():
     """Default-to-all, but still a question: every group starts ticked and every
     tool inside stays individually untickable."""
@@ -794,7 +796,7 @@ def test_agent_clis_are_asked_about_and_default_to_all():
     assert "ts_prompt_multi" in wiz
 
 
-@pytest.mark.skipif(not shutil.which("bash"), reason="bash is unavailable")
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_python_and_runtimes_are_in_the_questionnaire():
     groups = _sh_eval('echo "$TS_APP_GROUPS"').split()
     assert "python" in groups and "runtimes" in groups
@@ -824,7 +826,7 @@ def test_agent_cli_installers_use_the_real_upstream_commands():
     assert "deprecated upstream" in sh
 
 
-@pytest.mark.skipif(not shutil.which("bash"), reason="bash is unavailable")
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_node_managed_binaries_are_visible_to_the_update_check():
     """Global npm binaries live under fnm's per-shell PATH entry; without loading
     fnm's env first, ts-update would nag about codex/gemini forever."""
@@ -934,19 +936,20 @@ def test_pwsh_wizard_persists_the_workspace_answer():
 def _smb_eval(tmp_path, local_conf, snippet, tracked="set default_user guest\n"):
     """Run a snippet with bootstrap/_smb.sh sourced against a sandboxed store."""
     lib = tmp_path / "lib"; lib.mkdir(exist_ok=True)
-    (lib / "shares.conf").write_text(tracked, encoding="utf-8")
+    (lib / "shares.conf").write_text(tracked, encoding="utf-8", newline="\n")
     cfg = tmp_path / "cfg" / "terminal-stack"; cfg.mkdir(parents=True, exist_ok=True)
-    (cfg / "shares.local.conf").write_text(local_conf, encoding="utf-8")
-    env = dict(os.environ, XDG_CONFIG_HOME=str(tmp_path / "cfg"),
-               TS_SMB_LIB_DIR=str(lib))
-    r = subprocess.run([shutil.which("bash"), "-c",
+    (cfg / "shares.local.conf").write_text(local_conf, encoding="utf-8", newline="\n")
+    env = dict(os.environ, XDG_CONFIG_HOME=bash_path(tmp_path / "cfg"),
+               TS_SMB_LIB_DIR=bash_path(lib))
+    r = subprocess.run([BASH, "-c",
                         f'. bootstrap/_smb.sh >/dev/null 2>&1; {snippet}'],
-                       cwd=ROOT, text=True, capture_output=True, check=False, env=env)
+                       cwd=ROOT, text=True, encoding="utf-8", capture_output=True,
+                       check=False, env=env)
     assert r.returncode == 0, r.stderr
     return r.stdout.strip()
 
 
-@pytest.mark.skipif(not shutil.which("bash"), reason="bash is unavailable")
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_smb_store_parses_stanzas(tmp_path):
     conf = "share media\n  host nas.lan\n  path Media\n  user marty\n"
     assert _smb_eval(tmp_path, conf, 'ts_smb_get media host ""') == "nas.lan"
@@ -954,7 +957,7 @@ def test_smb_store_parses_stanzas(tmp_path):
     assert _smb_eval(tmp_path, conf, 'ts_smb_names') == "media"
 
 
-@pytest.mark.skipif(not shutil.which("bash"), reason="bash is unavailable")
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_smb_store_last_match_wins(tmp_path):
     """The local file must be able to override ONE field without restating a stanza."""
     conf = ("share media\n  host nas.lan\n  path Media\n  vfs off\n"
@@ -965,14 +968,14 @@ def test_smb_store_last_match_wins(tmp_path):
     assert _smb_eval(tmp_path, conf, 'ts_smb_names') == "media"
 
 
-@pytest.mark.skipif(not shutil.which("bash"), reason="bash is unavailable")
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_smb_store_falls_back_to_set_defaults(tmp_path):
     conf = "share media\n  host nas.lan\n  path Media\n"
     assert _smb_eval(tmp_path, conf, 'ts_smb_get media user ""',
                      tracked="set default_user guest\n") == "guest"
 
 
-@pytest.mark.skipif(not shutil.which("bash"), reason="bash is unavailable")
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_smb_flags_tail_keeps_its_spaces(tmp_path):
     """`flags` is the one free-form tail; the space-delimited store cannot hold it,
     so it lives in its own accumulator. An inline comment is stripped, and so is
@@ -983,7 +986,7 @@ def test_smb_flags_tail_keeps_its_spaces(tmp_path):
         "--transfers 8 --smb-idle-timeout 5m"
 
 
-@pytest.mark.skipif(not shutil.which("bash"), reason="bash is unavailable")
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_smb_validate_catches_the_share_vs_path_trap(tmp_path):
     """`share` opens a stanza, so writing `share Media` for the SMB share name
     silently opens a second one. That mistake must be reported, not absorbed."""
@@ -997,13 +1000,14 @@ def test_smb_validate_catches_the_share_vs_path_trap(tmp_path):
     assert _smb_eval(tmp_path, conf, 'ts_smb_names') == "media"
 
 
-@pytest.mark.skipif(not shutil.which("bash"), reason="bash is unavailable")
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_smb_help_works_without_a_clone():
     """`ts-smb -h` must work on a box where the clone or chezmoi is the broken thing."""
     env = {k: v for k, v in os.environ.items() if k != "TERMINAL_STACK_DIR"}
     env.update({"PATH": "/usr/bin:/bin", "HOME": "/nonexistent"})
-    r = subprocess.run([shutil.which("bash"), "bootstrap/ts-smb.sh", "-h"],
-                       cwd=ROOT, text=True, capture_output=True, check=False, env=env)
+    r = subprocess.run([BASH, "bootstrap/ts-smb.sh", "-h"],
+                       cwd=ROOT, text=True, encoding="utf-8", capture_output=True,
+                       check=False, env=env)
     assert r.returncode == 0, r.stderr
     assert r.stdout.startswith("ts-smb —")
     assert "Windows is not supported yet" in r.stdout
@@ -1108,7 +1112,7 @@ def test_tailscale_helpers_and_topic_cover_identity_and_diagnostics():
 
 # ── atuin / arch-tag regressions ────────────────────────────────────────────────
 
-@pytest.mark.skipif(not shutil.which("bash"), reason="bash is unavailable")
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_common_arch_tag_rust_uses_aarch64_not_arm64():
     """cargo-dist projects (atuin, yazi) name their ARM asset `aarch64`, while
     `gnu` yields `arm64`. Getting this wrong fails *silently on ARM only*: the
@@ -1121,7 +1125,7 @@ def test_common_arch_tag_rust_uses_aarch64_not_arm64():
     def tag(machine, style):
         script = (f'{fn.group(0)}\nuname() {{ echo "{machine}"; }}\n'
                   f'common_arch_tag {style}\n')
-        return subprocess.run(["bash", "-c", script], capture_output=True,
+        return subprocess.run([BASH, "-c", script], capture_output=True,
                               text=True).stdout.strip()
     assert tag("aarch64", "rust") == "aarch64"
     assert tag("arm64", "rust") == "aarch64"
@@ -1634,7 +1638,7 @@ def test_no_bare_variable_followed_by_non_ascii():
     assert not bad, "brace these: " + "; ".join(bad)
 
 
-@pytest.mark.skipif(not shutil.which("bash"), reason="bash is unavailable")
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_optional_installs_are_never_fatal():
     """`set -e` exempts only the NON-final members of an && / || list, so
     `brew list --cask zed || brew install --cask zed` is not guarded at all. That
@@ -1749,12 +1753,12 @@ _EXCL_PWSH = (
     "Write-Output ('RESULT=' + ($r -join ' '))")
 
 
-@pytest.mark.skipif(not shutil.which("bash"), reason="bash is unavailable")
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_exclusive_group_survives_a_non_member_tick_bash():
     for answers, want in _EXCL_CASES:
         script = _EXCL_BASH.replace(
             "ANSWERS", " ".join('"%s"' % a for a in answers))
-        r = subprocess.run([shutil.which("bash"), "-c", script], cwd=ROOT,
+        r = subprocess.run([BASH, "-c", script], cwd=ROOT,
                            text=True, capture_output=True, check=False,
                            stdin=subprocess.DEVNULL, timeout=60)
         assert r.stdout.split() == want, f"{answers}: got {r.stdout.split()!r}"
@@ -1776,7 +1780,7 @@ def test_exclusive_group_survives_a_non_member_tick_pwsh():
 
 
 
-@pytest.mark.skipif(not shutil.which("bash"), reason="bash is unavailable")
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_installed_apps_report_survives_a_tool_that_rejects_version():
     """The report assigned a four-stage pipeline directly, so under
     `set -euo pipefail` any tool whose --version exits non-zero killed the
@@ -1791,7 +1795,7 @@ def test_installed_apps_report_survives_a_tool_that_rejects_version():
         'printf "#!/bin/sh\\nexit 3\\n" > /tmp/_tsbin/tmux; chmod +x /tmp/_tsbin/tmux\n'
         'PATH=/tmp/_tsbin:$PATH ts_report_installed_apps "tmux" >/dev/null\n'
         'echo SURVIVED\n')
-    r = subprocess.run(["bash", "-c", script], cwd=ROOT, capture_output=True, text=True)
+    r = subprocess.run([BASH, "-c", script], cwd=ROOT, capture_output=True, text=True)
     assert "SURVIVED" in r.stdout, f"report aborted: {r.stderr.strip()[:200]}"
     # And the guard must be in the source, not incidental.
     cfg = _uncommented((ROOT / "bootstrap/_config.sh").read_text(encoding="utf-8"))
@@ -1815,7 +1819,7 @@ def test_ts_config_wizard_asks_about_terminals_and_saves_first():
     assert "ts_note_failure" in rw, "installs here must not be fatal either"
 
 
-@pytest.mark.skipif(not shutil.which("bash"), reason="bash is unavailable")
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_wizard_prompts_run_without_undefined_functions():
     """A RUNTIME smoke test, because the static text checks around it missed two
     real regressions: `exclusive -1` was called before its function was defined,
@@ -1834,7 +1838,7 @@ def test_wizard_prompts_run_without_undefined_functions():
         'done\n'
         # and actually drive the picker, which is where the ordering bug lived
         'TS_MULTI_EXCLUSIVE="a b" ts_prompt_multi "a b" "T:" "" "a|A|" "b|B|" "c|C|"\n')
-    r = subprocess.run(["bash", "-c", script], cwd=ROOT,
+    r = subprocess.run([BASH, "-c", script], cwd=ROOT,
                        capture_output=True, text=True, stdin=subprocess.DEVNULL)
     assert "UNDEFINED:" not in r.stdout, r.stdout
     # /dev/tty is legitimately absent under pytest; anything else is a real fault.
@@ -1860,7 +1864,7 @@ def test_ts_config_sources_what_it_calls():
 
 # ── wizard recommendations + readiness probing ──────────────────────────────────
 
-@pytest.mark.skipif(not shutil.which("bash"), reason="bash is unavailable")
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_service_probes_treat_any_http_response_as_up():
     """AgentMemory answers 404 on / and 401 on /agentmemory/health. `curl -fsS`
     turns either into a failure, which is why `ts-agents agentmemory status`
@@ -1871,7 +1875,7 @@ def test_service_probes_treat_any_http_response_as_up():
         # port 9 (discard) is reliably not an HTTP server
         'ts_probe_http http://127.0.0.1:9 1 && echo BAD_UP || echo ok_down\n'
         'ts_probe_http_ok http://127.0.0.1:9 1 && echo BAD_OK || echo ok_not_ok\n')
-    r = subprocess.run(["bash", "-c", script], cwd=ROOT, capture_output=True, text=True)
+    r = subprocess.run([BASH, "-c", script], cwd=ROOT, capture_output=True, text=True)
     assert "BAD_" not in r.stdout, r.stdout
     assert r.stdout.split() == ["ok_down", "ok_not_ok"], r.stdout
     agents = _uncommented((ROOT / "bootstrap/ts-agents.sh").read_text(encoding="utf-8"))
@@ -1930,7 +1934,7 @@ def test_platform_impossible_apps_are_not_offered_forever():
     assert "ts_app_installable" in pend, "pending list must filter impossible ids"
 
 
-@pytest.mark.skipif(not shutil.which("bash"), reason="bash is unavailable")
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_nightly_is_preticked_even_when_stable_is_installed():
     """Pre-ticking 'whatever is installed' meant a stable box saw nightly
     unticked, so pressing Enter — the thing everyone does — silently kept a
@@ -1954,7 +1958,7 @@ def test_nightly_is_preticked_even_when_stable_is_installed():
             'ts_wezterm_prompt_intro() { :; }\n'
             # non-interactive keeps the pre-ticks, so the answer IS the pre-tick
             'ts_prompt_terminals 2>/dev/null\n')
-        r = subprocess.run(["bash", "-c", script], cwd=ROOT, capture_output=True,
+        r = subprocess.run([BASH, "-c", script], cwd=ROOT, capture_output=True,
                            text=True, stdin=subprocess.DEVNULL)
         return r.stdout.split()
 
@@ -1976,12 +1980,12 @@ CC_TTS_LIB = ROOT / "dot_claude/hooks/cc-tts-lib.sh"
 
 def _self_summary_sh(text):
     r = subprocess.run(
-        ["bash", "-c", '. dot_claude/hooks/cc-tts-lib.sh 2>/dev/null; cc_tts_self_summary "$1"',
+        [BASH, "-c", '. dot_claude/hooks/cc-tts-lib.sh 2>/dev/null; cc_tts_self_summary "$1"',
          "_", text], cwd=ROOT, capture_output=True, text=True)
     return r.stdout.strip()
 
 
-@pytest.mark.skipif(not shutil.which("bash"), reason="bash is unavailable")
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_self_summarizer_matches_the_python_daemon():
     """`self` was implemented only in ttsd/summarize.py, which runs inside the
     Windows EXE — so on macOS/Linux it was accepted, persisted and never read,
@@ -2007,18 +2011,24 @@ def test_self_summarizer_matches_the_python_daemon():
             f"shell/python disagree on {c!r}"
 
 
-def test_codex_direct_stop_message_feeds_self_summary():
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+def test_codex_direct_stop_message_feeds_self_summary(tmp_path):
     """Codex Stop input carries the final response at the top level, unlike
     Claude's transcript-shaped payload. Missing that field silently fell back
     to the fixed template even when the user selected self."""
+    config = tmp_path / "tts.json"
+    config.write_text(json.dumps({"summarize": {"mode": "self"}}),
+                      encoding="utf-8", newline="\n")
     script = r'''
         export CC_TTS_SOURCE=codex
         export CC_TTS_HOOK_JSON='{"last_assistant_message":"Done. <!-- speak: Codex used its own summary. -->"}'
         . dot_claude/hooks/cc-tts-lib.sh 2>/dev/null
         cc_tts_build_speech codex waiting terminal-stack
     '''
-    result = subprocess.run(["bash", "-c", script], cwd=ROOT,
-                            capture_output=True, text=True, check=True)
+    env = dict(os.environ, CC_TTS_CONFIG=bash_path(config))
+    result = subprocess.run([BASH, "-c", script], cwd=ROOT,
+                            capture_output=True, text=True, encoding="utf-8",
+                            check=True, env=env)
     assert "Codex used its own summary" in result.stdout
     assert "I'm waiting for you" not in result.stdout
 
@@ -2030,13 +2040,13 @@ def test_ghostty_preserves_standard_macos_window_cycle_shortcut():
     assert "global:cmd+grave_accent" not in cfg
 
 
-@pytest.mark.skipif(not shutil.which("bash"), reason="bash is unavailable")
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_speak_marker_is_never_spoken_verbatim():
     """In hook mode the raw final message IS the speech text, so a
     <!-- speak: … --> comment would be read out loud. _speakable() is
     Python-side only and has no shell twin."""
     r = subprocess.run(
-        ["bash", "-c",
+        [BASH, "-c",
          '. dot_claude/hooks/cc-tts-lib.sh 2>/dev/null; '
          'cc_tts_strip_markers "Done. <!-- speak: hidden text --> tail"'],
         cwd=ROOT, capture_output=True, text=True)

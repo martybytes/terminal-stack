@@ -1,7 +1,7 @@
 # Verifying a change before you commit
 
-There is no CI, no test suite and no lint here — but that does not mean there is
-nothing to run. This is the checklist that replaces them. `INSTALL.md` § Phase 9 is
+There is no CI, so validation happens locally before every push. This checklist
+combines the automated suites with the manual gates they cannot cover. `INSTALL.md` § Phase 9 is
 the *post-install* smoke test for a fresh machine; this is the *pre-commit* pass for
 a change you just made.
 
@@ -39,6 +39,22 @@ python -m pytest tests/test_agent_tools.py -k shadows -q
 It walks the AST of every `.ps1`/`.psm1` in the repo and fails on any assignment
 whose target matches a typed parameter case-insensitively but not
 case-sensitively. Run it after touching any PowerShell file.
+
+### Windows: Bash-backed pytest
+
+Run the Python suite normally from PowerShell:
+
+```powershell
+python -m pytest tests -q
+```
+
+The suite resolves a native MSYS/Cygwin Bash from Git for Windows. It deliberately
+rejects `C:\Windows\System32\bash.exe`: that file is the WSL launcher, not a
+Windows-hosted POSIX shell, and it cannot consume the Windows paths and minimal
+environments used by these tests. If Git Bash is unavailable, Bash-dependent tests
+skip explicitly instead of hanging inside WSL. POSIX fixtures also translate temp
+paths with `cygpath`, write LF, and decode output as UTF-8; keep those boundaries
+when adding another Bash subprocess test.
 
 **`bash -n` is weaker than it looks.** It only proves the file parses. A mangled
 `printf 'x\n'` that became a literal two-line string is still valid shell and passes

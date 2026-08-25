@@ -35,6 +35,15 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **Windows pytest no longer launches WSL by accident (08/25/2026).** Python's
+  `shutil.which("bash")` selected `C:\Windows\System32\bash.exe`, which is the WSL
+  launcher, before Git Bash. Bash-backed tests then failed on Windows paths,
+  inherited the wrong home/configuration, or hung inside interactive wizard code.
+  The suite now resolves and probes a native MSYS/Cygwin Bash, rejects the WSL
+  launcher, translates temporary paths with `cygpath`, and pins POSIX fixtures to
+  LF plus UTF-8. Codex's direct self-summary test now uses an isolated config, and
+  the shell hook falls back to Python for final-message JSON when `jq` is absent.
+
 - **Headroom MCP no longer fails Codex startup with nginx `404` (08/25/2026).**
   Port `8788` serves the dashboard, not MCP, so both Claude and Codex were
   registered against a nonexistent `/mcp`; Codex exposed the failure on every

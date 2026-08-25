@@ -7,11 +7,12 @@ is the argv the CLI *would* run, which is where the data-safety contract lives.
 """
 
 import re
-import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
+
+from tests.shell_support import BASH
 
 ROOT = Path(__file__).resolve().parents[1]
 SH = ROOT / "bootstrap/ts-stack.sh"
@@ -89,12 +90,12 @@ def test_only_ts_stack_may_run_docker():
 def _dry_run(*args):
     env = {"TERMINAL_STACK_DIR": str(ROOT), "TS_STACK_DOCKER_PROBE": "absent",
            "NO_COLOR": "1", "HOME": str(Path.home()), "PATH": "/usr/bin:/bin"}
-    r = subprocess.run([shutil.which("bash"), str(SH), *args, "--dry-run"],
+    r = subprocess.run([BASH, str(SH), *args, "--dry-run"],
                        cwd=ROOT, capture_output=True, text=True, env=env)
     return r.stdout
 
 
-@pytest.mark.skipif(not shutil.which("bash"), reason="bash is unavailable")
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_down_never_receives_dash_v():
     """`down -v` destroys the headroom knowledge graph and every vector. The
     invariant is that -v cannot reach this argv, and it is a test rather than a
@@ -105,7 +106,7 @@ def test_down_never_receives_dash_v():
     assert "docker volume rm" not in out
 
 
-@pytest.mark.skipif(not shutil.which("bash"), reason="bash is unavailable")
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_restart_is_down_then_up_not_compose_restart():
     """`docker compose restart` reuses the existing container, so it ignores the
     changed .env or overlay that is the whole reason anyone restarts."""
@@ -116,7 +117,7 @@ def test_restart_is_down_then_up_not_compose_restart():
     assert out.index("down") < out.index("up -d")
 
 
-@pytest.mark.skipif(not shutil.which("bash"), reason="bash is unavailable")
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_naming_a_stack_overrides_its_saved_toggle():
     """Asking by name is consent; otherwise a machine with the setting off could
     never start the stack to try it."""
@@ -124,19 +125,19 @@ def test_naming_a_stack_overrides_its_saved_toggle():
     assert re.search(r"\(headroom\) docker compose\b.*\bup -d\b", out), out
 
 
-@pytest.mark.skipif(not shutil.which("bash"), reason="bash is unavailable")
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_status_survives_an_absent_engine():
     """The most common state on a fresh box, and on any box where Docker Desktop
     is not running. One headline, not a wall of failures."""
     env = {"TERMINAL_STACK_DIR": str(ROOT), "TS_STACK_DOCKER_PROBE": "absent",
            "NO_COLOR": "1", "HOME": str(Path.home()), "PATH": "/usr/bin:/bin"}
-    r = subprocess.run([shutil.which("bash"), str(SH), "status"],
+    r = subprocess.run([BASH, str(SH), "status"],
                        cwd=ROOT, capture_output=True, text=True, env=env)
     assert r.returncode == 0, r.stdout + r.stderr
     assert "engine unreachable" in r.stdout + r.stderr
 
 
-@pytest.mark.skipif(not shutil.which("bash"), reason="bash is unavailable")
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_docker_kind_calls_the_desktop_stub_what_it_is():
     """`docker` on PATH inside WSL is Docker Desktop's stub when integration is
     off: it exits 1 for every command and prints its complaint on STDOUT, so
@@ -151,7 +152,7 @@ def test_docker_kind_calls_the_desktop_stub_what_it_is():
         'PATH="$bin:$PATH" tss_docker_kind; echo\n'
         'TS_STACK_DOCKER_PROBE=wsl-shim tss_engine_advice linux "$(TS_STACK_DOCKER_PROBE=wsl-shim tss_docker_kind)"\n'
         'rm -rf "$bin"\n')
-    r = subprocess.run([shutil.which("bash"), "-c", script],
+    r = subprocess.run([BASH, "-c", script],
                        cwd=ROOT, capture_output=True, text=True)
     assert "wsl-shim" in r.stdout, r.stdout + r.stderr
     assert "WSL Integration" in r.stdout, "the advice must name the actual fix"
@@ -298,7 +299,7 @@ def test_up_refuses_while_a_legacy_volume_has_no_replacement():
         assert "pre-ts- names" in window, f"the {name} up path does not explain the refusal"
 
 
-@pytest.mark.skipif(not shutil.which("bash"), reason="bash is unavailable")
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_the_billing_overlay_never_replaces_the_default_env_file():
     """A lone `--env-file .billing.env` REPLACES .env as compose's interpolation
     source, so every ${OPENAI_*}-derived LLM_* display value resolves to empty:

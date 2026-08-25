@@ -62,6 +62,11 @@ agent knows to write that line; `ts-config tts summarizer template` removes it
 again. The block is bounded by `<!-- terminal-stack-tts-start -->` markers and
 the file is backed up first.
 
+The direct POSIX hook prefers `jq` when reading the final agent message and falls
+back to Python when `jq` is absent. Codex's top-level `last_assistant_message` and
+Claude-style transcript payloads produce the same self summary, including on a
+minimal host without `jq`.
+
 Applied to the **finish** event only. A question or a permission prompt keeps its
 template, because a line written for "I'm done" is the wrong thing to say when
 the agent is waiting on you.
