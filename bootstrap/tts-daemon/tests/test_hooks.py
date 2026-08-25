@@ -36,6 +36,23 @@ def test_claude_question_extracts_question():
     assert payload["override"] == "Which port?"
 
 
+def test_codex_request_user_input_extracts_question():
+    payload = build_payload(
+        "codex", "question", "question",
+        raw({
+            "session_id": "c1",
+            "cwd": "C:/work/obsidian-marty",
+            "tool_name": "request_user_input",
+            "tool_input": {"questions": [{"question": "Which calendar?"}]},
+        }),
+    )
+    assert payload is not None
+    assert payload["source"] == "codex"
+    assert payload["session_key"] == "codex:c1"
+    assert payload["state"] == "question"
+    assert payload["override"] == "Which calendar?"
+
+
 def test_cursor_aborted_stop_is_silent():
     assert build_payload(
         "cursor", "cursor_stop", "waiting", raw({"status": "aborted"}),

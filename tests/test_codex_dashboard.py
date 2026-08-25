@@ -10,6 +10,8 @@ from pathlib import Path
 
 HELPER = Path(__file__).resolve().parents[1] / "dot_codex/hooks/terminal_stack.py"
 PROFILE = Path(__file__).resolve().parents[1] / "dot_codex/modify_private_terminal-stack.config.toml.tmpl"
+POSIX_INPUT = Path(__file__).resolve().parents[1] / "dot_claude/hooks/executable_cc-speak-input.sh"
+WINDOWS_INPUT = Path(__file__).resolve().parents[1] / "windows/.claude/hooks/cc-speak-input.ps1"
 SPEC = importlib.util.spec_from_file_location("terminal_stack_codex", HELPER)
 assert SPEC and SPEC.loader
 codex = importlib.util.module_from_spec(SPEC)
@@ -24,6 +26,56 @@ def test_enhanced_profile_hides_native_status_line():
     ).stdout
     profile = tomllib.loads(rendered)
     assert profile["tui"]["status_line"] == []
+
+
+def test_enhanced_profile_registers_async_question_hook():
+    rendered = subprocess.run(
+        [sys.executable, str(PROFILE)],
+        input="", text=True, capture_output=True, check=True,
+    ).stdout
+    profile = tomllib.loads(rendered)
+    question = profile["hooks"]["PreToolUse"]
+    assert len(question) == 1
+    assert question[0]["matcher"] == "^request_user_input$"
+    assert question[0]["hooks"][0]["async"] is True
+
+
+def test_codex_tts_routes_only_stop_and_request_user_input():
+    assert codex.tts_route({"hook_event_name": "Stop"}) == ("stop", "waiting")
+    assert codex.tts_route({
+        "hook_event_name": "PreToolUse",
+        "tool_name": "request_user_input",
+    }) == ("question", "question")
+    assert codex.tts_route({
+        "hook_event_name": "PreToolUse",
+        "tool_name": "exec_command",
+    }) is None
+
+
+def test_hook_main_dispatches_question_route(monkeypatch):
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "request_user_input",
+        "tool_input": {"questions": [{"question": "Which calendar?"}]},
+    }
+    calls = []
+    monkeypatch.setattr(codex, "hook_payload", lambda: payload)
+    monkeypatch.setattr(codex, "save_hook_mapping", lambda _payload: None)
+    monkeypatch.setattr(
+        codex, "run_tts", lambda raw, event, state: calls.append((raw, event, state)),
+    )
+    assert codex.hook_main() == 0
+    assert calls == [(payload, "question", "question")]
+
+
+def test_input_fallbacks_preserve_codex_source():
+    shell = POSIX_INPUT.read_text(encoding="utf-8")
+    powershell = WINDOWS_INPUT.read_text(encoding="utf-8-sig")
+    assert 'source="${CC_TTS_SOURCE:-claude}"' in shell
+    assert 'cc_tts_daemon_send "$source"' in shell
+    assert "[string]$Source = 'claude'" in powershell
+    assert "Send-CcTtsDaemonEvent -Source $Source" in powershell
+    assert "'-Source', $Source" in powershell
 
 
 def test_profile_modifier_preserves_codex_hook_trust_state():

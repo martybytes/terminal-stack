@@ -2,8 +2,9 @@
 """Codex hook bridge and compact three-line WezTerm dashboard.
 
 The SessionStart hook maps the launching WezTerm pane to Codex's exact rollout.
-The Stop hook uses the existing terminal-stack TTS pipeline. Dashboard mode is
-started in a three-row split for enhanced interactive Codex launches.
+Stop and request_user_input hooks use the existing terminal-stack TTS pipeline.
+Dashboard mode is started in a three-row split by enhanced interactive Codex
+launches.
 """
 
 from __future__ import annotations
@@ -95,34 +96,50 @@ def save_hook_mapping(payload: dict[str, Any]) -> None:
     atomic_json(mapping_path(pane), current)
 
 
-def run_tts(payload: dict[str, Any]) -> None:
+def tts_route(payload: dict[str, Any]) -> tuple[str, str] | None:
+    event = hook_event(payload)
+    if event in {"stop", "sessionstop", "session_stop"}:
+        return "stop", "waiting"
+    if event in {"pretooluse", "pre_tool_use"}:
+        tool_name = str(payload.get("tool_name") or "").lower()
+        if tool_name == "request_user_input":
+            return "question", "question"
+    return None
+
+
+def run_tts(payload: dict[str, Any], event: str, state: str) -> None:
     raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     try:
         if os.name == "nt":
             local_app = os.environ.get("LOCALAPPDATA")
             exe = Path(local_app) / "terminal-stack/tts-daemon/terminal-stack-tts.exe" if local_app else None
             if exe and exe.is_file():
-                command = [str(exe), "hook", "--source", "codex", "--event", "stop",
-                           "--state", "waiting"]
+                command = [str(exe), "hook", "--source", "codex", "--event", event,
+                           "--state", state]
             else:
-                script = Path.home() / ".claude/hooks/cc-speak.ps1"
+                script_name = "cc-speak-input.ps1" if state == "question" else "cc-speak.ps1"
+                script = Path.home() / ".claude/hooks" / script_name
                 if not script.is_file():
                     return
-                command = [
-                    "pwsh.exe", "-NoLogo", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-                    "-File", str(script), "-State", "waiting", "-Source", "codex",
-                ]
+                command = ["pwsh.exe", "-NoLogo", "-NonInteractive",
+                           "-ExecutionPolicy", "Bypass", "-File", str(script)]
+                if state == "question":
+                    command.extend(["-Event", event, "-Source", "codex"])
+                else:
+                    command.extend(["-State", state, "-Source", "codex"])
             subprocess.run(
                 command, input=raw, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 timeout=8, check=False, creationflags=subprocess.CREATE_NO_WINDOW,
             )
         else:
-            script = Path.home() / ".claude/hooks/cc-speak.sh"
+            script_name = "cc-speak-input.sh" if state == "question" else "cc-speak.sh"
+            script = Path.home() / ".claude/hooks" / script_name
             if not script.exists():
                 return
             env = os.environ.copy()
             env["CC_TTS_SOURCE"] = "codex"
-            subprocess.run(["bash", str(script), "waiting"], input=raw, env=env,
+            argument = event if state == "question" else state
+            subprocess.run(["bash", str(script), argument], input=raw, env=env,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                            timeout=8, check=False)
     except (OSError, subprocess.SubprocessError):
@@ -132,8 +149,9 @@ def run_tts(payload: dict[str, Any]) -> None:
 def hook_main() -> int:
     payload = hook_payload()
     save_hook_mapping(payload)
-    if hook_event(payload) in {"stop", "sessionstop", "session_stop"}:
-        run_tts(payload)
+    route = tts_route(payload)
+    if route:
+        run_tts(payload, *route)
     return 0
 
 

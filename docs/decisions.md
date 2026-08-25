@@ -2042,6 +2042,23 @@ base file and fail on every machine that has not enabled the overlay — which i
 precisely what the Qdrant and Neo4j health checks were doing: passing
 everywhere, proving nothing.
 
+## Why Codex questions use `PreToolUse`, not transcript watching
+
+Codex writes `request_user_input` calls to rollout JSONL, but question pauses do
+not emit `Stop`. Completion-only TTS therefore cannot see them. A dashboard
+tailer could detect records, but would couple correctness to enhanced-pane
+lifetime, rollout discovery, offsets, restart recovery, and custom dedupe.
+
+Official Codex hook coverage includes local function tools under `PreToolUse`.
+The existing AgentMemory `PreToolUse` hook also generated context for a live
+`request_user_input` call, proving this Codex version uses that path. The profile
+therefore registers an exact `^request_user_input$` matcher and runs it
+asynchronously. The bridge emits existing `question/question` protocol, so first
+question extraction, session naming, priority, mute, filtering, history, and
+fallback behavior remain one TTS implementation. `PermissionRequest` stays out:
+approval speech is separate product behavior and previously produced weak,
+duplicated tool-name announcements.
+
 ## Why Headroom MCP uses Docker stdio instead of port 8788
 
 Port `8788` belongs to nginx and serves the Headroom dashboard. It never exposed

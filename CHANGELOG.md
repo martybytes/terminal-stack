@@ -2,6 +2,8 @@
 
 All notable changes captured here. Format loosely follows [Keep a Changelog](https://keepachangelog.com/). Dates are MM/DD/YYYY for display, `git log` is authoritative.
 
+- **Codex now speaks clarifying questions (08/25/2026).** Enhanced Codex profiles register an asynchronous `PreToolUse` matcher for `request_user_input`, dispatching existing `question/question` TTS events before the agent blocks on user input. Question text, session identity, project name, mute rules, event filters, daemon history, and direct fallback all reuse the established pipeline. Windows, WSL, macOS, and Linux input helpers now preserve the `codex` source instead of relabeling fallback speech as Claude. `Stop` completion speech remains unchanged; unrelated tools and `codex-stock` remain silent. New sessions must review and trust the added hook through `/hooks`.
+
 ## [Unreleased]
 
 ### Changed

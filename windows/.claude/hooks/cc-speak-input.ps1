@@ -1,5 +1,6 @@
 param(
-    [Parameter(Mandatory)][ValidateSet('notification', 'permission', 'question')][string]$Event
+    [Parameter(Mandatory)][ValidateSet('notification', 'permission', 'question')][string]$Event,
+    [string]$Source = 'claude'
 )
 
 $inputJson = ''
@@ -14,7 +15,7 @@ $parsed = Parse-CcTtsInputHook -InputJson $inputJson -Event $Event
 
 # Daemon first; direct path below is the fallback — never silence.
 if (Test-CcTtsDaemonReady) {
-    if (Send-CcTtsDaemonEvent -Source claude -Event $Event -State $parsed.State -InputJson $inputJson -Override $parsed.Override) {
+    if (Send-CcTtsDaemonEvent -Source $Source -Event $Event -State $parsed.State -InputJson $inputJson -Override $parsed.Override) {
         return
     }
 }
@@ -24,7 +25,7 @@ $args = @(
     '-NoLogo', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
     '-File', $notify,
     '-State', $parsed.State,
-    '-Source', 'claude'
+    '-Source', $Source
 )
 if ($parsed.Override) { $args += @('-OverrideText', $parsed.Override) }
 Start-Process pwsh.exe -ArgumentList $args -WindowStyle Hidden | Out-Null

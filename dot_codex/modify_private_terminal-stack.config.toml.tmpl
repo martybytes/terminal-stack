@@ -24,6 +24,16 @@ command = "python3 ~/.codex/hooks/terminal_stack.py hook"
 commandWindows = "py -3 C:/Users/__WIN_USER__/.codex/hooks/terminal_stack.py hook"
 timeout = 5
 
+[[hooks.PreToolUse]]
+matcher = "^request_user_input$"
+
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = "python3 ~/.codex/hooks/terminal_stack.py hook"
+commandWindows = "py -3 C:/Users/__WIN_USER__/.codex/hooks/terminal_stack.py hook"
+timeout = 10
+async = true
+
 [[hooks.Stop]]
 
 [[hooks.Stop.hooks]]

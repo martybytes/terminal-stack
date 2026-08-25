@@ -122,6 +122,10 @@ Claude/Anthropic.
 
 ## Voice notification
 
+An asynchronous `PreToolUse` hook matched only to `request_user_input` speaks
+clarifying questions immediately, including first question text. It uses same
+`codex` source and TTS pipeline as completion speech.
+
 The profile's asynchronous Stop hook sends a `codex` event through the same
 Kokoro/Chatterbox/edge and optional `ttsd` pipeline as Claude and Cursor. Existing
 global Codex `notify` configuration is not replaced. With TTS enabled, test the
@@ -144,6 +148,10 @@ prefix. If the tray daemon predates this feature, run
 The dashboard stays quiet when audio is healthy or TTS is disabled. It shows a
 red speaker warning only when enabled Codex speech is misconfigured or its
 configured daemon is unreachable.
+
+Question hooks load when a Codex session starts. After `ts-update`, start new
+enhanced session, run `/hooks`, and trust new `PreToolUse` command.
+`codex-stock` intentionally bypasses dashboard and voice hooks.
 
 ## Native footer
 
