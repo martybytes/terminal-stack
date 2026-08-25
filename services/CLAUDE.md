@@ -59,6 +59,16 @@ server-side record is evidence, because the hook always exits 0.
   compose file), containers, networks and locally built images. `docker ps` on a
   developer's machine also lists their work stacks; the prefix is what separates
   them.
+- **A feature flag and the services it needs travel together.** headroom's
+  memory overlay is the cautionary tale: the base file set `QDRANT_URL` and
+  `NEO4J_URI` and started both datastores, while the proxy engaged memory only
+  when passed `--memory` — which nothing passed, and for which there is no
+  environment variable. Four containers healthy, two of them holding nothing, for
+  months. If an overlay starts a service, it must also turn on the thing that
+  uses it, and a test asserts that for this one.
+- **Only one memory backend runs.** AgentMemory or headroom's own store, decided
+  by the `memoryBackend` setting outside this tree. Nothing here may make both
+  reachable at once.
 - **Every script exists twice** (`foo.sh` + `foo.ps1`), flags mapping one to one.
   `tests/test_service_script_parity.py` fails otherwise, and deliberate
   differences go in the divergence register in `docs/service-conventions.md`,

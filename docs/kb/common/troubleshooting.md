@@ -87,6 +87,37 @@ services/stacks/agentmemory/reconcile-llm-queue.sh --apply    # cold backup, qua
 moved aside to `/data/queue_store.quarantine-<stamp>` and a full volume backup
 is written first.
 
+## The console says "UPSTREAM OFFLINE"
+
+It means one thing: the console could not reach AgentMemory's
+`/agentmemory/livez` within its 3-second budget. That is the console-to-server
+hop *inside Docker*. It says nothing about your LLM provider, and nothing about
+Headroom.
+
+```sh
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3110/agentmemory/livez   # the server itself
+docker exec ts-agent007memory sh -c 'wget -qO- "$UPSTREAM_HTTP/agentmemory/livez"'  # as the console sees it
+```
+
+If 3110 answers and the console cannot reach it, the two are not on the same
+network. If neither answers, the server is down or still starting. A brief flap
+during `ts-stack restart` is expected.
+
+## The LLM queue depth is large and the wait is minutes
+
+Look at the trend, not the number. `Queue wait` is the age of the **oldest item
+still waiting**, not how long new work waits, so it falls as a backlog clears.
+
+```sh
+curl -s http://127.0.0.1:3114/api/llm | python -c "import json,sys; print(json.load(sys.stdin)['queue'])"
+```
+
+`depth` falling over a minute or two is a backlog draining and needs nothing.
+`depth` flat with `dlqDepth` climbing is the real failure — see the compression
+section above. Throughput is bounded by the worker count times the provider's
+latency, so a local 8B model at several seconds a call is a few jobs a minute
+however deep the queue is.
+
 ## Claude is not compressing prompts
 
 ```sh

@@ -370,11 +370,24 @@ a missing one fails at `docker compose config` rather than starting an open data
 plane), and creates the two `external: true` volumes that compose will not create
 for you. Idempotent: a re-run never rotates a value you set.
 
-**3. Pick the kokoro profile** if you have a GPU — `services/stacks/kokoro/.env`.
+**3. Pick a memory backend** if you did not answer the wizard's question yet.
+
+```sh
+ts-config memory status                    # which one, and whether it agrees with itself
+ts-config memory agentmemory|headroom|none
+```
+
+AgentMemory and Headroom both do semantic memory and **only one runs**: two
+stores means two half-filled ones. The default is AgentMemory for memory and
+Headroom for compression. `headroom` merges `docker-compose.memory.yml`, which
+starts Qdrant and Neo4j (about 940 MB) and passes `--memory` to the proxy; the
+other answers never pull those images. Changing it restarts headroom for you.
+
+**4. Pick the kokoro profile** if you have a GPU — `services/stacks/kokoro/.env`.
 On an RTX 50-series card it must be the `cu128` image; `:latest` is `cu126`, which
 starts happily and then crash-loops. On a Mac there is no GPU step at all.
 
-**4. Bring them up and prove it.**
+**5. Bring them up and prove it.**
 
 ```sh
 ts-stack up
@@ -388,23 +401,37 @@ port still binds `127.0.0.1`.
 
 ### Phase 6b — Per-computer coding-agent tools
 
-The wizard optionally enables Headroom, Caveman, and AgentMemory at user scope.
-Fresh machines default off; the same account can therefore use a Docker-backed
-desktop setup on one computer and no local services on another. Scripted answers:
+The wizard asks **one** memory-and-compression question, not two independent
+toggles — Headroom and AgentMemory overlap, and asking separately made "both
+memory systems on" a single keystroke away. Its four answers derive
+`memoryBackend`, `agentmemoryEnabled` and `headroomEnabled` together:
+
+| answer | memory | compression |
+|---|---|---|
+| AgentMemory remembers, Headroom compresses | AgentMemory | Headroom |
+| Headroom does both | Headroom | Headroom |
+| Headroom compresses only | none | Headroom |
+| Neither | none | none |
+
+Caveman is still its own question. Scripted answers:
 
 ```text
-TS_HEADROOM=on|off
+TS_MEMORY_BACKEND=agentmemory|headroom|none
 TS_HEADROOM_CURSOR=mcp|byok|off
 TS_CAVEMAN=on|off
-TS_AGENTMEMORY=on|off
 ```
+
+`TS_HEADROOM` and `TS_AGENTMEMORY` still work and are reconciled through the same
+table, so an older unattended install cannot land on a combination the menu does
+not offer.
 
 Phase 6a started the containers; this phase points the agents at them.
 **`ts-config agents` never touches Docker — `ts-stack` is the only thing that
 does**, and a test enforces that. Headroom expects the proxy/dashboard on
-`127.0.0.1:8787` and its HTTP MCP sidecar on `8788` (a separate
-`headroom mcp serve` process, which the compose file does not start); AgentMemory
-expects its REST service on `3111` and viewer on `3113`. Cursor `mcp` keeps
+`127.0.0.1:8787` and its dashboard on `8788`; AgentMemory expects its REST
+service on `3111` and viewer on `3113`. (`headroom mcp serve` is a separate
+process the compose file does not start, and memory does not need it — the
+`--memory` flag injects the memory tools directly.) Cursor `mcp` keeps
 subscription-model traffic direct. `byok` requires a provider API key, separate
 provider billing, and a one-time global Cursor provider base URL. Change anything
 later with `ts-config agents`; `off` removes active client wiring while preserving

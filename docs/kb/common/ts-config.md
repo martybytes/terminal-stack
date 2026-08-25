@@ -22,6 +22,8 @@ Run it bare for an interactive menu; `ts-config show` just prints the state.
 | `ts-config wezterm changes` | the full upstream changelog since your build, paged |
 | `ts-config wezterm install <stable\|nightly>` | switch channel — removes the other package first |
 | `ts-config wezterm upgrade` | refresh the channel you are on; never switches |
+| `ts-config memory [status]` | which memory backend runs, and whether the derived state agrees |
+| `ts-config memory <agentmemory\|headroom\|none>` | switch it; restarts headroom so the setting and the running state cannot disagree |
 | `ts-config agents [show]` | saved Headroom / Caveman / AgentMemory state |
 | `ts-config agents <tool> on\|off\|status\|repair\|uninstall` | one tool, user scope; never edits a project or Docker |
 | `ts-config agents headroom cursor <mcp\|byok\|off>` | Cursor-only mode; `mcp` keeps subscription traffic direct |
