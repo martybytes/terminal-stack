@@ -1472,6 +1472,7 @@ def test_agentmemory_hook_commands_are_posix_not_cmd_exe():
 def test_agentmemory_codex_check_requires_all_scripts_and_exact_hook_registrations():
     ps = (ROOT / "bootstrap/ts-agentmemory.ps1").read_text(encoding="utf-8")
     sh = AM_ENTRY.read_text(encoding="utf-8")
+    adapter = PS_ADAPTER.read_text(encoding="utf-8")
     for event in (
         "SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse",
         "PreCompact", "Stop",
@@ -1484,6 +1485,8 @@ def test_agentmemory_codex_check_requires_all_scripts_and_exact_hook_registratio
     assert '"$plugin_count" -ne 6' in sh
     assert '"$stable_count" -ne 6' in sh
     assert "has a stale AgentMemory command" in sh
+    assert adapter.count("function Test-TsTcp") == 1
+    assert "Test-TsTcp '127.0.0.1' 3111" in adapter
 
 
 def test_agentmemory_secret_recovery_uses_the_unix_cache_not_the_registry():

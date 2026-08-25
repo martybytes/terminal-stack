@@ -98,6 +98,14 @@ function Test-TsHeadroomAuth {
     return $false
 }
 
+function Test-TsTcp([string]$HostName, [int]$Port) {
+    $client = [Net.Sockets.TcpClient]::new()
+    try {
+        $task = $client.ConnectAsync($HostName, $Port)
+        return ($task.Wait(1000) -and $client.Connected)
+    } catch { return $false } finally { $client.Dispose() }
+}
+
 $script:TsHeadroomMcpReason = ''
 function Get-TsHeadroomMcpSpec {
     $docker = Get-TsNativeCommand 'docker'
