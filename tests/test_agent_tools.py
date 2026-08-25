@@ -1868,19 +1868,28 @@ def test_wizard_recommends_and_probes_before_offering():
         b = wiz[wiz.index(f"{fn}() {{"):]
         b = b[:b.index("\n}\n")]
         assert "ts_prompt_choice off " in b, f"{fn} should default to off"
-    # The agent toggles must be probe-driven, not hardcoded off.
-    assert "ts_probe_headroom" in wiz and "ts_probe_agentmemory" in wiz
-    assert "_hr_def" in wiz and "_am_def" in wiz
-    # Compare against the PROMPT call, not the headless/env-override branch that
-    # also assigns TS_WIZ_HEADROOM earlier in the same function.
-    ask = wiz[wiz.index("ts_wizard_ask() {"):]
-    prompt_call = 'TS_WIZ_HEADROOM="$(ts_prompt_agent_toggle'
-    assert prompt_call in ask
-    assert ask.index("ts_probe_headroom") < ask.index(prompt_call), \
-        "headroom must be probed before it is offered"
-    am_call = 'TS_WIZ_AGENTMEMORY="$(ts_prompt_agent_toggle'
-    assert ask.index("ts_probe_agentmemory") < ask.index(am_call), \
-        "agentmemory must be probed before it is offered"
+    # Headroom and AgentMemory are no longer two independent toggles -- that is
+    # what made "both memory systems on" reachable -- but the reason for probing
+    # them is unchanged: a machine wired to a service that is not running fails
+    # later and silently. Both probes run inside the one memory question, and
+    # their output is in what the question prints.
+    mem = wiz[wiz.index("ts_prompt_memory_backend() {"):]
+    mem = mem[:mem.index("\n}\n")]
+    assert "ts_probe_agentmemory" in mem and "ts_probe_headroom" in mem, \
+        "the memory question must probe both services before offering"
+    assert mem.index("ts_probe_agentmemory") < mem.index("ts_prompt_choice"), \
+        "probe before offering, not after"
+    assert "${am_report}" in mem and "${hr_report}" in mem, \
+        "the probe output must reach the question the user reads"
+    assert "RECOMMENDATION:" in mem
+    # The default is a CHOICE, not a probe result. Deriving it from the probe
+    # would recommend "none" on a first install -- where nothing is running yet,
+    # by definition -- and talk a newcomer out of the feature they came for.
+    assert "ts_prompt_choice agentmemory " in mem, \
+        "the recommended answer must be agentmemory"
+    # And the two blind toggles must not come back.
+    assert "TS_WIZ_HEADROOM=\"$(ts_prompt_agent_toggle" not in wiz
+    assert "TS_WIZ_AGENTMEMORY=\"$(ts_prompt_agent_toggle" not in wiz
 
 
 def test_platform_impossible_apps_are_not_offered_forever():
