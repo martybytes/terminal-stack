@@ -214,6 +214,8 @@ def test_headroom_mcp_uses_docker_stdio_and_removes_failed_registrations():
     assert "$mcpReady = $spec -and (Test-TsHeadroomMcp)" in ps_adapter
     assert "if ($Verb -eq 'add' -and $mcpReady)" in ps_adapter
     assert "'mcp','add','headroom','--',$spec.Command" in ps_adapter
+    assert "(?m)^\\s*transport:" in ps_adapter
+    assert "^[[:space:]]*transport:" in adapter
 
 def test_claude_instructions_fit_claude_code_limit():
     assert (ROOT / "CLAUDE.md").stat().st_size <= 40_000

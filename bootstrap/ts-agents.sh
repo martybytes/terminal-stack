@@ -184,7 +184,7 @@ codex_mcp_matches() {
     local codex="$1" command="$2" text arg
     shift 2
     text="$("$codex" mcp get headroom 2>/dev/null)" || return 1
-    printf '%s\n' "$text" | grep -Eq '^transport:[[:space:]]+stdio[[:space:]]*$' || return 1
+    printf '%s\n' "$text" | grep -Eq '^[[:space:]]*transport:[[:space:]]+stdio[[:space:]]*$' || return 1
     printf '%s\n' "$text" | grep -Fq "command: $command" || return 1
     for arg in "$@"; do printf '%s\n' "$text" | grep -Fq -- "$arg" || return 1; done
 }

@@ -190,8 +190,8 @@ function Test-TsCodexMcp([string]$Codex, $Entry) {
     if (-not $Codex) { return $false }
     try {
         $text = (& $Codex mcp get headroom 2>$null | Out-String)
-        if ($LASTEXITCODE -ne 0 -or $text -notmatch '(?m)^transport:\s+stdio\s*$') { return $false }
-        if ($text -notmatch ('(?m)^command:\s+' + [regex]::Escape([string]$Entry.command) + '\s*$')) { return $false }
+        if ($LASTEXITCODE -ne 0 -or $text -notmatch '(?m)^\s*transport:\s+stdio\s*$') { return $false }
+        if ($text -notmatch ('(?m)^\s*command:\s+' + [regex]::Escape([string]$Entry.command) + '\s*$')) { return $false }
         foreach ($arg in @($Entry.args)) {
             if ($text -notmatch [regex]::Escape([string]$arg)) { return $false }
         }
