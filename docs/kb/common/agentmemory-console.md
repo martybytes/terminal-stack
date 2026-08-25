@@ -28,6 +28,33 @@ ts-stack status            # shows all of them
 ts-stack logs agentmemory  # both containers
 ```
 
+## Making it fit: the console's own zoom
+
+The console scales itself, so you do not have to use the browser's zoom.
+
+| | |
+|---|---|
+| sidebar `-  100%  +` | 5% a step, 50% to 200% |
+| click the number | back to 100% |
+| Customize drawer -> UI scale | the same value, as a slider |
+
+Saved in `localStorage` with the rest of your preferences, and **global** rather
+than per page: a zoom that resets when you change page is not a zoom.
+
+Why it exists rather than telling you to press Ctrl+-: the browser's zoom shrinks
+the *viewport*, so the app frame gets shorter and the SystemBar pinned at its
+bottom goes off the end of the window. The console's zoom scales the content
+inside a frame that stays exactly the size of the window, so nothing can fall off
+it however far you go, and the content scrolls in its own pane instead. If the
+page itself ever scrolls under the window, that is a bug -- the frame is sized in
+measured pixels for exactly that reason, and `html`/`body` are `overflow: hidden`
+as a second guard.
+
+Layout follows the content too: the project cards and the metric tiles fit as
+many columns of a readable width as there is room for, and share what is left
+over. Six projects wrap to two rows; three spread across the full width; hiding a
+widget reflows the rest instead of leaving a gap.
+
 ## What it stores
 
 Its own SQLite database (`ts-agentmemory-console-history`), holding **minute

@@ -26,6 +26,20 @@ change-aware summaries, incremental knowledge-graph extraction, and daily
 consolidation. See `stacks/agentmemory/README.md` for how to point it at an
 endpoint you host, or at the OpenAI API, if you want that.
 
+
+## Two per-stack files, discovered by name
+
+Neither is registered anywhere; a stack has them or it does not.
+
+| file | what it does |
+|---|---|
+| `ts-after` | stack names this one starts after, and stops before. `agent007memory` sorts *before* `agentmemory` (`0` < `m`) while joining a network `agentmemory` creates, and an external network cannot be joined before it exists |
+| `ts-envfiles` | extra `--env-file` paths, applied before this stack's own `.env`. Compose **interpolation** sources only -- they inject nothing into a container, which is what keeps `OPENAI_API_KEY` out of the console while it still displays the model AgentMemory is configured for |
+| `ts-checks.<x>.conf` | health checks for the `docker-compose.<x>.yml` overlay of the same name, loaded only when that overlay is selected |
+
+That last one exists because headroom's Qdrant and Neo4j checks used to live in
+the base file, where they passed on every machine and proved nothing: the proxy
+had never once contacted either datastore. See `doc headroom`.
 ## Quick start
 
 ```sh
