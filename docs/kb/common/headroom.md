@@ -16,10 +16,20 @@ The last two are not part of the base stack: they arrive with
 `docker-compose.memory.yml`, which `ts-config memory headroom` selects. A
 machine using AgentMemory for memory never pulls those images.
 
-`headroom mcp serve` is a **separate process** the compose file does not start
-(8788 here is the dashboard gateway, not MCP). Memory does not need it — the
-`--memory` flag injects the memory tools into requests directly — so it only
-matters for CCR retrieval on subscription plans.
+Port `8788` is only the dashboard gateway. It has no `/mcp` route; pointing
+Codex there returns nginx `404` during `initialize`. Claude can hide the same
+failure, so a quiet Claude startup is not proof that HTTP MCP works.
+
+`ts-config agents headroom on|repair` instead registers this stdio command:
+
+```sh
+docker exec -i ts-headroom-proxy headroom mcp serve --transport stdio --proxy-url http://127.0.0.1:8787
+```
+
+`status` and reconciliation send a real JSON-RPC `initialize` request through
+that command and require Headroom tool capability before calling it healthy.
+Headroom memory does not require MCP: proxy `--memory` injects memory tools into
+requests directly. MCP matters for explicit Headroom tools such as CCR retrieval.
 
 ## Turning it on
 

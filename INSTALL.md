@@ -426,12 +426,14 @@ table, so an older unattended install cannot land on a combination the menu does
 not offer.
 
 Phase 6a started the containers; this phase points the agents at them.
-**`ts-config agents` never touches Docker — `ts-stack` is the only thing that
-does**, and a test enforces that. Headroom expects the proxy/dashboard on
-`127.0.0.1:8787` and its dashboard on `8788`; AgentMemory expects its REST
-service on `3111` and viewer on `3113`. (`headroom mcp serve` is a separate
-process the compose file does not start, and memory does not need it — the
-`--memory` flag injects the memory tools directly.) Cursor `mcp` keeps
+**`ts-config agents` never manages Docker lifecycle — `ts-stack` is the only
+thing that starts, stops, or recreates containers**, and a test enforces that.
+Headroom expects the model proxy on `127.0.0.1:8787` and dashboard on `8788`.
+AgentMemory expects its REST service on `3111` and viewer on `3113`.
+Port `8788` is nginx, not an MCP HTTP server: clients launch `headroom mcp serve`
+inside `ts-headroom-proxy` over stdio, and repair/status prove its JSON-RPC
+initialize handshake before accepting the registration. Headroom memory still
+does not depend on MCP; the proxy's `--memory` flag injects those tools directly.
 subscription-model traffic direct. `byok` requires a provider API key, separate
 provider billing, and a one-time global Cursor provider base URL. Change anything
 later with `ts-config agents`; `off` removes active client wiring while preserving

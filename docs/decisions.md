@@ -2041,3 +2041,21 @@ Without it an overlay's services either go unchecked, or their checks sit in the
 base file and fail on every machine that has not enabled the overlay — which is
 precisely what the Qdrant and Neo4j health checks were doing: passing
 everywhere, proving nothing.
+
+## Why Headroom MCP uses Docker stdio instead of port 8788
+
+Port `8788` belongs to nginx and serves the Headroom dashboard. It never exposed
+MCP, so registering `http://127.0.0.1:8788/mcp` made Codex fail every startup
+at `initialize` with nginx `404`; Claude's quieter reporting made the same broken
+registration look healthy.
+
+Publishing another unauthenticated MCP listener would add network surface and a
+second lifecycle to manage. The proxy container already contains the matching
+Headroom CLI, so clients now launch its MCP server on demand with `docker exec -i`
+and stdio. Repair/status sends a real JSON-RPC initialize request, then checks
+server identity and tool capability before writing Claude, Codex, or Cursor
+registration. Model routing stays independently gated by authenticated `/stats`.
+
+Trade-off: Docker and `ts-headroom-proxy` must be available when an MCP client
+starts. That dependency already exists for Headroom, and failed reconciliation
+removes stale registrations so Codex starts cleanly in direct mode.

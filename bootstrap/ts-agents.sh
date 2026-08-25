@@ -46,24 +46,101 @@ print(node)
 PY
 }
 
+json_lines() {
+    python3 - "$MANIFEST" "$1" <<'PY'
+import json, sys
+node = json.load(open(sys.argv[1], encoding="utf-8"))
+for part in sys.argv[2].split("."):
+    node = node[part]
+for item in node:
+    print(item)
+PY
+}
+
 cursor_mcp() {
-    local name="$1" url="${2:-}" path="$HOME/.cursor/mcp.json"
-    python3 - "$path" "$name" "$url" <<'PY'
+    local name="$1" command="${2:-}" path="$HOME/.cursor/mcp.json"
+    shift 2 || true
+    python3 - "$path" "$name" "$command" "$@" <<'PY'
 import json, os, shutil, sys, time
-path, name, url = sys.argv[1:]
+path, name, command, *args = sys.argv[1:]
 try:
-    with open(path, encoding="utf-8") as f: cfg = json.load(f)
+    with open(path, encoding="utf-8") as f:
+        cfg = json.load(f)
 except FileNotFoundError:
     cfg = {"mcpServers": {}}
 except Exception as exc:
     raise SystemExit(f"Refusing to overwrite malformed JSON {path}: {exc}")
 servers = cfg.setdefault("mcpServers", {})
-if url: servers[name] = {"url": url}
-else: servers.pop(name, None)
+if command:
+    servers[name] = {"command": command, "args": args}
+else:
+    servers.pop(name, None)
 os.makedirs(os.path.dirname(path), exist_ok=True)
-if os.path.exists(path): shutil.copy2(path, path + ".bak." + time.strftime("%Y%m%d-%H%M%S"))
-with open(path, "w", encoding="utf-8") as f: json.dump(cfg, f, indent=2); f.write("\n")
+if os.path.exists(path):
+    shutil.copy2(path, path + ".bak." + time.strftime("%Y%m%d-%H%M%S"))
+with open(path, "w", encoding="utf-8") as f:
+    json.dump(cfg, f, indent=2)
+    f.write("\n")
 PY
+}
+
+json_mcp_matches() {
+    local path="$1" name="$2" command="$3"
+    shift 3
+    python3 - "$path" "$name" "$command" "$@" <<'PY'
+import json, sys
+path, name, command, *args = sys.argv[1:]
+try:
+    with open(path, encoding="utf-8") as f:
+        entry = json.load(f).get("mcpServers", {}).get(name, {})
+except Exception:
+    raise SystemExit(1)
+raise SystemExit(0 if entry.get("command") == command and entry.get("args", []) == args else 1)
+PY
+}
+
+HEADROOM_MCP_COMMAND=""
+HEADROOM_MCP_ARGS=()
+HEADROOM_MCP_REASON=""
+
+headroom_mcp_spec() {
+    HEADROOM_MCP_REASON=""
+    HEADROOM_MCP_COMMAND="$(command -v docker 2>/dev/null || true)"
+    if [ -z "$HEADROOM_MCP_COMMAND" ]; then
+        HEADROOM_MCP_REASON="docker command not installed"
+        return 1
+    fi
+    local container program arg
+    container="$(json_get headroom.mcp.container)"
+    program="$(json_get headroom.mcp.command)"
+    HEADROOM_MCP_ARGS=(exec -i "$container" "$program")
+    while IFS= read -r arg; do HEADROOM_MCP_ARGS+=("$arg"); done < <(json_lines headroom.mcp.args)
+}
+
+headroom_mcp_probe() {
+    headroom_mcp_spec || return 1
+    local initialize output
+    initialize='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"terminal-stack","version":"1"}}}'
+    if ! output="$(printf '%s\n' "$initialize" | "$HEADROOM_MCP_COMMAND" "${HEADROOM_MCP_ARGS[@]}" 2>/dev/null)"; then
+        HEADROOM_MCP_REASON="docker MCP command failed"
+        return 1
+    fi
+    if ! python3 - "$output" <<'PY'
+import json, sys
+for line in sys.argv[1].splitlines():
+    try:
+        msg = json.loads(line)
+    except json.JSONDecodeError:
+        continue
+    result = msg.get("result", {})
+    if msg.get("id") == 1 and result.get("serverInfo", {}).get("name") == "headroom" and result.get("capabilities", {}).get("tools") is not None:
+        raise SystemExit(0)
+raise SystemExit(1)
+PY
+    then
+        HEADROOM_MCP_REASON="initialize response was not a Headroom MCP server"
+        return 1
+    fi
 }
 
 # The stack tree is always <clone>/services/, so there is nothing to search for:
@@ -103,45 +180,79 @@ headroom_probe_auth() {
     done
 }
 
+codex_mcp_matches() {
+    local codex="$1" command="$2" text arg
+    shift 2
+    text="$("$codex" mcp get headroom 2>/dev/null)" || return 1
+    printf '%s\n' "$text" | grep -Eq '^transport:[[:space:]]+stdio[[:space:]]*$' || return 1
+    printf '%s\n' "$text" | grep -Fq "command: $command" || return 1
+    for arg in "$@"; do printf '%s\n' "$text" | grep -Fq -- "$arg" || return 1; done
+}
+
 headroom_status() {
-    local proxy mcp token why proxy_ok=0
-    proxy="$(json_get headroom.proxyUrl)"; mcp="$(json_get headroom.mcpUrl)"
+    local proxy token why proxy_ok=0 mcp_ok=0
+    proxy="$(json_get headroom.proxyUrl)"
     echo "Headroom:"
     token="$(headroom_token)" || token=""
     if [ -z "$token" ]; then
-        echo "  !!  proxy token unavailable; set HEADROOM_PROXY_TOKEN or HEADROOM_ENV_FILE"
+        echo " !! proxy token unavailable; set HEADROOM_PROXY_TOKEN or HEADROOM_ENV_FILE"
     elif why="$(headroom_probe_auth "$token" "$proxy")"; then
-        echo "  ok  proxy authentication works at $proxy"
+        echo " ok proxy authentication works at $proxy"
         proxy_ok=1
     else
-        echo "  !!  proxy authentication failed at $proxy: $why (ts-stack runs the proxy)"
+        echo " !! proxy authentication failed at $proxy: $why (ts-stack runs the proxy)"
     fi
-    if am_probe "$mcp" >/dev/null 2>&1; then echo "  ok  MCP reachable at $mcp"
+    if headroom_mcp_probe; then
+        echo " ok MCP stdio initialize handshake works through Headroom container"
+        mcp_ok=1
     else
-        # Not a fault in this stack: `headroom mcp serve` is a SEPARATE process
-        # (default 127.0.0.1:8788) that the headroom stack's compose does not start.
-        echo "  !!  MCP not reachable at $mcp"
-        echo "      start it with: headroom mcp serve --transport http"
+        echo " -- MCP stdio initialize handshake failed: $HEADROOM_MCP_REASON"
     fi
-    echo "  dashboard: $(json_get headroom.dashboardUrl)"
+    if command -v claude >/dev/null 2>&1; then
+        if json_mcp_matches "$HOME/.claude.json" headroom "$HEADROOM_MCP_COMMAND" "${HEADROOM_MCP_ARGS[@]}"; then
+            echo " ok Claude user-scope MCP registration present"
+        elif [ "$mcp_ok" = 1 ]; then echo " !! Claude user-scope MCP registration missing or stale"
+        else echo " -- Claude Headroom MCP registration absent while MCP command is unavailable (expected)"
+        fi
+    fi
+    if command -v codex >/dev/null 2>&1; then
+        if codex_mcp_matches "$(command -v codex)" "$HEADROOM_MCP_COMMAND" "${HEADROOM_MCP_ARGS[@]}"; then
+            echo " ok Codex user-scope MCP registration present"
+        elif [ "$mcp_ok" = 1 ]; then echo " !! Codex user-scope MCP registration missing or stale"
+        else echo " -- Codex Headroom MCP registration absent while MCP command is unavailable (expected)"
+        fi
+    fi
+    if [ "$cursor_mode" = mcp ] && [ -d "$HOME/.cursor" ]; then
+        if json_mcp_matches "$HOME/.cursor/mcp.json" headroom "$HEADROOM_MCP_COMMAND" "${HEADROOM_MCP_ARGS[@]}"; then
+            echo " ok Cursor user-scope MCP registration present"
+        else
+            echo " !! Cursor user-scope MCP registration missing or stale"
+        fi
+    fi
+    echo " dashboard: $(json_get headroom.dashboardUrl)"
     [ "$proxy_ok" = 1 ]
 }
 
 headroom_apply() {
-    local url; url="$(json_get headroom.mcpUrl)"
-    # The proxy container on 8787 does not provide this optional MCP service.
-    # Do not leave clients pointing at a dead 8788 endpoint: Codex attempts every
-    # registered MCP server at startup and warns on every launch.
-    if am_probe "$url" >/dev/null 2>&1; then
-        command -v claude >/dev/null 2>&1 && { claude mcp remove --scope user headroom >/dev/null 2>&1 || true; claude mcp add --transport http --scope user headroom "$url"; }
-        command -v codex >/dev/null 2>&1 && { codex mcp remove headroom >/dev/null 2>&1 || true; codex mcp add headroom --url "$url"; }
-        if [ "$cursor_mode" = mcp ] && [ -d "$HOME/.cursor" ]; then cursor_mcp headroom "$url"
-        else cursor_mcp headroom ""; fi
+    if headroom_mcp_probe; then
+        command -v claude >/dev/null 2>&1 && {
+            claude mcp remove --scope user headroom >/dev/null 2>&1 || true
+            claude mcp add --scope user headroom -- "$HEADROOM_MCP_COMMAND" "${HEADROOM_MCP_ARGS[@]}"
+        }
+        command -v codex >/dev/null 2>&1 && {
+            codex mcp remove headroom >/dev/null 2>&1 || true
+            codex mcp add headroom -- "$HEADROOM_MCP_COMMAND" "${HEADROOM_MCP_ARGS[@]}"
+        }
+        if [ "$cursor_mode" = mcp ] && [ -d "$HOME/.cursor" ]; then
+            cursor_mcp headroom "$HEADROOM_MCP_COMMAND" "${HEADROOM_MCP_ARGS[@]}"
+        else
+            cursor_mcp headroom ""
+        fi
     else
         command -v claude >/dev/null 2>&1 && claude mcp remove --scope user headroom >/dev/null 2>&1 || true
         command -v codex >/dev/null 2>&1 && codex mcp remove headroom >/dev/null 2>&1 || true
         cursor_mcp headroom ""
-        echo "  --  optional Headroom MCP is offline; removed stale client registrations"
+        echo " -- optional Headroom MCP failed its initialize handshake ($HEADROOM_MCP_REASON); removed stale client registrations"
     fi
     if [ "$cursor_mode" = byok ]; then
         echo "Cursor BYOK: set its global provider base URL to http://127.0.0.1:8787 and use a provider API key."

@@ -204,7 +204,7 @@ def test_manifest_and_compose_agree_on_pins_and_ports():
     hr_env = (ROOT / "services/stacks/headroom/.env.example").read_text(encoding="utf-8")
     assert f"HEADROOM_IMAGE={cfg['headroom']['dockerImage']}" in hr_env
     assert f"HEADROOM_PORT={urlparse(cfg['headroom']['proxyUrl']).port}" in hr_env
-    assert f"HEADROOM_DASHBOARD_PORT={urlparse(cfg['headroom']['mcpUrl']).port}" in hr_env
+    assert f"HEADROOM_DASHBOARD_PORT={urlparse(cfg['headroom']['dashboardUrl']).port}" in hr_env
 
     am = (ROOT / "services/stacks/agentmemory/docker-compose.yml").read_text(encoding="utf-8")
     assert f'AGENTMEMORY_VERSION: "{cfg["agentmemory"]["version"]}"' in am

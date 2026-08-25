@@ -98,12 +98,41 @@ function Test-TsHeadroomAuth {
     return $false
 }
 
-function Test-TsTcp([string]$HostName, [int]$Port) {
-    $client = [Net.Sockets.TcpClient]::new()
+$script:TsHeadroomMcpReason = ''
+function Get-TsHeadroomMcpSpec {
+    $docker = Get-TsNativeCommand 'docker'
+    if (-not $docker) { return $null }
+    $mcp = $manifest.headroom.mcp
+    $args = @('exec', '-i', [string]$mcp.container, [string]$mcp.command) + @($mcp.args | ForEach-Object { [string]$_ })
+    return [pscustomobject]@{ Command = $docker; Arguments = [string[]]$args }
+}
+
+function Test-TsHeadroomMcp {
+    $script:TsHeadroomMcpReason = ''
+    $spec = Get-TsHeadroomMcpSpec
+    if (-not $spec) {
+        $script:TsHeadroomMcpReason = 'docker command not installed'
+        return $false
+    }
+    $initialize = '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"terminal-stack","version":"1"}}}'
     try {
-        $task = $client.ConnectAsync($HostName, $Port)
-        return ($task.Wait(1000) -and $client.Connected)
-    } catch { return $false } finally { $client.Dispose() }
+        $output = @($initialize | & $spec.Command @($spec.Arguments) 2>$null)
+        if ($LASTEXITCODE -ne 0) {
+            $script:TsHeadroomMcpReason = "docker MCP command exited $LASTEXITCODE"
+            return $false
+        }
+        $response = $output | ForEach-Object {
+            try { $_ | ConvertFrom-Json -AsHashtable } catch { $null }
+        } | Where-Object { $_ -and $_.id -eq 1 } | Select-Object -First 1
+        if ($response.result.serverInfo.name -ne 'headroom' -or -not $response.result.capabilities.tools) {
+            $script:TsHeadroomMcpReason = 'initialize response was not a Headroom MCP server'
+            return $false
+        }
+        return $true
+    } catch {
+        $script:TsHeadroomMcpReason = $_.Exception.Message
+        return $false
+    }
 }
 
 function Read-TsJson([string]$Path, [hashtable]$Default) {
@@ -135,30 +164,58 @@ function Set-TsCursorMcp([string]$Name, $Entry) {
     Write-TsJson $path $cfg
 }
 
-function Test-TsCursorMcp([string]$Name, [string]$Url) {
+function Test-TsCursorMcp([string]$Name, $Entry) {
     $path = Join-Path $env:USERPROFILE '.cursor\mcp.json'
     try {
         $cfg = Read-TsJson $path ([ordered]@{ mcpServers = [ordered]@{} })
-        return ($cfg.mcpServers.ContainsKey($Name) -and $cfg.mcpServers[$Name].url -eq $Url)
+        if (-not $cfg.mcpServers.ContainsKey($Name)) { return $false }
+        $have = $cfg.mcpServers[$Name] | ConvertTo-Json -Depth 20 -Compress
+        $want = $Entry | ConvertTo-Json -Depth 20 -Compress
+        return ($have -eq $want)
+    } catch { return $false }
+}
+
+function Test-TsClaudeMcp($Entry) {
+    $path = Join-Path $env:USERPROFILE '.claude.json'
+    try {
+        $cfg = Read-TsJson $path ([ordered]@{})
+        if (-not $cfg.ContainsKey('mcpServers') -or -not $cfg.mcpServers.ContainsKey('headroom')) { return $false }
+        $have = $cfg.mcpServers.headroom
+        return ([string]$have.command -eq [string]$Entry.command -and
+            (@($have.args) -join [char]0) -ceq (@($Entry.args) -join [char]0))
+    } catch { return $false }
+}
+
+function Test-TsCodexMcp([string]$Codex, $Entry) {
+    if (-not $Codex) { return $false }
+    try {
+        $text = (& $Codex mcp get headroom 2>$null | Out-String)
+        if ($LASTEXITCODE -ne 0 -or $text -notmatch '(?m)^transport:\s+stdio\s*$') { return $false }
+        if ($text -notmatch ('(?m)^command:\s+' + [regex]::Escape([string]$Entry.command) + '\s*$')) { return $false }
+        foreach ($arg in @($Entry.args)) {
+            if ($text -notmatch [regex]::Escape([string]$arg)) { return $false }
+        }
+        return $true
     } catch { return $false }
 }
 
 function Invoke-TsMcpRegistration([ValidateSet('add','remove')][string]$Verb) {
-    $url = [string]$manifest.headroom.mcpUrl
     $claude = Get-TsNativeCommand 'claude'
     $codex = Get-TsNativeCommand 'codex'
-    $mcpReady = Test-TsTcp '127.0.0.1' 8788
+    $spec = Get-TsHeadroomMcpSpec
+    $mcpReady = $spec -and (Test-TsHeadroomMcp)
     if ($Verb -eq 'add' -and $mcpReady) {
+        $entry = [ordered]@{ command = $spec.Command; args = @($spec.Arguments) }
         if ($claude) {
             & $claude mcp remove --scope user headroom *> $null
-            Invoke-TsNative $claude @('mcp','add','--transport','http','--scope','user','headroom',$url) | Out-Null
+            Invoke-TsNative $claude (@('mcp','add','--scope','user','headroom','--',$spec.Command) + @($spec.Arguments)) | Out-Null
         } else { Info 'Claude Code not installed; skipped Headroom MCP registration' }
         if ($codex) {
             & $codex mcp remove headroom *> $null
-            Invoke-TsNative $codex @('mcp','add','headroom','--url',$url) | Out-Null
+            Invoke-TsNative $codex (@('mcp','add','headroom','--',$spec.Command) + @($spec.Arguments)) | Out-Null
         } else { Info 'Codex not installed; skipped Headroom MCP registration' }
         if ($CursorMode -eq 'mcp' -and (Test-Path -LiteralPath (Join-Path $env:USERPROFILE '.cursor'))) {
-            Set-TsCursorMcp headroom ([ordered]@{ url = $url })
+            Set-TsCursorMcp headroom $entry
             Good 'Cursor Headroom MCP registered at user scope'
         } elseif ($CursorMode -eq 'byok') {
             Set-TsCursorMcp headroom $null
@@ -169,7 +226,7 @@ function Invoke-TsMcpRegistration([ValidateSet('add','remove')][string]$Verb) {
         if ($claude) { & $claude mcp remove --scope user headroom *> $null }
         if ($codex) { & $codex mcp remove headroom *> $null }
         Set-TsCursorMcp headroom $null
-        if ($Verb -eq 'add') { Info 'optional Headroom MCP is offline; removed stale client registrations' }
+        if ($Verb -eq 'add') { Info "optional Headroom MCP failed its initialize handshake ($script:TsHeadroomMcpReason); removed stale client registrations" }
     }
 }
 
@@ -178,24 +235,21 @@ function Show-TsHeadroomStatus {
     $proxy = [string]$manifest.headroom.proxyUrl
     if (Test-TsHeadroomAuth) { Good "proxy authentication works at $proxy" }
     else { Bad "proxy unusable at $proxy ($script:TsHeadroomAuthReason)" }
-    if (Test-TsTcp '127.0.0.1' 8788) { Good "MCP sidecar reachable at $($manifest.headroom.mcpUrl)" }
-    else { Info "MCP sidecar not reachable at $($manifest.headroom.mcpUrl) (optional separate process)" }
-    $mcpUrl = [string]$manifest.headroom.mcpUrl
-    $claudeJson = Join-Path $env:USERPROFILE '.claude.json'
-    try {
-        $claudeCfg = Read-TsJson $claudeJson ([ordered]@{})
-        if ($claudeCfg.ContainsKey('mcpServers') -and $claudeCfg.mcpServers.ContainsKey('headroom') -and $claudeCfg.mcpServers.headroom.url -eq $mcpUrl) {
-            Good 'Claude user-scope MCP registration present'
-        } elseif (Test-TsTcp '127.0.0.1' 8788) { Bad 'Claude user-scope MCP registration missing' }
-        else { Info 'Claude Headroom MCP registration absent while sidecar is offline (expected)' }
-    } catch { Bad "could not inspect $claudeJson" }
-    $codexCfg = Join-Path $(if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE '.codex' }) 'config.toml'
-    $codexText = if (Test-Path -LiteralPath $codexCfg) { Get-Content -LiteralPath $codexCfg -Raw } else { '' }
-    if ($codexText -match '(?ms)^\[mcp_servers\.headroom\]\s+url\s*=\s*"http://127\.0\.0\.1:8788/mcp"') { Good 'Codex user-scope MCP registration present' }
-    elseif (Test-TsTcp '127.0.0.1' 8788) { Bad 'Codex user-scope MCP registration missing' }
-    else { Info 'Codex Headroom MCP registration absent while sidecar is offline (expected)' }
+    $spec = Get-TsHeadroomMcpSpec
+    $mcpReady = $spec -and (Test-TsHeadroomMcp)
+    if ($mcpReady) { Good 'MCP stdio initialize handshake works through Headroom container' }
+    else { Info "MCP stdio initialize handshake failed ($script:TsHeadroomMcpReason)" }
+    $entry = if ($spec) { [ordered]@{ command = $spec.Command; args = @($spec.Arguments) } } else { $null }
+    $claude = Get-TsNativeCommand 'claude'
+    $codex = Get-TsNativeCommand 'codex'
+    if ($entry -and (Test-TsClaudeMcp $entry)) { Good 'Claude user-scope MCP registration present' }
+    elseif ($mcpReady) { Bad 'Claude user-scope MCP registration missing or stale' }
+    else { Info 'Claude Headroom MCP registration absent while MCP command is unavailable (expected)' }
+    if ($entry -and (Test-TsCodexMcp $codex $entry)) { Good 'Codex user-scope MCP registration present' }
+    elseif ($mcpReady) { Bad 'Codex user-scope MCP registration missing or stale' }
+    else { Info 'Codex Headroom MCP registration absent while MCP command is unavailable (expected)' }
     if ((Get-TsAgentRuntimeCursorMode) -eq 'mcp' -and (Test-Path -LiteralPath (Join-Path $env:USERPROFILE '.cursor'))) {
-        if (Test-TsCursorMcp headroom $mcpUrl) { Good 'Cursor user-scope MCP registration present' }
+        if ($entry -and (Test-TsCursorMcp headroom $entry)) { Good 'Cursor user-scope MCP registration present' }
         else { Bad 'Cursor user-scope MCP registration missing' }
     }
     Info "dashboard: $($manifest.headroom.dashboardUrl)"

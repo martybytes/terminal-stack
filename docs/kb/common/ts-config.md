@@ -50,11 +50,11 @@ follows what answered, because wiring an agent to a service that is not running
 fails later and silently.
 
 Headroom's `on` and `repair` actions require an authenticated `/stats` response,
-not merely the intentionally public health endpoints. If validation fails, the
-saved state remains off and Claude/Codex launch directly. `off` is the emergency
-revert: it saves off and removes Headroom MCP registrations without changing the
-Docker service or its data. The separate MCP sidecar may be unavailable while
-the model proxy is fully usable.
+not merely the intentionally public health endpoints. If validation fails, saved
+state remains off and Claude/Codex launch directly. `off` is the emergency revert:
+it saves off and removes Headroom MCP registrations without changing service data.
+MCP uses Docker stdio, not an HTTP sidecar: repair/status also require a real
+JSON-RPC initialize handshake before registering the command.
 
 ## Combined WSL + Windows
 

@@ -33,6 +33,17 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **Headroom MCP no longer fails Codex startup with nginx `404` (08/25/2026).**
+  Port `8788` serves the dashboard, not MCP, so both Claude and Codex were
+  registered against a nonexistent `/mcp`; Codex exposed the failure on every
+  launch while Claude made the same broken registration look healthy. Headroom
+  MCP now runs on demand inside `ts-headroom-proxy` over Docker stdio. Repair and
+  status send a real JSON-RPC `initialize`, validate server identity and tool
+  capability, and compare exact stdio registrations for Claude, Codex, and
+  Cursor. AgentMemory's Codex check now also requires all six plugin and stable
+  hook scripts plus exactly one current registration for each supported event;
+  changed hooks still require review and trust through Codex `/hooks`.
+
 - **A console test had been red since the merge (08/24/2026).** Genericising rewrote a fixture endpoint to `192.0.2.10`, which is RFC 5737 TEST-NET-1 — a *documentation* range, not a private one — so `privateHost()` correctly refused to call it local and the assertion that a private vLLM endpoint is fee-free failed. RFC 1918 is the range that is actually private. Nothing in the repo runs the console's `npm test`, which is why it sat red; worth wiring up.
 
 - **AgentMemory's LLM credential never reached the container, and nothing said so (08/24/2026).** Absorbing the Docker stacks moved them one directory deeper, and the agentmemory compose file kept loading the shared credential from `../.env` — which now resolves to `services/stacks/.env`, a file that has never existed. Both env files are `required: false` so a fresh clone starts in degraded no-LLM mode, and compose says *nothing at all* about an optional `env_file` it cannot find: no warning, no non-zero exit, nothing in `docker compose config`.

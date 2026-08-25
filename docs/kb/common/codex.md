@@ -64,6 +64,18 @@ Codex is the awkward host, for two reasons:
   the duplicate is dropped inside the hook before any request. Without it, Codex received the same
   context block twice per prompt.
 
+`ts-config agents agentmemory status` now checks the complete Codex seam: all six
+plugin scripts, all six stable Desktop copies, their terminal-stack edits, and
+exactly one owned `~/.codex/hooks.json` command for each of `SessionStart`,
+`UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PreCompact`, and `Stop`. Missing,
+duplicate, unexpected, or stale commands fail status, including a command tagged
+for another agent URL. After any hook command changes, start interactive Codex,
+run `/hooks`, review those commands, and trust them; Codex skips changed hooks
+until trust is renewed.
+
+Reference: [OpenAI Codex hooks](https://developers.openai.com/codex/hooks/) and
+[MCP configuration](https://developers.openai.com/codex/mcp/).
+
 ## Headroom and Caveman
 
 Codex writes hook trust hashes into `[hooks.state]` in the terminal-stack
@@ -90,11 +102,13 @@ ts-config agents headroom repair  # re-check and repair registrations
 `on` and `repair` must receive a successful authenticated `/stats` response.
 Public `/readyz` and `/health` responses are insufficient because Headroom keeps
 them available even when data-plane authentication would reject every request.
-The optional MCP sidecar on 8788 is reported separately and does not decide
-whether model routing is usable. Reconciliation registers it only while it is
-reachable; otherwise it removes stale client registrations so Codex does not
-print an MCP startup failure on every launch. The authenticated 8787 model proxy
-continues to work independently.
+Port `8788` is the nginx dashboard gateway and has no `/mcp` route. Codex now
+registers Docker stdio instead: `docker exec -i ts-headroom-proxy headroom mcp
+serve --transport stdio --proxy-url http://127.0.0.1:8787`. Reconciliation
+sends JSON-RPC `initialize` through that exact command and accepts it only when
+the response identifies Headroom and exposes tools. This prevents the repeated
+`HTTP 404` startup warning while keeping the authenticated `8787` model proxy
+independent.
 
 Caveman installs only the pinned global `caveman` skill and a marked block in the
 active global `~/.codex/AGENTS.md`. The rest of Caveman's skill collection is not

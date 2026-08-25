@@ -23,15 +23,19 @@ def test_manifest_pins_reviewed_versions_and_local_endpoints():
     assert cfg["headroom"]["version"] == "0.36.5"
     assert cfg["headroom"]["dockerImage"] == "ghcr.io/headroomlabs-ai/headroom:0.36.5"
     assert cfg["headroom"]["proxyUrl"] == "http://127.0.0.1:8787"
-    # 8788/mcp is CORRECT and must not be "fixed". Verified 2026-08-23 against
-    # the upstream checkout: headroom/cli/mcp.py sets DEFAULT_HTTP_PORT = 8788
-    # and DEFAULT_HTTP_PATH = "/mcp" for `headroom mcp serve --transport http`.
-    # It looks dead because nothing STARTS that server — docker-local's compose
-    # runs only the proxy on 8787, and `mcp serve` defaults to stdio transport.
-    # That is an operational gap in docker-local, not a wrong URL here. (8788
-    # also appears in headroom's RUST_DEV.md as an unrelated internal port for a
-    # Rust-proxy dev setup, which is what makes this look like a typo.)
-    assert cfg["headroom"]["mcpUrl"] == "http://127.0.0.1:8788/mcp"
+    # Port 8788 serves dashboard only. MCP starts on demand through Docker stdio;
+    # registering that command avoids Codex probing nonexistent HTTP /mcp.
+    assert cfg["headroom"]["dashboardUrl"] == "http://127.0.0.1:8788/dashboard"
+    assert "mcpUrl" not in cfg["headroom"]
+    assert cfg["headroom"]["mcp"] == {
+        "transport": "stdio",
+        "container": "ts-headroom-proxy",
+        "command": "headroom",
+        "args": [
+            "mcp", "serve", "--transport", "stdio", "--proxy-url",
+            "http://127.0.0.1:8787",
+        ],
+    }
     assert cfg["caveman"]["version"] == "2.2.0"
     assert cfg["caveman"]["source"].endswith("#v2.2.0")
     assert cfg["agentmemory"]["version"] == "0.9.29"
@@ -107,7 +111,8 @@ def test_headroom_enable_requires_authenticated_proxy_and_disable_restores_direc
     assert "headroom_status && headroom_apply && headroom_status" in adapter
     assert "function Test-TsHeadroomAuth" in ps_adapter
     assert "if (-not (Test-TsHeadroomAuth))" in ps_adapter
-    assert "MCP sidecar not reachable" in ps_adapter and "optional separate process" in ps_adapter
+    assert "MCP stdio initialize handshake works" in ps_adapter
+    assert "Test-TsHeadroomMcp" in ps_adapter
     # `off` must BOTH remove the client wiring and clear the saved setting, in that
     # order. Asserted as intent rather than one exact line: playwright has no
     # adapter to call, so the arm is no longer a single statement.
@@ -198,16 +203,17 @@ def test_headroom_auth_probe_retries_and_names_the_failure():
             f"the '{verb}' message does not say why auth failed"
 
 
-def test_offline_optional_headroom_mcp_is_removed_instead_of_registered():
+def test_headroom_mcp_uses_docker_stdio_and_removes_failed_registrations():
     adapter = (ROOT / "bootstrap/ts-agents.sh").read_text(encoding="utf-8")
     ps_adapter = PS_ADAPTER.read_text(encoding="utf-8")
     apply = adapter[adapter.index("headroom_apply() {"):adapter.index("\ncaveman_rule() {")]
-    assert 'if am_probe "$url"' in apply
-    assert 'codex mcp remove headroom' in apply
+    assert "if headroom_mcp_probe" in apply
+    assert 'codex mcp add headroom -- "$HEADROOM_MCP_COMMAND"' in apply
+    assert "codex mcp remove headroom" in apply
     assert "removed stale client registrations" in apply
-    assert "$mcpReady = Test-TsTcp '127.0.0.1' 8788" in ps_adapter
+    assert "$mcpReady = $spec -and (Test-TsHeadroomMcp)" in ps_adapter
     assert "if ($Verb -eq 'add' -and $mcpReady)" in ps_adapter
-
+    assert "'mcp','add','headroom','--',$spec.Command" in ps_adapter
 
 def test_claude_instructions_fit_claude_code_limit():
     assert (ROOT / "CLAUDE.md").stat().st_size <= 40_000
@@ -1459,6 +1465,23 @@ def test_agentmemory_hook_commands_are_posix_not_cmd_exe():
     # Both variables inlined per command, never inherited: an exported variable
     # only reaches processes started after it was set.
     assert "AGENTMEMORY_INJECT_CONTEXT=true" in body
+
+
+def test_agentmemory_codex_check_requires_all_scripts_and_exact_hook_registrations():
+    ps = (ROOT / "bootstrap/ts-agentmemory.ps1").read_text(encoding="utf-8")
+    sh = AM_ENTRY.read_text(encoding="utf-8")
+    for event in (
+        "SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse",
+        "PreCompact", "Stop",
+    ):
+        assert event in ps and event in sh
+    assert "Test-AmCodexHookRegistrations" in ps
+    assert "$set.P.Count -ne $script:CodexScripts.Count" in ps
+    assert "has a stale AgentMemory command" in ps
+    assert "am_check_codex_hooks" in sh
+    assert '"$plugin_count" -ne 6' in sh
+    assert '"$stable_count" -ne 6' in sh
+    assert "has a stale AgentMemory command" in sh
 
 
 def test_agentmemory_secret_recovery_uses_the_unix_cache_not_the_registry():

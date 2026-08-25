@@ -3,8 +3,20 @@
   "headroom": {
     "version": "0.36.5",
     "proxyUrl": "http://127.0.0.1:8787",
-    "mcpUrl": "http://127.0.0.1:8788/mcp",
-    "dashboardUrl": "http://127.0.0.1:8787/dashboard",
+    "dashboardUrl": "http://127.0.0.1:8788/dashboard",
+    "mcp": {
+      "transport": "stdio",
+      "container": "ts-headroom-proxy",
+      "command": "headroom",
+      "args": [
+        "mcp",
+        "serve",
+        "--transport",
+        "stdio",
+        "--proxy-url",
+        "http://127.0.0.1:8787"
+      ]
+    },
     "healthPaths": [
       "/readyz",
       "/health"

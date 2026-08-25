@@ -250,9 +250,8 @@ ts_docker_ports() {
 }
 
 # ts_probe_headroom — 0 when the proxy is ready. Echoes a human summary.
-# The MCP endpoint is reported separately because it is a SEPARATE process
-# (`headroom mcp serve`, default 127.0.0.1:8788) that services/stacks/headroom's
-# compose does not start — so the proxy being up says nothing about MCP being up.
+# MCP runs on demand through Docker stdio; ts-agents performs the real JSON-RPC
+# initialize probe before it writes any client registration.
 # The absorbed compose stacks live at <clone>/services/stacks/<name>/. Resolved
 # from the clone — $TERMINAL_STACK_DIR, else chezmoi's source path — because that
 # is the only answer that also works from the runtime clone, which is not under
@@ -274,7 +273,7 @@ ts_env_value() {                           # <file> <key>
 }
 
 ts_probe_headroom() {
-    local proxy="${1:-http://127.0.0.1:8787}" mcp="${2:-http://127.0.0.1:8788/mcp}" rc=1 token="" file="" root
+    local proxy="${1:-http://127.0.0.1:8787}" rc=1 token="" file="" root
     token="${HEADROOM_PROXY_TOKEN:-}"
     if [ -z "$token" ]; then
         # One rule everywhere: the stack tree is <clone>/services/. ts_stack_env_file
@@ -290,13 +289,7 @@ ts_probe_headroom() {
         local seen; seen="$(ts_docker_ports headroom 2>/dev/null || true)"
         [ -n "$seen" ] && printf '          docker shows: %s\n' "$(printf '%s' "$seen" | tr '\n' ';')"
     fi
-    if ts_probe_http "$mcp"; then
-        printf '  MCP:    reachable at %s\n' "$mcp"
-    else
-        printf '  MCP:    not reachable at %s — that is a separate process\n' "$mcp"
-        printf '          (`headroom mcp serve --transport http`); compose does not start it.\n'
-    fi
-    return $rc
+    printf '  MCP: Docker stdio; initialize is verified during headroom repair/status\n'
 }
 
 # ts_probe_agentmemory — 0 when the REST service answers at all.

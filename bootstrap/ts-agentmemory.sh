@@ -233,6 +233,81 @@ PY
 
 # ---- Codex --------------------------------------------------------------------
 
+am_check_codex_hooks() {
+    local path="$1" stable_dir="$2" url output
+    url="$(am_agent_url codex)"
+    if output="$(python3 - "$path" "$stable_dir" "$url" <<'PY'
+import json, os, sys
+
+path, stable_dir, url = sys.argv[1:4]
+expected = [
+    ("SessionStart", "session-start.mjs", "agentmemory: loading session context"),
+    ("UserPromptSubmit", "prompt-submit.mjs", "agentmemory: recalling relevant memories"),
+    ("PreToolUse", "pre-tool-use.mjs", None),
+    ("PostToolUse", "post-tool-use.mjs", None),
+    ("PreCompact", "pre-compact.mjs", None),
+    ("Stop", "stop.mjs", None),
+]
+expected_events = {event for event, _, _ in expected}
+problems = []
+
+try:
+    with open(path, encoding="utf-8") as handle:
+        cfg = json.load(handle)
+except FileNotFoundError:
+    problems.append("Codex hooks.json missing")
+    cfg = {}
+except Exception as exc:
+    problems.append("Codex hooks.json is not valid JSON: %s" % exc)
+    cfg = {}
+
+hooks = cfg.get("hooks") if isinstance(cfg, dict) else None
+if not isinstance(hooks, dict):
+    if not problems:
+        problems.append("Codex hooks.json has no hooks object")
+    hooks = {}
+
+owned = []
+for event, groups in hooks.items():
+    if not isinstance(groups, list):
+        continue
+    for group in groups:
+        if not isinstance(group, dict) or not isinstance(group.get("hooks"), list):
+            continue
+        for hook in group["hooks"]:
+            if isinstance(hook, dict) and "hooks/agentmemory/" in str(hook.get("command", "")).replace("\\", "/"):
+                owned.append((event, hook))
+
+for event, script, status in expected:
+    matches = [hook for actual_event, hook in owned if actual_event == event]
+    if len(matches) != 1:
+        problems.append("Codex hooks.json event %s has %d AgentMemory registrations; expected 1" % (event, len(matches)))
+        continue
+    wanted = 'AGENTMEMORY_URL=%s AGENTMEMORY_INJECT_CONTEXT=true node "%s"' % (
+        url, os.path.join(stable_dir, script)
+    )
+    if matches[0].get("command") != wanted:
+        problems.append("Codex hooks.json event %s has a stale AgentMemory command" % event)
+    if matches[0].get("statusMessage") != status:
+        problems.append("Codex hooks.json event %s has a stale AgentMemory status message" % event)
+
+for event, _ in owned:
+    if event not in expected_events:
+        problems.append("Codex hooks.json has stale AgentMemory registration under %s" % event)
+
+if problems:
+    print("\n".join(problems))
+    raise SystemExit(1)
+PY
+)"; then
+        _pass 'Codex hooks.json registrations correct'
+    else
+        while IFS= read -r line; do [ -n "$line" ] && _fail "$line"; done <<EOF
+$output
+EOF
+    fi
+}
+
 am_codex() {
     local root ver edits_file plugin_paths stable_dir
     root="${CODEX_HOME:-$HOME/.codex}"
@@ -253,22 +328,25 @@ am_codex() {
     stable_dir="$root/hooks/agentmemory/scripts"
 
     if [ "$CHECK" = 1 ]; then
-        local before=$PROBLEMS stable_paths="" n
+        local before=$PROBLEMS stable_paths="" n plugin_count=0 stable_count=0 p
         for n in $AM_CODEX_SCRIPTS; do [ -f "$stable_dir/$n" ] && stable_paths="$stable_paths $stable_dir/$n"; done
-        if [ -z "$plugin_paths" ]; then _warn 'Codex plugin cache (CLI): no scripts found'
+        for p in $plugin_paths; do plugin_count=$((plugin_count + 1)); done
+        for p in $stable_paths; do stable_count=$((stable_count + 1)); done
+        if [ "$plugin_count" -ne 6 ]; then _fail "Codex plugin cache (CLI): expected 6 scripts, found $plugin_count"
         else
             before=$PROBLEMS
             # shellcheck disable=SC2086
             am_run_engine check "$edits_file" "$AM_BACKUP_SUFFIX" $plugin_paths
             [ "$PROBLEMS" = "$before" ] && _pass 'Codex plugin cache (CLI): edits present'
         fi
-        if [ -z "$stable_paths" ]; then _warn 'Codex stable copies (Desktop): no scripts found'
+        if [ "$stable_count" -ne 6 ]; then _fail "Codex stable copies (Desktop): expected 6 scripts, found $stable_count"
         else
             before=$PROBLEMS
             # shellcheck disable=SC2086
             am_run_engine check "$edits_file" "$AM_BACKUP_SUFFIX" $stable_paths
             [ "$PROBLEMS" = "$before" ] && _pass 'Codex stable copies (Desktop): edits present'
         fi
+        am_check_codex_hooks "$root/hooks.json" "$stable_dir"
         rm -f "$edits_file"; return 0
     fi
 

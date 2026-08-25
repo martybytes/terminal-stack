@@ -103,6 +103,66 @@ function Test-AmOwnedCommand([string]$Command) {
     return $Command -like '*hooks/agentmemory/*' -or $Command -like '*hooks\agentmemory\*'
 }
 
+function Test-AmCodexHookRegistrations([string]$Root, [string]$StableDir) {
+    $path = Join-Path $Root 'hooks.json'
+    $before = $script:problems
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        Fail 'Codex hooks.json missing'
+        return
+    }
+    try {
+        $cfg = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json -AsHashtable
+    } catch {
+        Fail "Codex hooks.json is not valid JSON: $($_.Exception.Message)"
+        return
+    }
+    if ($cfg -isnot [System.Collections.IDictionary] -or
+        -not $cfg.ContainsKey('hooks') -or
+        $cfg['hooks'] -isnot [System.Collections.IDictionary]) {
+        Fail 'Codex hooks.json has no hooks object'
+        return
+    }
+
+    $desired = [ordered]@{
+        SessionStart = @{ script = 'session-start.mjs'; status = 'agentmemory: loading session context' }
+        UserPromptSubmit = @{ script = 'prompt-submit.mjs'; status = 'agentmemory: recalling relevant memories' }
+        PreToolUse = @{ script = 'pre-tool-use.mjs' }
+        PostToolUse = @{ script = 'post-tool-use.mjs' }
+        PreCompact = @{ script = 'pre-compact.mjs' }
+        Stop = @{ script = 'stop.mjs' }
+    }
+    $owned = @()
+    foreach ($event in $cfg['hooks'].Keys) {
+        foreach ($group in @($cfg['hooks'][$event])) {
+            foreach ($hook in @($group.hooks)) {
+                if (Test-AmOwnedCommand ([string]$hook.command)) {
+                    $owned += [pscustomobject]@{ Event = [string]$event; Hook = $hook }
+                }
+            }
+        }
+    }
+    foreach ($event in $desired.Keys) {
+        $matches = @($owned | Where-Object Event -CEQ $event)
+        if ($matches.Count -ne 1) {
+            Fail "Codex hooks.json event $event has $($matches.Count) AgentMemory registrations; expected 1"
+            continue
+        }
+        $want = New-AmHookCommand 'codex' (Join-Path $StableDir $desired[$event].script)
+        if ([string]$matches[0].Hook.command -cne $want) {
+            Fail "Codex hooks.json event $event has a stale AgentMemory command"
+        }
+        $wantStatus = [string]$desired[$event].status
+        $haveStatus = [string]$matches[0].Hook.statusMessage
+        if ($haveStatus -cne $wantStatus) {
+            Fail "Codex hooks.json event $event has a stale AgentMemory status message"
+        }
+    }
+    foreach ($extra in @($owned | Where-Object { -not $desired.Contains([string]$_.Event) })) {
+        Fail "Codex hooks.json has stale AgentMemory registration under $($extra.Event)"
+    }
+    if ($script:problems -eq $before) { Pass 'Codex hooks.json registrations correct' }
+}
+
 # Copy the vendor scripts to a stable location and apply the edits to the copy, so a
 # plugin upgrade cannot silently revert the deployed behaviour underneath a live agent.
 function Sync-AmStableScripts([string]$SourceDir, [string]$DestDir, [string[]]$Names, [object[]]$Edits) {
@@ -220,11 +280,17 @@ function Invoke-AmCodex {
             @{ N = 'Codex plugin cache (CLI)'; P = $pluginPaths },
             @{ N = 'Codex stable copies (Desktop)'; P = $stablePaths }
         )) {
-            if ($set.P.Count -eq 0) { Warn "$($set.N): no scripts found"; continue }
+            if ($set.P.Count -ne $script:CodexScripts.Count) {
+                $found = @($set.P | ForEach-Object { Split-Path -Leaf $_ })
+                $missingNames = @($script:CodexScripts | Where-Object { $_ -notin $found })
+                Fail "$($set.N): missing scripts: $($missingNames -join ', ')"
+                continue
+            }
             $missing = Test-AmHookEdits -ScriptPaths $set.P -Edits $edits
             if ($missing.Count -eq 0) { Pass "$($set.N): edits present" }
             else { Fail "$($set.N): edits reverted: $($missing[0])" }
         }
+        Test-AmCodexHookRegistrations -Root $root -StableDir $stableDir
         return
     }
 

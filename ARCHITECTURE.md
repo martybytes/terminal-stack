@@ -88,6 +88,12 @@ See `docs/decisions.md` § "Why two backups" for the incident that motivated the
 
 ## Two halves: config and services
 
+Headroom MCP crosses the config/service boundary as a process, not another
+published port. Agent clients run `docker exec -i ts-headroom-proxy headroom mcp
+serve --transport stdio --proxy-url http://127.0.0.1:8787`; lifecycle adapters
+probe it with JSON-RPC `initialize` but still never start or mutate Docker. Port
+`8788` remains the dashboard-only nginx gateway, so `/mcp` there is invalid.
+
 chezmoi owns `$HOME`. `ts-stack` owns Docker. They meet in exactly two places: a
 published loopback port, and `bootstrap/agent-tools.json`, the single file where
 a port, URL, image tag or version pin is written down.
