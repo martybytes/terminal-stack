@@ -87,10 +87,7 @@ And `wso` blocks migration of **any** un-tiered terminal-stack clone, not merely
 
 Source → destination mapping for the `windows/` subtree is **relative-path-preserving**: `windows/.wezterm.lua` → `/mnt/c/Users/<you>/.wezterm.lua`. To add a new Windows-side file, drop it at the mirror path under `windows/` — no script changes needed. Full mechanism in `docs/cross-side-chezmoi.md`.
 
-**Username resolution.** No source file hard-codes a username:
-
-- WSL-side templates (`*.tmpl` under the chezmoi source root, e.g. `dot_config/starship.toml.tmpl`) use chezmoi's native engine — `{{ .chezmoi.homeDir }}`, `{{ .chezmoi.username }}`.
-- Windows-side templates (`*.tmpl` under `windows/`, e.g. `windows/.claude/settings.json.tmpl`) use a literal `__WIN_USER__` token that `run_after_90-sync-windows.sh` substitutes at sync time. The username is resolved from (1) `chezmoi data → windowsUsername` (written by the WSL bootstrap), falling back to (2) `cmd.exe /c echo %USERNAME%` via WSL interop. When you add a new Windows-side templated file, use `__WIN_USER__` — not Go-template syntax.
+**Username resolution.** No source file hard-codes a username. WSL/native templates use chezmoi's engine (`{{ .chezmoi.homeDir }}`); Windows-side templates under `windows/` use a literal `__WIN_USER__` token the sync substitutes. **When adding a Windows-side templated file use `__WIN_USER__`, never Go-template syntax.** Resolution order and the bootstrap that persists it: `ARCHITECTURE.md` § "Username resolution".
 
 **User config tokens.** Windows `.tmpl` files use `__WIN_USER__` plus the saved leader, theme, tmux, mux, restore, and TTS tokens; WSL/native templates read the matching chezmoi `[data]` keys behind defaults. The Windows renderer requires Python. Keep `Read-TsChoice` and `ts_prompt_choice` behavior/output aligned, and increment `TS_WIZ_ASKED` outside command substitutions. Terminal choices remain explicit and mutually exclusive where packages conflict; WezTerm nightly is recommended, unknown/manual installs are never replaced, and the installed channel is detected rather than persisted. See `docs/decisions.md` for token mappings, theme resolution, wizard invariants, and WezTerm update logic.
 
@@ -132,7 +129,9 @@ These are written up at length in `docs/powershell-quirks.md`; the short version
 
 ## Backup convention
 
-Any script in this repo that overwrites a user file must write a backup first as `<path>.bak.YYYYMMDD`. If that name already exists (same-day re-run), append `.1`, `.2`, etc. Never clobber a same-day backup. Reference implementation: `run_after_90-sync-windows.sh` (the `.bak` block, around line 27; grep rather than trusting a line number). A Phase 7 incident where this discipline was missing motivated the hardening; see `docs/decisions.md` § "Why two backups".
+`<path>.bak.YYYYMMDD`, then `.1`, `.2` on a same-day re-run; never clobber a
+same-day backup. Stated in full, with the incident behind it, in
+`ARCHITECTURE.md` § "Backup discipline".
 
 ## Where to look
 
