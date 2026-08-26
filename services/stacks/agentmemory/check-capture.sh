@@ -451,5 +451,5 @@ fi
 printf '%sPlugins, hooks, permissions and environment are read at process start: after any fix, restart Claude Code, Cursor and Codex.%s\n' "$C_DIM" "$C_RESET"
 
 # Unlike the .ps1, which always exits 0, this mirrors the health so it can be
-# used in a pipeline or a hook — the ts-doctor.sh house rule.
+# used in a pipeline or a hook — the house rule for this repo.
 [ "$TSS_PROBLEMS" = 0 ]

@@ -1,0 +1,16 @@
+{
+  "subsystem": "doctor",
+  "case": "no-clone-quiet",
+  "platform": "wsl",
+  "sandbox": "empty-home",
+  "argv": [
+    "--quiet"
+  ],
+  "recorded_from": "bootstrap/ts-doctor.sh",
+  "exit_code": 1,
+  "stdout_lines": [
+    "  !! chezmoi has no source dir (chezmoi.toml missing sourceDir)",
+    "  !! ~/.zshrc not found (chezmoi apply not run yet?)"
+  ],
+  "stderr_lines": []
+}

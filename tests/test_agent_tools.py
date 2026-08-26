@@ -448,10 +448,8 @@ def test_shell_entrypoints_parse():
         # only showed up when someone ran the command.
         "bootstrap/ts-mux.sh",
         "bootstrap/ts-wezterm.sh",
-        "bootstrap/ts-doctor.sh",
         "bootstrap/wso.sh",
         "bootstrap/_workspace.sh",
-        "bootstrap/_doctor.sh",
         "bootstrap/_common-debian.sh",
         "bootstrap/ts-smb.sh",
         "bootstrap/_smb.sh",
@@ -1922,12 +1920,21 @@ def test_agentmemory_is_bash32_clean_and_uses_python_for_json():
 
 
 def test_doctor_checks_agentmemory_natively_not_only_on_wsl():
-    """The [ -d /mnt/c/Users ] gate meant macOS and Linux never checked — and
-    never wired — anything at all."""
-    body = (ROOT / "bootstrap/_doctor.sh").read_text(encoding="utf-8")
-    assert "ts-agentmemory.sh" in body, "doctor must know about the bash twin"
-    seg = body[body.index("agentmemory hook wiring") :]
+    """The rule outlives the shell that used to hold it.
+
+    The old bash doctor gated this check on [ -d /mnt/c/Users ], so macOS and
+    Linux never checked - and never wired - anything at all. Repointed at
+    tstack/commands/doctor.py when doctor was ported; the check must still run
+    everywhere, and must still call the bash twin off Windows.
+    """
+    body = read_repo("tstack/commands/doctor.py")
+    seg = body[body.index("def check_agentmemory_wiring") : body.index("def _tts_port")]
+    assert "ts-agentmemory.sh" in seg, "doctor must know about the bash twin"
+    assert "ts-agentmemory.ps1" in seg, "and the pwsh one on Windows"
     assert "--check" in seg
+    assert "/mnt/c/Users" not in seg, (
+        "the check must not be gated on a Windows path again - that is the bug"
+    )
 
 
 def test_ts_agents_invokes_the_hook_wiring():

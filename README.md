@@ -61,7 +61,7 @@ Re-running the original install one-liner from § Quick install does the same th
 
 **`tstack rollback`** undoes the last `tstack update`: it resets the clone to the recorded SHA (refusing if the clone has uncommitted changes) and re-applies. Run `tstack update` again to return to latest. The rollback point lives at `~/.local/state/terminal-stack/rollback-sha` (zsh) / `%LOCALAPPDATA%\terminal-stack\rollback-sha` (pwsh).
 
-**`tstack doctor`** diagnoses a broken install — a chezmoi `sourceDir` pointing at an old/moved clone (the classic "I updated but `doc` says command not found" symptom), a `~/.zshrc`/`$PROFILE` missing the stack block, leftover old clones, or tools off PATH. It's read-only by default; **`tstack doctor --repair`** (pwsh: `tstack doctor -Repair`) repoints `sourceDir`, moves a legacy-path clone to the canonical location (or, when that location is already occupied, switches to the clone there and offers the other for removal), re-applies, and offers to remove old clones and retired files (pre-ticked checklist, one confirmation, `TS_DRY_RUN=1` to preview). The installers run the same checks automatically and prompt for the clone location.
+**`tstack doctor`** diagnoses a broken install — a chezmoi `sourceDir` pointing at an old/moved clone (the classic "I updated but `doc` says command not found" symptom), a `~/.zshrc`/`$PROFILE` missing the stack block, the two config stores disagreeing, a TTS daemon that is enabled but dead, leftover old clones, or tools off PATH. One implementation now runs on every platform, so Windows gets the checks it never had. It is read-only by default and `--json` emits one record per check for scripts; **`tstack doctor --repair`** repoints `sourceDir`, moves a legacy-path clone to the canonical location (or, when that location is already occupied, switches to the clone there and offers the other for removal), re-applies, and offers to remove old clones and retired files (pre-ticked checklist, one confirmation, `TS_DRY_RUN=1` to preview). The installers run the same checks automatically and prompt for the clone location.
 
 **Manual rollback** (state file missing, or rolling back further than one update):
 
@@ -139,7 +139,10 @@ terminal-stack/
 │   ├── commands.conf     #   the subcommand table: name, posix impl, windows impl, summary
 │   ├── registry.py       #   parser for that table
 │   ├── paths.py          #   clone resolution (was written three times)
-│   └── platform.py       #   windows / wsl / linux / macos detection and interop
+│   ├── platform.py       #   windows / wsl / linux / macos detection and interop
+│   ├── store.py          #   the ONE reader of chezmoi [data] + the config.json mirror
+│   ├── checks.py         #   the check model behind `doctor` and `--json`
+│   └── commands/         #   one module per ported subcommand (doctor)
 ├── services/             # the Docker stacks the memory/compression/voice
 │   ├── stacks/           #   features run on (chezmoi-ignored, run from the clone)
 │   └── console/          #   the agentmemory console's source, built from here
@@ -153,7 +156,6 @@ terminal-stack/
 │   ├── _wizard.sh           # install-wizard prompts (ts_prompt_choice)
 │   ├── _cleanup.sh / _cleanup.ps1 # old-clone checklist; ts_backup_file lives here
 │   ├── ts-config.sh         # backend for the `tstack config` shell command
-│   ├── ts-doctor.sh         # backend for `tstack doctor`
 │   ├── ts-mux.sh            # backend for `tstack mux` (WezTerm multiplexer domain)
 │   ├── ts-smb.sh            # backend for `tstack smb` (SMB shares over rclone)
 │   ├── _smb.sh              # share store, engine probe, mount lifecycle

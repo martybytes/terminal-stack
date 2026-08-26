@@ -1,0 +1,26 @@
+{
+  "subsystem": "doctor",
+  "case": "help",
+  "platform": "wsl",
+  "sandbox": "empty-home",
+  "argv": [
+    "-h"
+  ],
+  "recorded_from": "bootstrap/ts-doctor.sh",
+  "exit_code": 0,
+  "stdout_lines": [
+    "ts-doctor.sh - diagnose and repair the terminal-stack install. Driven by the",
+    "`tstack doctor` shell wrapper (zsh) and runnable standalone. On Windows the pwsh",
+    "Test-TerminalStack / Repair-TerminalStack are the counterparts.",
+    "",
+    "Usage:",
+    "  tstack doctor                 run health checks (read-only)",
+    "  tstack doctor --repair        diagnose, then fix issues (repoint sourceDir,",
+    "                            re-apply, offer to clean up old clones/leftovers)",
+    "  tstack doctor --quiet         checks only, suppress the per-check \"ok\" lines",
+    "",
+    "Run from WSL in a combined WSL+Windows setup - it repoints the WSL chezmoi",
+    "source of truth. Exit status mirrors the health (0 healthy, 1 issues found)."
+  ],
+  "stderr_lines": []
+}

@@ -6,6 +6,40 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Added
 
+- **`tstack doctor` is Python, and runs the same checks everywhere (08/25/2026).** The first
+  subsystem ported off the shell twins. `bootstrap/ts-doctor.sh` and `bootstrap/_doctor.sh`
+  are deleted, and `Invoke-TsDoctor` / `Test-TerminalStack` / `Repair-TerminalStack` are gone
+  from `$PROFILE`.
+
+  The two implementations had drifted a long way apart: bash ran about twenty checks, pwsh
+  about eight, and neither knew what the other looked at. Windows never checked the config
+  stores for divergence, the memory-backend derivation, SMB mount records, or the agentmemory
+  hook wiring. It does now, because there is one implementation.
+
+  `--json` emits one record per check (id, status, message, hint), so the checks are a read
+  model rather than prose to scrape. `--quiet` prints nothing at all on a healthy machine.
+  Exit status is unchanged: 0 healthy, 1 issues found.
+
+  Three bugs the characterization recording exposed, all fixed in the port:
+  - `ts_chezmoi_bin` returned `$TERMINAL_STACK_CHEZMOI` unchecked, so a pin at a path with no
+    binary was reported as `ok  chezmoi: <path>`.
+  - The bash doctor resolved the clone through `chezmoi source-path` **alone**, so a machine
+    with a valid `TERMINAL_STACK_DIR` pin and a broken chezmoi reported "no source dir" while
+    every other command in the stack honoured the pin.
+  - The daemon probe only tried `127.0.0.1`. On WSL the TTS daemon is a *Windows* process and
+    WSL2's loopback is the VM's, so a healthy daemon read as dead under NAT networking. The
+    port walks the same host ladder the hooks already used.
+
+  A false positive was removed too: the `chezmoi source-path` check is POSIX-only, because on
+  Windows the apply path is `scripts/sync-windows.ps1` and chezmoi is usually present only
+  because winget installed it, pointing somewhere unrelated.
+
+- **Characterization fixtures (`tests/characterize/`).** What the shell did, recorded before it
+  was replaced, replayed against the port. Deliberate divergences need a written reason, and a
+  test rejects a reason too thin to review. Fixtures carry the platform they represent and are
+  only replayed there; host-dependent lines are filtered, so nothing personal reaches a tracked
+  file and a fixture recorded on one machine still passes on another.
+
 - **One command: `tstack` (08/25/2026).** The eight `ts-*` commands are replaced by a
   single entry point with subcommands: `tstack config`, `doctor`, `update`, `rollback`,
   `mux`, `services`, `smb`, `wezterm`, `agents`, `agentmemory`, `doc`. **No `ts-*` name

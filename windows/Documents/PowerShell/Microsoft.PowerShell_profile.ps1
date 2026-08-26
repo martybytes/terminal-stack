@@ -1695,7 +1695,7 @@ function Invoke-TsMux {
 }
 # The local Docker service stacks. PARALLEL implementation of
 # bootstrap/ts-stack.sh, reached through the script in the clone so `tstack update`
-# ships fixes without a profile re-sync -- same shape as Invoke-TsDoctor.
+# ships fixes without a profile re-sync.
 function Invoke-TsStack {
     $src = Resolve-TsSourceDir
     if (-not $src) { return }
@@ -1734,90 +1734,6 @@ function Set-TsSourceDirPersisted([string]$SourceDir) {
     Write-Host "==> persisted `$env:TERMINAL_STACK_DIR = $SourceDir to $localProfile"
 }
 
-# Diagnose / repair the Windows install: missing/moved clone, stale config, leftover
-# old clones. `tstack doctor` checks (read-only); `tstack doctor -Repair` fixes (move the
-# clone to the canonical location, re-sync, offer cleanup). POSIX counterpart:
-# bootstrap/ts-doctor.sh.
-function Invoke-TsDoctor {
-    [CmdletBinding()] param([switch]$Repair, [switch]$Quiet)
-    $clone = Find-TsAnyClone
-    if (-not $clone) { Write-Warning 'No terminal-stack clone found. Re-run install.ps1 (irm ... | iex).'; return }
-    . (Join-Path $clone 'bootstrap\_cleanup.ps1')
-    $src = Resolve-TsSourceDir
-    if (-not $src) { $src = $clone }
-    $canon = Get-TsCanonicalCloneDir
-    if ($Repair) {
-        # Offer the canonical-location move first (Move-TsClone clears a stale pin).
-        if ($src.TrimEnd('\') -ne $canon.TrimEnd('\') -and -not (Test-TsDevClone $src) `
-            -and (Get-Command Move-TsClone -ErrorAction SilentlyContinue)) {
-            if (Test-Path $canon) {
-                # Move-TsClone refuses an existing destination, and the cleanup
-                # menu never offers the canonical path — so "resolve it there"
-                # used to be a dead end. Decide it here instead.
-                if (Test-TsStackClone $canon) {
-                    Write-Warning "two clones: '$src' and the canonical '$canon'."
-                    Write-Host   "  switching to $canon; the cleanup menu below can remove '$src'."
-                    $src = $canon
-                } else {
-                    Write-Warning "'$canon' exists but is not a terminal-stack clone."
-                    Write-Host   "  Move it aside or delete it, then re-run 'tstack doctor -Repair' to relocate '$src'."
-                }
-            } elseif (-not [Console]::IsInputRedirected) {
-                $a = Read-Host "Move '$src' to the canonical location '$canon'? [Y/n]"
-                if ($a -notmatch '^(n|no)$') {
-                    if (Move-TsClone -Source $src -Dest $canon) { $src = $canon }
-                }
-            }
-        }
-        # Fallback pin only when the clone stays at a non-canonical path.
-        if ($src.TrimEnd('\') -ne $canon.TrimEnd('\') -and `
-            (Resolve-Path $clone -ErrorAction SilentlyContinue).Path -ne (Resolve-Path $src -ErrorAction SilentlyContinue).Path) {
-            Set-TsSourceDirPersisted $src
-        }
-        . (Join-Path $src 'bootstrap\_config.ps1')
-        Repair-CcTtsDuckSnapshot
-        Invoke-TsSync $src
-        Invoke-TsCleanupMenu $src
-        Test-TsInstall -SourceDir $src | Out-Null
-    } else {
-        if ($src.TrimEnd('\') -ne $canon.TrimEnd('\') -and -not (Test-TsDevClone $src)) {
-            Write-Host "note: clone is at a legacy location; 'tstack doctor -Repair' can move it to $canon"
-        } elseif (Test-TsDevClone $src) {
-            Write-Host 'note: pinned at a dev clone (workspace tier path) — deliberate, leaving it alone.'
-        }
-        # Claude TTS daemon (only when the feature is on): enabled-but-dead means
-        # hooks silently degraded to direct playback; a stale duck snapshot means
-        # music may be stuck quiet (Windows persists per-app volume).
-        . (Join-Path $src 'bootstrap\_config.ps1')
-        $ttsCfg = Get-CcTtsConfig
-        if ($ttsCfg -and $ttsCfg.enabled) {
-            if ($ttsCfg.daemon -and $ttsCfg.daemon.enabled) {
-                if (Test-CcTtsDaemonHealthy) {
-                    if (-not $Quiet) { Write-Host '  ok  tts daemon healthy' }
-                } else {
-                    Write-Warning 'tts daemon enabled but not reachable — hooks fall back to direct playback; start: tstack config tts daemon on'
-                }
-            }
-            if ((Test-Path (Get-CcTtsDuckSnapshotPath)) -and -not (Test-CcTtsDaemonHealthy)) {
-                Write-Host "note: stale duck snapshot — music may be stuck quiet; 'tstack doctor -Repair' restores volumes"
-            }
-        }
-        $agentDoctor = Join-Path $src 'bootstrap\ts-agents.ps1'
-        if (Test-Path -LiteralPath $agentDoctor) {
-            foreach ($entry in @(
-                @{ Name = 'headroom'; Enabled = (Get-TsAgentSetting headroomEnabled); Cursor = (Get-TsAgentSetting headroomCursorMode) },
-                @{ Name = 'caveman'; Enabled = (Get-TsAgentSetting cavemanEnabled); Cursor = 'mcp' },
-                @{ Name = 'agentmemory'; Enabled = (Get-TsAgentSetting agentmemoryEnabled); Cursor = 'mcp' }
-            )) {
-                if ($entry.Enabled -ne 'on') { continue }
-                & $agentDoctor -Tool $entry.Name -Action status -CursorMode $entry.Cursor | Out-Host
-            }
-        }
-        Test-TsInstall -SourceDir $src -Quiet:$Quiet | Out-Null
-    }
-}
-function Test-TerminalStack    { [CmdletBinding()] param([switch]$Quiet) Invoke-TsDoctor -Quiet:$Quiet }
-function Repair-TerminalStack  { Invoke-TsDoctor -Repair }
 
 # tstack — the single entry point. Routing lives in tstack/commands.conf in the
 # clone, so this function never grows a branch per subcommand: adding one, or

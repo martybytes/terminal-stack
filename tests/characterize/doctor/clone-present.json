@@ -1,0 +1,19 @@
+{
+  "subsystem": "doctor",
+  "case": "clone-present",
+  "platform": "wsl",
+  "sandbox": "clone-only",
+  "argv": [],
+  "recorded_from": "bootstrap/ts-doctor.sh",
+  "exit_code": 1,
+  "stdout_lines": [
+    "==> terminal-stack doctor",
+    "  ok  chezmoi: <SANDBOX>/no-such-chezmoi",
+    "  !! chezmoi has no source dir (chezmoi.toml missing sourceDir)",
+    "  !! ~/.zshrc not found (chezmoi apply not run yet?)",
+    "  ok  zsh on PATH",
+    "  ok  starship on PATH",
+    "  ok  memory backend: agentmemory"
+  ],
+  "stderr_lines": []
+}
