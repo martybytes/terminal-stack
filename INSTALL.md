@@ -523,6 +523,19 @@ If you skip the `[data].windowsUsername` line, the sync hook will fall back to `
 
 ### Phase 9 — Verify
 
+Start with the one command that now fronts everything:
+
+```sh
+tstack --help          # every subcommand, with the platform gaps marked honestly
+tstack --version       # clone path, branch, commit, and whether it is dirty
+tstack doctor          # the install's own health check
+```
+
+`tstack --help` failing means the shell shim did not load; re-open the shell.
+A subcommand reported as "not available on <platform>" is correct and deliberate
+(`smb` and `wezterm` are POSIX-only), not a broken install. There are no `ts-*`
+commands any more; `ts-config`, `ts-update` and friends are gone, without aliases.
+
 ```powershell
 wezterm.exe --version
 starship --version

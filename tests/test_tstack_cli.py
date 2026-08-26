@@ -103,7 +103,9 @@ def test_ported_subcommands_have_a_module():
 
 def test_no_retired_ts_command_names_survive_in_the_shells():
     """No aliases anywhere was the decision; this is what keeps it true."""
-    retired = r"(?<![\w./\\-])ts-(?:config|update|doctor|rollback|mux|smb|stack|wezterm)(?!-)(?!\.\w)"
+    retired = (
+        r"(?<![\w./\\-])ts-(?:config|update|doctor|rollback|mux|smb|stack|wezterm)(?!-)(?!\.\w)"
+    )
     for path in (ZSHRC, PROFILE):
         found = sorted(set(re.findall(retired, path.read_text(encoding="utf-8"))))
         assert not found, f"{path.name} still references {found}"
@@ -208,6 +210,45 @@ def test_app_installable_is_pinned_on_both_sides_not_just_bash():
     assert "nvtop" in sh and "ts_app_installable" in sh
 
 
+DOC_SCANNED = (
+    "README.md",
+    "INSTALL.md",
+    "ARCHITECTURE.md",
+    "CLAUDE.md",
+    "AGENTS.md",
+    "docs/kb/common/stack.md",
+    "docs/kb/common/tstack.md",
+)
+
+
+def test_docs_and_the_registry_agree_on_the_command_surface():
+    """A documented command that does not exist, or a command nobody documented.
+
+    Both directions are drift. The first sends someone to a command that errors;
+    the second is a feature only its author knows about. The registry is the
+    source of truth, so the docs are checked against it rather than the reverse.
+    """
+    known = {r[0] for r in rows()}
+    documented: set[str] = set()
+    # Anchored to a backtick or the start of a line: a command is written either
+    # as inline code or as the first thing in a fenced block. Without the anchor,
+    # `ruff check tstack tests` in AGENTS.md reads as a subcommand called "tests".
+    pattern = re.compile(r"(?:^|`)tstack ([a-z][a-z0-9-]*)", re.M)
+    for rel in DOC_SCANNED:
+        documented |= set(pattern.findall((ROOT / rel).read_text(encoding="utf-8")))
+
+    invented = sorted(w for w in documented if w not in known)
+    assert not invented, (
+        f"documented but not in tstack/commands.conf: {invented}. "
+        "Either add the row or fix the docs."
+    )
+
+    undocumented = sorted(known - documented)
+    assert not undocumented, (
+        f"in tstack/commands.conf but documented nowhere in {list(DOC_SCANNED)}: {undocumented}"
+    )
+
+
 def test_the_git_hooks_are_actually_installed_by_something():
     """The gate that had never run.
 
@@ -223,9 +264,11 @@ def test_the_git_hooks_are_actually_installed_by_something():
     assert "ts_install_git_hooks()" in sh
     assert "function Install-TsGitHooks" in ps
 
-    for rel in ("bootstrap/wsl-bootstrap.sh",
-                "bootstrap/linux-bootstrap.sh",
-                "bootstrap/mac-bootstrap.sh"):
+    for rel in (
+        "bootstrap/wsl-bootstrap.sh",
+        "bootstrap/linux-bootstrap.sh",
+        "bootstrap/mac-bootstrap.sh",
+    ):
         body = (ROOT / rel).read_text(encoding="utf-8")
         assert "ts_install_git_hooks" in body, f"{rel} never installs the hooks"
 
@@ -243,6 +286,42 @@ def test_the_hooks_never_claim_a_file_that_does_not_exist():
         body = (ROOT / ".githooks" / name).read_text(encoding="utf-8")
         for claimed in re.findall(r"\b(bootstrap[\w./-]*\.(?:sh|ps1))\b", body):
             assert (ROOT / claimed).exists(), f".githooks/{name} names missing {claimed}"
+
+
+def test_every_subprocess_call_in_the_suite_has_a_timeout():
+    """A test subprocess without a timeout can hang the whole suite forever.
+
+    `test_wizard_prompts_run_without_undefined_functions` did exactly that: it
+    drives `ts_prompt_multi`, which reads from /dev/tty rather than stdin, so
+    `stdin=DEVNULL` did not stop it. Wherever a controlling terminal exists the
+    prompt blocked indefinitely -- it does under WSL and does not under Git Bash,
+    so the suite passed on Windows and hung on Linux, with no failure to read.
+
+    A hang is worse than a failure: it looks like slowness, and CI reports it as
+    a timeout with no indication of which test.
+    """
+    offenders = []
+    for path in sorted(ROOT.glob("tests/*.py")):
+        src = path.read_text(encoding="utf-8")
+        for match in re.finditer(r"subprocess\.run\(", src):
+            # Slice to the matching close paren, tolerating nested parens.
+            depth, i = 0, match.end() - 1
+            while i < len(src):
+                if src[i] == "(":
+                    depth += 1
+                elif src[i] == ")":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                i += 1
+            call = src[match.start() : i + 1]
+            if "timeout=" not in call:
+                line = src[: match.start()].count("\n") + 1
+                offenders.append(f"{path.relative_to(ROOT)}:{line}")
+    assert not offenders, (
+        "subprocess.run without timeout= (a hang here stalls the whole suite): "
+        + ", ".join(offenders)
+    )
 
 
 # ---------------------------------------------------- PowerShell hazard lints
@@ -284,17 +363,20 @@ def test_splatting_a_lone_dash_flag_survives_the_shim():
     'h'. With no tail at all it splatted one empty string. Both parse cleanly.
     """
     script = (
-        'function Show-Args { $args.Count }\n'
+        "function Show-Args { $args.Count }\n"
         '$passed = @("services", "-h")\n'
-        '$tail = @(if ($passed.Count -gt 1) { $passed[1..($passed.Count - 1)] } else { @() })\n'
+        "$tail = @(if ($passed.Count -gt 1) { $passed[1..($passed.Count - 1)] } else { @() })\n"
         '& "Show-Args" @tail\n'
         '$none = @("services")\n'
-        '$t2 = @(if ($none.Count -gt 1) { $none[1..($none.Count - 1)] } else { @() })\n'
+        "$t2 = @(if ($none.Count -gt 1) { $none[1..($none.Count - 1)] } else { @() })\n"
         '& "Show-Args" @t2\n'
     )
     out = subprocess.run(
         [PWSH, "-NoLogo", "-NoProfile", "-Command", script],
-        capture_output=True, text=True, timeout=120, check=False,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
     )
     assert out.returncode == 0, out.stderr
     counts = [int(x) for x in out.stdout.split()]

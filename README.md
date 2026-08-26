@@ -131,6 +131,15 @@ terminal-stack/
 ├── install-wsl.sh        # one-liner WSL installer (curl | bash)
 ├── install-linux.sh      # one-liner native-Linux installer
 ├── install-mac.sh        # one-liner macOS installer
+├── REVAMP-PLAN.md        # the port to one `tstack` program, phase by phase
+├── pyproject.toml        # ruff / mypy / pytest / coverage config
+├── tstack/               # the `tstack` command itself (chezmoi-ignored, run from the clone)
+│   ├── main.py           #   entry point the shell shims invoke
+│   ├── cli.py            #   dispatcher; renders ALL help, so the twins cannot drift
+│   ├── commands.conf     #   the subcommand table: name, posix impl, windows impl, summary
+│   ├── registry.py       #   parser for that table
+│   ├── paths.py          #   clone resolution (was written three times)
+│   └── platform.py       #   windows / wsl / linux / macos detection and interop
 ├── services/             # the Docker stacks the memory/compression/voice
 │   ├── stacks/           #   features run on (chezmoi-ignored, run from the clone)
 │   └── console/          #   the agentmemory console's source, built from here

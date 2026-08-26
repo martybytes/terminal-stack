@@ -75,10 +75,19 @@ def test_shared_constants_match_within_each_pair():
     """
     shared = [
         # host ports
-        "3110", "3111", "3112", "3113", "3114", "8880", "8931",
+        "3110",
+        "3111",
+        "3112",
+        "3113",
+        "3114",
+        "8880",
+        "8931",
         # pins, limits and stable names
-        "0.1.18", "268435456", "http://127.0.0.1:8931/mcp",
-        "agentmemory_iii-data", "agent007memory_history",
+        "0.1.18",
+        "268435456",
+        "http://127.0.0.1:8931/mcp",
+        "agentmemory_iii-data",
+        "agent007memory_history",
     ]
     # Deliberately no bare "1000"/"3600" here: they are substrings of 100000,
     # "0.01 1000" and 3600000, so they match incidentally and the test cries
@@ -104,14 +113,15 @@ def test_reconcile_embedded_programs_are_identical():
 
     def between(text, start, end):
         i = text.index(start)
-        return text[i:text.index(end, i) + len(end)]
+        return text[i : text.index(end, i) + len(end)]
 
     for name, start, end in [
         ("node analysis", 'const fs = require("fs");', "}));\n"),
         ("sh quarantine", "set -eu\nsrc=/data/queue_store", "sync\n"),
     ]:
-        assert between(ps, start, end) == between(sh, start, end), \
+        assert between(ps, start, end) == between(sh, start, end), (
             f"the embedded {name} program has diverged between the two files"
+        )
 
 
 # --------------------------------------------------------------------------
@@ -149,7 +159,9 @@ def test_sh_scripts_have_the_house_prologue():
             assert "Exit 0 = pass" in text, f"{rel}: does not state its exit contract"
         else:
             assert "set -euo pipefail" in text, f"{rel}: missing strict mode"
-        assert "_stack.sh" in text or "_common.sh" in text, f"{rel}: does not source the shared library"
+        assert "_stack.sh" in text or "_common.sh" in text, (
+            f"{rel}: does not source the shared library"
+        )
         assert re.search(r"(?i)twin[:\s]", text), f"{rel}: header does not name its .ps1 twin"
 
 
@@ -167,13 +179,14 @@ def _registered_divergences():
     """Script basenames named in the divergence register in docs/service-conventions.md."""
     text = (ROOT / "docs/service-conventions.md").read_text(encoding="utf-8")
     start = text.index("### Intentional divergences")
-    table = text[start:text.index("\n## ", start)]
+    table = text[start : text.index("\n## ", start)]
     return set(re.findall(r"`([A-Za-z0-9_.-]+\.(?:sh|ps1|mjs))`", table))
 
 
 def test_the_divergence_register_exists_and_is_populated():
-    assert len(_registered_divergences()) >= 5, \
+    assert len(_registered_divergences()) >= 5, (
         "docs/service-conventions.md's divergence register looks empty — the flag test below relies on it"
+    )
 
 
 def test_every_ps1_flag_has_a_kebab_case_counterpart():

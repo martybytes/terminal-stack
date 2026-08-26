@@ -34,7 +34,8 @@ def test_help_is_byte_identical_between_the_twins():
     sh = _help_text(SH, "HELP='")
     ps = _help_text(PS, "$HELP = @'\n")
     assert sh.rstrip("\n") == ps.rstrip("\n"), (
-        "the -h text diverged:\n--- sh\n" + sh + "\n--- ps\n" + ps)
+        "the -h text diverged:\n--- sh\n" + sh + "\n--- ps\n" + ps
+    )
 
 
 def test_no_two_script_scope_pwsh_variables_differ_only_by_case():
@@ -65,10 +66,12 @@ def test_toggle_map_is_the_same_in_both_twins():
     """A stack gated on the wrong saved setting is skipped for the wrong reason."""
     sh = SH.read_text(encoding="utf-8") + (ROOT / "services/_stack.sh").read_text(encoding="utf-8")
     ps = PS.read_text(encoding="utf-8")
-    for stack, key in (("agentmemory", "agentmemoryEnabled"),
-                       ("headroom", "headroomEnabled"),
-                       ("playwright", "playwrightEnabled"),
-                       ("kokoro", "ccTts")):
+    for stack, key in (
+        ("agentmemory", "agentmemoryEnabled"),
+        ("headroom", "headroomEnabled"),
+        ("playwright", "playwrightEnabled"),
+        ("kokoro", "ccTts"),
+    ):
         assert key in sh and key in ps, f"{stack} -> {key} missing from a twin"
 
 
@@ -88,10 +91,21 @@ def test_only_ts_stack_may_run_docker():
 
 # ── the argv contract ─────────────────────────────────────────────────────────
 def _dry_run(*args):
-    env = {"TERMINAL_STACK_DIR": str(ROOT), "TS_STACK_DOCKER_PROBE": "absent",
-           "NO_COLOR": "1", "HOME": str(Path.home()), "PATH": "/usr/bin:/bin"}
-    r = subprocess.run([BASH, str(SH), *args, "--dry-run"],
-                       cwd=ROOT, capture_output=True, text=True, env=env)
+    env = {
+        "TERMINAL_STACK_DIR": str(ROOT),
+        "TS_STACK_DOCKER_PROBE": "absent",
+        "NO_COLOR": "1",
+        "HOME": str(Path.home()),
+        "PATH": "/usr/bin:/bin",
+    }
+    r = subprocess.run(
+        [BASH, str(SH), *args, "--dry-run"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=300,
+    )
     return r.stdout
 
 
@@ -129,10 +143,16 @@ def test_naming_a_stack_overrides_its_saved_toggle():
 def test_status_survives_an_absent_engine():
     """The most common state on a fresh box, and on any box where Docker Desktop
     is not running. One headline, not a wall of failures."""
-    env = {"TERMINAL_STACK_DIR": str(ROOT), "TS_STACK_DOCKER_PROBE": "absent",
-           "NO_COLOR": "1", "HOME": str(Path.home()), "PATH": "/usr/bin:/bin"}
-    r = subprocess.run([BASH, str(SH), "status"],
-                       cwd=ROOT, capture_output=True, text=True, env=env)
+    env = {
+        "TERMINAL_STACK_DIR": str(ROOT),
+        "TS_STACK_DOCKER_PROBE": "absent",
+        "NO_COLOR": "1",
+        "HOME": str(Path.home()),
+        "PATH": "/usr/bin:/bin",
+    }
+    r = subprocess.run(
+        [BASH, str(SH), "status"], cwd=ROOT, capture_output=True, text=True, env=env, timeout=300
+    )
     assert r.returncode == 0, r.stdout + r.stderr
     assert "engine unreachable" in r.stdout + r.stderr
 
@@ -146,14 +166,14 @@ def test_docker_kind_calls_the_desktop_stub_what_it_is():
     Windows side."""
     script = (
         f'. "{(ROOT / "services/_stack.sh").as_posix()}"\n'
-        'bin=$(mktemp -d)\n'
+        "bin=$(mktemp -d)\n"
         'printf "#!/bin/sh\\necho \\"The command \'docker\' could not be found in this WSL 2 distro.\\"\\nexit 1\\n" > "$bin/docker"\n'
         'chmod +x "$bin/docker"\n'
         'PATH="$bin:$PATH" tss_docker_kind; echo\n'
         'TS_STACK_DOCKER_PROBE=wsl-shim tss_engine_advice linux "$(TS_STACK_DOCKER_PROBE=wsl-shim tss_docker_kind)"\n'
-        'rm -rf "$bin"\n')
-    r = subprocess.run([BASH, "-c", script],
-                       cwd=ROOT, capture_output=True, text=True)
+        'rm -rf "$bin"\n'
+    )
+    r = subprocess.run([BASH, "-c", script], cwd=ROOT, capture_output=True, text=True, timeout=300)
     assert "wsl-shim" in r.stdout, r.stdout + r.stderr
     assert "WSL Integration" in r.stdout, "the advice must name the actual fix"
     assert "is Docker Desktop running" not in r.stdout
@@ -167,8 +187,10 @@ def test_the_stack_env_file_resolves_from_the_clone_in_every_copy():
     token may be for a proxy that has since rotated, producing a 401 that reads
     like a broken install. There is no fallback to the old path on purpose."""
     posix = ("bootstrap/ts-agents.sh", "bootstrap/_config.sh", "dot_zshrc")
-    windows = ("bootstrap/ts-agents.ps1",
-               "windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1")
+    windows = (
+        "bootstrap/ts-agents.ps1",
+        "windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1",
+    )
     for rel in posix:
         body = (ROOT / rel).read_text(encoding="utf-8")
         # _config.sh takes the stack name as an argument; the rest name headroom.
@@ -189,7 +211,7 @@ def test_no_runtime_file_points_at_the_absorbed_repo_by_name():
         for f in sorted(ROOT.glob(pattern)):
             body = f.read_text(encoding="utf-8")
             if f.name == "_agentmemory.sh" or f.name == "_agentmemory.ps1":
-                continue      # the secret-cache path migrates with a fallback; see its own test
+                continue  # the secret-cache path migrates with a fallback; see its own test
             assert "docker-local" not in body, f"{f.name} still names the absorbed repo"
 
 
@@ -200,6 +222,7 @@ def test_manifest_and_compose_agree_on_pins_and_ports():
     test could stay green while compose ran a different image."""
     import json
     from urllib.parse import urlparse
+
     cfg = json.loads((ROOT / "bootstrap/agent-tools.json").read_text(encoding="utf-8"))
 
     hr_env = (ROOT / "services/stacks/headroom/.env.example").read_text(encoding="utf-8")
@@ -211,8 +234,9 @@ def test_manifest_and_compose_agree_on_pins_and_ports():
     assert f'AGENTMEMORY_VERSION: "{cfg["agentmemory"]["version"]}"' in am
     # The REST port the agents are told to use is the CONSOLE's, which proxies the
     # server; the server's own listener is the 3110 bypass. Both must be published.
-    assert f":{urlparse(cfg['agentmemory']['restUrl']).port}:" in \
-        (ROOT / "services/stacks/agent007memory/docker-compose.yml").read_text(encoding="utf-8")
+    assert f":{urlparse(cfg['agentmemory']['restUrl']).port}:" in (
+        ROOT / "services/stacks/agent007memory/docker-compose.yml"
+    ).read_text(encoding="utf-8")
     assert f":{urlparse(cfg['agentmemory']['viewerUrl']).port}:" in am
 
 
@@ -220,10 +244,12 @@ def test_every_published_port_binds_loopback_only():
     """None of these services authenticate. `"8880:8880"` would put one on the
     LAN, and the failure is silent until somebody else finds it."""
     import re as _re
+
     bad = []
     for f in sorted((ROOT / "services").rglob("docker-compose*.yml")):
-        for m in _re.finditer(r'^\s*-\s*"?([0-9.]+:)?(\d+):\d+"?\s*$',
-                              f.read_text(encoding="utf-8"), _re.M):
+        for m in _re.finditer(
+            r'^\s*-\s*"?([0-9.]+:)?(\d+):\d+"?\s*$', f.read_text(encoding="utf-8"), _re.M
+        ):
             if m.group(1) != "127.0.0.1:":
                 bad.append(f"{f.relative_to(ROOT)}: {m.group(0).strip()}")
     assert not bad, "\n".join(bad)
@@ -237,8 +263,12 @@ def test_every_project_container_and_volume_is_ts_prefixed():
     `kokoro`, `headroom-proxy`, and nothing at all for the memory server -- which
     Docker then called `agentmemory-agentmemory-1`), and volumes were split
     between prefixed and bare."""
-    expected_projects = {"agentmemory": "ts-agentmemory", "headroom": "ts-headroom",
-                         "kokoro": "ts-kokoro", "playwright": "ts-playwright"}
+    expected_projects = {
+        "agentmemory": "ts-agentmemory",
+        "headroom": "ts-headroom",
+        "kokoro": "ts-kokoro",
+        "playwright": "ts-playwright",
+    }
     for stack, project in expected_projects.items():
         base = (ROOT / "services/stacks" / stack / "docker-compose.yml").read_text(encoding="utf-8")
         assert f"\nname: {project}\n" in base, f"{stack}: project name not pinned"
@@ -279,11 +309,13 @@ def test_the_volume_rename_map_names_the_volumes_as_they_are_on_disk():
     on an empty volume, reporting success."""
     lib = (ROOT / "services/_stack.sh").read_text(encoding="utf-8")
     ps = PS.read_text(encoding="utf-8")
-    for old, new in (("agentmemory_iii-data", "ts-agentmemory-data"),
-                     ("agent007memory_history", "ts-agentmemory-console-history"),
-                     ("headroom_headroom_workspace", "ts-headroom-workspace"),
-                     ("headroom_qdrant_data", "ts-headroom-qdrant"),
-                     ("headroom_neo4j_data", "ts-headroom-neo4j")):
+    for old, new in (
+        ("agentmemory_iii-data", "ts-agentmemory-data"),
+        ("agent007memory_history", "ts-agentmemory-console-history"),
+        ("headroom_headroom_workspace", "ts-headroom-workspace"),
+        ("headroom_qdrant_data", "ts-headroom-qdrant"),
+        ("headroom_neo4j_data", "ts-headroom-neo4j"),
+    ):
         assert f"{old} {new}" in lib, f"bash map missing {old}"
         assert old in ps and new in ps, f"pwsh map missing {old}"
 
@@ -291,10 +323,12 @@ def test_the_volume_rename_map_names_the_volumes_as_they_are_on_disk():
 def test_up_refuses_while_a_legacy_volume_has_no_replacement():
     """Compose would create an empty ts- volume and start the stack with no
     memories in it, reporting success. Both twins refuse and name one command."""
-    for text, name in ((SH.read_text(encoding="utf-8"), "bash"),
-                       (PS.read_text(encoding="utf-8"), "pwsh")):
+    for text, name in (
+        (SH.read_text(encoding="utf-8"), "bash"),
+        (PS.read_text(encoding="utf-8"), "pwsh"),
+    ):
         i = text.index("    'up' {") if name == "pwsh" else text.index("    up)")
-        window = text[i:i + 1200]
+        window = text[i : i + 1200]
         assert "migrate-volumes" in window, f"the {name} up path does not name the fix"
         assert "pre-ts- names" in window, f"the {name} up path does not explain the refusal"
 
@@ -307,10 +341,12 @@ def test_the_billing_overlay_never_replaces_the_default_env_file():
     ordering used to live in update-console.*, which this replaced."""
     # The bash choke point is tss_compose in the shared library; the pwsh one is
     # Invoke-TsStackCompose in the script itself.
-    for text in ((ROOT / "services/_stack.sh").read_text(encoding="utf-8"),
-                 PS.read_text(encoding="utf-8")):
+    for text in (
+        (ROOT / "services/_stack.sh").read_text(encoding="utf-8"),
+        PS.read_text(encoding="utf-8"),
+    ):
         i = text.index(".billing.env")
-        window = text[max(0, i - 600):i + 200]
+        window = text[max(0, i - 600) : i + 200]
         assert "--env-file" in window
         assert window.index(".env") < window.index(".billing.env")
     # And when this machine actually has one, the emitted argv proves it.
@@ -348,8 +384,14 @@ def test_the_services_are_findable_by_name():
     """`doc agentmemory`, `doc headroom` and `doc playwright` all matched ZERO
     topics: the material was a 1167-line repo README with no `doc` label at all.
     Same failure mode as tstack config once being buried inside common/stack.md."""
-    for page in ("services.md", "troubleshooting.md", "agentmemory.md",
-                 "agentmemory-console.md", "headroom.md", "playwright.md"):
+    for page in (
+        "services.md",
+        "troubleshooting.md",
+        "agentmemory.md",
+        "agentmemory-console.md",
+        "headroom.md",
+        "playwright.md",
+    ):
         assert (ROOT / "docs/kb/common" / page).exists(), page
     assert (ROOT / "docs/kb/windows/docker-desktop.md").exists()
     assert (ROOT / "docs/kb/macos/docker-desktop.md").exists()
@@ -365,9 +407,12 @@ def test_no_tracked_file_carries_personal_infrastructure():
     """This repo is public, and is now somebody else's onboarding path. History
     is exempt: rewriting it to hide a hostname makes the record dishonest."""
     import subprocess
+
     # This file names the strings it forbids, and CHANGELOG/decisions are history.
     exempt = {"CHANGELOG.md", "docs/decisions.md", "LICENSE", "tests/test_stack.py"}
-    files = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, text=True).stdout.split()
+    files = subprocess.run(
+        ["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, timeout=300
+    ).stdout.split()
     for rel in files:
         if rel in exempt or rel.startswith("services/console/public/"):
             continue
@@ -406,6 +451,7 @@ def test_every_optional_env_file_points_at_a_documented_location():
     true of services/.env and of each stack's own .env, and false of any level
     the path lands on by accident."""
     import re
+
     for compose in sorted((ROOT / "services" / "stacks").glob("*/docker-compose*.yml")):
         for path in re.findall(r"- path:\s*(\S+)", compose.read_text(encoding="utf-8")):
             target = (compose.parent / path).resolve()
@@ -428,11 +474,14 @@ def test_every_sourced_helper_path_resolves():
     nothing ran them because they are the tools you reach for only when
     something is already wrong."""
     import re
+
     bad = []
     for sh in sorted((ROOT / "services").rglob("*.sh")):
         if "node_modules" in sh.parts:
             continue
-        for ref in re.findall(r'^\s*\.\s+"\$SCRIPT_DIR/([^"]+)"', sh.read_text(encoding="utf-8"), re.M):
+        for ref in re.findall(
+            r'^\s*\.\s+"\$SCRIPT_DIR/([^"]+)"', sh.read_text(encoding="utf-8"), re.M
+        ):
             if not (sh.parent / ref).resolve().is_file():
                 bad.append(f"{sh.relative_to(ROOT)} sources {ref}, which does not exist")
     assert not bad, chr(10).join(bad)
@@ -446,6 +495,7 @@ def test_a_stack_that_joins_another_network_declares_ts_after():
     configured. Any stack declaring an external network must name the stack that
     owns it."""
     import re
+
     stacks = ROOT / "services" / "stacks"
     owners = {}
     for compose in sorted(stacks.glob("*/docker-compose.yml")):
@@ -513,7 +563,9 @@ def test_the_console_is_its_own_project_named_for_what_it_is():
     # across projects silently, so leaving one would read as ordering that is not
     # happening.
     assert not re.search(r"^\s+depends_on:", compose, re.M)
-    assert not (ROOT / "services" / "stacks" / "agentmemory" / "docker-compose.console.yml").exists()
+    assert not (
+        ROOT / "services" / "stacks" / "agentmemory" / "docker-compose.console.yml"
+    ).exists()
 
 
 def test_headroom_memory_needs_the_flag_and_the_flag_lives_in_the_overlay():
@@ -587,7 +639,9 @@ def test_ts_envfiles_paths_are_interpolation_sources_only():
                 f"{extra.parent.name}: {line} is both a ts-envfiles entry and an env_file: "
                 f"entry -- that injects every key in it, secrets included"
             )
-            assert (extra.parent / line).resolve().is_file(), f"{extra.parent.name}: {line} does not exist"
+            assert (extra.parent / line).resolve().is_file(), (
+                f"{extra.parent.name}: {line} does not exist"
+            )
 
 
 def test_overlay_checks_are_paired_with_their_overlay():
@@ -597,7 +651,7 @@ def test_overlay_checks_are_paired_with_their_overlay():
     the Qdrant and Neo4j health checks were doing."""
     stacks = ROOT / "services" / "stacks"
     for conf in sorted(stacks.glob("*/ts-checks.*.conf")):
-        name = conf.name[len("ts-checks."):-len(".conf")]
+        name = conf.name[len("ts-checks.") : -len(".conf")]
         assert (conf.parent / f"docker-compose.{name}.yml").is_file(), (
             f"{conf.relative_to(ROOT)} has no docker-compose.{name}.yml to belong to"
         )

@@ -152,11 +152,20 @@ def test_candidates_are_deduplicated_case_insensitively(monkeypatch, tmp_path):
 
 def make_clone(root: Path) -> Path:
     root.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["git", "init", "-q", str(root)], check=True, capture_output=True)
+    subprocess.run(["git", "init", "-q", str(root)], check=True, capture_output=True, timeout=300)
     subprocess.run(
-        ["git", "-C", str(root), "remote", "add", "origin",
-         "https://github.com/martybytes/terminal-stack.git"],
-        check=True, capture_output=True,
+        [
+            "git",
+            "-C",
+            str(root),
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/martybytes/terminal-stack.git",
+        ],
+        check=True,
+        capture_output=True,
+        timeout=300,
     )
     return root
 
@@ -225,11 +234,25 @@ def test_a_dev_clone_is_invisible_unless_it_is_the_pin(monkeypatch, tmp_path):
 def test_clone_version_reports_dirtiness(tmp_path):
     clone = make_clone(tmp_path / "c")
     (clone / "f.txt").write_text("x", encoding="utf-8")
-    subprocess.run(["git", "-C", str(clone), "add", "-A"], check=True, capture_output=True)
     subprocess.run(
-        ["git", "-C", str(clone), "-c", "user.email=t@t", "-c", "user.name=t",
-         "commit", "-qm", "one"],
-        check=True, capture_output=True,
+        ["git", "-C", str(clone), "add", "-A"], check=True, capture_output=True, timeout=300
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(clone),
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "user.name=t",
+            "commit",
+            "-qm",
+            "one",
+        ],
+        check=True,
+        capture_output=True,
+        timeout=300,
     )
     assert paths.clone_version(clone)["dirty"] is False
     (clone / "f.txt").write_text("y", encoding="utf-8")

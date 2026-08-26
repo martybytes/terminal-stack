@@ -54,8 +54,10 @@ def impl_paths(name: str) -> list[Path]:
         fields = row.split(None, 3)
         if len(fields) < 4 or fields[0] != name:
             continue
-        for token, owner in ((fields[1], "dot_zshrc"),
-                             (fields[2], "windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1")):
+        for token, owner in (
+            (fields[1], "dot_zshrc"),
+            (fields[2], "windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1"),
+        ):
             if token == "-":
                 continue
             if token == "python":
@@ -66,7 +68,6 @@ def impl_paths(name: str) -> list[Path]:
                 out.append(repo_file(token))
     assert out, f"{name!r} is not in tstack/commands.conf"
     return out
-
 
 
 def test_manifest_pins_reviewed_versions_and_local_endpoints():
@@ -85,7 +86,11 @@ def test_manifest_pins_reviewed_versions_and_local_endpoints():
         "container": "ts-headroom-proxy",
         "command": "headroom",
         "args": [
-            "mcp", "serve", "--transport", "stdio", "--proxy-url",
+            "mcp",
+            "serve",
+            "--transport",
+            "stdio",
+            "--proxy-url",
             "http://127.0.0.1:8787",
         ],
     }
@@ -111,29 +116,33 @@ def test_no_project_scope_or_docker_mutation_in_lifecycle_adapters():
 
 
 def test_launch_wrappers_are_process_local_and_have_stock_escape_hatches():
-    ps = (ROOT / "windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1").read_text(encoding="utf-8")
+    ps = (ROOT / "windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1").read_text(
+        encoding="utf-8"
+    )
     zsh = (ROOT / "dot_zshrc").read_text(encoding="utf-8")
     assert "function claude-stock" in ps and "function codex-stock" in ps
     assert "claude-stock()" in zsh and "codex-stock()" in zsh
     assert "finally" in ps and "$env:ANTHROPIC_BASE_URL = $savedBase" in ps
     assert "ANTHROPIC_BASE_URL=http://127.0.0.1:8787" in zsh
-    assert "ANTHROPIC_CUSTOM_HEADERS=\"$custom_headers\"" in zsh
+    assert 'ANTHROPIC_CUSTOM_HEADERS="$custom_headers"' in zsh
     assert "http://127.0.0.1:8787/stats" in zsh
     assert "X-Headroom-Proxy-Token" in zsh
     assert 'model_provider="headroom"' in zsh
     assert "model_providers.headroom.env_http_headers.X-Headroom-Proxy-Token" in zsh
     assert "model_providers.openai" not in zsh
-    assert 'model_provider=\"headroom\"' in ps
+    assert 'model_provider="headroom"' in ps
     assert "model_providers.headroom.env_http_headers.X-Headroom-Proxy-Token" in ps
     assert "model_providers.openai" not in ps
-    assert "openai_base_url=\"http://127.0.0.1:8787/v1\"" in ps
-    assert "openai_base_url=\"http://127.0.0.1:8787/v1\"" in zsh
+    assert 'openai_base_url="http://127.0.0.1:8787/v1"' in ps
+    assert 'openai_base_url="http://127.0.0.1:8787/v1"' in zsh
 
 
 def test_ts_update_owns_chezmoi_conflict_handling_and_runtime_guard():
     zsh = (ROOT / "dot_zshrc").read_text(encoding="utf-8")
-    ps = (ROOT / "windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1").read_text(encoding="utf-8")
-    update = zsh[zsh.index("_ts_chezmoi_conflicts() {"):zsh.index("_tstack_rollback() {")]
+    ps = (ROOT / "windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1").read_text(
+        encoding="utf-8"
+    )
+    update = zsh[zsh.index("_ts_chezmoi_conflicts() {") : zsh.index("_tstack_rollback() {")]
     assert "status --path-style absolute --exclude scripts" in update
     assert "[o]verwrite, [m]erge, [v]iew again, or [q]uit" in update
     assert "apply --dry-run --error-on-conflict --no-tty" in update
@@ -158,14 +167,14 @@ def test_codex_profile_is_partially_owned_on_every_sync_path():
     ps_sync = (ROOT / "scripts/sync-windows.ps1").read_text(encoding="utf-8")
     wsl_sync = (ROOT / "run_after_90-sync-windows.sh").read_text(encoding="utf-8")
     assert "StartsWith('modify_')" in ps_sync
-    assert '== modify_*' in wsl_sync
+    assert "== modify_*" in wsl_sync
 
 
 def test_headroom_enable_requires_authenticated_proxy_and_disable_restores_direct_mode():
     adapter = (ROOT / "bootstrap/ts-agents.sh").read_text(encoding="utf-8")
     ps_adapter = PS_ADAPTER.read_text(encoding="utf-8")
     config = (ROOT / "bootstrap/ts-config.sh").read_text(encoding="utf-8")
-    assert 'X-Headroom-Proxy-Token: $token' in adapter
+    assert "X-Headroom-Proxy-Token: $token" in adapter
     assert '"$proxy/stats"' in adapter
     assert "headroom_status && headroom_apply && headroom_status" in adapter
     assert "function Test-TsHeadroomAuth" in ps_adapter
@@ -175,8 +184,8 @@ def test_headroom_enable_requires_authenticated_proxy_and_disable_restores_direc
     # `off` must BOTH remove the client wiring and clear the saved setting, in that
     # order. Asserted as intent rather than one exact line: playwright has no
     # adapter to call, so the arm is no longer a single statement.
-    off_arm = config[config.index("        off)"):]
-    off_arm = off_arm[:off_arm.index(";;")]
+    off_arm = config[config.index("        off)") :]
+    off_arm = off_arm[: off_arm.index(";;")]
     assert 'run_agent_adapter "$tool" off' in off_arm
     assert 'ts_agent_set "$key" off' in off_arm
 
@@ -185,10 +194,12 @@ def test_pwsh_profile_caches_tool_init_instead_of_respawning():
     """A WezTerm pane spent most of a second spawning starship (twice), zoxide and
     the C# compiler before it drew a prompt. The generated init only changes when
     the binary does, so it is cached and dot-sourced."""
-    ps = (ROOT / "windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1").read_text(encoding="utf-8")
+    ps = (ROOT / "windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1").read_text(
+        encoding="utf-8"
+    )
     assert "function Get-TsToolInit" in ps
     # Keyed on the producing binary, or an upgrade would keep serving stale init.
-    helper = ps[ps.index("function Get-TsToolInit"):ps.index("# ---- shell-init-cache-end ----")]
+    helper = ps[ps.index("function Get-TsToolInit") : ps.index("# ---- shell-init-cache-end ----")]
     assert "LastWriteTimeUtc.Ticks" in helper and ".Length" in helper
     # Hands back a file; the CALLER dot-sources it. Doing that inside the helper
     # would put starship's New-Module and zoxide's `function global:` in a scope
@@ -200,8 +211,8 @@ def test_pwsh_profile_caches_tool_init_instead_of_respawning():
     assert "Invoke-Expression (&starship init powershell)" not in ps
     assert "Invoke-Expression (& { (zoxide init powershell | Out-String) })" not in ps
     for tool in ("starship", "zoxide"):
-        call = ps[ps.index(f"-Name {tool} -Exe"):]
-        call = call[:call.index("\n") + 200]
+        call = ps[ps.index(f"-Name {tool} -Exe") :]
+        call = call[: call.index("\n") + 200]
         assert ". $tsInit.Path" in call, f"{tool} init is not dot-sourced from the cache"
     # fnm must NOT be cached: its output embeds a per-shell FNM_MULTISHELL_PATH.
     assert "-Name fnm -Exe" not in ps
@@ -210,8 +221,14 @@ def test_pwsh_profile_caches_tool_init_instead_of_respawning():
 def test_console_codepage_helper_is_compiled_once_not_per_shell():
     """Add-Type runs the C# compiler every session (~340ms per pane) and caches
     nothing between them, so the P/Invoke is precompiled to an assembly."""
-    ps = (ROOT / "windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1").read_text(encoding="utf-8")
-    block = ps[ps.index("if (-not ('Native.ConsoleCP' -as [type])) {"):ps.index("[Native.ConsoleCP]::SetConsoleOutputCP(65001)")]
+    ps = (ROOT / "windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1").read_text(
+        encoding="utf-8"
+    )
+    block = ps[
+        ps.index("if (-not ('Native.ConsoleCP' -as [type])) {") : ps.index(
+            "[Native.ConsoleCP]::SetConsoleOutputCP(65001)"
+        )
+    ]
     assert "-OutputAssembly" in block and "Add-Type -Path" in block
     # Never compile straight onto the target: another pane may have it loaded.
     assert '$tsCpTmp = "$tsCpDll.$PID.tmp"' in block and "Move-Item" in block
@@ -224,13 +241,18 @@ def test_fnm_ignores_package_json_engines_in_both_shells():
     an engines range no fnm-INSTALLED version satisfies turned the cd into an
     interactive install prompt -- with a system node that already satisfied it."""
     zsh = (ROOT / "dot_zshrc").read_text(encoding="utf-8")
-    ps = (ROOT / "windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1").read_text(encoding="utf-8")
+    ps = (ROOT / "windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1").read_text(
+        encoding="utf-8"
+    )
     for name, text in (("dot_zshrc", zsh), ("$PROFILE", ps)):
         assert "--resolve-engines=false" in text, f"{name} still resolves package.json engines"
     # fnm before 1.36 has no such flag and exits non-zero; an empty eval would
     # leave fnm unwired with nothing printed, so both sides keep a fallback.
     assert '_ts_fnm_env="$(fnm env --use-on-cd --shell zsh 2>/dev/null)"' in zsh
-    assert "if (-not $tsFnmEnv.Trim()) { $tsFnmEnv = fnm env --use-on-cd --shell powershell | Out-String }" in ps
+    assert (
+        "if (-not $tsFnmEnv.Trim()) { $tsFnmEnv = fnm env --use-on-cd --shell powershell | Out-String }"
+        in ps
+    )
 
 
 def test_headroom_auth_probe_retries_and_names_the_failure():
@@ -241,16 +263,18 @@ def test_headroom_auth_probe_retries_and_names_the_failure():
     the reason in the message."""
     adapter = (ROOT / "bootstrap/ts-agents.sh").read_text(encoding="utf-8")
     ps_adapter = PS_ADAPTER.read_text(encoding="utf-8")
-    probe = adapter[adapter.index("headroom_probe_auth() {"):adapter.index("\nheadroom_status() {")]
+    probe = adapter[
+        adapter.index("headroom_probe_auth() {") : adapter.index("\nheadroom_status() {")
+    ]
     assert "--max-time 5" in probe, "2s is a false negative against a cold container"
     assert "for attempt in 1 2" in probe
     assert "printf unreachable" in probe
     # curl prints 000 itself on a connection failure; `|| echo 000` yields 000000.
     assert "|| code=000" in probe and "|| echo 000" not in _uncommented(probe)
     assert 'why="$(headroom_probe_auth "$token" "$proxy")"' in adapter
-    assert 'proxy authentication failed at $proxy: $why' in adapter
-    ps_probe = ps_adapter[ps_adapter.index("function Test-TsHeadroomAuth"):]
-    ps_probe = ps_probe[:ps_probe.index("\n}\n")]
+    assert "proxy authentication failed at $proxy: $why" in adapter
+    ps_probe = ps_adapter[ps_adapter.index("function Test-TsHeadroomAuth") :]
+    ps_probe = ps_probe[: ps_probe.index("\n}\n")]
     assert "-TimeoutSec 5" in ps_probe
     assert "foreach ($attempt in 1, 2)" in ps_probe
     assert "$script:TsHeadroomAuthReason = 'unreachable'" in ps_probe
@@ -258,14 +282,15 @@ def test_headroom_auth_probe_retries_and_names_the_failure():
     # And every caller of the gate must print the reason it just recorded.
     for verb in ("leaving direct mode unchanged", "registrations were not changed"):
         line = [l for l in ps_adapter.splitlines() if verb in l]
-        assert line and "$script:TsHeadroomAuthReason" in line[0], \
+        assert line and "$script:TsHeadroomAuthReason" in line[0], (
             f"the '{verb}' message does not say why auth failed"
+        )
 
 
 def test_headroom_mcp_uses_docker_stdio_and_removes_failed_registrations():
     adapter = (ROOT / "bootstrap/ts-agents.sh").read_text(encoding="utf-8")
     ps_adapter = PS_ADAPTER.read_text(encoding="utf-8")
-    apply = adapter[adapter.index("headroom_apply() {"):adapter.index("\ncaveman_rule() {")]
+    apply = adapter[adapter.index("headroom_apply() {") : adapter.index("\ncaveman_rule() {")]
     assert "if headroom_mcp_probe" in apply
     assert 'codex mcp add headroom -- "$HEADROOM_MCP_COMMAND"' in apply
     assert "codex mcp remove headroom" in apply
@@ -275,6 +300,7 @@ def test_headroom_mcp_uses_docker_stdio_and_removes_failed_registrations():
     assert "'mcp','add','headroom','--',$spec.Command" in ps_adapter
     assert "(?m)^\\s*transport:" in ps_adapter
     assert "^[[:space:]]*transport:" in adapter
+
 
 def test_claude_instructions_fit_claude_code_limit():
     assert (ROOT / "CLAUDE.md").stat().st_size <= 40_000
@@ -295,17 +321,38 @@ def test_headroom_off_preserves_foreign_cursor_mcp(tmp_path):
     cursor = home / ".cursor"
     cursor.mkdir(parents=True)
     mcp = cursor / "mcp.json"
-    mcp.write_text(json.dumps({"mcpServers": {
-        "foreign": {"url": "http://127.0.0.1:9999/mcp"},
-        "headroom": {"url": "http://127.0.0.1:8788/mcp"},
-    }}), encoding="utf-8")
+    mcp.write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "foreign": {"url": "http://127.0.0.1:9999/mcp"},
+                    "headroom": {"url": "http://127.0.0.1:8788/mcp"},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
     env = os.environ.copy()
     env["USERPROFILE"] = str(home)
     env["PATH"] = ""
     result = subprocess.run(
-        [shutil.which("pwsh"), "-NoLogo", "-NoProfile", "-NonInteractive",
-         "-File", str(PS_ADAPTER), "-Tool", "headroom", "-Action", "off"],
-        env=env, text=True, capture_output=True, check=False,
+        [
+            shutil.which("pwsh"),
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-File",
+            str(PS_ADAPTER),
+            "-Tool",
+            "headroom",
+            "-Action",
+            "off",
+        ],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=300,
     )
     assert result.returncode == 0, result.stderr
     servers = json.loads(mcp.read_text(encoding="utf-8"))["mcpServers"]
@@ -326,9 +373,14 @@ def test_windows_config_preserves_agent_settings_when_other_values_change(tmp_pa
         "-CavemanEnabled on -AgentmemoryEnabled off; "
         "$null = Save-TsConfig -ThemeMode light"
     )
-    result = subprocess.run([shutil.which("pwsh"), "-NoLogo", "-NoProfile",
-                             "-NonInteractive", "-Command", command],
-                            env=env, text=True, capture_output=True, check=False)
+    result = subprocess.run(
+        [shutil.which("pwsh"), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=300,
+    )
     assert result.returncode == 0, result.stderr
     cfg = json.loads((local / "terminal-stack/config.json").read_text(encoding="utf-8-sig"))
     assert cfg["themeMode"] == "light"
@@ -345,17 +397,31 @@ def test_existing_agentmemory_install_migrates_missing_toggle_to_on(tmp_path):
     (home / ".claude/plugins/cache/agentmemory/agentmemory/0.9.29").mkdir(parents=True)
     cfg_path = local / "terminal-stack/config.json"
     cfg_path.parent.mkdir(parents=True)
-    cfg_path.write_text(json.dumps({
-        "leaderChord": "ctrl-space", "themeMode": "dark", "tmuxPrefix": "ctrl-b",
-        "weztermMux": "off", "weztermRestore": "off", "apps": [],
-    }), encoding="utf-8")
+    cfg_path.write_text(
+        json.dumps(
+            {
+                "leaderChord": "ctrl-space",
+                "themeMode": "dark",
+                "tmuxPrefix": "ctrl-b",
+                "weztermMux": "off",
+                "weztermRestore": "off",
+                "apps": [],
+            }
+        ),
+        encoding="utf-8",
+    )
     env = os.environ.copy()
     env.update({"USERPROFILE": str(home), "LOCALAPPDATA": str(local)})
     helper = ROOT / "bootstrap/_config.ps1"
     command = f". '{helper}'; $null = Save-TsConfig"
-    result = subprocess.run([shutil.which("pwsh"), "-NoLogo", "-NoProfile",
-                             "-NonInteractive", "-Command", command],
-                            env=env, text=True, capture_output=True, check=False)
+    result = subprocess.run(
+        [shutil.which("pwsh"), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=300,
+    )
     assert result.returncode == 0, result.stderr
     cfg = json.loads(cfg_path.read_text(encoding="utf-8-sig"))
     assert cfg["agentmemoryEnabled"] == "on"
@@ -367,27 +433,44 @@ def test_shell_entrypoints_parse():
     # syntax (glob patterns in [[ ]], ${(P)var}, typeset -g "$var=..."), so `bash -n`
     # rejects it. It gets its own zsh gate below.
     files = [
-        "bootstrap/_config.sh", "bootstrap/_wizard.sh", "bootstrap/ts-config.sh",
-        "bootstrap/ts-agents.sh", "bootstrap/wsl-bootstrap.sh",
-        "bootstrap/linux-bootstrap.sh", "bootstrap/mac-bootstrap.sh",
+        "bootstrap/_config.sh",
+        "bootstrap/_wizard.sh",
+        "bootstrap/ts-config.sh",
+        "bootstrap/ts-agents.sh",
+        "bootstrap/wsl-bootstrap.sh",
+        "bootstrap/linux-bootstrap.sh",
+        "bootstrap/mac-bootstrap.sh",
         "run_after_90-sync-windows.sh",
         # These were never covered by the gate; a syntax error in any of them
         # only showed up when someone ran the command.
-        "bootstrap/ts-mux.sh", "bootstrap/ts-wezterm.sh", "bootstrap/ts-doctor.sh",
-        "bootstrap/wso.sh", "bootstrap/_workspace.sh", "bootstrap/_doctor.sh",
+        "bootstrap/ts-mux.sh",
+        "bootstrap/ts-wezterm.sh",
+        "bootstrap/ts-doctor.sh",
+        "bootstrap/wso.sh",
+        "bootstrap/_workspace.sh",
+        "bootstrap/_doctor.sh",
         "bootstrap/_common-debian.sh",
-        "bootstrap/ts-smb.sh", "bootstrap/_smb.sh", "bootstrap/_smb_setup.sh",
+        "bootstrap/ts-smb.sh",
+        "bootstrap/_smb.sh",
+        "bootstrap/_smb_setup.sh",
         "bootstrap/ts-rclone-config.sh",
     ]
-    result = subprocess.run([BASH, "-n", *files], cwd=ROOT,
-                            text=True, capture_output=True, check=False)
+    result = subprocess.run(
+        [BASH, "-n", *files], cwd=ROOT, text=True, capture_output=True, check=False, timeout=300
+    )
     assert result.returncode == 0, result.stderr
 
 
 @pytest.mark.skipif(not shutil.which("zsh"), reason="zsh is unavailable")
 def test_zshrc_parses_under_zsh():
-    result = subprocess.run([shutil.which("zsh"), "-n", "dot_zshrc"], cwd=ROOT,
-                            text=True, capture_output=True, check=False)
+    result = subprocess.run(
+        [shutil.which("zsh"), "-n", "dot_zshrc"],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=300,
+    )
     assert result.returncode == 0, result.stderr
 
 
@@ -441,9 +524,21 @@ exit 0
 
 @pytest.mark.skipif(not shutil.which("pwsh"), reason="PowerShell 7 is unavailable")
 def test_no_pwsh_local_shadows_a_typed_parameter():
-    result = subprocess.run([shutil.which("pwsh"), "-NoLogo", "-NoProfile",
-                             "-NonInteractive", "-Command", _PS_COLLISION_SCAN],
-                            cwd=ROOT, text=True, capture_output=True, check=False)
+    result = subprocess.run(
+        [
+            shutil.which("pwsh"),
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            _PS_COLLISION_SCAN,
+        ],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=300,
+    )
     assert result.returncode == 0, result.stdout + result.stderr
 
 
@@ -452,6 +547,7 @@ def test_no_pwsh_local_shadows_a_typed_parameter():
 # found on PATH when this shell loaded" in every top-level login shell: the
 # resolver ran ~650 lines before ~/.local/bin was added to PATH, and it cached
 # the (empty) result for the life of the shell.
+
 
 def test_local_bin_is_on_path_before_the_agent_resolvers():
     zsh = (ROOT / "dot_zshrc").read_text(encoding="utf-8")
@@ -472,18 +568,20 @@ def test_agent_binaries_resolve_lazily_not_at_shell_load():
     assert 'typeset -g _TS_CODEX_BIN=""' in zsh
     # The resolver rebuilds zsh's command hash, or a CLI installed since startup
     # stays invisible.
-    resolver = zsh[zsh.index("_ts_agent_bin() {"):]
-    resolver = resolver[:resolver.index("\n}\n") + 2]
+    resolver = zsh[zsh.index("_ts_agent_bin() {") :]
+    resolver = resolver[: resolver.index("\n}\n") + 2]
     assert "rehash" in resolver
     assert '"$HOME/.local/bin/$name"' in resolver
     # Callers must not capture it in $( ) — that subshell would discard the cache.
-    assert '$(_ts_claude_bin)' not in zsh
-    assert '$(_ts_codex_bin)' not in zsh
+    assert "$(_ts_claude_bin)" not in zsh
+    assert "$(_ts_codex_bin)" not in zsh
     for fn in ("claude-stock()", "codex-stock()"):
         assert fn in zsh
     assert "was not found on PATH when this shell loaded" not in zsh
 
-    ps = (ROOT / "windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1").read_text(encoding="utf-8")
+    ps = (ROOT / "windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1").read_text(
+        encoding="utf-8"
+    )
     assert "function Get-TsAgentCommand" in ps
     assert "$script:TsClaudeCommand = @('claude.exe'" not in ps
     assert "$script:TsCodexCommand = @('codex.exe'" not in ps
@@ -505,8 +603,8 @@ def test_agent_resolver_picks_up_a_cli_installed_after_shell_load(tmp_path):
     home = tmp_path / "home"
     (home / ".local/bin").mkdir(parents=True)
     zsh_src = (ROOT / "dot_zshrc").read_text(encoding="utf-8")
-    resolver = zsh_src[zsh_src.index("_ts_agent_bin() {"):]
-    resolver = resolver[:resolver.index("\n}\n") + 2]
+    resolver = zsh_src[zsh_src.index("_ts_agent_bin() {") :]
+    resolver = resolver[: resolver.index("\n}\n") + 2]
     script = f"""
 {resolver}
 typeset -g PROBE=""
@@ -517,9 +615,14 @@ chmod +x "$HOME/.local/bin/faketool"
 _ts_agent_bin faketool PROBE || print "NOT_FOUND"
 print "after=[$PROBE]"
 """
-    result = subprocess.run([shutil.which("zsh"), "-c", script],
-                            env={"HOME": str(home), "PATH": "/usr/bin:/bin", "TERM": "dumb"},
-                            text=True, capture_output=True, check=False)
+    result = subprocess.run(
+        [shutil.which("zsh"), "-c", script],
+        env={"HOME": str(home), "PATH": "/usr/bin:/bin", "TERM": "dumb"},
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=300,
+    )
     assert result.returncode == 0, result.stderr
     assert "FOUND_TOO_EARLY" not in result.stdout
     assert "NOT_FOUND" not in result.stdout
@@ -532,6 +635,7 @@ print "after=[$PROBE]"
 # this: the POSIX side was a whole-file target, "correct only as long as WSL-side
 # Claude Code has no plugins and no per-machine keys". It grew one
 # (agentPushNotifEnabled), so it is a modify_ splice now, like the Windows side.
+
 
 def test_posix_claude_settings_is_a_splice_not_a_whole_file_target():
     assert not (ROOT / "dot_claude/settings.json.tmpl").exists(), (
@@ -554,21 +658,30 @@ def test_claude_settings_splice_preserves_foreign_keys(tmp_path):
     # Render the chezmoi template the crude way — the only directives used are
     # .chezmoi.homeDir and the ccTtsEnabled / resolvedTheme guards.
     import re
+
     rendered = re.sub(r"\{\{ if [^}]*\}\}|\{\{ end \}\}", "", src)
     rendered = re.sub(r"\{\{[^}]*\}\}", "/home/test", rendered)
     script = tmp_path / "modify.py"
     script.write_text(rendered, encoding="utf-8")
     script.chmod(0o755)
 
-    live = json.dumps({
-        "model": "claude-opus-5",
-        "enabledPlugins": {"agentmemory@local": True},
-        "permissions": {"defaultMode": "ask"},
-        "agentPushNotifEnabled": True,
-        "theme": "light",
-    })
-    result = subprocess.run([sys.executable, str(script)], input=live,
-                            text=True, capture_output=True, check=False)
+    live = json.dumps(
+        {
+            "model": "claude-opus-5",
+            "enabledPlugins": {"agentmemory@local": True},
+            "permissions": {"defaultMode": "ask"},
+            "agentPushNotifEnabled": True,
+            "theme": "light",
+        }
+    )
+    result = subprocess.run(
+        [sys.executable, str(script)],
+        input=live,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=300,
+    )
     assert result.returncode == 0, result.stderr
     out = json.loads(result.stdout)
     for key in ("model", "enabledPlugins", "permissions", "agentPushNotifEnabled"):
@@ -577,8 +690,14 @@ def test_claude_settings_splice_preserves_foreign_keys(tmp_path):
 
     # A live file we cannot parse is echoed back untouched rather than replaced.
     broken = "{ not json"
-    result = subprocess.run([sys.executable, str(script)], input=broken,
-                            text=True, capture_output=True, check=False)
+    result = subprocess.run(
+        [sys.executable, str(script)],
+        input=broken,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=300,
+    )
     assert result.returncode == 0
     assert result.stdout == broken
 
@@ -592,27 +711,32 @@ def test_repo_infrastructure_is_not_deployed_to_home():
 
 def test_dropbox_jump_exists_in_both_shells():
     zsh = (ROOT / "dot_zshrc").read_text(encoding="utf-8")
-    ps = (ROOT / "windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1").read_text(encoding="utf-8")
+    ps = (ROOT / "windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1").read_text(
+        encoding="utf-8"
+    )
     # Must be shell functions: a child process cannot cd its parent.
     assert "_ts_dropbox() {" in zsh and "\ndb() {" in zsh and "dbx() { db" in zsh
     assert "function Get-TsDropbox" in ps and "function db {" in ps and "function dbx" in ps
     # $DROPBOX_DIR wins, and resolution is at call time (no load-time snapshot).
     assert '[[ -n "${DROPBOX_DIR:-}" ]]' in zsh
-    assert 'if ($env:DROPBOX_DIR) { return $env:DROPBOX_DIR }' in ps
+    assert "if ($env:DROPBOX_DIR) { return $env:DROPBOX_DIR }" in ps
     # macOS moved Dropbox under CloudStorage; that candidate must be probed first.
-    dropbox = zsh[zsh.index("_ts_dropbox() {"):]
+    dropbox = zsh[zsh.index("_ts_dropbox() {") :]
     assert dropbox.index("Library/CloudStorage/Dropbox") < dropbox.index('"$HOME/Dropbox"')
 
 
 # --- terminal emulators: channel choice, Ghostty, and the opt-out --------------
 
+
 def test_terminal_emulator_stays_optional_on_every_platform():
     """Nothing may force-install an emulator: the opt-out is the point."""
     win = (ROOT / "bootstrap/windows-bootstrap.ps1").read_text(encoding="utf-8")
-    required = win[win.index("$requiredPackages = @("):]
-    required = required[:required.index(")")]
+    required = win[win.index("$requiredPackages = @(") :]
+    required = required[: required.index(")")]
     assert "wezterm" not in required.lower(), "WezTerm must not be a required package"
-    assert "Terminal emulator: none selected" in (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
+    assert "Terminal emulator: none selected" in (ROOT / "bootstrap/_config.ps1").read_text(
+        encoding="utf-8"
+    )
     mac = (ROOT / "bootstrap/mac-bootstrap.sh").read_text(encoding="utf-8")
     assert "Terminal emulator: none selected" in mac
     deb = (ROOT / "bootstrap/_common-debian.sh").read_text(encoding="utf-8")
@@ -630,14 +754,16 @@ def test_multi_select_prompts_render_identically():
     # Row format: bash %2d == pwsh {1,2}
     assert r"'  [%s] %2d) %s%s\n'" in sh
     assert '"  [{0}] {1,2}) {2}{3}"' in ps
-    for line in ("Toggle a number, [a]ll, [n]one, Enter to continue, [s]kip",
-                 "(non-interactive — keeping the defaults)",
-                 "(several are fine), a, n, s, or Enter"):
+    for line in (
+        "Toggle a number, [a]ll, [n]one, Enter to continue, [s]kip",
+        "(non-interactive — keeping the defaults)",
+        "(several are fine), a, n, s, or Enter",
+    ):
         assert line in sh, line
         assert line in ps, line
     # The whitespace-stripping trap: "1 2" must stay two tokens.
-    multi = sh[sh.index("ts_prompt_multi() {"):]
-    assert "tr -d '[:space:]'" not in multi[:multi.index("\n}\n")]
+    multi = sh[sh.index("ts_prompt_multi() {") :]
+    assert "tr -d '[:space:]'" not in multi[: multi.index("\n}\n")]
     assert "-split '[,\\s]+'" in ps
 
 
@@ -668,10 +794,19 @@ def test_wezterm_env_var_channel_mapping_is_exact():
     for env, (want_sel, want_chan) in cases.items():
         k, v = env.split("=", 1)
         r = subprocess.run(
-            [BASH, "-c",
-             '. bootstrap/_config.sh >/dev/null 2>&1; . bootstrap/_wizard.sh; '
-             'sel="$(ts_prompt_terminals)"; printf "%s|%s" "$sel" "$(ts_terminals_channel "$sel")"'],
-            cwd=ROOT, env={**os.environ, k: v}, text=True, capture_output=True, check=False)
+            [
+                BASH,
+                "-c",
+                ". bootstrap/_config.sh >/dev/null 2>&1; . bootstrap/_wizard.sh; "
+                'sel="$(ts_prompt_terminals)"; printf "%s|%s" "$sel" "$(ts_terminals_channel "$sel")"',
+            ],
+            cwd=ROOT,
+            env={**os.environ, k: v},
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=300,
+        )
         assert r.returncode == 0, r.stderr
         sel, chan = r.stdout.split("|")
         assert sel.strip() == want_sel, f"{env}: got selection {sel!r}"
@@ -682,10 +817,18 @@ def test_wezterm_env_var_channel_mapping_is_exact():
 def test_wezterm_version_string_parses_to_a_date():
     """The build date is IN the release name, so it needs no network call."""
     r = subprocess.run(
-        [BASH, "-c",
-         '. bootstrap/_wezterm.sh; ts_wez_version_parse "wezterm 20240203-110809-5046fc22"; '
-         'ts_wez_version_parse "20260331-040028-577474d8"; ts_wez_version_parse "not a version"'],
-        cwd=ROOT, text=True, capture_output=True, check=False)
+        [
+            BASH,
+            "-c",
+            '. bootstrap/_wezterm.sh; ts_wez_version_parse "wezterm 20240203-110809-5046fc22"; '
+            'ts_wez_version_parse "20260331-040028-577474d8"; ts_wez_version_parse "not a version"',
+        ],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=300,
+    )
     assert r.returncode == 0, r.stderr
     lines = [l for l in r.stdout.splitlines() if l.strip()]
     assert lines[0] == "20240203-110809-5046fc22|20240203|5046fc22"
@@ -700,10 +843,18 @@ def test_changelog_slicer_counts_against_a_fixture():
     fixture = ROOT / "tests/fixtures/wezterm-changelog.md"
     assert fixture.exists()
     r = subprocess.run(
-        [BASH, "-c",
-         f'. bootstrap/_wezterm.sh; ts_wez_changelog_fetch() {{ printf "%s\n" "{fixture}"; }}; '
-         'ts_wez_changes_tally 20240203-110809-5046fc22'],
-        cwd=ROOT, text=True, capture_output=True, check=False)
+        [
+            BASH,
+            "-c",
+            f'. bootstrap/_wezterm.sh; ts_wez_changelog_fetch() {{ printf "%s\n" "{fixture}"; }}; '
+            "ts_wez_changes_tally 20240203-110809-5046fc22",
+        ],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=300,
+    )
     assert r.returncode == 0, r.stderr
     tally = r.stdout.strip()
     # Hand-counted from the fixture: the Continuous/Nightly section only, since
@@ -715,11 +866,21 @@ def test_changelog_slicer_counts_against_a_fixture():
     # A version that is not in the changelog slices nothing away — everything is
     # newer than it — so the count must be strictly larger.
     r2 = subprocess.run(
-        [BASH, "-c",
-         f'. bootstrap/_wezterm.sh; ts_wez_changelog_fetch() {{ printf "%s\n" "{fixture}"; }}; '
-         'ts_wez_changes_tally 19700101-000000-00000000'],
-        cwd=ROOT, text=True, capture_output=True, check=False)
-    older = dict(zip(r2.stdout.split()[::2], (int(n) for n in r2.stdout.split()[1::2]), strict=False))
+        [
+            BASH,
+            "-c",
+            f'. bootstrap/_wezterm.sh; ts_wez_changelog_fetch() {{ printf "%s\n" "{fixture}"; }}; '
+            "ts_wez_changes_tally 19700101-000000-00000000",
+        ],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=300,
+    )
+    older = dict(
+        zip(r2.stdout.split()[::2], (int(n) for n in r2.stdout.split()[1::2]), strict=False)
+    )
     assert sum(older.values()) > sum(counts.values())
 
 
@@ -727,10 +888,18 @@ def test_changelog_slicer_counts_against_a_fixture():
 def test_wezterm_queries_fail_open_when_offline():
     """No network must degrade to version-and-date, never block or error."""
     r = subprocess.run(
-        [BASH, "-c",
-         '. bootstrap/_wezterm.sh; gh() { return 1; }; curl() { return 1; }; '
-         'ts_wezterm_status; echo "RC=$?"'],
-        cwd=ROOT, text=True, capture_output=True, check=False)
+        [
+            BASH,
+            "-c",
+            ". bootstrap/_wezterm.sh; gh() { return 1; }; curl() { return 1; }; "
+            'ts_wezterm_status; echo "RC=$?"',
+        ],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=300,
+    )
     assert r.returncode == 0, r.stderr
     assert "RC=0" in r.stdout
     assert "offline" in r.stdout
@@ -750,7 +919,10 @@ def test_wezterm_channel_switch_removes_the_other_one_both_ways():
     assert "_ts_wez_apt_install wezterm-nightly wezterm" in sh
     assert "_ts_wez_apt_install wezterm         wezterm-nightly" in sh
     ps = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
-    assert "$other = if ($Channel -eq 'nightly') { 'wez.wezterm' } else { 'wez.wezterm.nightly' }" in ps
+    assert (
+        "$other = if ($Channel -eq 'nightly') { 'wez.wezterm' } else { 'wez.wezterm.nightly' }"
+        in ps
+    )
     # The removal must be conditional on switching, never unconditional: a machine
     # that declines WezTerm entirely must keep whatever it already had.
     assert "stable-only policy" not in sh and "stable-only policy" not in ps
@@ -759,14 +931,16 @@ def test_wezterm_channel_switch_removes_the_other_one_both_ways():
 def test_nothing_installs_or_upgrades_wezterm_automatically():
     """The whole point: every path asks first."""
     zsh = (ROOT / "dot_zshrc").read_text(encoding="utf-8")
-    upd = zsh[zsh.index("_tstack_update() {"):]
-    upd = upd[:upd.index("\n}\n")]
+    upd = zsh[zsh.index("_tstack_update() {") :]
+    upd = upd[: upd.index("\n}\n")]
     assert "ts_wezterm_update_available" in upd
     assert "Upgrade WezTerm now? [y/N]" in upd
     assert 'ts-wezterm.sh" upgrade' in upd
     # Non-interactive must print the command, never run it.
     assert "Upgrade it with: tstack config wezterm upgrade" in upd
-    ps = (ROOT / "windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1").read_text(encoding="utf-8")
+    ps = (ROOT / "windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1").read_text(
+        encoding="utf-8"
+    )
     assert "Get-TsWezUpdateAvailable" in ps
     assert "Upgrade WezTerm now? [y/N]" in ps
     assert "Upgrade it with: tstack config wezterm upgrade" in ps
@@ -778,25 +952,31 @@ def test_ts_config_exposes_wezterm():
     assert "wezterm)\n        shift\n        run_wezterm" in sh
     assert "wezterm, wizard)" in sh, "the unknown-command hint must list it"
     # -h is generated from the header comment: the sed range must still cover it.
-    rng = sh[sh.index("sed -n '2,"):]
-    end = int(rng[len("sed -n '2,"):].split("p")[0])
+    rng = sh[sh.index("sed -n '2,") :]
+    end = int(rng[len("sed -n '2,") :].split("p")[0])
     header = sh.splitlines()[1:end]
-    assert any("tstack config wezterm" in line for line in header), \
+    assert any("tstack config wezterm" in line for line in header), (
         "the wezterm line is outside the range -h prints"
+    )
     # run_wizard installs the emulator it just asked about (it used not to).
-    wiz = sh[sh.index("run_wizard() {"):]
-    wiz = wiz[:wiz.index("\n}\n")]
+    wiz = sh[sh.index("run_wizard() {") :]
+    wiz = wiz[: wiz.index("\n}\n")]
     assert "install_terminals" in wiz
-
 
 
 # --- app catalog: groups, new tools, the ai group ------------------------------
 
+
 def _sh_eval(snippet):
     """Run a snippet with bootstrap/_config.sh sourced, return stdout."""
-    r = subprocess.run([BASH, "-c",
-                        f'. bootstrap/_config.sh >/dev/null 2>&1; {snippet}'],
-                       cwd=ROOT, text=True, capture_output=True, check=False)
+    r = subprocess.run(
+        [BASH, "-c", f". bootstrap/_config.sh >/dev/null 2>&1; {snippet}"],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=300,
+    )
     assert r.returncode == 0, r.stderr
     return r.stdout.strip()
 
@@ -808,7 +988,7 @@ def test_every_catalog_id_belongs_to_exactly_one_group():
     groups = _sh_eval('echo "$TS_APP_GROUPS"').split()
     seen = {}
     for g in groups:
-        for member in _sh_eval(f'ts_app_group_members {g}').split():
+        for member in _sh_eval(f"ts_app_group_members {g}").split():
             assert member not in seen, f"{member} is in both {seen[member]} and {g}"
             seen[member] = g
     assert set(all_ids) == set(seen), (
@@ -820,17 +1000,37 @@ def test_every_catalog_id_belongs_to_exactly_one_group():
 @pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_new_tools_are_in_the_catalog_with_descriptions():
     all_ids = _sh_eval('echo "$TS_APPS_ALL"').split()
-    for tool in ("duf", "ncdu", "dust", "gdu", "btop", "bottom", "glances",
-                 "bandwhich", "gping", "bat", "eza", "fd", "ripgrep", "fzf", "tree",
-                 "atuin", "yazi", "pi"):
+    for tool in (
+        "duf",
+        "ncdu",
+        "dust",
+        "gdu",
+        "btop",
+        "bottom",
+        "glances",
+        "bandwhich",
+        "gping",
+        "bat",
+        "eza",
+        "fd",
+        "ripgrep",
+        "fzf",
+        "tree",
+        "atuin",
+        "yazi",
+        "pi",
+    ):
         assert tool in all_ids, f"{tool} missing from the catalog"
-        assert _sh_eval(f'ts_app_desc {tool}'), f"{tool} has no description"
+        assert _sh_eval(f"ts_app_desc {tool}"), f"{tool} has no description"
     # bottom's binary is btm, not bottom.
-    assert _sh_eval('ts_app_bin bottom') == "btm"
+    assert _sh_eval("ts_app_bin bottom") == "btm"
     # gdu collides with GNU coreutils' g-prefixed du; brew renames the TUI to
     # gdu-go when coreutils is present, so the mapping must follow reality.
-    assert _sh_eval('ts_app_bin gdu') in ("gdu", "gdu-go")
-    assert _sh_eval('gdu-go() { :; }; command -v gdu-go >/dev/null && ts_app_bin gdu') in ("gdu", "gdu-go")
+    assert _sh_eval("ts_app_bin gdu") in ("gdu", "gdu-go")
+    assert _sh_eval("gdu-go() { :; }; command -v gdu-go >/dev/null && ts_app_bin gdu") in (
+        "gdu",
+        "gdu-go",
+    )
     # fd closes the documented sessionizer gap (README says it is needed).
     assert "needs `fd`" in (ROOT / "README.md").read_text(encoding="utf-8")
 
@@ -839,7 +1039,7 @@ def test_new_tools_are_in_the_catalog_with_descriptions():
 def test_agent_clis_are_asked_about_and_default_to_all():
     """Default-to-all, but still a question: every group starts ticked and every
     tool inside stays individually untickable."""
-    ai = _sh_eval('ts_app_group_members ai').split()
+    ai = _sh_eval("ts_app_group_members ai").split()
     assert set(ai) == {"claude", "codex", "cursor-agent", "grok", "gemini", "pi"}
     recommended = _sh_eval('echo "$TS_APPS_RECOMMENDED"').split()
     for tool in ai:
@@ -857,14 +1057,14 @@ def test_agent_clis_are_asked_about_and_default_to_all():
 def test_python_and_runtimes_are_in_the_questionnaire():
     groups = _sh_eval('echo "$TS_APP_GROUPS"').split()
     assert "python" in groups and "runtimes" in groups
-    py = _sh_eval('ts_app_group_members python').split()
+    py = _sh_eval("ts_app_group_members python").split()
     for tool in ("python", "uv", "pipx", "ruff", "ipython", "httpie", "poetry", "pre-commit"):
         assert tool in py, f"{tool} missing from the python group"
-    assert set(_sh_eval('ts_app_group_members runtimes').split()) == {"fnm", "node"}
+    assert set(_sh_eval("ts_app_group_members runtimes").split()) == {"fnm", "node"}
     # python's binary is python3, not python.
-    assert _sh_eval('ts_app_bin python') == "python3"
+    assert _sh_eval("ts_app_bin python") == "python3"
     for tool in [*py, "fnm"]:
-        assert _sh_eval(f'ts_app_desc {tool}'), f"{tool} has no description"
+        assert _sh_eval(f"ts_app_desc {tool}"), f"{tool} has no description"
 
 
 def test_agent_cli_installers_use_the_real_upstream_commands():
@@ -889,19 +1089,21 @@ def test_node_managed_binaries_are_visible_to_the_update_check():
     fnm's env first, tstack update would nag about codex/gemini forever."""
     sh = (ROOT / "bootstrap/_config.sh").read_text(encoding="utf-8")
     assert "ts_load_node_env" in sh
-    pending = sh[sh.index("ts_apps_pending() {"):]
-    assert "ts_load_node_env" in pending[:pending.index("\n}\n")]
-    report = sh[sh.index("ts_report_installed_apps() {"):]
-    assert "ts_load_node_env" in report[:report.index("\n}\n")]
+    pending = sh[sh.index("ts_apps_pending() {") :]
+    assert "ts_load_node_env" in pending[: pending.index("\n}\n")]
+    report = sh[sh.index("ts_report_installed_apps() {") :]
+    assert "ts_load_node_env" in report[: report.index("\n}\n")]
 
 
 def test_fnm_is_wired_into_both_shells():
     zsh = (ROOT / "dot_zshrc").read_text(encoding="utf-8")
-    ps = (ROOT / "windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1").read_text(encoding="utf-8")
+    ps = (ROOT / "windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1").read_text(
+        encoding="utf-8"
+    )
     assert "fnm env --use-on-cd --shell zsh" in zsh
     assert "fnm env --use-on-cd --shell powershell" in ps
     # Guarded, so a machine without fnm is unaffected.
-    assert 'if command -v fnm >/dev/null; then' in zsh
+    assert "if command -v fnm >/dev/null; then" in zsh
     assert "if (Get-Command fnm -ErrorAction SilentlyContinue) {" in ps
     # grok's completions are carried by us, because its installer's ~/.zshrc edit
     # is reverted by the next chezmoi apply.
@@ -916,7 +1118,7 @@ def test_agent_clis_are_not_installed_through_a_package_manager():
     # each package has its own floor (codex 16, gemini 20).
     assert "ts_node_major" in sh and '-ge "$want"' in sh
     assert "$major -ge $want" in ps
-    assert 'want=16' in sh and 'want=20' in sh
+    assert "want=16" in sh and "want=20" in sh
     # grok has a real upstream installer now (xAI ship a standalone binary), so
     # the old "no official package" placeholder must be gone from both sides.
     for body in (sh, ps):
@@ -937,18 +1139,27 @@ def test_ts_config_wizard_replays_the_whole_questionnaire():
     assert "run_wizard()" in sh
     assert "wizard|reconfigure) run_wizard ;;" in sh
     # It must re-state every value, or ts_save_config drops the ones it omits.
-    wiz = sh[sh.index("run_wizard() {"):]
-    wiz = wiz[:wiz.index("\n}\n")]
-    for call in ("ts_wizard_collect", "ts_save_config", "ts_agents_save_config",
-                 "ts_wez_mux_set", "ts_wez_restore_set", "ts_cc_tts_apply_wizard_choice"):
+    wiz = sh[sh.index("run_wizard() {") :]
+    wiz = wiz[: wiz.index("\n}\n")]
+    for call in (
+        "ts_wizard_collect",
+        "ts_save_config",
+        "ts_agents_save_config",
+        "ts_wez_mux_set",
+        "ts_wez_restore_set",
+        "ts_cc_tts_apply_wizard_choice",
+    ):
         assert call in wiz, f"run_wizard does not persist {call}"
     # -h is generated from the header comment: the sed range must still cover it.
-    rng = sh[sh.index("sed -n '2,"):]
-    end = int(rng[len("sed -n '2,"):].split("p")[0])
+    rng = sh[sh.index("sed -n '2,") :]
+    end = int(rng[len("sed -n '2,") :].split("p")[0])
     header = sh.splitlines()[1:end]
-    assert any("tstack config wizard" in line for line in header), \
+    assert any("tstack config wizard" in line for line in header), (
         "the wizard line is outside the range -h prints"
-    ps = (ROOT / "windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1").read_text(encoding="utf-8")
+    )
+    ps = (ROOT / "windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1").read_text(
+        encoding="utf-8"
+    )
     assert "$runWizard = {" in ps and "'wizard'" in ps
 
 
@@ -968,19 +1179,20 @@ def test_wizard_callees_are_all_defined_in_config_ps1():
     `tstack config wizard` only (this is how Read-TsWorkspaceDir broke it). Derive
     the callee list from the body instead of maintaining it by hand."""
     cfg = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
-    body = cfg[cfg.index("function Read-TsWizard"):]
-    body = body[:body.index("\nfunction ", 1)]
+    body = cfg[cfg.index("function Read-TsWizard") :]
+    body = body[: body.index("\nfunction ", 1)]
     called = set(re.findall(r"\b((?:Read|Get|Test|Show|Save|Install)-Ts[A-Za-z]+)", body))
     called.discard("Read-TsWizard")
-    missing = sorted(n for n in called
-                     if not re.search(r"^function " + n + r"\b", cfg, re.M))
+    missing = sorted(n for n in called if not re.search(r"^function " + n + r"\b", cfg, re.M))
     assert not missing, f"Read-TsWizard calls {missing}, which tstack config wizard cannot see"
 
 
 def test_pwsh_wizard_persists_the_workspace_answer():
     """The questionnaire asks for a workspace root; dropping the answer on the
     `tstack config wizard` path is a silent behaviour difference from the installer."""
-    ps = (ROOT / "windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1").read_text(encoding="utf-8")
+    ps = (ROOT / "windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1").read_text(
+        encoding="utf-8"
+    )
     cfg = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
     assert "function Save-TsWorkspaceOverride" in cfg
     assert "Save-TsWorkspaceOverride $w.Workspace" in ps
@@ -990,6 +1202,7 @@ def test_pwsh_wizard_persists_the_workspace_answer():
 
 # ── tstack smb ──────────────────────────────────────────────────────────────────────
 
+
 def _smb_eval(tmp_path, local_conf, snippet, tracked="set default_user guest\n"):
     """Run a snippet with bootstrap/_smb.sh sourced against a sandboxed store."""
     lib = tmp_path / "lib"
@@ -998,12 +1211,19 @@ def _smb_eval(tmp_path, local_conf, snippet, tracked="set default_user guest\n")
     cfg = tmp_path / "cfg" / "terminal-stack"
     cfg.mkdir(parents=True, exist_ok=True)
     (cfg / "shares.local.conf").write_text(local_conf, encoding="utf-8", newline="\n")
-    env = dict(os.environ, XDG_CONFIG_HOME=bash_path(tmp_path / "cfg"),
-               TS_SMB_LIB_DIR=bash_path(lib))
-    r = subprocess.run([BASH, "-c",
-                        f'. bootstrap/_smb.sh >/dev/null 2>&1; {snippet}'],
-                       cwd=ROOT, text=True, encoding="utf-8", capture_output=True,
-                       check=False, env=env)
+    env = dict(
+        os.environ, XDG_CONFIG_HOME=bash_path(tmp_path / "cfg"), TS_SMB_LIB_DIR=bash_path(lib)
+    )
+    r = subprocess.run(
+        [BASH, "-c", f". bootstrap/_smb.sh >/dev/null 2>&1; {snippet}"],
+        cwd=ROOT,
+        text=True,
+        encoding="utf-8",
+        capture_output=True,
+        check=False,
+        env=env,
+        timeout=300,
+    )
     assert r.returncode == 0, r.stderr
     return r.stdout.strip()
 
@@ -1013,25 +1233,26 @@ def test_smb_store_parses_stanzas(tmp_path):
     conf = "share media\n  host nas.lan\n  path Media\n  user marty\n"
     assert _smb_eval(tmp_path, conf, 'ts_smb_get media host ""') == "nas.lan"
     assert _smb_eval(tmp_path, conf, 'ts_smb_get media path ""') == "Media"
-    assert _smb_eval(tmp_path, conf, 'ts_smb_names') == "media"
+    assert _smb_eval(tmp_path, conf, "ts_smb_names") == "media"
 
 
 @pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_smb_store_last_match_wins(tmp_path):
     """The local file must be able to override ONE field without restating a stanza."""
-    conf = ("share media\n  host nas.lan\n  path Media\n  vfs off\n"
-            "share media\n  vfs writes\n")
+    conf = "share media\n  host nas.lan\n  path Media\n  vfs off\nshare media\n  vfs writes\n"
     assert _smb_eval(tmp_path, conf, 'ts_smb_get media vfs ""') == "writes"
     assert _smb_eval(tmp_path, conf, 'ts_smb_get media host ""') == "nas.lan"
     # ...and the name is not duplicated by the second stanza.
-    assert _smb_eval(tmp_path, conf, 'ts_smb_names') == "media"
+    assert _smb_eval(tmp_path, conf, "ts_smb_names") == "media"
 
 
 @pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_smb_store_falls_back_to_set_defaults(tmp_path):
     conf = "share media\n  host nas.lan\n  path Media\n"
-    assert _smb_eval(tmp_path, conf, 'ts_smb_get media user ""',
-                     tracked="set default_user guest\n") == "guest"
+    assert (
+        _smb_eval(tmp_path, conf, 'ts_smb_get media user ""', tracked="set default_user guest\n")
+        == "guest"
+    )
 
 
 @pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
@@ -1039,10 +1260,11 @@ def test_smb_flags_tail_keeps_its_spaces(tmp_path):
     """`flags` is the one free-form tail; the space-delimited store cannot hold it,
     so it lives in its own accumulator. An inline comment is stripped, and so is
     the whitespace the strip leaves behind."""
-    conf = ("share media\n  host nas.lan\n  path Media\n"
-            "  flags --transfers 8 --smb-idle-timeout 5m   # tuned\n")
-    assert _smb_eval(tmp_path, conf, 'ts_smb_flags media') == \
-        "--transfers 8 --smb-idle-timeout 5m"
+    conf = (
+        "share media\n  host nas.lan\n  path Media\n"
+        "  flags --transfers 8 --smb-idle-timeout 5m   # tuned\n"
+    )
+    assert _smb_eval(tmp_path, conf, "ts_smb_flags media") == "--transfers 8 --smb-idle-timeout 5m"
 
 
 @pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
@@ -1050,13 +1272,13 @@ def test_smb_validate_catches_the_share_vs_path_trap(tmp_path):
     """`share` opens a stanza, so writing `share Media` for the SMB share name
     silently opens a second one. That mistake must be reported, not absorbed."""
     conf = "share media\n  host nas.lan\n  share Media\n"
-    out = _smb_eval(tmp_path, conf, 'ts_smb_validate || true')
+    out = _smb_eval(tmp_path, conf, "ts_smb_validate || true")
     # Stanza names are folded to lower case, so `share Media` merges back into the
     # `media` stanza rather than creating a spurious one — the mistake therefore
     # shows up as a missing `path`, and the message has to say why.
     assert "has no path" in out
     assert "'share' opens a stanza" in out
-    assert _smb_eval(tmp_path, conf, 'ts_smb_names') == "media"
+    assert _smb_eval(tmp_path, conf, "ts_smb_names") == "media"
 
 
 @pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
@@ -1064,9 +1286,16 @@ def test_smb_help_works_without_a_clone():
     """`tstack smb -h` must work on a box where the clone or chezmoi is the broken thing."""
     env = {k: v for k, v in os.environ.items() if k != "TERMINAL_STACK_DIR"}
     env.update({"PATH": "/usr/bin:/bin", "HOME": "/nonexistent"})
-    r = subprocess.run([BASH, "bootstrap/ts-smb.sh", "-h"],
-                       cwd=ROOT, text=True, encoding="utf-8", capture_output=True,
-                       check=False, env=env)
+    r = subprocess.run(
+        [BASH, "bootstrap/ts-smb.sh", "-h"],
+        cwd=ROOT,
+        text=True,
+        encoding="utf-8",
+        capture_output=True,
+        check=False,
+        env=env,
+        timeout=300,
+    )
     assert r.returncode == 0, r.stderr
     assert r.stdout.startswith("tstack smb —")
     assert "Windows is not supported yet" in r.stdout
@@ -1086,8 +1315,8 @@ def test_smb_never_offers_a_password_flag():
     assert "OPT_PASSWORD=1" in arm[0]
     # the connection string builder must never interpolate a password
     lib = (ROOT / "bootstrap/_smb.sh").read_text(encoding="utf-8")
-    conn = lib[lib.index("ts_smb_conn() {"):]
-    conn = conn[:conn.index("\n}\n")]
+    conn = lib[lib.index("ts_smb_conn() {") :]
+    conn = conn[: conn.index("\n}\n")]
     assert "pass" not in conn
 
 
@@ -1095,8 +1324,8 @@ def test_smb_never_stats_a_mountpoint_to_test_liveness():
     """On a dead FUSE mount, stat/ls/test -d block forever and take the shell with
     them. Liveness must come from the kernel mount table only."""
     lib = (ROOT / "bootstrap/_smb.sh").read_text(encoding="utf-8")
-    fn = lib[lib.index("ts_smb_is_mounted() {"):]
-    fn = fn[:fn.index("\n}\n")]
+    fn = lib[lib.index("ts_smb_is_mounted() {") :]
+    fn = fn[: fn.index("\n}\n")]
     for forbidden in ("test -d", "[ -d ", "stat ", "ls "):
         assert forbidden not in fn, f"ts_smb_is_mounted touches the path: {forbidden}"
     assert "/proc/self/mounts" in fn or "mount " in fn
@@ -1106,8 +1335,8 @@ def test_smb_does_not_auto_enable_fskit():
     """fuse-t's FSKit backend fails outright on macOS 26.6 with fuse-t 1.2.6
     ("fuse: mount failed with error: -1") while the default nfs backend does not."""
     src = (ROOT / "bootstrap/ts-smb.sh").read_text(encoding="utf-8")
-    mount_fn = src[src.index("cmd_mount() {"):]
-    mount_fn = mount_fn[:mount_fn.index("\n}\n")]
+    mount_fn = src[src.index("cmd_mount() {") :]
+    mount_fn = mount_fn[: mount_fn.index("\n}\n")]
     code = "\n".join(l for l in mount_fn.splitlines() if not l.strip().startswith("#"))
     assert "backend=fskit" not in code
 
@@ -1119,8 +1348,11 @@ def test_smb_exists_and_is_not_claimed_for_pwsh():
     makes `tstack smb` report "not available on Windows" instead of "not found",
     and the help has to agree so nobody 'fixes' the missing twin silently.
     """
-    rows = [r.split(None, 3) for r in read_repo("tstack/commands.conf").splitlines()
-            if r.strip() and not r.startswith("#")]
+    rows = [
+        r.split(None, 3)
+        for r in read_repo("tstack/commands.conf").splitlines()
+        if r.strip() and not r.startswith("#")
+    ]
     smb = next((r for r in rows if r[0] == "smb"), None)
     assert smb, "smb missing from tstack/commands.conf"
     assert smb[1].endswith("ts-smb.sh"), smb
@@ -1138,15 +1370,15 @@ def test_rclone_is_in_the_catalog_with_a_description():
 
 def test_guided_rclone_only_intercepts_exact_bare_config():
     zsh = (ROOT / "dot_zshrc").read_text(encoding="utf-8")
-    body = zsh[zsh.index("rclone() {"):]
-    body = body[:body.index("\n}\n")]
+    body = zsh[zsh.index("rclone() {") :]
+    body = body[: body.index("\n}\n")]
     assert '(( $# == 1 )) && [[ "$1" == config ]]' in body
     assert '"$_TS_RCLONE_BIN" "$@"' in body
     assert "rclone-stock()" in zsh
     wizard = (ROOT / "bootstrap/ts-rclone-config.sh").read_text(encoding="utf-8")
     assert "This does NOT choose a folder" in wizard
     assert "rclone config providers" not in wizard  # always use the resolved binary
-    assert 'config providers' in wizard
+    assert "config providers" in wizard
     assert "Tier 5  deprecated" in wizard
 
 
@@ -1171,12 +1403,19 @@ def test_tailscale_helpers_and_topic_cover_identity_and_diagnostics():
     for name in ("tail-status", "tail-ping", "tail-netcheck", "tail-nc", "tail-ssh"):
         assert f"alias {name}=" in zsh
     topic = (ROOT / "docs/kb/common/tools/tailscale.md").read_text(encoding="utf-8")
-    for command in ("tailscale ip -4", "tailscale status --json", "tailscale ping", "tailscale netcheck", "tailscale whois"):
+    for command in (
+        "tailscale ip -4",
+        "tailscale status --json",
+        "tailscale ping",
+        "tailscale netcheck",
+        "tailscale whois",
+    ):
         assert command in topic
     assert "https://tailscale.com/kb/1080/cli" in topic
 
 
 # ── atuin / arch-tag regressions ────────────────────────────────────────────────
+
 
 @pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_common_arch_tag_rust_uses_aarch64_not_arm64():
@@ -1185,14 +1424,15 @@ def test_common_arch_tag_rust_uses_aarch64_not_arm64():
     asset regex matches nothing, x86_64 boxes keep working, and the tool is
     quietly missing on every Pi/ARM server."""
     lib = ROOT / "bootstrap/_common-debian.sh"
-    fn = re.search(r"^common_arch_tag\(\) \{.*?^\}", lib.read_text(encoding="utf-8"),
-                   re.S | re.M)
+    fn = re.search(r"^common_arch_tag\(\) \{.*?^\}", lib.read_text(encoding="utf-8"), re.S | re.M)
     assert fn, "common_arch_tag not found"
+
     def tag(machine, style):
-        script = (f'{fn.group(0)}\nuname() {{ echo "{machine}"; }}\n'
-                  f'common_arch_tag {style}\n')
-        return subprocess.run([BASH, "-c", script], capture_output=True,
-                              text=True).stdout.strip()
+        script = f'{fn.group(0)}\nuname() {{ echo "{machine}"; }}\ncommon_arch_tag {style}\n'
+        return subprocess.run(
+            [BASH, "-c", script], capture_output=True, text=True, timeout=300
+        ).stdout.strip()
+
     assert tag("aarch64", "rust") == "aarch64"
     assert tag("arm64", "rust") == "aarch64"
     assert tag("x86_64", "rust") == "x86_64"
@@ -1211,8 +1451,9 @@ def test_atuin_is_gated_by_a_setting_not_a_presence_check():
     # Ignore comments: the file explains at length why this guard is wrong, so a
     # raw substring match would hit the explanation rather than real code.
     code = [l for l in rc.splitlines() if not l.lstrip().startswith("#")]
-    assert not any("command -v atuin" in l for l in code), \
+    assert not any("command -v atuin" in l for l in code), (
         "dot_zshrc must NOT gate atuin on a presence check"
+    )
     # dot_zshrc stays a non-template so `chezmoi re-add ~/.zshrc` keeps working.
     assert not (ROOT / "dot_zshrc.tmpl").exists()
     frag = ROOT / "dot_config/terminal-stack/atuin.zsh.tmpl"
@@ -1230,9 +1471,18 @@ def test_atuin_history_filter_mirrors_the_zsh_secret_filter():
     cfg = (ROOT / "dot_config/atuin/config.toml.tmpl").read_text(encoding="utf-8")
     rc = (ROOT / "dot_zshrc").read_text(encoding="utf-8")
     zline = next(l for l in rc.splitlines() if "ANTHROPIC_API_KEY=" in l and "=~" in l)
-    for pat in ("ANTHROPIC_API_KEY=", "OPENAI_API_KEY=", "GITHUB_TOKEN=",
-                "GH_TOKEN=", "NPM_TOKEN=", "_KEY=", "_SECRET=", "_PASSWORD=",
-                "_TOKEN=", "sk-[A-Za-z0-9_-]{20,}"):
+    for pat in (
+        "ANTHROPIC_API_KEY=",
+        "OPENAI_API_KEY=",
+        "GITHUB_TOKEN=",
+        "GH_TOKEN=",
+        "NPM_TOKEN=",
+        "_KEY=",
+        "_SECRET=",
+        "_PASSWORD=",
+        "_TOKEN=",
+        "sk-[A-Za-z0-9_-]{20,}",
+    ):
         assert pat in zline, f"{pat} vanished from zshaddhistory"
         assert pat in cfg, f"{pat} missing from atuin history_filter"
     assert "secrets_filter = true" in cfg
@@ -1246,23 +1496,28 @@ def test_atuin_has_no_winget_id_and_no_pwsh_init():
     ids = ps.split("$script:TsWingetIds")[1].split("}")[0]
     # Comment lines name atuin to explain the absence; only assignments count.
     assigns = [l for l in ids.splitlines() if "=" in l and not l.lstrip().startswith("#")]
-    assert not any(l.strip().startswith("atuin") for l in assigns), \
+    assert not any(l.strip().startswith("atuin") for l in assigns), (
         "atuin must not have a winget id"
+    )
     assert "yazi       = 'sxyazi.yazi'" in ids, "yazi's winget id is real and verified"
 
 
 # ── Ghostty ─────────────────────────────────────────────────────────────────────
 
+
 def _wez_light_scheme():
     """PALETTES.light.scheme_def out of dot_wezterm.lua.tmpl."""
     lua = (ROOT / "dot_wezterm.lua.tmpl").read_text(encoding="utf-8")
-    sd = lua[lua.index("scheme_def = {"):]
-    sd = sd[:sd.index("\n    },")]
+    sd = lua[lua.index("scheme_def = {") :]
+    sd = sd[: sd.index("\n    },")]
+
     def one(key):
         return re.search(rf"{key} = '(#[0-9A-Fa-f]{{6}})'", sd).group(1).lower()
+
     def arr(key):
         block = re.search(rf"{key} = \{{(.*?)\}}", sd, re.S).group(1)
         return [c.lower() for c in re.findall(r"'(#[0-9A-Fa-f]{6})'", block)]
+
     return one, arr
 
 
@@ -1279,10 +1534,14 @@ def test_ghostty_light_theme_matches_the_wezterm_palette():
         assert pal[str(i)] == c, f"palette {i} drifted from the Lua ansi table"
     for i, c in enumerate(brights):
         assert pal[str(i + 8)] == c, f"palette {i + 8} drifted from the Lua brights"
-    for key, lua_key in (("background", "background"), ("foreground", "foreground"),
-                         ("cursor-color", "cursor_bg"), ("cursor-text", "cursor_fg"),
-                         ("selection-background", "selection_bg"),
-                         ("selection-foreground", "selection_fg")):
+    for key, lua_key in (
+        ("background", "background"),
+        ("foreground", "foreground"),
+        ("cursor-color", "cursor_bg"),
+        ("cursor-text", "cursor_fg"),
+        ("selection-background", "selection_bg"),
+        ("selection-foreground", "selection_fg"),
+    ):
         got = re.search(rf"^{key} = (#[0-9a-f]{{6}})$", theme, re.M).group(1)
         assert got == one(lua_key), f"{key} drifted from the Lua scheme_def"
 
@@ -1300,8 +1559,9 @@ def test_ghostty_config_follows_theme_mode_not_resolved_theme():
         st = ln.strip()
         if st.startswith("#") or st.startswith("{{") or "=" not in st:
             continue
-        assert "#" not in st.split("=", 1)[1] or "color" in st or "palette" in st, \
+        assert "#" not in st.split("=", 1)[1] or "color" in st or "palette" in st, (
             f"inline comment would be parsed as part of the value: {ln!r}"
+        )
 
 
 def test_ghostty_is_gated_and_never_removed_by_chezmoi():
@@ -1333,8 +1593,9 @@ def test_windows_ghostty_targets_the_upstream_config_dir():
     assert (ROOT / WIN_GHOSTTY / "config.tmpl").exists()
     assert (ROOT / WIN_GHOSTTY / "themes/vs-code-light-modern").exists()
     for bad in ("AppData/Local/winghostty", "AppData/Local/noctty"):
-        assert not (ROOT / bad).exists(), \
+        assert not (ROOT / bad).exists(), (
             f"{bad} is app-named and breaks on the rename; use AppData/Local/ghostty"
+        )
 
 
 def test_windows_ghostty_theme_is_byte_identical_to_the_macos_one():
@@ -1353,8 +1614,9 @@ def test_windows_ghostty_config_carries_no_foreign_token():
     mid-sentence before this test existed."""
     cfg = (ROOT / WIN_GHOSTTY / "config.tmpl").read_text(encoding="utf-8")
     found = set(re.findall(r"__[A-Z0-9_]+__", cfg))
-    assert found == {"__GHOSTTY_THEME__", "__GHOSTTY_WINDOW_THEME__"}, \
+    assert found == {"__GHOSTTY_THEME__", "__GHOSTTY_WINDOW_THEME__"}, (
         f"unexpected token(s) in the Windows Ghostty config: {sorted(found)}"
+    )
 
 
 def test_windows_ghostty_config_uses_tokens_not_go_templates():
@@ -1368,8 +1630,7 @@ def test_windows_ghostty_config_uses_tokens_not_go_templates():
         if st.startswith("#") or "=" not in st:
             continue
         val = st.split("=", 1)[1]
-        assert "#" not in val, \
-            f"inline comment would be parsed as part of the value: {ln!r}"
+        assert "#" not in val, f"inline comment would be parsed as part of the value: {ln!r}"
 
 
 def test_windows_ghostty_drops_the_macos_only_directives():
@@ -1396,8 +1657,9 @@ def test_ghostty_theme_mapping_is_the_same_in_both_sync_paths():
     }
     for name, path in sources.items():
         body = path.read_text(encoding="utf-8")
-        assert "dark:Catppuccin Mocha,light:vs-code-light-modern" in body, \
+        assert "dark:Catppuccin Mocha,light:vs-code-light-modern" in body, (
             f"{name}: follow must use a split theme (it is what tracks the OS)"
+        )
         assert "vs-code-light-modern" in body and "Catppuccin Mocha" in body, name
         for wt in ("'light'", "'auto'", "'dark'"):
             assert wt in body, f"{name}: missing window-theme value {wt}"
@@ -1412,8 +1674,9 @@ def test_ghostty_off_skips_the_windows_subtree_without_deleting_it():
     assert "AppData/Local/ghostty/*" in sh and "GHOSTTY_CFG_ON" in sh
     assert "AppData/Local/ghostty/*" in ps and "tsGhosttyOn" in ps
     for name, body in (("bash", sh), ("pwsh", ps)):
-        assert "rm -rf" not in body.lower() or "ghostty" not in body.lower().split("rm -rf")[1][:200], \
-            f"{name} sync must never delete the Ghostty tree"
+        assert (
+            "rm -rf" not in body.lower() or "ghostty" not in body.lower().split("rm -rf")[1][:200]
+        ), f"{name} sync must never delete the Ghostty tree"
 
 
 def test_ghostty_is_offered_on_windows_but_never_installed():
@@ -1438,8 +1701,9 @@ def test_pwsh_preticked_list_survives_appending():
     rendered unticked. The @( ) around the switch is what prevents it."""
     ps = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
     block = ps.split("$preticked = ")[1][:400]
-    assert block.startswith("@(switch"), \
+    assert block.startswith("@(switch"), (
         "wrap the switch in @( ) or += will concatenate instead of append"
+    )
 
 
 def test_windows_ghostty_pins_the_same_shell_as_wezterm():
@@ -1450,8 +1714,9 @@ def test_windows_ghostty_pins_the_same_shell_as_wezterm():
     must too, or the two terminals on one machine open different shells."""
     cfg = (ROOT / WIN_GHOSTTY / "config.tmpl").read_text(encoding="utf-8")
     body = [l.strip() for l in cfg.splitlines() if not l.strip().startswith("#")]
-    assert any(l.startswith("command =") and "pwsh" in l for l in body), \
+    assert any(l.startswith("command =") and "pwsh" in l for l in body), (
         "the Windows Ghostty config must pin pwsh, like WezTerm's default_prog"
+    )
     wez = (ROOT / "windows/.wezterm.lua.tmpl").read_text(encoding="utf-8")
     assert "'pwsh.exe'" in wez, "WezTerm's default_prog moved; keep the pair aligned"
 
@@ -1464,14 +1729,17 @@ def test_windows_ghostty_is_opaque_so_the_dwm_backdrop_stays_off():
     cfg = (ROOT / WIN_GHOSTTY / "config.tmpl").read_text(encoding="utf-8")
     body = [l.strip() for l in cfg.splitlines() if not l.strip().startswith("#")]
     opacity = [l for l in body if l.startswith("background-opacity")]
-    assert opacity == ["background-opacity = 1"], \
+    assert opacity == ["background-opacity = 1"], (
         f"anything below 1 re-enables the backdrop: {opacity!r}"
-    assert not [l for l in body if l.startswith("background-blur")], \
+    )
+    assert not [l for l in body if l.startswith("background-blur")], (
         "a blur is the other half of shouldUseSystemBackdrop; leave it unset"
+    )
     # The macOS side keeps the translucent look; this pair is meant to differ.
     mac = (ROOT / "dot_config/ghostty/config.tmpl").read_text(encoding="utf-8")
-    assert "background-opacity = 0.97" in mac, \
+    assert "background-opacity = 0.97" in mac, (
         "if macOS went opaque too, this test's premise needs revisiting"
+    )
 
 
 def test_cursor_agent_has_a_real_windows_installer():
@@ -1482,13 +1750,15 @@ def test_cursor_agent_has_a_real_windows_installer():
     # _uncommented: the block records the old wrong claim verbatim in a comment.
     # `#` starts a comment in pwsh as in shell, so the helper works on both.
     ps = _uncommented((ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8"))
-    assert "cursor.com/install?win32=true" in ps, \
+    assert "cursor.com/install?win32=true" in ps, (
         "cursor-agent must install on Windows, not defer to WSL"
+    )
     assert "no Windows installer this stack can call" not in ps, "that claim is obsolete"
     # POSIX keeps the shell-script form of the same endpoint.
     sh = _uncommented((ROOT / "bootstrap/_config.sh").read_text(encoding="utf-8"))
-    assert "cursor.com/install" in sh and "win32" not in sh, \
+    assert "cursor.com/install" in sh and "win32" not in sh, (
         "the POSIX twin must NOT take the win32 branch"
+    )
 
 
 def test_pending_apps_refreshes_path_before_probing():
@@ -1500,14 +1770,16 @@ def test_pending_apps_refreshes_path_before_probing():
     again on every tstack update."""
     ps = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
     body = ps.split("function Get-TsAppsPending {")[1].split("\nfunction ")[0]
-    assert "Update-TsSessionPath" in body, \
+    assert "Update-TsSessionPath" in body, (
         "refresh PATH before probing, or the pending list reports false positives"
+    )
     sh = (ROOT / "bootstrap/_config.sh").read_text(encoding="utf-8")
     tw = sh.split("ts_apps_pending() {")[1].split("\n}")[0]
     assert "ts_load_node_env" in tw, "the POSIX twin's equivalent moved; keep the pair aligned"
 
 
 # ── agentmemory bash port ───────────────────────────────────────────────────────
+
 
 def _uncommented(text):
     """Shell source with comment lines dropped. These files document at length
@@ -1544,8 +1816,12 @@ def test_agentmemory_codex_check_requires_all_scripts_and_exact_hook_registratio
     sh = AM_ENTRY.read_text(encoding="utf-8")
     adapter = PS_ADAPTER.read_text(encoding="utf-8")
     for event in (
-        "SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse",
-        "PreCompact", "Stop",
+        "SessionStart",
+        "UserPromptSubmit",
+        "PreToolUse",
+        "PostToolUse",
+        "PreCompact",
+        "Stop",
     ):
         assert event in ps and event in sh
     assert "Test-AmCodexHookRegistrations" in ps
@@ -1580,7 +1856,9 @@ def test_agentmemory_secret_recovery_uses_the_unix_cache_not_the_registry():
     for text, name in ((sh, "bash"), (ps, "pwsh")):
         i = text.index("stale secret recovery")
         j = text.index("duplicate-invocation guard helper", i)
-        assert "'let amFreshSecret = null;'" in text[i:j],             f"the {name} twin's recovery edit has no explicit marker"
+        assert "'let amFreshSecret = null;'" in text[i:j], (
+            f"the {name} twin's recovery edit has no explicit marker"
+        )
     # The .ps1 keeps its registry form; this is a deliberate divergence, not drift.
     assert "reg query" in ps
 
@@ -1599,8 +1877,9 @@ def test_agentmemory_edit_text_matches_the_powershell_twin():
         assert anchor in ps, f"{anchor!r} missing from the pwsh twin"
     # Edit ordering is load-bearing: the duplicate-guard helper anchors on the
     # shebang, which the pre-tool-use project-helper edit must consume first.
-    assert sh.index("pre-tool-use gains the project helpers") < \
-        sh.index("duplicate-invocation guard helper")
+    assert sh.index("pre-tool-use gains the project helpers") < sh.index(
+        "duplicate-invocation guard helper"
+    )
 
 
 def test_agentmemory_is_bash32_clean_and_uses_python_for_json():
@@ -1621,7 +1900,7 @@ def test_doctor_checks_agentmemory_natively_not_only_on_wsl():
     never wired — anything at all."""
     body = (ROOT / "bootstrap/_doctor.sh").read_text(encoding="utf-8")
     assert "ts-agentmemory.sh" in body, "doctor must know about the bash twin"
-    seg = body[body.index("agentmemory hook wiring"):]
+    seg = body[body.index("agentmemory hook wiring") :]
     assert "--check" in seg
 
 
@@ -1653,17 +1932,28 @@ def test_cc_wrappers_stop_claude_overwriting_the_tab_title():
     Only WezTerm has a sticky tab title a script can set; everywhere else the
     wrapper's OSC 2 survives solely because Claude is told not to write one."""
     rc = (ROOT / "dot_zshrc").read_text(encoding="utf-8")
-    ps = (ROOT / "windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1").read_text(encoding="utf-8")
+    ps = (ROOT / "windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1").read_text(
+        encoding="utf-8"
+    )
     for name in ("cc()", "ccc()", "ccd()", "ccdc()", "ccr()", "ccdr()", "cca()"):
         line = next(l for l in rc.splitlines() if l.startswith(name))
-        assert "CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1" in line, \
+        assert "CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1" in line, (
             f"{name} would have its tab title overwritten by Claude"
+        )
         assert "_ts_tab_title" in line
-    for name in ("function cc ", "function ccc ", "function ccd ", "function ccdc",
-                 "function ccr ", "function ccdr", "function cca "):
+    for name in (
+        "function cc ",
+        "function ccc ",
+        "function ccd ",
+        "function ccdc",
+        "function ccr ",
+        "function ccdr",
+        "function cca ",
+    ):
         line = next(l for l in ps.splitlines() if l.startswith(name))
-        assert "CLAUDE_CODE_DISABLE_TERMINAL_TITLE" in line, \
+        assert "CLAUDE_CODE_DISABLE_TERMINAL_TITLE" in line, (
             f"{name.strip()} (pwsh) would have its tab title overwritten"
+        )
         assert "Set-TsTabTitle" in line
     # The old WezTerm-only names must be fully retired on both sides.
     assert "_wez_tab_title" not in rc
@@ -1675,8 +1965,8 @@ def test_tab_title_helper_skips_tmux_and_falls_back_to_osc2():
     so emitting OSC 2 there would be swallowed. WezTerm gets its sticky
     override; everything else (Ghostty, Terminal.app) gets OSC 2."""
     rc = (ROOT / "dot_zshrc").read_text(encoding="utf-8")
-    body = rc[rc.index("_ts_tab_title() {"):]
-    body = body[:body.index("\n}\n") + 3]
+    body = rc[rc.index("_ts_tab_title() {") :]
+    body = body[: body.index("\n}\n") + 3]
     assert "WEZTERM_PANE" in body and "set-tab-title" in body
     assert '-z "$TMUX"' in body, "must not emit OSC 2 inside tmux"
     assert "\\033]2;%s\\007" in body or "033]2;" in body
@@ -1698,7 +1988,7 @@ def test_no_bare_variable_followed_by_non_ascii():
     for f in BOOTSTRAP_SH:
         for i, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
             if line.lstrip().startswith("#"):
-                continue          # prose explaining the trap is not the trap
+                continue  # prose explaining the trap is not the trap
             if pat.search(line):
                 bad.append(f"{f.name}:{i}: {line.strip()}")
     assert not bad, "brace these: " + "; ".join(bad)
@@ -1721,8 +2011,7 @@ def test_optional_installs_are_never_fatal():
             # zsh/git/starship/chezmoi there is no stack to configure.
             if "zsh git starship chezmoi" in st:
                 continue
-            assert st.endswith("\\") or "||" in st, \
-                f"{f.name}:{i} unguarded install: {st}"
+            assert st.endswith("\\") or "||" in st, f"{f.name}:{i} unguarded install: {st}"
     # --adopt destroyed a real /Applications/Zed.app; never reintroduce it.
     # Comments explaining that are not the thing being banned.
     code = _uncommented(cfg)
@@ -1736,27 +2025,30 @@ def test_wizard_answers_persist_before_any_optional_install():
     this: macOS persists inline before its installs; the Debian wrappers hand
     _common-debian.sh a TS_PERSIST_HOOK that it calls before any optional step."""
     mac = _uncommented((ROOT / "bootstrap/mac-bootstrap.sh").read_text(encoding="utf-8"))
-    assert mac.index("ts_save_config") < mac.index("ts_brew_install_apps"), \
+    assert mac.index("ts_save_config") < mac.index("ts_brew_install_apps"), (
         "mac-bootstrap installs apps before saving the wizard answers"
+    )
     # The agent WIRING needs the CLIs installed, so it alone stays late.
     assert mac.index("ts_agents_apply_wizard") > mac.index("ts_save_config")
 
     deb = (ROOT / "bootstrap/_common-debian.sh").read_text(encoding="utf-8")
-    body = deb[deb.index("common_install_all() {"):]
-    body = body[:body.index("\n}\n")]
-    body = _uncommented(body)   # index the calls, not the prose about them
+    body = deb[deb.index("common_install_all() {") :]
+    body = body[: body.index("\n}\n")]
+    body = _uncommented(body)  # index the calls, not the prose about them
     hook = body.index("TS_PERSIST_HOOK")
     for installer in ("common_install_selected_apps", "common_install_terminals"):
-        assert hook < body.index(installer), \
+        assert hook < body.index(installer), (
             f"_common-debian.sh: {installer} runs before the persistence hook"
+        )
     # chezmoi must precede the hook: ts_save_config runs `chezmoi init`.
     assert body.index("common_chezmoi") < hook
 
     for name in ("linux-bootstrap.sh", "wsl-bootstrap.sh"):
         w = (ROOT / "bootstrap" / name).read_text(encoding="utf-8")
         assert "TS_PERSIST_HOOK=_ts_persist_wizard" in w, f"{name} sets no hook"
-        assert "ts_save_config" in w[w.index("_ts_persist_wizard() {"):], \
+        assert "ts_save_config" in w[w.index("_ts_persist_wizard() {") :], (
             f"{name}: the hook does not actually save"
+        )
 
 
 def test_terminal_tick_list_enforces_one_wezterm_channel_live():
@@ -1769,7 +2061,7 @@ def test_terminal_tick_list_enforces_one_wezterm_channel_live():
     assert "$Exclusive" in ps and "-Exclusive @('wezterm-nightly', 'wezterm-stable')" in ps
     # The env path returned early without the constraint on both sides.
     assert "ts_terminals_one_channel" in wiz
-    assert wiz.count("ts_terminals_one_channel") >= 3   # def + env path + picker
+    assert wiz.count("ts_terminals_one_channel") >= 3  # def + env path + picker
 
 
 # The exclusive collapse is driven by the index of whatever was just ticked. That
@@ -1781,12 +2073,12 @@ def test_terminal_tick_list_enforces_one_wezterm_channel_live():
 # pwsh side was unreachable behind the Read-TsMulti crash.
 _EXCL_CASES = [
     # answers typed,  expected selection
-    (["3", ""],       ["wezterm-nightly", "ghostty"]),   # non-member must not collapse
-    (["2", ""],       ["wezterm-stable"]),               # member still evicts its rival
-    (["3", "2", ""],  ["wezterm-stable", "ghostty"]),
-    (["2", "3", ""],  ["wezterm-stable", "ghostty"]),
-    (["a", ""],       ["wezterm-nightly", "ghostty"]),   # all: group collapses to the tie-break
-    (["1", ""],       []),
+    (["3", ""], ["wezterm-nightly", "ghostty"]),  # non-member must not collapse
+    (["2", ""], ["wezterm-stable"]),  # member still evicts its rival
+    (["3", "2", ""], ["wezterm-stable", "ghostty"]),
+    (["2", "3", ""], ["wezterm-stable", "ghostty"]),
+    (["a", ""], ["wezterm-nightly", "ghostty"]),  # all: group collapses to the tie-break
+    (["1", ""], []),
 ]
 
 # ts_prompt_multi reads its answer inside a nested $( ), so a shell-variable
@@ -1816,17 +2108,23 @@ _EXCL_PWSH = (
     "@{Key='ghostty';Label='ghostty'}) "
     "-Preticked @('wezterm-nightly') "
     "-Exclusive @('wezterm-nightly','wezterm-stable') 6>$null; "
-    "Write-Output ('RESULT=' + ($r -join ' '))")
+    "Write-Output ('RESULT=' + ($r -join ' '))"
+)
 
 
 @pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_exclusive_group_survives_a_non_member_tick_bash():
     for answers, want in _EXCL_CASES:
-        script = _EXCL_BASH.replace(
-            "ANSWERS", " ".join(f'"{a}"' for a in answers))
-        r = subprocess.run([BASH, "-c", script], cwd=ROOT,
-                           text=True, capture_output=True, check=False,
-                           stdin=subprocess.DEVNULL, timeout=60)
+        script = _EXCL_BASH.replace("ANSWERS", " ".join(f'"{a}"' for a in answers))
+        r = subprocess.run(
+            [BASH, "-c", script],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+            stdin=subprocess.DEVNULL,
+            timeout=60,
+        )
         assert r.stdout.split() == want, f"{answers}: got {r.stdout.split()!r}"
 
 
@@ -1834,16 +2132,18 @@ def test_exclusive_group_survives_a_non_member_tick_bash():
 def test_exclusive_group_survives_a_non_member_tick_pwsh():
     """The pwsh twin must reach the same six answers as the bash one."""
     for answers, want in _EXCL_CASES:
-        command = _EXCL_PWSH.replace(
-            "ANSWERS", ",".join(f"'{a}'" for a in answers))
-        r = subprocess.run([shutil.which("pwsh"), "-NoLogo", "-NoProfile",
-                            "-NonInteractive", "-Command", command],
-                           cwd=ROOT, text=True, capture_output=True, check=False)
-        line = next((l for l in r.stdout.splitlines()
-                     if l.startswith("RESULT=")), None)
+        command = _EXCL_PWSH.replace("ANSWERS", ",".join(f"'{a}'" for a in answers))
+        r = subprocess.run(
+            [shutil.which("pwsh"), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=300,
+        )
+        line = next((l for l in r.stdout.splitlines() if l.startswith("RESULT=")), None)
         assert line is not None, r.stdout + r.stderr
-        assert line[len("RESULT="):].split() == want, f"{answers}: got {line!r}"
-
+        assert line[len("RESULT=") :].split() == want, f"{answers}: got {line!r}"
 
 
 @pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
@@ -1854,21 +2154,22 @@ def test_installed_apps_report_survives_a_tool_that_rejects_version():
     tmux is exactly that tool (it wants -V) and is FIRST in the recommended
     list, so this fired on every single run."""
     script = (
-        'set -euo pipefail\n'
-        '. bootstrap/_config.sh >/dev/null 2>&1\n'
+        "set -euo pipefail\n"
+        ". bootstrap/_config.sh >/dev/null 2>&1\n"
         # A binary that exits non-zero for BOTH --version and -V is the worst case.
-        'mkdir -p /tmp/_tsbin\n'
+        "mkdir -p /tmp/_tsbin\n"
         'printf "#!/bin/sh\\nexit 3\\n" > /tmp/_tsbin/tmux; chmod +x /tmp/_tsbin/tmux\n'
         'PATH=/tmp/_tsbin:$PATH ts_report_installed_apps "tmux" >/dev/null\n'
-        'echo SURVIVED\n')
-    r = subprocess.run([BASH, "-c", script], cwd=ROOT, capture_output=True, text=True)
+        "echo SURVIVED\n"
+    )
+    r = subprocess.run([BASH, "-c", script], cwd=ROOT, capture_output=True, text=True, timeout=300)
     assert "SURVIVED" in r.stdout, f"report aborted: {r.stderr.strip()[:200]}"
     # And the guard must be in the source, not incidental.
     cfg = _uncommented((ROOT / "bootstrap/_config.sh").read_text(encoding="utf-8"))
-    body = cfg[cfg.index("ts_report_installed_apps()"):]
-    body = body[:body.index("\n}\n")]
-    assert '--version 2>/dev/null || true' in body, "version probe must not be fatal"
-    assert '-V 2>/dev/null' in body, "tmux-style tools need the -V fallback"
+    body = cfg[cfg.index("ts_report_installed_apps()") :]
+    body = body[: body.index("\n}\n")]
+    assert "--version 2>/dev/null || true" in body, "version probe must not be fatal"
+    assert "-V 2>/dev/null" in body, "tmux-style tools need the -V fallback"
 
 
 def test_ts_config_wizard_asks_about_terminals_and_saves_first():
@@ -1877,11 +2178,12 @@ def test_ts_config_wizard_asks_about_terminals_and_saves_first():
     channel, which is a main reason to run it again. And like the bootstraps it
     must save before installing."""
     body = _uncommented((ROOT / "bootstrap/ts-config.sh").read_text(encoding="utf-8"))
-    rw = body[body.index("run_wizard()"):]
-    rw = rw[:rw.index("\n}\n")]
+    rw = body[body.index("run_wizard()") :]
+    rw = rw[: rw.index("\n}\n")]
     assert "TS_WIZ_ASK_TERMINALS=1" in rw, "tstack config wizard must ask about terminals"
-    assert rw.index("ts_save_config") < rw.index("install_apps"), \
+    assert rw.index("ts_save_config") < rw.index("install_apps"), (
         "run_wizard installs before saving the answers"
+    )
     assert "ts_note_failure" in rw, "installs here must not be fatal either"
 
 
@@ -1897,19 +2199,34 @@ def test_wizard_prompts_run_without_undefined_functions():
         '. "$SRC/bootstrap/_wizard.sh"\n'
         '. "$SRC/bootstrap/_detect.sh"\n'
         # every function ts-config.sh / the bootstraps call on the wizard path
-        'for f in ts_is_headless ts_is_interactive ts_prompt_multi ts_prompt_choice \\\n'
-        '         ts_prompt_terminals ts_terminals_one_channel ts_wizard_collect \\\n'
-        '         ts_note_failure ts_report_failures; do\n'
+        "for f in ts_is_headless ts_is_interactive ts_prompt_multi ts_prompt_choice \\\n"
+        "         ts_prompt_terminals ts_terminals_one_channel ts_wizard_collect \\\n"
+        "         ts_note_failure ts_report_failures; do\n"
         '  command -v "$f" >/dev/null || echo "UNDEFINED: $f"\n'
-        'done\n'
+        "done\n"
         # and actually drive the picker, which is where the ordering bug lived
-        'TS_MULTI_EXCLUSIVE="a b" ts_prompt_multi "a b" "T:" "" "a|A|" "b|B|" "c|C|"\n')
-    r = subprocess.run([BASH, "-c", script], cwd=ROOT,
-                       capture_output=True, text=True, stdin=subprocess.DEVNULL)
+        'TS_MULTI_EXCLUSIVE="a b" ts_prompt_multi "a b" "T:" "" "a|A|" "b|B|" "c|C|"\n'
+    )
+    # start_new_session detaches the child from the controlling terminal, so
+    # opening /dev/tty fails - which is the state this test already says it
+    # expects ("legitimately absent under pytest"). stdin=DEVNULL is not enough:
+    # ts_prompt_multi reads from /dev/tty, not stdin, so wherever a tty exists
+    # the prompt blocks forever. It does under WSL and it does not under Git
+    # Bash, which is why this passed on Windows and hung on Linux.
+    # The timeout turns any future regression of that shape into a failure
+    # rather than a hang.
+    r = subprocess.run(
+        [BASH, "-c", script],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        stdin=subprocess.DEVNULL,
+        start_new_session=True,
+        timeout=120,
+    )
     assert "UNDEFINED:" not in r.stdout, r.stdout
     # /dev/tty is legitimately absent under pytest; anything else is a real fault.
-    noise = [l for l in r.stderr.splitlines()
-             if l.strip() and "/dev/tty" not in l]
+    noise = [l for l in r.stderr.splitlines() if l.strip() and "/dev/tty" not in l]
     assert not noise, "wizard emitted errors: " + "; ".join(noise)
     # The exclusive group must have collapsed a pre-tick of BOTH a and b.
     picked = r.stdout.replace("UNDEFINED:", "").split()
@@ -1921,14 +2238,17 @@ def test_ts_config_sources_what_it_calls():
     never sourced there."""
     body = (ROOT / "bootstrap/ts-config.sh").read_text(encoding="utf-8")
     # Match the SOURCE STATEMENT, not the shellcheck comment above it.
-    src_line = next((l for l in body.splitlines()
-                     if l.strip().startswith(". ") and "_detect.sh" in l), None)
+    src_line = next(
+        (l for l in body.splitlines() if l.strip().startswith(". ") and "_detect.sh" in l), None
+    )
     assert src_line, "ts-config.sh must source _detect.sh"
-    assert body.index(src_line) < body.index("ts_is_headless ||"), \
+    assert body.index(src_line) < body.index("ts_is_headless ||"), (
         "_detect.sh sourced after first use of ts_is_headless"
+    )
 
 
 # ── wizard recommendations + readiness probing ──────────────────────────────────
+
 
 @pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_service_probes_treat_any_http_response_as_up():
@@ -1937,16 +2257,18 @@ def test_service_probes_treat_any_http_response_as_up():
     reported the service down while it was up and serving. Any response proves
     something is listening; only a refused connection is 'down'."""
     script = (
-        '. bootstrap/_config.sh >/dev/null 2>&1\n'
+        ". bootstrap/_config.sh >/dev/null 2>&1\n"
         # port 9 (discard) is reliably not an HTTP server
-        'ts_probe_http http://127.0.0.1:9 1 && echo BAD_UP || echo ok_down\n'
-        'ts_probe_http_ok http://127.0.0.1:9 1 && echo BAD_OK || echo ok_not_ok\n')
-    r = subprocess.run([BASH, "-c", script], cwd=ROOT, capture_output=True, text=True)
+        "ts_probe_http http://127.0.0.1:9 1 && echo BAD_UP || echo ok_down\n"
+        "ts_probe_http_ok http://127.0.0.1:9 1 && echo BAD_OK || echo ok_not_ok\n"
+    )
+    r = subprocess.run([BASH, "-c", script], cwd=ROOT, capture_output=True, text=True, timeout=300)
     assert "BAD_" not in r.stdout, r.stdout
     assert r.stdout.split() == ["ok_down", "ok_not_ok"], r.stdout
     agents = _uncommented((ROOT / "bootstrap/ts-agents.sh").read_text(encoding="utf-8"))
-    assert 'curl -fsS --max-time 1 "$(json_get agentmemory.restUrl)"' not in agents, \
+    assert 'curl -fsS --max-time 1 "$(json_get agentmemory.restUrl)"' not in agents, (
         "-f makes a 404/401 look like the service is down"
+    )
 
 
 def test_wizard_recommends_and_probes_before_offering():
@@ -1955,39 +2277,41 @@ def test_wizard_recommends_and_probes_before_offering():
     swallow errors and exit 0. Probe first, default from what was found."""
     wiz = (ROOT / "bootstrap/_wizard.sh").read_text(encoding="utf-8")
     for fn in ("ts_prompt_wezterm_mux", "ts_prompt_wezterm_restore", "ts_prompt_atuin"):
-        body = wiz[wiz.index(f"{fn}() {{"):]
-        body = body[:body.index("\n}\n")]
+        body = wiz[wiz.index(f"{fn}() {{") :]
+        body = body[: body.index("\n}\n")]
         assert "RECOMMENDATION:" in body, f"{fn} has no recommendation"
     # atuin now defaults to ON; the other two stay off.
-    at = wiz[wiz.index("ts_prompt_atuin() {"):]
-    at = at[:at.index("\n}\n")]
+    at = wiz[wiz.index("ts_prompt_atuin() {") :]
+    at = at[: at.index("\n}\n")]
     assert "ts_prompt_choice on " in at, "atuin should default to on"
     for fn in ("ts_prompt_wezterm_mux", "ts_prompt_wezterm_restore"):
-        b = wiz[wiz.index(f"{fn}() {{"):]
-        b = b[:b.index("\n}\n")]
+        b = wiz[wiz.index(f"{fn}() {{") :]
+        b = b[: b.index("\n}\n")]
         assert "ts_prompt_choice off " in b, f"{fn} should default to off"
     # Headroom and AgentMemory are no longer two independent toggles -- that is
     # what made "both memory systems on" reachable -- but the reason for probing
     # them is unchanged: a machine wired to a service that is not running fails
     # later and silently. Both probes run inside the one memory question, and
     # their output is in what the question prints.
-    mem = wiz[wiz.index("ts_prompt_memory_backend() {"):]
-    mem = mem[:mem.index("\n}\n")]
-    assert "ts_probe_agentmemory" in mem and "ts_probe_headroom" in mem, \
+    mem = wiz[wiz.index("ts_prompt_memory_backend() {") :]
+    mem = mem[: mem.index("\n}\n")]
+    assert "ts_probe_agentmemory" in mem and "ts_probe_headroom" in mem, (
         "the memory question must probe both services before offering"
-    assert mem.index("ts_probe_agentmemory") < mem.index("ts_prompt_choice"), \
+    )
+    assert mem.index("ts_probe_agentmemory") < mem.index("ts_prompt_choice"), (
         "probe before offering, not after"
-    assert "${am_report}" in mem and "${hr_report}" in mem, \
+    )
+    assert "${am_report}" in mem and "${hr_report}" in mem, (
         "the probe output must reach the question the user reads"
+    )
     assert "RECOMMENDATION:" in mem
     # The default is a CHOICE, not a probe result. Deriving it from the probe
     # would recommend "none" on a first install -- where nothing is running yet,
     # by definition -- and talk a newcomer out of the feature they came for.
-    assert "ts_prompt_choice agentmemory " in mem, \
-        "the recommended answer must be agentmemory"
+    assert "ts_prompt_choice agentmemory " in mem, "the recommended answer must be agentmemory"
     # And the two blind toggles must not come back.
-    assert "TS_WIZ_HEADROOM=\"$(ts_prompt_agent_toggle" not in wiz
-    assert "TS_WIZ_AGENTMEMORY=\"$(ts_prompt_agent_toggle" not in wiz
+    assert 'TS_WIZ_HEADROOM="$(ts_prompt_agent_toggle' not in wiz
+    assert 'TS_WIZ_AGENTMEMORY="$(ts_prompt_agent_toggle' not in wiz
 
 
 def test_platform_impossible_apps_are_not_offered_forever():
@@ -1995,8 +2319,8 @@ def test_platform_impossible_apps_are_not_offered_forever():
     missing on every tstack update, accepted, and printed 'Linux-only; skipping'."""
     cfg = (ROOT / "bootstrap/_config.sh").read_text(encoding="utf-8")
     assert "ts_app_installable" in cfg
-    pend = cfg[cfg.index("ts_apps_pending() {"):]
-    pend = pend[:pend.index("\n}\n")]
+    pend = cfg[cfg.index("ts_apps_pending() {") :]
+    pend = pend[: pend.index("\n}\n")]
     assert "ts_app_installable" in pend, "pending list must filter impossible ids"
 
 
@@ -2008,24 +2332,30 @@ def test_nightly_is_preticked_even_when_stable_is_installed():
     Nightly is pre-selected regardless; only a hand-installed WezTerm
     ('unknown', not ours to replace) leaves both unticked."""
     wiz = (ROOT / "bootstrap/_wizard.sh").read_text(encoding="utf-8")
-    body = wiz[wiz.index("ts_prompt_terminals() {"):]
-    body = body[:body.index("\n}\n")]
-    assert "stable)  preticked=\"wezterm-stable\"" not in body, \
-        "installed-wins pre-tick is back"
+    body = wiz[wiz.index("ts_prompt_terminals() {") :]
+    body = body[: body.index("\n}\n")]
+    assert 'stable)  preticked="wezterm-stable"' not in body, "installed-wins pre-tick is back"
     assert "RECOMMENDATION: nightly" in body
 
     def pretick(channel):
         script = (
-            '. bootstrap/_config.sh >/dev/null 2>&1\n'
-            '. bootstrap/_wizard.sh\n'
-            f'ts_wezterm_channel() {{ echo {channel}; }}\n'
+            ". bootstrap/_config.sh >/dev/null 2>&1\n"
+            ". bootstrap/_wizard.sh\n"
+            f"ts_wezterm_channel() {{ echo {channel}; }}\n"
             # Stub the intro: it fetches upstream release data over the network,
             # which makes this test slow and dependent on being online.
-            'ts_wezterm_prompt_intro() { :; }\n'
+            "ts_wezterm_prompt_intro() { :; }\n"
             # non-interactive keeps the pre-ticks, so the answer IS the pre-tick
-            'ts_prompt_terminals 2>/dev/null\n')
-        r = subprocess.run([BASH, "-c", script], cwd=ROOT, capture_output=True,
-                           text=True, stdin=subprocess.DEVNULL)
+            "ts_prompt_terminals 2>/dev/null\n"
+        )
+        r = subprocess.run(
+            [BASH, "-c", script],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            stdin=subprocess.DEVNULL,
+            timeout=300,
+        )
         return r.stdout.split()
 
     for ch in ("stable", "nightly", "none"):
@@ -2046,8 +2376,18 @@ CC_TTS_LIB = ROOT / "dot_claude/hooks/cc-tts-lib.sh"
 
 def _self_summary_sh(text):
     r = subprocess.run(
-        [BASH, "-c", '. dot_claude/hooks/cc-tts-lib.sh 2>/dev/null; cc_tts_self_summary "$1"',
-         "_", text], cwd=ROOT, capture_output=True, text=True)
+        [
+            BASH,
+            "-c",
+            '. dot_claude/hooks/cc-tts-lib.sh 2>/dev/null; cc_tts_self_summary "$1"',
+            "_",
+            text,
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
     return r.stdout.strip()
 
 
@@ -2061,20 +2401,21 @@ def test_self_summarizer_matches_the_python_daemon():
     sys.path.insert(0, str(ROOT / "bootstrap/tts-daemon"))
     try:
         from ttsd.summarize import Summarizer
-    except Exception as exc:                     # pragma: no cover
+    except Exception as exc:  # pragma: no cover
         pytest.skip(f"ttsd not importable: {exc}")
     cases = [
         "x <!-- speak: All tests pass. -->",
-        "<!-- speak: a --> <!-- speak: b two -->",          # last marker wins
+        "<!-- speak: a --> <!-- speak: b two -->",  # last marker wins
         "# Heading\n- Migrated the parser to the new tokenizer and every single "
-        "one of the tests now passes cleanly.\nmore",        # 15-word cap
-        "```\ncode here\n```\nRefactored the loader.",        # fenced code dropped
+        "one of the tests now passes cleanly.\nmore",  # 15-word cap
+        "```\ncode here\n```\nRefactored the loader.",  # fenced code dropped
         "Just one short sentence. And a second one.",
         "",
     ]
     for c in cases:
-        assert _self_summary_sh(c) == Summarizer._self_summary(c).strip(), \
+        assert _self_summary_sh(c) == Summarizer._self_summary(c).strip(), (
             f"shell/python disagree on {c!r}"
+        )
 
 
 @pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
@@ -2083,18 +2424,24 @@ def test_codex_direct_stop_message_feeds_self_summary(tmp_path):
     Claude's transcript-shaped payload. Missing that field silently fell back
     to the fixed template even when the user selected self."""
     config = tmp_path / "tts.json"
-    config.write_text(json.dumps({"summarize": {"mode": "self"}}),
-                      encoding="utf-8", newline="\n")
-    script = r'''
+    config.write_text(json.dumps({"summarize": {"mode": "self"}}), encoding="utf-8", newline="\n")
+    script = r"""
         export CC_TTS_SOURCE=codex
         export CC_TTS_HOOK_JSON='{"last_assistant_message":"Done. <!-- speak: Codex used its own summary. -->"}'
         . dot_claude/hooks/cc-tts-lib.sh 2>/dev/null
         cc_tts_build_speech codex waiting terminal-stack
-    '''
+    """
     env = dict(os.environ, CC_TTS_CONFIG=bash_path(config))
-    result = subprocess.run([BASH, "-c", script], cwd=ROOT,
-                            capture_output=True, text=True, encoding="utf-8",
-                            check=True, env=env)
+    result = subprocess.run(
+        [BASH, "-c", script],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
+        env=env,
+        timeout=300,
+    )
     assert "Codex used its own summary" in result.stdout
     assert "I'm waiting for you" not in result.stdout
 
@@ -2112,15 +2459,22 @@ def test_speak_marker_is_never_spoken_verbatim():
     <!-- speak: … --> comment would be read out loud. _speakable() is
     Python-side only and has no shell twin."""
     r = subprocess.run(
-        [BASH, "-c",
-         '. dot_claude/hooks/cc-tts-lib.sh 2>/dev/null; '
-         'cc_tts_strip_markers "Done. <!-- speak: hidden text --> tail"'],
-        cwd=ROOT, capture_output=True, text=True)
+        [
+            BASH,
+            "-c",
+            ". dot_claude/hooks/cc-tts-lib.sh 2>/dev/null; "
+            'cc_tts_strip_markers "Done. <!-- speak: hidden text --> tail"',
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
     assert "hidden text" not in r.stdout and "<!--" not in r.stdout, r.stdout
     lib = CC_TTS_LIB.read_text(encoding="utf-8")
     assert "cc_tts_strip_markers" in lib
     # self applies to the done event only, matching summarize.py:84-99.
-    body = lib[lib.index("cc_tts_build_speech() {"):]
+    body = lib[lib.index("cc_tts_build_speech() {") :]
     assert '[ "$state" = waiting ]' in body, "self must not fire on question/permission/error"
 
 
@@ -2131,13 +2485,14 @@ def test_macos_has_a_synthesis_floor():
     detached and its output discarded."""
     lib = CC_TTS_LIB.read_text(encoding="utf-8")
     assert "cc_tts_synth_say" in lib
-    synth = lib[lib.index("\ncc_tts_synth() {"):]
-    synth = synth[:synth.index("\n}\n")]
+    synth = lib[lib.index("\ncc_tts_synth() {") :]
+    synth = synth[: synth.index("\n}\n")]
     # say must be the LAST rung, after edge.
-    assert synth.index("cc_tts_synth_edge") < synth.index("cc_tts_synth_say"), \
+    assert synth.index("cc_tts_synth_edge") < synth.index("cc_tts_synth_say"), (
         "say must be the floor, not preferred over a real engine"
-    say = lib[lib.index("cc_tts_synth_say() {"):]
-    say = say[:say.index("\n}\n")]
+    )
+    say = lib[lib.index("cc_tts_synth_say() {") :]
+    say = say[: say.index("\n}\n")]
     # `say -o out.mp3` exits 0 and writes a 16-byte junk file: it picks format
     # from the extension and only really writes AIFF.
     assert ".aiff" in say, "say must synthesise to .aiff, not the caller's extension"
@@ -2168,8 +2523,8 @@ def test_doc_reports_a_miss_before_falling_back_to_fzf():
     """A zero-match query dropped straight into fzf, which re-queried the
     NARROWER per-OS index — so the user got an empty picker and no message."""
     rc = (ROOT / "dot_zshrc").read_text(encoding="utf-8")
-    body = rc[rc.index("_doc_open() {"):]
-    body = body[:body.index("\n}\n")]
+    body = rc[rc.index("_doc_open() {") :]
+    body = body[: body.index("\n}\n")]
     miss = body.index("no topic matching")
     fzf = body.index("_doc_finder")
     assert miss < fzf, "must report the miss before handing off to fzf"
@@ -2181,8 +2536,8 @@ def test_tts_wizard_is_platform_aware_and_asks_what_it_says():
     that cannot run a daemon."""
     tts = (ROOT / "bootstrap/_cc_tts.sh").read_text(encoding="utf-8")
     assert "ts_prompt_cc_tts_message" in tts, "no question about what it says"
-    msg = tts[tts.index("ts_prompt_cc_tts_message() {"):]
-    msg = msg[:msg.index("\n}\n")]
+    msg = tts[tts.index("ts_prompt_cc_tts_message() {") :]
+    msg = msg[: msg.index("\n}\n")]
     assert "RECOMMENDATION: self" in msg
     for mode in ("self", "template", "hook"):
         assert f"'{mode}|{mode}|" in msg, f"{mode} not offered"
@@ -2193,8 +2548,8 @@ def test_tts_wizard_is_platform_aware_and_asks_what_it_says():
     # Daemon-only settings refuse rather than storing a value nothing reads.
     code = _uncommented(tts)
     for verb in ("music", "duck-level"):
-        arm = code[code.index(f"        {verb})"):]
-        arm = arm[:arm.index("\n            ;;")]
+        arm = code[code.index(f"        {verb})") :]
+        arm = arm[: arm.index("\n            ;;")]
         assert "ts_cc_tts_daemon_supported" in arm, f"{verb} has no platform guard"
     # Bare `tstack config tts` shows status like every sibling verb.
     assert "''|show)" in tts
@@ -2204,7 +2559,8 @@ def test_wizard_does_not_reset_tuned_tts_keys():
     """ts_cc_tts_apply_wizard_choice reset every key on BOTH on and off, so each
     `tstack config wizard` silently discarded any `tstack config tts …` tuning."""
     body = (ROOT / "bootstrap/_cc_tts.sh").read_text(encoding="utf-8")
-    fn = body[body.index("ts_cc_tts_apply_wizard_choice() {"):]
-    fn = fn[:fn.index("\n}\n")]
-    assert "[ -n \"$configured\" ] || ts_cc_tts_reset_defaults" in fn, \
+    fn = body[body.index("ts_cc_tts_apply_wizard_choice() {") :]
+    fn = fn[: fn.index("\n}\n")]
+    assert '[ -n "$configured" ] || ts_cc_tts_reset_defaults' in fn, (
         "defaults must only be seeded on a never-configured host"
+    )

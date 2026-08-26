@@ -33,6 +33,10 @@ tests/**
 services/**
 # The pre-commit hook is repo infrastructure, run from a DEV clone, never $HOME.
 .githooks/**
+# Project-scoped Claude Code commands: dev-clone infrastructure. Without this
+# line chezmoi deploys them to ~/.claude/commands and they collide with the
+# user's own global commands.
+.claude/**
 # The tstack program: repo infrastructure, run from the clone by the shell shims in
 # dot_zshrc and $PROFILE. Same allow-by-default trap as tests/** and services/**:
 # without this line every module is written into $HOME on apply

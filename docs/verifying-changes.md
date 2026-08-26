@@ -1,7 +1,15 @@
 # Verifying a change before you commit
 
-There is no CI, so validation happens locally before every push. This checklist
-combines the automated suites with the manual gates they cannot cover. `INSTALL.md` § Phase 9 is
+CI runs on every push (`.github/workflows/ci.yml`: ubuntu, macos, windows and a
+WSL job) and is the only coverage macOS and native Debian/Ubuntu get, since
+neither can be run from a Windows development machine. It does not replace this
+page: what follows is the set of gates a runner cannot perform - loading a
+WezTerm config without a GUI, proving a Nerd Font glyph actually renders, driving
+an interactive prompt through a pty, exercising a real config store.
+
+Run the automated gates first (`ruff check`, `ruff format --check`, `mypy`,
+`pytest tests/ --cov`); `.githooks/pre-commit` and `pre-push` do it for you once
+`core.hooksPath=.githooks` is set. `INSTALL.md` § Phase 9 is
 the *post-install* smoke test for a fresh machine; this is the *pre-commit* pass for
 a change you just made.
 

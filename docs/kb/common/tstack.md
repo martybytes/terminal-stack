@@ -1,5 +1,29 @@
 # tstack — the stack's one command
 
+`tstack` is the single entry point for the whole stack. There are no `ts-*`
+commands any more, and no aliases for them.
+
+| Command | What it does |
+|---|---|
+| `tstack config` | view and change saved settings (the table below) |
+| `tstack doctor` | diagnose the install; `--repair` fixes what it can |
+| `tstack update` | pull the latest stack and re-apply |
+| `tstack rollback` | undo the last update |
+| `tstack services` | the Docker service stacks - see `doc services` |
+| `tstack mux` | the WezTerm multiplexer domain |
+| `tstack wezterm` | WezTerm channel and updates (POSIX only) |
+| `tstack smb` | SMB shares over rclone (POSIX only) - see `doc smb-shares` |
+| `tstack agents` | agent CLI wiring - see `doc agentmemory`, `doc headroom` |
+| `tstack agentmemory` | the agentmemory hook harness; `--check` reports reverted edits |
+| `tstack doc` | this knowledge base (the bare `doc` command is the same thing) |
+| `tstack --help` | every subcommand, with platform gaps marked |
+| `tstack --version` | clone path, branch, commit, and whether it is dirty |
+
+A subcommand reported as "not available on <platform>" is deliberate, not a
+broken install: `smb` and `wezterm` have no PowerShell implementation.
+
+## Configuration
+
 Everything the install wizard asks, changeable afterwards. Every change persists
 (chezmoi `[data]` on WSL/Linux/macOS, `config.json` on Windows) and re-applies.
 
