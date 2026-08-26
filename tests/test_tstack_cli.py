@@ -166,14 +166,27 @@ def test_unknown_subcommand_exits_two_and_suggests():
 
 
 def test_version_json_is_stable():
+    """The schema holds in both states, including "no clone resolvable".
+
+    A CI checkout lives at a path the candidate list deliberately does not
+    contain (`/home/runner/work/...`), so `--version` legitimately finds no
+    clone there. That is correct behaviour, not a failure - but the output must
+    still be well-formed JSON that names the platform, or anything parsing it
+    breaks precisely when something is already wrong.
+    """
     out = run_cli("--version", "--json")
     assert out.returncode == 0, out.stderr
     import json
 
     data = json.loads(out.stdout)
-    for key in ("path", "sha", "short", "branch", "dirty", "tstack", "platform"):
-        assert key in data, key
     assert data["platform"] in ("windows", "wsl", "linux", "macos")
+    assert data["tstack"]
+
+    if "error" in data:
+        assert "clone" in data["error"], data["error"]
+    else:
+        for key in ("path", "sha", "short", "branch", "dirty"):
+            assert key in data, key
 
 
 # --------------------------------------------- claims the audit found unenforced

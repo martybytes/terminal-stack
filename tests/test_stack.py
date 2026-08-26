@@ -658,8 +658,16 @@ def test_ts_envfiles_paths_are_interpolation_sources_only():
                 f"{extra.parent.name}: {line} is both a ts-envfiles entry and an env_file: "
                 f"entry -- that injects every key in it, secrets included"
             )
-            assert (extra.parent / line).resolve().is_file(), (
-                f"{extra.parent.name}: {line} does not exist"
+            # The referenced file must be a real path, not a typo -- but `.env`
+            # is gitignored and only exists after `tstack services bootstrap`,
+            # so requiring it here made this test pass only on an already-set-up
+            # machine and fail on every clean checkout, which is exactly what CI
+            # is. Accept the tracked `.example` as proof the path is real.
+            target = (extra.parent / line).resolve()
+            example = target.with_name(target.name + ".example")
+            assert target.is_file() or example.is_file(), (
+                f"{extra.parent.name}: {line} names neither an existing file nor "
+                f"a tracked {example.name}"
             )
 
 
