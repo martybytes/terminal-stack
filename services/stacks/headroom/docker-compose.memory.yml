@@ -2,8 +2,8 @@
 #
 # Merged on top of docker-compose.yml only when .env sets
 #   COMPOSE_FILE=docker-compose.yml:docker-compose.memory.yml
-# which `ts-config memory headroom` does for you. Never edit COMPOSE_FILE by
-# hand: `memoryBackend` is the setting, and the two must agree or `ts-doctor`
+# which `tstack config memory headroom` does for you. Never edit COMPOSE_FILE by
+# hand: `memoryBackend` is the setting, and the two must agree or `tstack doctor`
 # reports drift.
 #
 # ONLY ONE MEMORY BACKEND RUNS. Enabling this means AgentMemory is not installed

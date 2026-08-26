@@ -9,7 +9,7 @@
 -- This file is a template: the leader chord and theme mode are injected from the
 -- saved terminal-stack config (__LEADER_KEY__ / __LEADER_MODS__ / __THEME_MODE__)
 -- by the Windows sync (run_after_90-sync-windows.sh or scripts/sync-windows.ps1).
--- Change them with `ts-config leader <chord>` / `ts-config theme <mode>`.
+-- Change them with `tstack config leader <chord>` / `tstack config theme <mode>`.
 
 local wezterm = require 'wezterm'
 local act = wezterm.action
@@ -44,7 +44,7 @@ end
 -- back to the hook's raw OSC 11, which ConPTY eats on Windows, so per-pane tints
 -- may not render. Failures are logged (Ctrl+Shift+L).
 --
--- Toggle with `ts-mux on` / `ts-mux off`; `ts-mux -h` also has status / kill /
+-- Toggle with `tstack mux on` / `tstack mux off`; `tstack mux -h` also has status / kill /
 -- restart / reset. __WEZ_MUX__ is injected by the Windows sync from the saved
 -- config key `weztermMux`.
 local MUX_ENABLED = '__WEZ_MUX__' == 'on'
@@ -57,7 +57,7 @@ end
 -- scrollback you had when you last closed WezTerm. OFF by default: a terminal
 -- that silently reopens yesterday's shells is a surprise rather than a feature,
 -- and the autosave below keeps Leader+L available whenever you do want it back.
--- Toggle with `ts-config restore on` / `off`.
+-- Toggle with `tstack config restore on` / `off`.
 local RESTORE_ENABLED = '__WEZ_RESTORE__' == 'on'
 
 -- ── Theme palette (light / dark, optional follow-OS) ──────────────────────────

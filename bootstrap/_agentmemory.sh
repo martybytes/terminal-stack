@@ -149,7 +149,7 @@ am_build_edits() {
     # 6. Stale-secret recovery, every script.
     #    UNIX FORM: the .ps1 re-reads HKCU\Environment here. On Unix that throws,
     #    is caught, and leaves the recovery a permanent no-op — so this reads the
-    #    0600 cache ts-stack maintains instead. Same fail-open discipline: any
+    #    0600 cache tstack services maintains instead. Same fail-open discipline: any
     #    error returns the original response.
     #
     #    Reads terminal-stack/agentmemory.secret, then the legacy

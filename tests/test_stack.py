@@ -1,4 +1,4 @@
-"""ts-stack: the service-lifecycle CLI.
+"""tstack services: the service-lifecycle CLI.
 
 The high-value tests here need no Docker, which is the point — most machines
 running this suite have no engine, and the WSL ones have Docker Desktop's stub
@@ -75,7 +75,7 @@ def test_toggle_map_is_the_same_in_both_twins():
 def test_only_ts_stack_may_run_docker():
     """The boundary that replaced the old inter-repo seam: services/ is the
     service side, everything outside it configures a host program. ts-agents may
-    print the ts-stack verb but never the compose command — the existing
+    print the tstack services verb but never the compose command — the existing
     lifecycle-adapter test matches `docker compose` as a substring over the whole
     file, so even a helpful comment fails it."""
     for rel in ("bootstrap/ts-agents.sh", "bootstrap/ts-agents.ps1"):
@@ -253,7 +253,7 @@ def test_every_project_container_and_volume_is_ts_prefixed():
 def test_the_memory_volumes_are_external_and_the_headroom_ones_are_not():
     """The asymmetry IS the safety property. `down -v` cannot remove an external
     volume, which is why every memory ever saved lives in one; headroom's three
-    are removable by design and ts-stack gates that behind --destroy-data."""
+    are removable by design and tstack services gates that behind --destroy-data."""
     am = (ROOT / "services/stacks/agentmemory/docker-compose.yml").read_text(encoding="utf-8")
     con = (ROOT / "services/stacks/agent007memory/docker-compose.yml").read_text(encoding="utf-8")
     hr = (ROOT / "services/stacks/headroom/docker-compose.yml").read_text(encoding="utf-8")
@@ -347,7 +347,7 @@ def test_line_endings_and_bom_are_scoped_to_the_service_tree():
 def test_the_services_are_findable_by_name():
     """`doc agentmemory`, `doc headroom` and `doc playwright` all matched ZERO
     topics: the material was a 1167-line repo README with no `doc` label at all.
-    Same failure mode as ts-config once being buried inside common/stack.md."""
+    Same failure mode as tstack config once being buried inside common/stack.md."""
     for page in ("services.md", "troubleshooting.md", "agentmemory.md",
                  "agentmemory-console.md", "headroom.md", "playwright.md"):
         assert (ROOT / "docs/kb/common" / page).exists(), page
@@ -386,7 +386,7 @@ def test_install_documents_docker_before_the_agent_toggles():
     answers, so the order is not cosmetic."""
     ins = (ROOT / "INSTALL.md").read_text(encoding="utf-8")
     assert "Phase 6a" in ins and ins.index("Phase 6a") < ins.index("Phase 6b")
-    assert "ts-stack bootstrap" in ins
+    assert "tstack services bootstrap" in ins
     assert "Terminal-stack never manages the containers" not in ins
 
 
@@ -442,7 +442,7 @@ def test_a_stack_that_joins_another_network_declares_ts_after():
     """Lexical order puts agent007memory FIRST ('0' < 'm'), and it joins
     ts-agentmemory-net, which the agentmemory stack creates. An external network
     cannot be joined before it exists, so without `ts-after` every fresh
-    `ts-stack up` fails with "network not found" on a stack that is perfectly
+    `tstack services up` fails with "network not found" on a stack that is perfectly
     configured. Any stack declaring an external network must name the stack that
     owns it."""
     import re

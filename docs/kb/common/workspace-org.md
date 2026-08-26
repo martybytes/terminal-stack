@@ -120,7 +120,7 @@ the guard is needed. It cost a real install: a clone at `<workspace>/terminal-st
 was migrated to `src/github.com/martybytes/terminal-stack`, a path no resolver knows,
 and the machinery went with it. A genuine dev clone already lives at a tier path and is
 therefore never a scan candidate, so nothing legitimate is caught. Relocating the
-runtime clone is `ts-doctor --repair`'s job — see `doc common/stack`.
+runtime clone is `tstack doctor --repair`'s job — see `doc common/stack`.
 
 Every run that moves anything writes a TSV log, which is what `wso unarchive --undo-last`
 reads. Those logs live in `<workspace>/.terminal-stack/workspace-runs/` — inside the
@@ -179,4 +179,4 @@ Read every line of `wso plan` before running `wso migrate`. Anything it lists as
 needs a human — usually two diverged clones of the same repo, which is a `git diff`
 session, not something a tool should guess at. The exception is
 `runtime — not migrated`, which needs nothing from you: it is the stack protecting its
-own install, and `ts-doctor --repair` is what moves that clone.
+own install, and `tstack doctor --repair` is what moves that clone.

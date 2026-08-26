@@ -32,6 +32,7 @@ _ts_persist_wizard() {
     TOML="$HOME/.config/chezmoi/chezmoi.toml"
     if [ -d "$SOURCE_DIR" ]; then
         ts_ensure_source_dir "$SOURCE_DIR"
+        ts_install_git_hooks "$SOURCE_DIR"
     else
         echo "$WARN $SOURCE_DIR not found; skipping chezmoi.toml. Set SOURCE_DIR env var and re-run, or edit manually."
     fi
@@ -43,7 +44,7 @@ _ts_persist_wizard() {
         ts_save_config "${TS_WIZ_LEADER:-ctrl-space}" "${TS_WIZ_THEME:-dark}" "${TS_WIZ_TMUX:-ctrl-b}" ${TS_WIZ_APPS:-}
         ts_agents_save_config "${TS_WIZ_HEADROOM:-off}" "${TS_WIZ_HEADROOM_CURSOR:-mcp}" "${TS_WIZ_CAVEMAN:-off}" "${TS_WIZ_AGENTMEMORY:-off}"
         # Stored on its own, not through ts_save_config: the mux key is positional-
-        # argument-free by design so ts-mux can flip it without re-stating the rest.
+        # argument-free by design so tstack mux can flip it without re-stating the rest.
         ts_wez_mux_set "${TS_WIZ_WEZ_MUX:-off}"
         ts_wez_restore_set "${TS_WIZ_WEZ_RESTORE:-off}"
         ts_atuin_set "${TS_WIZ_ATUIN:-off}"

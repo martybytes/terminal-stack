@@ -12,7 +12,7 @@ Earendil's self-extensible coding agent, in the `ai` group alongside `claude`,
 - **Needs Node 22.19+** (its `engines` field), the highest floor of any tool
   here — `codex` wants 16, `gemini` 20. If Node is older the installer *says
   what to do* rather than failing:
-  `ts-config apps fnm`, then `fnm install --lts`.
+  `tstack config apps fnm`, then `fnm install --lts`.
 - **Pre-ticked but still asked**, like every agent CLI. Untick it and nothing
   happens.
 

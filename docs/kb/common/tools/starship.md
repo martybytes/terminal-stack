@@ -11,7 +11,7 @@ clock on the right.
 
 The `palette` line is baked at apply time from the saved `resolvedTheme` —
 Catppuccin Mocha (dark) or VS Code Light Modern (light). Change it with
-`ts-config theme <dark|light|follow>`, never by editing the rendered file.
+`tstack config theme <dark|light|follow>`, never by editing the rendered file.
 
 ## Agent shells
 

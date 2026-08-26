@@ -7,7 +7,7 @@ SRC="${TERMINAL_STACK_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
 RCLONE_BIN="${TERMINAL_STACK_RCLONE_BIN:-}"
 [ -n "$RCLONE_BIN" ] || RCLONE_BIN="$(command -v rclone 2>/dev/null || true)"
 if [ -z "$RCLONE_BIN" ]; then
-    echo "rclone config: rclone is not installed. Run: ts-config apps rclone" >&2
+    echo "rclone config: rclone is not installed. Run: tstack config apps rclone" >&2
     exit 127
 fi
 
@@ -121,7 +121,7 @@ EOF
 
 provider_search() {
     if ! command -v jq >/dev/null 2>&1; then
-        echo "Provider search needs jq. Run: ts-config apps jq" >/dev/tty
+        echo "Provider search needs jq. Run: tstack config apps jq" >/dev/tty
         echo "You can still use Advanced raw rclone wizard from the main menu." >/dev/tty
         return 1
     fi

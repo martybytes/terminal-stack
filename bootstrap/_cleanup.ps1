@@ -118,7 +118,7 @@ function Move-TsClone {
             }
             Remove-Item -LiteralPath $srcResolved -Recurse -Force
         } else {
-            Write-Warning "Move-TsClone: move failed ($($_.Exception.Message)). Close shells/editors open in $Source and re-run ts-doctor -Repair."
+            Write-Warning "Move-TsClone: move failed ($($_.Exception.Message)). Close shells/editors open in $Source and re-run tstack doctor -Repair."
             return $false
         }
     }
@@ -246,7 +246,7 @@ function Test-TsInstall {
     }
 
     $cfg = Join-Path $env:LOCALAPPDATA 'terminal-stack\config.json'
-    if (Test-Path $cfg) { _ok "config: $cfg" } else { _bad "config.json missing ($cfg) — run install.ps1 or ts-config" }
+    if (Test-Path $cfg) { _ok "config: $cfg" } else { _bad "config.json missing ($cfg) — run install.ps1 or tstack config" }
 
     if (Test-Path $PROFILE) {
         if (Select-String -Path $PROFILE -Pattern 'terminal-stack-update-start' -Quiet -ErrorAction SilentlyContinue) {
@@ -260,7 +260,7 @@ function Test-TsInstall {
         if (Test-TsDevClone $SourceDir) {
             Write-Host '  note: pinned at a dev clone (workspace tier path) — deliberate, leaving it alone.'
         } else {
-            Write-Host "  note: clone is at a legacy location; 'ts-doctor -Repair' can move it to $canon"
+            Write-Host "  note: clone is at a legacy location; 'tstack doctor -Repair' can move it to $canon"
         }
     }
 
@@ -273,6 +273,6 @@ function Test-TsInstall {
 
     $issues = $script:_tsIssues
     if ($issues -eq 0) { if (-not $Quiet) { Write-Host '==> all checks passed.' } }
-    else { Write-Warning "$issues issue(s) found — run Repair-TerminalStack (ts-doctor -Repair) to fix." }
+    else { Write-Warning "$issues issue(s) found — run Repair-TerminalStack (tstack doctor -Repair) to fix." }
     return $issues
 }

@@ -11,7 +11,7 @@ winget install --id Docker.DockerDesktop --exact
 
 Then start it once from the Start menu and let it finish initialising. The stack
 never starts it for you: launching a multi-gigabyte GUI application because you
-typed `ts-stack status` is not acceptable. `ts-stack up --start-engine` does it
+typed `tstack services status` is not acceptable. `tstack services up --start-engine` does it
 when you ask.
 
 ## WSL integration — the setting that causes "docker is broken in WSL"
@@ -29,7 +29,7 @@ on **stdout**, so `command -v docker` succeeds and tells you nothing. Anything
 that treats that as "the engine is down" is giving you the wrong answer: the
 engine may be perfectly healthy on the Windows side.
 
-`ts-stack` detects this specifically. For anything that changes state it re-runs
+`tstack services` detects this specifically. For anything that changes state it re-runs
 its Windows twin over interop rather than proxying `docker.exe`, because compose
 resolves `-f`, build contexts and bind mounts as *Windows* paths, and a
 `\wsl.localhost` share is not reliably bind-mountable — a failure that would
@@ -55,12 +55,12 @@ docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi
 
 On an RTX 50-series (Blackwell) card kokoro needs the `cu128` image. `:latest` is
 `cu126`, which starts happily and then crash-loops on the first synthesis —
-`ts-stack test` catches that by checking the restart count, not just health.
+`tstack services test` catches that by checking the restart count, not just health.
 
 ## Autostart
 
 Docker Desktop can start with Windows (Settings → General). If you leave it off,
-`ts-stack status` will tell you the engine is unreachable rather than looking
+`tstack services status` will tell you the engine is unreachable rather than looking
 broken.
 
 See also: `doc services` · `doc troubleshooting`

@@ -7,9 +7,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MANIFEST="$ROOT/agent-tools.json"
 tool="${1:-all}" action="${2:-status}" cursor_mode="${3:-mcp}"
 
-case "$tool" in all|headroom|caveman|agentmemory) ;; *) echo "ts-agents: unknown tool '$tool'" >&2; exit 2;; esac
-case "$action" in status|on|off|repair|uninstall|dashboard) ;; *) echo "ts-agents: unknown action '$action'" >&2; exit 2;; esac
-case "$cursor_mode" in mcp|byok|off) ;; *) echo "ts-agents: cursor mode must be mcp, byok, or off" >&2; exit 2;; esac
+case "$tool" in all|headroom|caveman|agentmemory) ;; *) echo "tstack agents: unknown tool '$tool'" >&2; exit 2;; esac
+case "$action" in status|on|off|repair|uninstall|dashboard) ;; *) echo "tstack agents: unknown action '$action'" >&2; exit 2;; esac
+case "$cursor_mode" in mcp|byok|off) ;; *) echo "tstack agents: cursor mode must be mcp, byok, or off" >&2; exit 2;; esac
 
 # On a combined Windows/WSL install the actual GUI agents and user configuration
 # live on Windows. Use the same adapter as native PowerShell so the two entrypoints
@@ -200,7 +200,7 @@ headroom_status() {
         echo " ok proxy authentication works at $proxy"
         proxy_ok=1
     else
-        echo " !! proxy authentication failed at $proxy: $why (ts-stack runs the proxy)"
+        echo " !! proxy authentication failed at $proxy: $why (tstack services runs the proxy)"
     fi
     if headroom_mcp_probe; then
         echo " ok MCP stdio initialize handshake works through Headroom container"
@@ -312,7 +312,7 @@ agentmemory_apply() {
     # then exits 0. Re-run on every `on`/`repair` because a plugin upgrade
     # replaces the cache and silently reverts every edit.
     if [ -x "$ROOT/ts-agentmemory.sh" ]; then
-        bash "$ROOT/ts-agentmemory.sh" --apply || echo 'ts-agents: agentmemory hook wiring reported problems (see above).'
+        bash "$ROOT/ts-agentmemory.sh" --apply || echo 'tstack agents: agentmemory hook wiring reported problems (see above).'
     fi
     echo 'AgentMemory plugin enabled. Docker, secrets, and server feature flags were not changed.'
 }
@@ -344,7 +344,7 @@ run_one() {
             am_probe "$(json_get agentmemory.restUrl)" ;;
         agentmemory:on|agentmemory:repair) agentmemory_apply ;;
         agentmemory:off|agentmemory:uninstall) agentmemory_remove ;;
-        *) echo "ts-agents: unsupported action $action for $1" >&2; return 2 ;;
+        *) echo "tstack agents: unsupported action $action for $1" >&2; return 2 ;;
     esac
 }
 

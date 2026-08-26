@@ -13,14 +13,14 @@ it uses. Long-form reference: `services/stacks/headroom/README.md`.
 | 7474 / 7687 | Neo4j — the knowledge graph. Same condition |
 
 The last two are not part of the base stack: they arrive with
-`docker-compose.memory.yml`, which `ts-config memory headroom` selects. A
+`docker-compose.memory.yml`, which `tstack config memory headroom` selects. A
 machine using AgentMemory for memory never pulls those images.
 
 Port `8788` is only the dashboard gateway. It has no `/mcp` route; pointing
 Codex there returns nginx `404` during `initialize`. Claude can hide the same
 failure, so a quiet Claude startup is not proof that HTTP MCP works.
 
-`ts-config agents headroom on|repair` instead registers this stdio command:
+`tstack config agents headroom on|repair` instead registers this stdio command:
 
 ```sh
 docker exec -i ts-headroom-proxy headroom mcp serve --transport stdio --proxy-url http://127.0.0.1:8787
@@ -34,9 +34,9 @@ requests directly. MCP matters for explicit Headroom tools such as CCR retrieval
 ## Turning it on
 
 ```sh
-ts-stack up headroom
-ts-config agents headroom on      # registers the MCP clients, saves the setting
-ts-config agents headroom status  # the authenticated probe, with a reason
+tstack services up headroom
+tstack config agents headroom on      # registers the MCP clients, saves the setting
+tstack config agents headroom status  # the authenticated probe, with a reason
 ```
 
 `headroom on` refuses to persist `on` until the authenticated proxy answers,
@@ -57,15 +57,15 @@ Tell them apart by the body:
 | `{"error":"unauthorized"}` | headroom refusing you — wrong or missing proxy token |
 | anything naming an API key | you got through headroom; your provider refused it |
 
-The token is generated on this machine by `ts-stack bootstrap` and written only
+The token is generated on this machine by `tstack services bootstrap` and written only
 to the gitignored `services/stacks/headroom/.env`.
 
 ## Both secrets are required to start
 
 `HEADROOM_PROXY_TOKEN` and `NEO4J_PASSWORD` are `:?`-required in the compose
 file, so a missing one fails at `docker compose config` naming the variable
-rather than starting an open data plane. `ts-stack bootstrap` generates both;
-`ts-stack config headroom` is what to run if it will not start.
+rather than starting an open data plane. `tstack services bootstrap` generates both;
+`tstack services config headroom` is what to run if it will not start.
 
 ## Resource notes
 
@@ -81,7 +81,7 @@ main reason the memory backend is a deliberate choice rather than a default.
 `ts-headroom-workspace`, `ts-headroom-qdrant` and `ts-headroom-neo4j` are plain
 named volumes, so `docker compose down -v` **can** remove them — that is the
 difference from agentmemory's, which are external precisely so it cannot.
-`ts-stack reset --destroy-data` is the deliberate path, and it takes a verified
+`tstack services reset --destroy-data` is the deliberate path, and it takes a verified
 backup and a typed phrase first.
 
 ## What Headroom does, and does not, use a model for
@@ -107,13 +107,13 @@ is a shared side-model:
 ## Memory: only one backend runs
 
 AgentMemory and Headroom both do semantic memory, and this stack runs exactly
-one of them. `ts-config memory` is the switch:
+one of them. `tstack config memory` is the switch:
 
 ```sh
-ts-config memory status        # which one, and whether the derived state agrees
-ts-config memory agentmemory   # AgentMemory remembers, Headroom compresses (the default)
-ts-config memory headroom      # Headroom does both; AgentMemory is not installed
-ts-config memory none          # no memory; Headroom still compresses
+tstack config memory status        # which one, and whether the derived state agrees
+tstack config memory agentmemory   # AgentMemory remembers, Headroom compresses (the default)
+tstack config memory headroom      # Headroom does both; AgentMemory is not installed
+tstack config memory none          # no memory; Headroom still compresses
 ```
 
 Choosing `headroom` merges `docker-compose.memory.yml`, which starts Qdrant and
@@ -124,7 +124,7 @@ never engaged — and every machine ran a 900 MB Neo4j holding zero nodes while
 reporting healthy. There is no environment variable for `--memory`, so the flag
 lives in the overlay's `command:` and a test asserts it stays there.
 
-`ts-stack doctor` reports the backend, refuses to let the derived
+`tstack services doctor` reports the backend, refuses to let the derived
 `agentmemoryEnabled` drift from it, and says so if the proxy is running without
 `--memory` while `headroom` is selected.
 
@@ -137,7 +137,7 @@ neither exists inside the container — nor should it. Your routing is fine if
 `/stats` attributes requests to `claude-code`. Ask the host instead:
 
 ```sh
-ts-config agents headroom status
+tstack config agents headroom status
 ```
 
 See also: `doc services` · `doc troubleshooting` · `doc claude-code`

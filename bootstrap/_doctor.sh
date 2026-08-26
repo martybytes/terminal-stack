@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # _doctor.sh — diagnose + repair the terminal-stack install. Sourced by the bash
-# entry ts-doctor.sh, by the installers (post-apply health check), and by ts-update.
+# entry ts-doctor.sh, by the installers (post-apply health check), and by tstack update.
 # Depends on _config.sh (sourceDir helpers) and _cleanup.sh (clone discovery).
 #
 # CARE WITH NON-ASCII AFTER A BARE $VAR. macOS ships bash 3.2, whose
@@ -229,7 +229,7 @@ ts_doctor() {
             if grep -q 'terminal-stack-tts.exe hook' "$_hk_settings" 2>/dev/null; then
                 _ok "Claude TTS hooks installed"
             elif [ "$(ts_cc_tts_get ccTtsEnabled 2>/dev/null)" = true ]; then
-                _bad "TTS is enabled but ~/.claude/settings.json has no terminal-stack-tts hooks - nothing will ever call the daemon; repair: ts-config tts on (from WSL)"
+                _bad "TTS is enabled but ~/.claude/settings.json has no terminal-stack-tts hooks - nothing will ever call the daemon; repair: tstack config tts on (from WSL)"
             fi
         fi
     fi
@@ -243,7 +243,7 @@ ts_doctor() {
         _am="$(ts_agent_get agentmemoryEnabled 2>/dev/null || echo off)"
         case "$_mb:$_am" in
             agentmemory:on|headroom:off|none:off) _ok "memory backend: $_mb" ;;
-            *) _bad "memoryBackend is '$_mb' but agentmemoryEnabled is '$_am' — fix: ts-config memory $_mb" ;;
+            *) _bad "memoryBackend is '$_mb' but agentmemoryEnabled is '$_am' — fix: tstack config memory $_mb" ;;
         esac
     fi
 
@@ -266,7 +266,7 @@ ts_doctor() {
                 # for kokoro is a fallback, not a silent loss. When kokoro IS the
                 # chosen engine and it is down, voice notifications are gone.
                 if [ "$_tts_engine" = kokoro ]; then
-                    _bad "kokoro is the chosen TTS engine (ccTtsEngine=kokoro) and it is not reachable — voice notifications are silently off; start it: ts-stack up kokoro"
+                    _bad "kokoro is the chosen TTS engine (ccTtsEngine=kokoro) and it is not reachable — voice notifications are silently off; start it: tstack services up kokoro"
                 else
                     echo "  note: kokoro TTS engine not reachable (engine is $_tts_engine, so this is only the fallback)"
                 fi ;;
@@ -307,7 +307,7 @@ ts_doctor() {
             _bad "tts: $_lj forces enabled=false, which overrides the saved setting - remove that key (ccmute is the way to go quiet)"
         fi
         if [ -n "${_hdup:-}" ] && [ "$_hdup" != 0 ]; then
-            echo "  note: $_hdup session(s) spoke twice within 8s in the last day - inspect: ts-config tts history --dupes"
+            echo "  note: $_hdup session(s) spoke twice within 8s in the last day - inspect: tstack config tts history --dupes"
         fi
         if [ "$(ts_cc_tts_get ccTtsDaemon 2>/dev/null)" = on ]; then
             local _dout _snap
@@ -315,13 +315,13 @@ ts_doctor() {
                 _ok "tts daemon healthy"
                 printf '%s\n' "$_dout" | grep 'older build' | sed 's/^/  note: /' || true
             else
-                _bad "tts daemon enabled (ccTtsDaemon=on) but not reachable — hooks fall back to direct playback; start: ts-config tts daemon on"
+                _bad "tts daemon enabled (ccTtsDaemon=on) but not reachable — hooks fall back to direct playback; start: tstack config tts daemon on"
                 if [ -n "${_hage:-}" ] && [ "$_hage" != - ] && [ "$_hage" -gt 900 ] 2>/dev/null; then
                     echo "  note: nothing has spoken through the daemon for $((_hage / 60)) minutes - that long on the direct path is how overlapping voices go unnoticed"
                 fi
                 _snap="$(ts_cc_tts_daemon_snapshot_path 2>/dev/null || true)"
                 if [ -n "$_snap" ] && [ -f "$_snap" ]; then
-                    echo "  note: stale duck snapshot present — music may be stuck quiet; the daemon's next start restores it (ts-config tts daemon on)"
+                    echo "  note: stale duck snapshot present — music may be stuck quiet; the daemon's next start restores it (tstack config tts daemon on)"
                 fi
             fi
         fi
@@ -349,7 +349,7 @@ ts_doctor() {
                 if "$_am_pwsh" -NoLogo -NonInteractive -ExecutionPolicy Bypass -File "$_am_win" -Check >/dev/null 2>&1; then
                     _ok "agentmemory hook wiring intact"
                 else
-                    _bad "agentmemory hook wiring is incomplete (a plugin upgrade reverts it) — repair: ts-update, or bootstrap/ts-agentmemory.ps1 -Apply"
+                    _bad "agentmemory hook wiring is incomplete (a plugin upgrade reverts it) — repair: tstack update, or bootstrap/ts-agentmemory.ps1 -Apply"
                 fi
                 _am_done=1
             fi
@@ -358,7 +358,7 @@ ts_doctor() {
             if bash "$src/bootstrap/ts-agentmemory.sh" --check >/dev/null 2>&1; then
                 _ok "agentmemory hook wiring intact"
             else
-                _bad "agentmemory hook wiring is incomplete (a plugin upgrade reverts it) — repair: ts-config agents agentmemory repair"
+                _bad "agentmemory hook wiring is incomplete (a plugin upgrade reverts it) — repair: tstack config agents agentmemory repair"
             fi
         fi
         # The secret, which is a different failure. The hooks now recover a stale *process*
@@ -384,17 +384,17 @@ ts_doctor() {
         fi
     fi
 
-    # ── ts-smb (SMB shares over rclone) ───────────────────────────────────────
+    # ── tstack smb (SMB shares over rclone) ───────────────────────────────────────
     # Gated: ts_doctor is already long, so this runs only once you actually use
-    # ts-smb. `ts-smb doctor` is the full report; these are the three lines that
+    # tstack smb. `tstack smb doctor` is the full report; these are the three lines that
     # matter to a general health check.
     local smb_conf="${XDG_CONFIG_HOME:-$HOME/.config}/terminal-stack/shares.local.conf"
     local smb_state="${XDG_STATE_HOME:-$HOME/.local/state}/terminal-stack/smb"
     if [ -f "$smb_conf" ] || [ -n "$(ls -A "$smb_state" 2>/dev/null || true)" ]; then
         if command -v rclone >/dev/null 2>&1; then
-            _ok "ts-smb: rclone present"
+            _ok "tstack smb: rclone present"
         else
-            _bad "ts-smb: shares are configured but rclone is missing; repair: ts-config apps rclone"
+            _bad "tstack smb: shares are configured but rclone is missing; repair: tstack config apps rclone"
         fi
         # The Homebrew macOS build refuses to mount, and nothing at runtime can
         # get past it — worth saying out loud, because browsing still works and
@@ -404,7 +404,7 @@ ts_doctor() {
             rcp="$(realpath "$rcp" 2>/dev/null || printf '%s' "$rcp")"
             case "$rcp" in
                 */Cellar/*|/opt/homebrew/*|/usr/local/Homebrew/*)
-                    _bad "ts-smb: this rclone is the Homebrew build, which cannot mount on macOS (browsing is unaffected); repair: install the official binary from https://rclone.org/downloads/"
+                    _bad "tstack smb: this rclone is the Homebrew build, which cannot mount on macOS (browsing is unaffected); repair: install the official binary from https://rclone.org/downloads/"
                     ;;
             esac
         fi
@@ -416,7 +416,7 @@ ts_doctor() {
             kill -0 "$pid" 2>/dev/null || smb_stale=$((smb_stale + 1))
         done
         if [ "$smb_stale" -gt 0 ]; then
-            _bad "ts-smb: $smb_stale stale mount record(s); repair: ts-smb umount --all --force"
+            _bad "tstack smb: $smb_stale stale mount record(s); repair: tstack smb umount --all --force"
         fi
     fi
 
@@ -428,7 +428,7 @@ ts_doctor() {
         if command -v ts_is_dev_clone >/dev/null 2>&1 && ts_is_dev_clone "$src"; then
             echo "  note: sourceDir points at a dev clone (workspace tier path) — deliberate pin, leaving it alone."
         else
-            echo "  note: clone is at a legacy location; 'ts-doctor --repair' can move it to $canon"
+            echo "  note: clone is at a legacy location; 'tstack doctor --repair' can move it to $canon"
         fi
     fi
 
@@ -436,13 +436,13 @@ ts_doctor() {
     # counting an issue, so a working install still reports "all checks passed".
     others="$(ts_find_old_clones "${src:-$HOME/code/terminal-stack}" 2>/dev/null)"
     if [ -n "$others" ]; then
-        echo "  note: other terminal-stack clones present (ts-doctor --repair can clean them up):"
+        echo "  note: other terminal-stack clones present (tstack doctor --repair can clean them up):"
         echo "$others" | sed 's/^/        /'
     fi
 
     unset -f _ok _bad 2>/dev/null || true
     if [ "$issues" -eq 0 ]; then [ "$quiet" = "1" ] || echo "$INFO all checks passed."; return 0; fi
-    echo "$WARN $issues issue(s) found — run 'ts-doctor --repair' to fix."
+    echo "$WARN $issues issue(s) found — run 'tstack doctor --repair' to fix."
     return 1
 }
 

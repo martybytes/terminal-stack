@@ -1,11 +1,11 @@
 # services — the local Docker stacks
 
 Three headline features of this stack are a client talking to a server on
-`127.0.0.1`. `ts-stack` drives those servers. Long-form reference lives beside
+`127.0.0.1`. `tstack services` drives those servers. Long-form reference lives beside
 each compose file in `services/stacks/<name>/README.md`.
 
 > AgentMemory and Headroom both do semantic memory, and exactly one of them runs:
-> `ts-config memory agentmemory|headroom|none`. The default is AgentMemory for
+> `tstack config memory agentmemory|headroom|none`. The default is AgentMemory for
 > memory and Headroom for compression.
 
 ## The stacks
@@ -18,7 +18,7 @@ each compose file in `services/stacks/<name>/README.md`.
 | `kokoro` | voice notifications go silent | 8880 |
 | `playwright` | agents cannot drive a browser | 8931 |
 
-`agent007memory` starts after `agentmemory` and joins its network — `ts-stack`
+`agent007memory` starts after `agentmemory` and joins its network — `tstack services`
 orders them, and reversing them by hand fails with "network not found".
 
 Everything binds `127.0.0.1` only — none of these services authenticate.
@@ -27,27 +27,27 @@ Everything binds `127.0.0.1` only — none of these services authenticate.
 
 | | |
 |---|---|
-| `ts-stack` | one line per stack: state, health, published ports |
-| `ts-stack bootstrap` | first run here: `.env` files, generated secrets, volumes |
-| `ts-stack up [<stack>]` | start (only the stacks your settings enable) |
-| `ts-stack down [<stack>]` | stop. Every volume is kept |
-| `ts-stack restart [<stack>]` | down then up, so a changed `.env` is picked up |
-| `ts-stack logs <stack> [-n N] [-f]` | tail one stack |
-| `ts-stack config [<stack>]` | what compose actually resolves to on this machine |
-| `ts-stack doctor` | engine, `.env` files, health, ports, toggle drift |
-| `ts-stack test` | take it all down, bring it back up, prove the chain works |
-| `ts-stack backup` | cold tar of every data volume, with a manifest |
-| `ts-stack --dry-run <verb>` | print the exact docker argv and change nothing |
+| `tstack services` | one line per stack: state, health, published ports |
+| `tstack services bootstrap` | first run here: `.env` files, generated secrets, volumes |
+| `tstack services up [<stack>]` | start (only the stacks your settings enable) |
+| `tstack services down [<stack>]` | stop. Every volume is kept |
+| `tstack services restart [<stack>]` | down then up, so a changed `.env` is picked up |
+| `tstack services logs <stack> [-n N] [-f]` | tail one stack |
+| `tstack services config [<stack>]` | what compose actually resolves to on this machine |
+| `tstack services doctor` | engine, `.env` files, health, ports, toggle drift |
+| `tstack services test` | take it all down, bring it back up, prove the chain works |
+| `tstack services backup` | cold tar of every data volume, with a manifest |
+| `tstack services --dry-run <verb>` | print the exact docker argv and change nothing |
 
 ## Which stacks take part
 
 From the settings you already have: `agentmemoryEnabled`, `headroomEnabled`,
-`playwrightEnabled` (`ts-config agents`), and for kokoro the TTS switch plus
-`ccTts.engine` (`ts-config tts`). A stack that is off is **skipped and reported
+`playwrightEnabled` (`tstack config agents`), and for kokoro the TTS switch plus
+`ccTts.engine` (`tstack config tts`). A stack that is off is **skipped and reported
 as skipped**, never as broken. One that is off but *running* gets a warning
 naming both ways out.
 
-Naming a stack overrides its toggle — `ts-stack up headroom` works with the
+Naming a stack overrides its toggle — `tstack services up headroom` works with the
 setting off, because asking by name is consent.
 
 ## Reading the status line
@@ -66,16 +66,16 @@ rather than a failure.
 
 `doc troubleshooting` is keyed by symptom. The short version:
 
-- **engine down** — `ts-stack doctor` names which runtime it looked for and how
+- **engine down** — `tstack services doctor` names which runtime it looked for and how
   to start it. In WSL, `docker` may exist and be Docker Desktop's stub, which
   exits 1 for every command; doctor says so rather than guessing.
-- **a stack will not start** — `ts-stack config <stack>` first. A missing
+- **a stack will not start** — `tstack services config <stack>` first. A missing
   required value fails there, by name.
-- **it says "Up" but does not work** — that is what `ts-stack test` is for.
+- **it says "Up" but does not work** — that is what `tstack services test` is for.
   "Up (healthy)" is not evidence: kokoro reports it while crash-looping on a CUDA
   build that does not match the card.
 
-## What `ts-stack test` actually proves
+## What `tstack services test` actually proves
 
 Not just that containers started:
 

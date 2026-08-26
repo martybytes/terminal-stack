@@ -4,9 +4,9 @@ import importlib.util
 import json
 import subprocess
 import sys
-import tomllib
 from pathlib import Path
 
+import tomllib
 
 HELPER = Path(__file__).resolve().parents[1] / "dot_codex/hooks/terminal_stack.py"
 PROFILE = Path(__file__).resolve().parents[1] / "dot_codex/modify_private_terminal-stack.config.toml.tmpl"

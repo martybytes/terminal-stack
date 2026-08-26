@@ -16,7 +16,7 @@
 #   __THEME_MODE__      dark|light|follow    (from themeMode)
 #   __THEME_RESOLVED__  baked palette light|dark (from resolvedTheme)
 #   __TMUX_PREFIX__     tmux prefix spec     (from tmuxPrefixResolved)
-#   __WEZ_MUX__         on|off WezTerm mux domain (from weztermMux; see ts-mux)
+#   __WEZ_MUX__         on|off WezTerm mux domain (from weztermMux; see tstack mux)
 #   __GHOSTTY_THEME__   Ghostty `theme` value derived from themeMode
 #   __GHOSTTY_WINDOW_THEME__  its Windows-only DWM title-bar counterpart
 #   __WEZ_RESTORE__     on|off reopen last session (from weztermRestore)
@@ -287,7 +287,7 @@ sync_tree() {
     # ghosttyConfig=off: skip the Ghostty subtree rather than deleting it.
     # Same rule as the macOS .chezmoiignore gate - turning it off stops the
     # config being re-rendered; removing what is already there is
-    # ts-config's job, so a hand-written config on a box that never opted
+    # tstack config's job, so a hand-written config on a box that never opted
     # in is never touched by a sync.
     case "$rel" in
       AppData/Local/ghostty/*)
@@ -498,5 +498,5 @@ printf 'sync-windows: user=%s, %d created, %d updated, %d unchanged\n' "$WIN_USE
 # and only when the mux is actually the thing hosting panes.
 if [ "$wezterm_cfg_changed" = 1 ] && [ "$WEZ_MUX" = on ]; then
   echo "sync-windows: WezTerm config changed. The GUI reloads live, but wezterm-mux-server keeps the old config for spawning panes." >&2
-  echo "  When convenient (closes all panes!): 'ts-mux restart'." >&2
+  echo "  When convenient (closes all panes!): 'tstack mux restart'." >&2
 fi

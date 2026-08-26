@@ -8,6 +8,8 @@ CHANGELOG.md
 INSTALL.md
 CLAUDE.md
 AGENTS.md
+REVAMP-PLAN.md
+pyproject.toml
 LICENSE
 .gitignore
 .gitattributes
@@ -31,6 +33,11 @@ tests/**
 services/**
 # The pre-commit hook is repo infrastructure, run from a DEV clone, never $HOME.
 .githooks/**
+# The tstack program: repo infrastructure, run from the clone by the shell shims in
+# dot_zshrc and $PROFILE. Same allow-by-default trap as tests/** and services/**:
+# without this line every module is written into $HOME on apply
+# (tstack/commands/config.py -> ~/tstack/commands/config.py).
+tstack/**
 # Python bytecode caches are build noise. .gitignore already covers them, but
 # chezmoi has its own ignore list — without this, running the codex hook tests
 # deploys ~/.codex/hooks/__pycache__/*.pyc.
@@ -58,9 +65,9 @@ scripts/**
        (this path is chezmoi's, and chezmoi only manages $HOME here; the WINDOWS
        Ghostty config is a different file, windows/AppData/Local/ghostty/, carried
        by the sync — native-Linux hosts are headless and get neither),
-       and this one, which is how `ts-config ghostty off` stops the config being
+       and this one, which is how `tstack config ghostty off` stops the config being
        re-rendered. Turning it off does NOT delete anything from $HOME — that is
-       ts-config's job, deliberately, because .chezmoiignore is evaluated on
+       tstack config's job, deliberately, because .chezmoiignore is evaluated on
        every machine and a removal rule would wipe a hand-written Ghostty config
        on a box that never opted in. */}}
 {{ if ne (index . "ghosttyConfig" | default "on") "on" }}

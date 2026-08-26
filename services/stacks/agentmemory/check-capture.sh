@@ -71,10 +71,16 @@ section 'A. Client wiring lives in terminal-stack'
 # from them, so this only locates the entry point — and says so loudly when
 # there isn't one, because on macOS/Linux that is the difference between
 # "agentmemory works" and "agentmemory silently never records anything".
+# The PATH probe that used to lead this list looked for an executable named
+# `ts-agentmemory`. There never was one: it was a bootstrap script reached through
+# a zsh wrapper, and `tstack` is a shell function too, so `command -v` cannot see
+# either from a non-interactive script. It matched nothing on every host, silently,
+# and the clone-path candidates below are what actually resolved. The canonical
+# runtime clone location now leads, which is where `tstack update` keeps it.
 ts_entry=''
 for cand in \
-    "$(command -v ts-agentmemory 2>/dev/null || true)" \
     "${TERMINAL_STACK_DIR:-}/bootstrap/ts-agentmemory.sh" \
+    "${XDG_DATA_HOME:-$HOME/.local/share}/terminal-stack/bootstrap/ts-agentmemory.sh" \
     "$TSS_ROOT/../terminal-stack/bootstrap/ts-agentmemory.sh" \
     "$HOME/Documents/Workspace/src/github.com/martybytes/terminal-stack/bootstrap/ts-agentmemory.sh"
 do
@@ -83,14 +89,14 @@ done
 
 if [ -n "$ts_entry" ]; then
     info "harness wiring: $ts_entry"
-    info 'Run it with --check (or ts-doctor) to report reverted hook-script edits,'
-    info 'which is what a plugin upgrade silently causes.'
+    info 'Run `tstack agentmemory --check` (or `tstack doctor`) to report reverted'
+    info 'hook-script edits, which is what a plugin upgrade silently causes.'
 else
-    fail 'no ts-agentmemory shell entry point on this host — terminal-stack ships a .ps1 only, so NO host-side hook wiring exists on macOS/Linux.'
-    info 'Consequence: the server can store observations, but nothing is sending any.'
+    fail 'no agentmemory harness entry point found — no terminal-stack clone at any known location, so host-side hook wiring cannot be verified.'
+    info 'Consequence: the server can store observations, but nothing may be sending any.'
     info 'The API stays healthy, MCP tools resolve, searches answer — and capture is dead.'
     info 'Section D will fail below, and that is the correct result, not a bug in this script.'
-    info 'The fix belongs in terminal-stack: a .sh twin of bootstrap/ts-agentmemory.ps1.'
+    info 'Fix: install terminal-stack, or set TERMINAL_STACK_DIR to an existing clone.'
 fi
 info 'What follows is the server side: secret, capture, search, project scoping.'
 
@@ -428,7 +434,7 @@ $(scan_duplicate_pairs "$since")
 EOF
         if [ "${rows:-0}" -lt 2 ]; then info 'too few recent captures to scan for duplicates'
         elif [ "${pairs:-0}" = 0 ]; then pass "no duplicate captures across the last $rows stored in 10 min"
-        else fail "$pairs duplicated captures in the last 10 min - run ts-agentmemory --check in terminal-stack"; fi
+        else fail "$pairs duplicated captures in the last 10 min - run `tstack agentmemory --check` in terminal-stack"; fi
     else
         fail 'duplicate probe failed: could not post the observation'
     fi

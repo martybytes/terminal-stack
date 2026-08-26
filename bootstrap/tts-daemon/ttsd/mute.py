@@ -103,7 +103,7 @@ def toggle(by: str = "cli") -> bool:
 
 
 def describe() -> str:
-    """One line for humans: `ccmute`, `ts-doctor`, and the tray tooltip share this."""
+    """One line for humans: `ccmute`, `tstack doctor`, and the tray tooltip share this."""
     if not is_muted():
         return "tts: not muted"
     info = state()

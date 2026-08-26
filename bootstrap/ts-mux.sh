@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # ts-mux.sh — turn the WezTerm multiplexer domain on/off and drive the live mux
-# server. Driven by the `ts-mux` shell wrapper (zsh) and runnable standalone.
+# server. Driven by the `tstack mux` shell wrapper (zsh) and runnable standalone.
 #
-# The pwsh `ts-mux` (Invoke-TsMux in $PROFILE) is the PARALLEL implementation for
+# The pwsh `tstack mux` (Invoke-TsMux in $PROFILE) is the PARALLEL implementation for
 # Windows-standalone installs, not a wrapper: change one, change the other, and
 # keep the -h output byte-identical.
 #
@@ -16,33 +16,33 @@
 # wezterm.exe), never the Linux process table.
 set -euo pipefail
 
-HELP='ts-mux — WezTerm multiplexer domain: keep panes alive when the GUI dies.
+HELP='tstack mux — WezTerm multiplexer domain: keep panes alive when the GUI dies.
 
 Usage:
-  ts-mux [status]   the setting, the mux server, and the panes it hosts
-  ts-mux on         host panes in the mux domain (unix domain "main")
-  ts-mux off        spawn panes locally (the default)
-  ts-mux list       wezterm cli list — every pane the mux knows about
-  ts-mux kill       stop wezterm-mux-server       [KILLS EVERY PANE IT HOSTS]
-  ts-mux restart    stop it, then start a fresh one, so it re-reads the config
-  ts-mux reset      back to default: off + re-apply + kill + clear stale sockets
-  ts-mux -h         this help
+  tstack mux [status]   the setting, the mux server, and the panes it hosts
+  tstack mux on         host panes in the mux domain (unix domain "main")
+  tstack mux off        spawn panes locally (the default)
+  tstack mux list       wezterm cli list — every pane the mux knows about
+  tstack mux kill       stop wezterm-mux-server       [KILLS EVERY PANE IT HOSTS]
+  tstack mux restart    stop it, then start a fresh one, so it re-reads the config
+  tstack mux reset      back to default: off + re-apply + kill + clear stale sockets
+  tstack mux -h         this help
 
   -y, --yes         skip the confirmation for kill / restart / reset
 
 With the mux on, your shells run inside wezterm-mux-server instead of the GUI, so
 a GUI crash leaves every pane (and everything running in it) alive and relaunching
 WezTerm reattaches. The costs are why it is off by default: the mux server loads
-its OWN copy of .wezterm.lua, so a config change needs "ts-mux restart" — which
+its OWN copy of .wezterm.lua, so a config change needs "tstack mux restart" — which
 kills every pane — and not just a GUI reload; and the Claude per-pane tint needs
 pane:inject_output, which mux panes do not have.
 
 on/off re-render .wezterm.lua and take effect for newly spawned tabs; relaunch
 WezTerm for a clean switch. Panes already hosted in the mux stay there until you
-close them or run "ts-mux kill". The setting is saved with the rest of the config
-(chezmoi [data] weztermMux / config.json weztermMux) and shown by "ts-config show".'
+close them or run "tstack mux kill". The setting is saved with the rest of the config
+(chezmoi [data] weztermMux / config.json weztermMux) and shown by "tstack config show".'
 
-# Help before anything else: `ts-mux -h` must work on a box where the clone or
+# Help before anything else: `tstack mux -h` must work on a box where the clone or
 # chezmoi is the very thing that is broken.
 case "${1:-}" in -h|--help|help) printf '%s
 ' "$HELP"; exit 0 ;; esac
@@ -51,11 +51,11 @@ CZ="${TERMINAL_STACK_CHEZMOI:-}"
 if [ -z "$CZ" ]; then
     if [ -x "$HOME/.local/bin/chezmoi" ]; then CZ="$HOME/.local/bin/chezmoi"
     elif command -v chezmoi >/dev/null 2>&1; then CZ="$(command -v chezmoi)"
-    else echo "ts-mux: chezmoi not found on PATH." >&2; exit 1; fi
+    else echo "tstack mux: chezmoi not found on PATH." >&2; exit 1; fi
 fi
 SRC="${TERMINAL_STACK_DIR:-$("$CZ" source-path 2>/dev/null || true)}"
 if [ ! -d "$SRC/bootstrap" ]; then
-    echo "ts-mux: cannot locate the terminal-stack clone (set TERMINAL_STACK_DIR)." >&2
+    echo "tstack mux: cannot locate the terminal-stack clone (set TERMINAL_STACK_DIR)." >&2
     exit 1
 fi
 # shellcheck source=_config.sh
@@ -160,7 +160,7 @@ finish() {
 confirm() {  # confirm <prompt>
     [ "$ASSUME_YES" = 1 ] && return 0
     if ! { true > /dev/tty; } 2>/dev/null; then
-        echo "ts-mux: no terminal to confirm on — re-run with -y if you mean it." >&2
+        echo "tstack mux: no terminal to confirm on — re-run with -y if you mean it." >&2
         return 1
     fi
     local a; a="$(ts_tty_prompt "$1 [y/N]: ")"
@@ -171,7 +171,7 @@ confirm() {  # confirm <prompt>
 show_status() {
     local setting rendered pids cli panes
     setting="$(ts_wez_mux_get)"
-    echo "ts-mux:"
+    echo "tstack mux:"
     echo "  setting  : $setting   (saved as weztermMux)"
 
     rendered="$(rendered_mux 2>/dev/null || true)"
@@ -192,12 +192,12 @@ show_status() {
 
     if cli="$(wez_cli 2>/dev/null)"; then
         panes="$("$cli" cli list 2>/dev/null | tail -n +2 | grep -c . || true)"
-        [ -n "$panes" ] && echo "  panes    : $panes   ('ts-mux list' for detail)"
+        [ -n "$panes" ] && echo "  panes    : $panes   ('tstack mux list' for detail)"
     fi
 
     if [ "$setting" = off ] && [ -n "$pids" ]; then
         echo "  note     : panes spawned while the mux was on are still hosted by it;"
-        echo "             they stay alive until you close them or run 'ts-mux kill'."
+        echo "             they stay alive until you close them or run 'tstack mux kill'."
     fi
 }
 
@@ -210,16 +210,16 @@ set_mux() {  # set_mux <on|off>
     finish
     if [ "$want" = on ]; then
         echo "    Panes now spawn into the mux domain 'main'. Relaunch WezTerm for a"
-        echo "    clean switch; 'ts-mux status' shows the server once it starts."
+        echo "    clean switch; 'tstack mux status' shows the server once it starts."
     else
         echo "    New tabs spawn locally again. Panes already hosted by the mux stay"
-        echo "    there until you close them or run 'ts-mux kill'."
+        echo "    there until you close them or run 'tstack mux kill'."
     fi
 }
 
 do_list() {
     local cli
-    cli="$(wez_cli)" || { echo "ts-mux: wezterm CLI not found on PATH." >&2; return 1; }
+    cli="$(wez_cli)" || { echo "tstack mux: wezterm CLI not found on PATH." >&2; return 1; }
     "$cli" cli list
 }
 
@@ -248,12 +248,12 @@ do_start() {
     local bin
     if [ -n "$(mux_pids)" ]; then echo "==> wezterm-mux-server is already running."; return 0; fi
     bin="$(mux_bin)" || {
-        echo "ts-mux: wezterm-mux-server not found — relaunch WezTerm and it will spawn one." >&2
+        echo "tstack mux: wezterm-mux-server not found — relaunch WezTerm and it will spawn one." >&2
         return 1
     }
     echo "==> starting wezterm-mux-server --daemonize"
     "$bin" --daemonize >/dev/null 2>&1 \
-        || { echo "ts-mux: start failed — relaunch WezTerm and it will spawn one." >&2; return 1; }
+        || { echo "tstack mux: start failed — relaunch WezTerm and it will spawn one." >&2; return 1; }
 }
 
 clear_sockets() {
@@ -284,8 +284,8 @@ for a in "$@"; do
     case "$a" in
         -y|--yes) ASSUME_YES=1 ;;
         -h|--help|help) printf '%s\n' "$HELP"; exit 0 ;;
-        -*) echo "ts-mux: unknown flag '$a' (try: ts-mux -h)" >&2; exit 2 ;;
-        *) [ -z "$CMD" ] && CMD="$a" || { echo "ts-mux: unexpected argument '$a'" >&2; exit 2; } ;;
+        -*) echo "tstack mux: unknown flag '$a' (try: tstack mux -h)" >&2; exit 2 ;;
+        *) [ -z "$CMD" ] && CMD="$a" || { echo "tstack mux: unexpected argument '$a'" >&2; exit 2; } ;;
     esac
 done
 
@@ -297,5 +297,5 @@ case "$CMD" in
     kill)      do_kill ;;
     restart)   do_kill && do_start ;;
     reset)     do_reset ;;
-    *) echo "ts-mux: unknown command '$CMD' (status, on, off, list, kill, restart, reset)" >&2; exit 2 ;;
+    *) echo "tstack mux: unknown command '$CMD' (status, on, off, list, kill, restart, reset)" >&2; exit 2 ;;
 esac

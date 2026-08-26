@@ -7,7 +7,7 @@ keep on **remote servers** — locally, WezTerm panes cover the same ground.
 
 | Setting | Effect |
 |---|---|
-| prefix | configurable: `ts-config tmux <chord>`, default `C-b` — kept separate from the WezTerm leader so the two layers never collide |
+| prefix | configurable: `tstack config tmux <chord>`, default `C-b` — kept separate from the WezTerm leader so the two layers never collide |
 | `mouse on` | click panes, drag borders, wheel-scroll |
 | `base-index 1` / `pane-base-index 1` | windows and panes count from 1, matching the number row |
 | `renumber-windows on` | closing window 2 of 4 leaves 1-3, not 1,3,4 |
@@ -18,8 +18,8 @@ keep on **remote servers** — locally, WezTerm panes cover the same ground.
 | `allow-passthrough on` + `extended-keys on` | modified keys and escape sequences reach the app — this is **why** `Shift+Enter` works in Claude Code inside tmux |
 
 The status line's colors are **baked at apply time** from the saved theme.
-`ts-config theme <dark|light|follow>` re-applies and re-bakes them; toggling the OS
-appearance alone changes nothing until the next apply or `ts-update`.
+`tstack config theme <dark|light|follow>` re-applies and re-bakes them; toggling the OS
+appearance alone changes nothing until the next apply or `tstack update`.
 
 ## Sessions
 | Command | What it does |

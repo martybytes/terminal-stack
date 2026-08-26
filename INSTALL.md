@@ -33,12 +33,12 @@ Two guards on that choice, both there because the alternative bit us:
 
 **Cleaning up old installs.** After cloning, the installer scans for **old terminal-stack clones at other paths** and **retired leftover files** (`command-reference.{md,txt,html}`, `~/.local/bin/wzr`, `~/.wezterm-ref`) and offers a checklist — safe items pre-ticked, one confirmation before anything is removed, your per-machine files (`~/.zshrc.local`/`profile.local.ps1`, `~/.doc.local`, `*.local.md`) never touched. Preview without deleting via `TS_DRY_RUN=1`. This is also what prevents the "I re-installed but `doc` still isn't found" trap: a stale `chezmoi sourceDir` pointing at an old clone is repointed automatically.
 
-**Install wizard.** The bootstraps run a short wizard, each prompt skippable via an env var (so scripted installs stay non-interactive — the bash prompts read `/dev/tty` directly and degrade to their defaults when no terminal is attached). Your answers are **saved** (chezmoi `[data]` on WSL/Linux/macOS; `%LOCALAPPDATA%\terminal-stack\config.json` on Windows) so `ts-update` keeps honoring them and `ts-config` can change them later.
+**Install wizard.** The bootstraps run a short wizard, each prompt skippable via an env var (so scripted installs stay non-interactive — the bash prompts read `/dev/tty` directly and degrade to their defaults when no terminal is attached). Your answers are **saved** (chezmoi `[data]` on WSL/Linux/macOS; `%LOCALAPPDATA%\terminal-stack\config.json` on Windows) so `tstack update` keeps honoring them and `tstack config` can change them later.
 
 Every question works the same way: the default is **marked with `>` and captioned "press Enter"**, an option's **name works wherever its number does** (`dark`, `stable`, `none`), and anything it doesn't recognise **asks again** rather than quietly taking the default — after three tries it gives up and takes the default, so an automated caller can't hang.
 
 - **Leader key** (WezTerm) — `Ctrl+Space` (default), `Ctrl+A`, `Ctrl+B`, `Alt+Space`, or a custom `mod-key` chord (e.g. `ctrl-x`). Skip with `TS_LEADER=ctrl-a`.
-- **Theme** — `dark` (Catppuccin Mocha, default), `light` (VS Code Light Modern), or `follow` (track the OS light/dark setting; WezTerm switches live, the Starship/tmux palette is baked at apply and refreshed by `ts-update`/`ts-config`). Skip with `TS_THEME=dark|light|follow`.
+- **Theme** — `dark` (Catppuccin Mocha, default), `light` (VS Code Light Modern), or `follow` (track the OS light/dark setting; WezTerm switches live, the Starship/tmux palette is baked at apply and refreshed by `tstack update`/`tstack config`). Skip with `TS_THEME=dark|light|follow`.
 - **Terminal emulator** (Windows, macOS and desktop Linux — WSL and headless hosts never install one) — a tick-list, so each is individually opt-in and `[n]one` is one keystroke away. **WezTerm nightly**, **WezTerm stable** and (macOS/Linux) **Ghostty** are separate ticks. Whatever is installed starts ticked on its detected channel; on a fresh machine **nightly is pre-selected**, because upstream's newest stable is `20240203` — February 2024, with no cut since — and this stack's Lua config targets current builds.
 
   The prompt shows the facts rather than just a default: your installed build and its date, the newest build on each channel, and a count of what changed in between.
@@ -54,11 +54,11 @@ Every question works the same way: the default is **marked with `>` and captione
   Toggle a number, [a]ll, [n]one, Enter to continue, [s]kip:
   ```
 
-  **Nothing is automatic.** Nothing installs unless you tick it, and neither channel ever upgrades on its own — `ts-update` reports and offers, `ts-config wezterm` changes it on demand. Ticking both WezTerm rows installs nightly and says so: the two packages install to the same place, so they cannot coexist, and switching channel removes the other first.
+  **Nothing is automatic.** Nothing installs unless you tick it, and neither channel ever upgrades on its own — `tstack update` reports and offers, `tstack config wezterm` changes it on demand. Ticking both WezTerm rows installs nightly and says so: the two packages install to the same place, so they cannot coexist, and switching channel removes the other first.
 
-  Skip the prompt with `TS_TERMINALS=wezterm-nightly,ghostty` / `TS_TERMINALS=wezterm-stable` / `TS_TERMINALS=none`; `TS_WEZTERM=nightly|stable|skip` still maps across. Change it later with **`ts-config wezterm install <stable|nightly>`**, which removes the other channel for you; `ts-config wezterm` (or `ts-wezterm`) shows your build, both channels' newest, and what changed in between. Rationale in `docs/decisions.md` § "Why the WezTerm channel is a question, and why it is not a saved setting".
-- **WezTerm multiplexer** — whether panes are hosted by `wezterm-mux-server` instead of the GUI, so a GUI crash leaves every pane alive and relaunching WezTerm reattaches. Defaults to **off**: the mux server loads its own copy of `.wezterm.lua`, so config changes then need `ts-mux restart` (which kills every pane), and mux panes can't render the per-pane Claude tint. Skipped on headless servers (no GUI to host). Change it any time with `ts-mux on|off`. Skip with `TS_WEZ_MUX=on|off`.
-- **Restore last session** — whether launching WezTerm reopens the workspace you last had (panes, layout and scrollback) or starts clean. Defaults to **off**; the autosave runs either way, so `Ctrl+Space` `L` still restores by hand and `ts-config restore on` flips it later. Skipped on headless servers. Skip with `TS_WEZ_RESTORE=on|off`.
+  Skip the prompt with `TS_TERMINALS=wezterm-nightly,ghostty` / `TS_TERMINALS=wezterm-stable` / `TS_TERMINALS=none`; `TS_WEZTERM=nightly|stable|skip` still maps across. Change it later with **`tstack config wezterm install <stable|nightly>`**, which removes the other channel for you; `tstack config wezterm` (or `tstack wezterm`) shows your build, both channels' newest, and what changed in between. Rationale in `docs/decisions.md` § "Why the WezTerm channel is a question, and why it is not a saved setting".
+- **WezTerm multiplexer** — whether panes are hosted by `wezterm-mux-server` instead of the GUI, so a GUI crash leaves every pane alive and relaunching WezTerm reattaches. Defaults to **off**: the mux server loads its own copy of `.wezterm.lua`, so config changes then need `tstack mux restart` (which kills every pane), and mux panes can't render the per-pane Claude tint. Skipped on headless servers (no GUI to host). Change it any time with `tstack mux on|off`. Skip with `TS_WEZ_MUX=on|off`.
+- **Restore last session** — whether launching WezTerm reopens the workspace you last had (panes, layout and scrollback) or starts clean. Defaults to **off**; the autosave runs either way, so `Ctrl+Space` `L` still restores by hand and `tstack config restore on` flips it later. Skipped on headless servers. Skip with `TS_WEZ_RESTORE=on|off`.
 - **Apps** — five ways to answer: the **recommended set**, **everything**, **whole groups**, **individual tools**, or **none**. The Nerd Font, Starship, chezmoi, git and zsh are always installed regardless. Skip the question with `TS_APPS=recommended|all|none|id,id,…`.
 
   The catalog is grouped so you can take a category without reading 30 lines:
@@ -96,18 +96,18 @@ Every question works the same way: the default is **marked with `>` and captione
 
   After installing, the wizard prints what each tool actually resolved to and its version — an installer that failed quietly shows up as `NOT FOUND on PATH` rather than being assumed to have worked.
 
-- **Changed your mind later?** `ts-config apps` re-asks just the apps question; **`ts-config wizard`** replays the *entire* questionnaire — leader, theme, terminal emulator, apps, mux, restore, TTS, agent tools — and persists all of it. `TS_ASSUME_YES=1 ts-config wizard` takes the defaults without prompting.
+- **Changed your mind later?** `tstack config apps` re-asks just the apps question; **`tstack config wizard`** replays the *entire* questionnaire — leader, theme, terminal emulator, apps, mux, restore, TTS, agent tools — and persists all of it. `TS_ASSUME_YES=1 tstack config wizard` takes the defaults without prompting.
 - **Claude Code voice notifications** — off unless a local Kokoro TTS server answers on `http://127.0.0.1:8880`, in which case enabling is the default. Skip with `TS_CC_TTS=on|off`.
-- **TTS tray daemon** (asked only when voice notifications were enabled, on Windows/WSL, never headless) — route announcements through a small native daemon that names the session ("terminal-stack finished — added the retry logic"), queues and coalesces simultaneous completions, and ducks (or pauses) your music while speaking. Defaults to **direct EXE playback**; enabling voice builds one console-free `terminal-stack-tts.exe` using a temporary Python venv, while choosing the daemon also adds autostart and the tray/session features. Python 3.10+ is a build dependency only — no persistent venv or Python runtime remains under `%LOCALAPPDATA%\terminal-stack\tts-daemon`. Change later with `ts-config tts daemon on|off`; hooks launch a detached direct worker in the same EXE whenever the daemon is unreachable. Skip with `TS_CC_TTS_DAEMON=on|off`. The daemon also hosts the dashboard (tray: Open dashboard, or `http://127.0.0.1:8890/ui`) for live activity, the log, and settings. Details: `doc windows/tts-daemon`.
+- **TTS tray daemon** (asked only when voice notifications were enabled, on Windows/WSL, never headless) — route announcements through a small native daemon that names the session ("terminal-stack finished — added the retry logic"), queues and coalesces simultaneous completions, and ducks (or pauses) your music while speaking. Defaults to **direct EXE playback**; enabling voice builds one console-free `terminal-stack-tts.exe` using a temporary Python venv, while choosing the daemon also adds autostart and the tray/session features. Python 3.10+ is a build dependency only — no persistent venv or Python runtime remains under `%LOCALAPPDATA%\terminal-stack\tts-daemon`. Change later with `tstack config tts daemon on|off`; hooks launch a detached direct worker in the same EXE whenever the daemon is unreachable. Skip with `TS_CC_TTS_DAEMON=on|off`. The daemon also hosts the dashboard (tray: Open dashboard, or `http://127.0.0.1:8890/ui`) for live activity, the log, and settings. Details: `doc windows/tts-daemon`.
 - **Workspace directory** — pre-filled with the autodetected candidate (`C:\DATA\Workspace` / `~/Documents/Workspace` / `~/workspace` / `~/Workspace`). Press Enter to accept. Persisted to `~/.zshrc.local` (zsh) or `Documents\PowerShell\profile.local.ps1` (pwsh) *only* when it differs from the autodetect. Skip with `WORKSPACE_DIR=/path` / `$env:WORKSPACE_DIR`.
 
 Then a **review** — every answer listed, with `[P]roceed / [e]dit / [q]uit`. Nothing has been installed or written at that point, so `e` re-asks the questions and `q` leaves the machine untouched. The review is skipped when there is nothing to review (every answer came from an env var) or with `TS_ASSUME_YES=1` (bash).
 
 **Headless servers.** On a host with no graphical session (a server reached over ssh/PuTTY), the bootstrap auto-detects "headless", tells you so, and lets you confirm or flip it; force it with `TS_HEADLESS=1` (or `=0` for a desktop). Headless mode **skips the Nerd Font download and the WezTerm leader-key prompt** — there's no GUI terminal to use them — while still installing tmux, Starship, zsh, and the CLI tools. (WSL is treated as a desktop: it renders in a Windows GUI terminal.)
 
-Change any of these later with **`ts-config`** (interactive menu) or one-shot — `ts-config theme follow`, `ts-config leader ctrl-a`, `ts-config apps`, `ts-config restore on`, `ts-config show`. In a combined Windows+WSL setup, run `ts-config` from WSL (its `chezmoi apply` is authoritative for the Windows-side files).
+Change any of these later with **`tstack config`** (interactive menu) or one-shot — `tstack config theme follow`, `tstack config leader ctrl-a`, `tstack config apps`, `tstack config restore on`, `tstack config show`. In a combined Windows+WSL setup, run `tstack config` from WSL (its `chezmoi apply` is authoritative for the Windows-side files).
 
-**If something looks wrong** — `doc: command not found` after an update, a clone you moved, leftover old clones — run **`ts-doctor`** (read-only health check) and **`ts-doctor --repair`** (pwsh: `ts-doctor -Repair`) to repoint chezmoi's `sourceDir`, move a legacy-path clone to the canonical location, re-apply, and clean up. If the canonical location is *already* occupied, `--repair` switches to the clone that lives there and offers the other one for removal — a case that used to have no way forward. The installers run the same check automatically at the end.
+**If something looks wrong** — `doc: command not found` after an update, a clone you moved, leftover old clones — run **`tstack doctor`** (read-only health check) and **`tstack doctor --repair`** (pwsh: `tstack doctor -Repair`) to repoint chezmoi's `sourceDir`, move a legacy-path clone to the canonical location, re-apply, and clean up. If the canonical location is *already* occupied, `--repair` switches to the clone that lives there and offers the other one for removal — a case that used to have no way forward. The installers run the same check automatically at the end.
 
 If you want to walk through each step instead (recommended for first-time inspection, or when chezmoi would clobber an existing hand-edited dotfile), keep reading.
 
@@ -191,7 +191,7 @@ Installs via Homebrew (installing Homebrew itself first if absent):
 - JetBrainsMono Nerd Font (`--cask font-jetbrains-mono-nerd-font`)
 - Terminal emulators, if you ticked them: `--cask wezterm@nightly` or `--cask wezterm` (your pick) and/or `--cask ghostty`
 
-Both WezTerm casks are offered and **nightly is pre-selected** — upstream's newest stable is `20240203-110809`, February 2024. Switching channel uninstalls the other cask first, since both ship `/Applications/WezTerm.app`. Each emulator is a separate tick (`TS_TERMINALS=wezterm-nightly,ghostty|none`); an already-installed one is upgraded rather than reinstalled, and never without being asked. `ts-config wezterm` shows your build, both channels' newest, and what changed. Headless Macs skip the emulator and font casks entirely — there is no window server to render them.
+Both WezTerm casks are offered and **nightly is pre-selected** — upstream's newest stable is `20240203-110809`, February 2024. Switching channel uninstalls the other cask first, since both ship `/Applications/WezTerm.app`. Each emulator is a separate tick (`TS_TERMINALS=wezterm-nightly,ghostty|none`); an already-installed one is upgraded rather than reinstalled, and never without being asked. `tstack config wezterm` shows your build, both channels' newest, and what changed. Headless Macs skip the emulator and font casks entirely — there is no window server to render them.
 
 It also writes `~/.config/chezmoi/chezmoi.toml` with `sourceDir` pointing at the
 clone (auto-detected from the script's own location). macOS keeps the system
@@ -251,7 +251,7 @@ WezTerm reads `%USERPROFILE%\.wezterm.lua` and `%USERPROFILE%\.wezterm\pane_nav.
 & C:\path\to\terminal-stack\scripts\sync-windows.ps1 -SourceDir C:\path\to\terminal-stack
 ```
 
-The canonical install (`%LOCALAPPDATA%\terminal-stack\stack`) resolves without any pin — set `$env:TERMINAL_STACK_DIR` in `profile.local.ps1` only when working against a **non-canonical** location, e.g. a dev clone at a workspace tier path (which is otherwise invisible to `ts-update` and the resolvers). Changes to `.wezterm.lua` usually auto-reload; press **`Ctrl+Space` `r`** after `pane_nav.lua` edits. Full loop, optional file-watcher, macOS path, and symlink trick: `docs/developing-wezterm.md`.
+The canonical install (`%LOCALAPPDATA%\terminal-stack\stack`) resolves without any pin — set `$env:TERMINAL_STACK_DIR` in `profile.local.ps1` only when working against a **non-canonical** location, e.g. a dev clone at a workspace tier path (which is otherwise invisible to `tstack update` and the resolvers). Changes to `.wezterm.lua` usually auto-reload; press **`Ctrl+Space` `r`** after `pane_nav.lua` edits. Full loop, optional file-watcher, macOS path, and symlink trick: `docs/developing-wezterm.md`.
 
 ## Manual
 
@@ -293,7 +293,7 @@ wezterm.exe --version
 
 Optional — the rest of the stack works without it, under Windows Terminal or an
 existing WezTerm. Either channel is fine; the stack asks rather than choosing for
-you, and `ts-config wezterm` compares what you have against both channels.
+you, and `tstack config wezterm` compares what you have against both channels.
 
 ### Phase 2 — `.wezterm.lua`
 
@@ -361,7 +361,7 @@ group change does not affect the shell that ran it. Full notes:
 **2. First-run setup.**
 
 ```sh
-ts-stack bootstrap
+tstack services bootstrap
 ```
 
 Seeds every `services/stacks/*/.env` from its tracked `.env.example`, **generates**
@@ -373,8 +373,8 @@ for you. Idempotent: a re-run never rotates a value you set.
 **3. Pick a memory backend** if you did not answer the wizard's question yet.
 
 ```sh
-ts-config memory status                    # which one, and whether it agrees with itself
-ts-config memory agentmemory|headroom|none
+tstack config memory status                    # which one, and whether it agrees with itself
+tstack config memory agentmemory|headroom|none
 ```
 
 AgentMemory and Headroom both do semantic memory and **only one runs**: two
@@ -390,8 +390,8 @@ starts happily and then crash-loops. On a Mac there is no GPU step at all.
 **5. Bring them up and prove it.**
 
 ```sh
-ts-stack up
-ts-stack test
+tstack services up
+tstack services test
 ```
 
 `test` takes everything down, brings it back up, and checks the things "Up
@@ -426,7 +426,7 @@ table, so an older unattended install cannot land on a combination the menu does
 not offer.
 
 Phase 6a started the containers; this phase points the agents at them.
-**`ts-config agents` never manages Docker lifecycle — `ts-stack` is the only
+**`tstack config agents` never manages Docker lifecycle — `tstack services` is the only
 thing that starts, stops, or recreates containers**, and a test enforces that.
 Headroom expects the model proxy on `127.0.0.1:8787` and dashboard on `8788`.
 AgentMemory expects its REST service on `3111` and viewer on `3113`.
@@ -436,23 +436,23 @@ initialize handshake before accepting the registration. Headroom memory still
 does not depend on MCP; the proxy's `--memory` flag injects those tools directly.
 subscription-model traffic direct. `byok` requires a provider API key, separate
 provider billing, and a one-time global Cursor provider base URL. Change anything
-later with `ts-config agents`; `off` removes active client wiring while preserving
+later with `tstack config agents`; `off` removes active client wiring while preserving
 service data, and `uninstall` also removes terminal-stack-owned client packages.
 
 Headroom enable/repair validates the authenticated data plane at `/stats` before
 saving `on`; `/readyz` and `/health` alone do not prove agent requests will work.
 If the proxy or token breaks, restore direct launches immediately with
-`ts-config agents headroom off`. Re-enable with `ts-config agents headroom on`
+`tstack config agents headroom off`. Re-enable with `tstack config agents headroom on`
 only after its preflight succeeds. `claude-stock` and `codex-stock` are always
 direct one-launch escape hatches.
 
 Verify the client seam after the Docker services are running:
 
 ```powershell
-ts-config agents headroom status
-ts-config agents caveman status
-ts-config agents agentmemory status
-ts-config agents headroom dashboard
+tstack config agents headroom status
+tstack config agents caveman status
+tstack config agents agentmemory status
+tstack config agents headroom dashboard
 ```
 
 Headroom's dashboard labels traffic by the client/provider that made it. A
@@ -543,11 +543,11 @@ chezmoi doctor | head -5
 
 Open WezTerm, confirm the active tab renders as a solid accent block and the clock shows on the right of the bar (`Ctrl+Space` `s` adds `user@host │ path`). Open a zsh pane, confirm Starship prompt with the branch glyph renders. Open a pwsh pane, run `cc` from a project dir, confirm the tab shows the Claude icon and the bare project name (a coloured state dot appears once Claude starts working).
 
-If you enabled the TTS daemon: `ts-config tts daemon status` should report healthy with the clone's git SHA, and `~/.claude/hooks/cc-tts-test.sh --daemon` (pwsh: `cc-tts-test.ps1 -Daemon`) should speak "Daemon test…". Then prove the never-silence fallback once: `cc-tts-test.sh --daemon-fallback` must still speak through the classic direct path.
+If you enabled the TTS daemon: `tstack config tts daemon status` should report healthy with the clone's git SHA, and `~/.claude/hooks/cc-tts-test.sh --daemon` (pwsh: `cc-tts-test.ps1 -Daemon`) should speak "Daemon test…". Then prove the never-silence fallback once: `cc-tts-test.sh --daemon-fallback` must still speak through the classic direct path.
 
 Two more, both quick. `ccmute` should report `MUTED`, silence the next announcement, and cut off anything speaking at that moment; `ccmute off` restores it. And the tray's **Open dashboard** should load, with the Status tab reporting the daemon up and the Log tab streaming lines as they happen.
 
-If you use SMB shares: `ts-smb doctor` should report rclone present and name the mount engine it picked, and `ts-smb hosts` should list any SMB server advertising on your network. On macOS, note that a Homebrew-installed rclone **cannot mount** — doctor says so and points at the official binary; browsing and copying work either way.
+If you use SMB shares: `tstack smb doctor` should report rclone present and name the mount engine it picked, and `tstack smb hosts` should list any SMB server advertising on your network. On macOS, note that a Homebrew-installed rclone **cannot mount** — doctor says so and points at the official binary; browsing and copying work either way.
 
 ### Phase 10 — Done
 

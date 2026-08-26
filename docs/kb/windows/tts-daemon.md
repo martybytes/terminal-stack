@@ -5,12 +5,12 @@ TTS builds and installs one GUI-subsystem `terminal-stack-tts.exe`; Python is a
 build-time dependency only. Hooks call that EXE directly. They do not launch
 PowerShell, `cmd.exe`, Python, `ffplay`, or `ffprobe` while speaking.
 
-`ts-config tts daemon on` adds session-aware queueing and the tray. When the
+`tstack config tts daemon on` adds session-aware queueing and the tray. When the
 daemon is off or unreachable, the same EXE launches a detached direct worker —
 never silence, and still no console window.
 
-**Combined Windows+WSL setup: run the `ts-config tts …` verbs from WSL.**
-pwsh `ts-config` saves only the Windows `config.json`, and the next WSL
+**Combined Windows+WSL setup: run the `tstack config tts …` verbs from WSL.**
+pwsh `tstack config` saves only the Windows `config.json`, and the next WSL
 `chezmoi apply` re-renders that file from chezmoi `[data]` — silently
 reverting a pwsh-only change. From WSL the setting lands in `[data]` and both
 sides render from it. (pwsh `daemon on` still installs/starts the daemon fine;
@@ -18,16 +18,16 @@ it prints a reminder about the WSL half.)
 
 | Command | What it does |
 |---|---|
-| `ts-config tts on` | build/install the EXE if missing and enable voice hooks |
-| `ts-config tts daemon on` | build/install the EXE, register direct EXE autostart, and start the tray daemon |
-| `ts-config tts daemon off` | restore volumes, stop, remove autostart, back to direct playback |
-| `ts-config tts daemon status` | health, queue, version-vs-clone staleness |
-| `ts-config tts daemon restart` | the deliberate way to pick up a ts-update (never automatic) |
-| `ts-config tts summarizer self\|haiku\|ollama\|template` | how the spoken line is written (see below) |
-| `ts-config tts music duck\|smart\|pause\|off` | what happens to music while speaking (default duck) |
-| `ts-config tts duck-level 30` | duck target as % of current volume |
-| `ts-config tts voices show\|am_adam,af_heart,…` | per-session voice pool |
-| `ts-config tts test --source claude` | synthetic event through the installed EXE |
+| `tstack config tts on` | build/install the EXE if missing and enable voice hooks |
+| `tstack config tts daemon on` | build/install the EXE, register direct EXE autostart, and start the tray daemon |
+| `tstack config tts daemon off` | restore volumes, stop, remove autostart, back to direct playback |
+| `tstack config tts daemon status` | health, queue, version-vs-clone staleness |
+| `tstack config tts daemon restart` | the deliberate way to pick up a tstack update (never automatic) |
+| `tstack config tts summarizer self\|haiku\|ollama\|template` | how the spoken line is written (see below) |
+| `tstack config tts music duck\|smart\|pause\|off` | what happens to music while speaking (default duck) |
+| `tstack config tts duck-level 30` | duck target as % of current volume |
+| `tstack config tts voices show\|am_adam,af_heart,…` | per-session voice pool |
+| `tstack config tts test --source claude` | synthetic event through the installed EXE |
 
 What you hear: `"Claude. terminal-stack finished. Added the retry logic."` —
 project name (with "two"/"three" when several sessions share one project),
@@ -51,11 +51,11 @@ has music mode, summarizer mode, **Open dashboard**, test speak, unduck now.
   waiting template. Switching away removes every stack-owned marker block.
 - `haiku` — Claude Haiku rewrites the final message into one spoken sentence
   (~1 s, needs `ANTHROPIC_API_KEY` in the daemon's environment).
-- `ollama` — same against a local Ollama (`ts-config tts ollama <url> <model>`).
+- `ollama` — same against a local Ollama (`tstack config tts ollama <url> <model>`).
 
-Every mode degrades rightward to `template` on any failure. `ts-config` also
+Every mode degrades rightward to `template` on any failure. `tstack config` also
 reloads a reachable running daemon after saving, so changing modes does not
-require `ts-config tts daemon restart`.
+require `tstack config tts daemon restart`.
 
 ## Cursor
 
@@ -77,7 +77,7 @@ repeat the fixed waiting template unless the hook supplied no response text.
 
 | Thing | Path |
 |---|---|
-| source + PyInstaller spec | `<clone>\bootstrap\tts-daemon` (ships via ts-update) |
+| source + PyInstaller spec | `<clone>\bootstrap\tts-daemon` (ships via tstack update) |
 | installed runtime | `%LOCALAPPDATA%\terminal-stack\tts-daemon\terminal-stack-tts.exe` |
 | log | `%LOCALAPPDATA%\terminal-stack\tts-daemon\logs\ttsd.log` |
 | duck snapshot (crash safety) | `…\tts-daemon\state\duck-snapshot.json` |
@@ -89,7 +89,7 @@ repeat the fixed waiting template unless the hook supplied no response text.
 | autostart | HKCU `…\CurrentVersion\Run` → `"…\terminal-stack-tts.exe" daemon` |
 | HTTP API | `http://127.0.0.1:8890` — `/healthz`, `/v1/status`, `/v1/dnd`, `/v1/duck/release`, `/v1/history`, `/v1/history/summary`, `/v1/mute`, `/ui`, `/v1/logs/stream` |
 
-Music stuck quiet after a crash? `ts-doctor --repair` (or just start the
+Music stuck quiet after a crash? `tstack doctor --repair` (or just start the
 daemon — it restores the stale snapshot at startup). Emergency by hand:
 NirSoft `svcl.exe /SetVolume Spotify.exe 100`.
 
@@ -133,7 +133,7 @@ a web page you happen to be visiting cannot read your history.
 
 Changes are written to `~/.claude/tts/local.json`: **machine-local overrides** that win over
 the saved settings and survive every apply, but do not travel to your other machines. For a
-setting that should propagate, use `ts-config tts …` from WSL. Every field shows which layer
+setting that should propagate, use `tstack config tts …` from WSL. Every field shows which layer
 it came from, and says so when an override is beating the saved value.
 
 Three groups are called out because they are not what they look like:
@@ -179,7 +179,7 @@ It is **sticky** — muted until you unmute — and **absolute**: questions, per
 prompts and errors are silenced too, which the old tray "Do not disturb" never did. Muting
 also cuts off whatever is speaking at that moment. It survives a reboot and the daemon
 dying, because it is a file (`state\muted`); `ccmute status`, the WezTerm chip and
-`ts-doctor` all report it, so a mute you forgot about cannot masquerade as broken TTS.
+`tstack doctor` all report it, so a mute you forgot about cannot masquerade as broken TTS.
 
 **`ccmute` is not `cctts off`.** `cctts off` is the structural switch: it rewrites the
 saved setting and removes the hooks on the next apply, taking 5–15 seconds and a wall of
@@ -189,16 +189,16 @@ want the feature gone.
 If nothing speaks and `ccmute status` says *not muted*, check
 `~/.claude/tts/local.json` for `"enabled": false` — that untracked override wins over the
 rendered config, and it is the one thing that can silence everything while `cctts` still
-reports ON. `ts-doctor` now flags it.
+reports ON. `tstack doctor` now flags it.
 
 ## It said the same thing twice (or two voices at once)
 
 Ask it what happened — every decision is recorded, including the ones where it stayed quiet:
 
 ```powershell
-ts-config tts history            # last 25 decisions, oldest first
-ts-config tts history 60         # more of them
-ts-config tts history --dupes    # anything that spoke twice inside 8s, last 24h
+tstack config tts history            # last 25 decisions, oldest first
+tstack config tts history 60         # more of them
+tstack config tts history --dupes    # anything that spoke twice inside 8s, last 24h
 ```
 
 ```
@@ -215,11 +215,11 @@ AskUserQuestion. AskUserQuestion" and added nothing.)
 
 If duplicates *are* showing up:
 
-- **`ts-config tts daemon status` first.** While the daemon is down each hook speaks from
+- **`tstack config tts daemon status` first.** While the daemon is down each hook speaks from
   its own detached process. They still take turns (a lock file serialises them) and still
   deduplicate through the shared history, but the daemon is the path that also coalesces —
   "Two sessions finished: …" — so its absence is worth knowing about. It now restarts
-  itself on the next hook; `ts-doctor` says how long it has been silent.
+  itself on the next hook; `tstack doctor` says how long it has been silent.
 - **The window is `debounceSec`** in `~/.claude/tts/config.json` (5 seconds). Raise it in
   the untracked `local.json` if two genuinely different announcements are landing on top of
   each other; set it to `0` to turn deduplication off entirely and hear everything.
@@ -229,7 +229,7 @@ If duplicates *are* showing up:
 Overlapping *audio* specifically — two voices talking at once rather than one line said
 twice — should be impossible now on both paths: the daemon speaks from a single dispatcher
 thread, and direct workers hold `state\speak.lock` across synth and playback. If you hear
-it anyway, get the timestamps from `ts-config tts history` and check whether the `pid`
+it anyway, get the timestamps from `tstack config tts history` and check whether the `pid`
 column shows two different processes overlapping.
 
 ## Voice went silent after an apply
@@ -250,10 +250,10 @@ chezmoi execute-template '{{ .ccTtsEnabled }}'      # from WSL — authoritative
 (Get-Content "$env:LOCALAPPDATA\terminal-stack\config.json" | ConvertFrom-Json).ccTts.enabled
 ```
 
-Disagree? Re-save **from WSL** — `ts-config tts on` — which is the only path
+Disagree? Re-save **from WSL** — `tstack config tts on` — which is the only path
 that writes both stores, then confirm `~/.claude/settings.json` has TTS entries
 under `Stop`, `StopFailure`, `Notification` and the
-`AskUserQuestion` `PreToolUse` matcher. Same rule for every `ts-config`
+`AskUserQuestion` `PreToolUse` matcher. Same rule for every `tstack config`
 setting on a combined Windows+WSL machine, not just TTS.
 
 ## WSL reachability
@@ -265,6 +265,6 @@ its shared token is at `…\tts-daemon\state\token`. The installer tries to add 
 firewall rule for that listener and prints an elevated one-liner when it can't
 — but check before bothering: on at least one machine the gateway path worked
 with **no** rule (the `vEthernet (WSL)` interface profile already allowed it).
-Verify with `ts-config tts daemon status` from WSL; if it reports unreachable
+Verify with `tstack config tts daemon status` from WSL; if it reports unreachable
 there while healthy on Windows, the firewall rule is the thing to add. Either
 way, unreachable only affects WSL API/status probes; spoken hooks still use the EXE.

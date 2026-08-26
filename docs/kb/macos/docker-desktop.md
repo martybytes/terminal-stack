@@ -16,7 +16,7 @@ brew install colima docker docker-compose
 colima start --cpu 4 --memory 8
 ```
 
-`ts-stack doctor` resolves which runtime you are on from `docker context ls`
+`tstack services doctor` resolves which runtime you are on from `docker context ls`
 rather than guessing, and tells you the right command to start it — including
 OrbStack and Rancher Desktop if that is what you use.
 
@@ -37,7 +37,7 @@ what the setup script selects. It is slower, not broken.
 
 Docker Desktop for Mac shares `$HOME`, `/tmp`, `/private` and `/Volumes` by
 default. Anything outside those cannot be bind-mounted, which matters for
-backups: `ts-stack backup` writes under `$XDG_STATE_HOME` (inside `$HOME`) for
+backups: `tstack services backup` writes under `$XDG_STATE_HOME` (inside `$HOME`) for
 exactly this reason. Override with `TS_STACK_BACKUP_ROOT`, but keep it under
 `$HOME` or the tar container cannot see it.
 

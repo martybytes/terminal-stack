@@ -235,7 +235,7 @@ function Set-TsTabTitle([string]$title) {
     }
 }
 
-# Agent-tool settings are read at launch, so `ts-config agents ...` takes effect
+# Agent-tool settings are read at launch, so `tstack config agents ...` takes effect
 # in already-open shells. Headroom routing is process-local and restored in a
 # finally block; no provider URL leaks into later commands or child shells.
 function Get-TsAgentRuntimeSetting([string]$Name, [string]$Default = 'off') {
@@ -830,7 +830,7 @@ function Get-TsClones {
 # The two pin sources are NOT equivalent when the pin is dangling. -SourceDir is
 # typed per call, so a bad one is a mistake worth failing on. $env:TERMINAL_STACK_DIR
 # arrives from profile.local.ps1 in every session, so a stale line there would
-# otherwise brick ts-update / wso / doc machine-wide with no way out — it degrades
+# otherwise brick tstack update / wso / doc machine-wide with no way out — it degrades
 # to the normal candidate search instead.
 function Resolve-TsSourceDir([string]$SourceDir) {
     # Initialized up front: it is only assigned in the stale-pin branch below, and reading
@@ -849,7 +849,7 @@ function Resolve-TsSourceDir([string]$SourceDir) {
             return $env:TERMINAL_STACK_DIR
         }
         Write-Warning "stale `$env:TERMINAL_STACK_DIR pin: no clone at $($env:TERMINAL_STACK_DIR) — searching the usual locations."
-        Write-Host   "  Clear it with 'ts-doctor -Repair', or delete the line from $(Join-Path (Split-Path $PROFILE) 'profile.local.ps1')."
+        Write-Host   "  Clear it with 'tstack doctor -Repair', or delete the line from $(Join-Path (Split-Path $PROFILE) 'profile.local.ps1')."
         $stalePin = $true
     }
     $clones = Get-TsClones
@@ -865,7 +865,7 @@ function Resolve-TsSourceDir([string]$SourceDir) {
             Write-Host ("  {0} {1}" -f $mark, $c.Path)
             Write-Host ("       {0}  |  {1}" -f $c.Origin, $c.Short)
         }
-        Write-Host "  Consolidate with 'ts-doctor -Repair' (or pin one: Set-TsSourceDirPersisted '<path>')"
+        Write-Host "  Consolidate with 'tstack doctor -Repair' (or pin one: Set-TsSourceDirPersisted '<path>')"
     }
     return $clones[0].Path
 }
@@ -895,29 +895,29 @@ function Update-TerminalStack {
     if (-not $SourceDir) { return }
 
     # Preflight: a resolved dir that isn't a terminal-stack clone means a stale /
-    # moved install. Nudge toward ts-doctor rather than pulling the wrong repo.
+    # moved install. Nudge toward tstack doctor rather than pulling the wrong repo.
     $remote = & git -C $SourceDir config --get remote.origin.url 2>$null
     if ($remote -notmatch 'terminal-stack') {
-        Write-Warning "ts-update: '$SourceDir' doesn't look like a terminal-stack clone. Run 'ts-doctor' to check."
+        Write-Warning "tstack update: '$SourceDir' doesn't look like a terminal-stack clone. Run 'tstack doctor' to check."
     }
     Write-Host "==> clone: $SourceDir"
     $dirty = @(& git -C $SourceDir status --porcelain 2>$null)
     if ($dirty.Count) {
-        Write-Warning 'ts-update: runtime clone has uncommitted changes; refusing to fetch, pull, or sync.'
+        Write-Warning 'tstack update: runtime clone has uncommitted changes; refusing to fetch, pull, or sync.'
         $dirty | ForEach-Object { Write-Host "  $_" }
-        Write-Host '  Make changes in the workspace dev clone, commit them, then rerun ts-update.'
+        Write-Host '  Make changes in the workspace dev clone, commit them, then rerun tstack update.'
         return
     }
-    # Location notice only — moving is ts-doctor's job, never a side effect of updating.
+    # Location notice only — moving is tstack doctor's job, never a side effect of updating.
     $canon = Get-TsCanonicalCloneDir
     if ($SourceDir.TrimEnd('\') -ne $canon.TrimEnd('\') -and -not (Test-TsDevClone $SourceDir)) {
-        Write-Host "ts-update: note — clone is at a legacy location; run 'ts-doctor -Repair' to move it to $canon."
+        Write-Host "tstack update: note — clone is at a legacy location; run 'tstack doctor -Repair' to move it to $canon."
     }
-    # A second clone is not just untidy: whichever one ts-update picks is the one
+    # A second clone is not just untidy: whichever one tstack update picks is the one
     # that overwrites $PROFILE, so an unnoticed leftover silently reinstates an
     # old profile. Offer to pin the choice once rather than re-deciding it on
     # every run. Skipped when pinned, non-interactive, or already canonical
-    # (canonical needs no pin — consolidate via ts-doctor instead).
+    # (canonical needs no pin — consolidate via tstack doctor instead).
     if (-not $env:TERMINAL_STACK_DIR -and $SourceDir.TrimEnd('\') -ne $canon.TrimEnd('\')) {
         $all = Get-TsClones
         if ($all.Count -gt 1 -and -not [Console]::IsInputRedirected) {
@@ -939,7 +939,7 @@ function Update-TerminalStack {
         $stateFile = Get-TsStateFile
         New-Item -ItemType Directory -Force -Path (Split-Path $stateFile) | Out-Null
         (& git -C $SourceDir rev-parse HEAD) | Set-Content $stateFile
-        Write-Host "==> recorded rollback point: $(& git -C $SourceDir rev-parse --short HEAD) (ts-rollback to undo)"
+        Write-Host "==> recorded rollback point: $(& git -C $SourceDir rev-parse --short HEAD) (tstack rollback to undo)"
         & git -C $SourceDir pull --ff-only
         if ($LASTEXITCODE -ne 0) { Write-Warning 'git pull failed; not applying.'; return }
     } else {
@@ -966,7 +966,7 @@ function Update-TerminalStack {
                 Write-Host "==> $($pending.Count) app(s) from the catalog are not installed:"
                 foreach ($p in $pending) { Write-Host ("    {0,-10} {1}" -f $p, (Get-TsAppDesc $p)) }
                 if ([Console]::IsInputRedirected) {
-                    Write-Host "    Install them with: ts-config apps"
+                    Write-Host "    Install them with: tstack config apps"
                 } else {
                     $a = Read-Host 'Install them now? [y/N]'
                     if ($a -match '^(y|Y|yes|YES)$') {
@@ -977,14 +977,14 @@ function Update-TerminalStack {
                         Save-TsConfig -LeaderChord $cfg.leaderChord -ThemeMode $cfg.themeMode `
                                       -TmuxPrefix $cfg.tmuxPrefix -Apps $merged | Out-Null
                     } else {
-                        Write-Host '    Skipped. Run ts-config apps when you want them.'
+                        Write-Host '    Skipped. Run tstack config apps when you want them.'
                     }
                 }
             }
         } catch { Write-Warning "app check skipped: $_" }
     }
 
-    # A WezTerm upgrade is not a stack update, but ts-update is the moment you are
+    # A WezTerm upgrade is not a stack update, but tstack update is the moment you are
     # already thinking about being current — and neither channel ever moves on its
     # own. Silent unless there is genuinely something newer on the channel you are
     # already on; silent too when WezTerm is absent, hand-installed, or offline.
@@ -995,11 +995,11 @@ function Update-TerminalStack {
             if ($wezNew) {
                 Write-Host "==> WezTerm: $wezNew"
                 if ([Console]::IsInputRedirected) {
-                    Write-Host '    Upgrade it with: ts-config wezterm upgrade'
+                    Write-Host '    Upgrade it with: tstack config wezterm upgrade'
                 } else {
                     $a = Read-Host 'Upgrade WezTerm now? [y/N]'
                     if ($a -match '^(y|Y|yes|YES)$') { Update-TsWezterm }
-                    else { Write-Host "    Skipped. 'ts-config wezterm' for the details, 'ts-config wezterm upgrade' to do it." }
+                    else { Write-Host "    Skipped. 'tstack config wezterm' for the details, 'tstack config wezterm upgrade' to do it." }
                 }
             }
         } catch { Write-Warning "WezTerm check skipped: $_" }
@@ -1007,7 +1007,7 @@ function Update-TerminalStack {
 
     # The tts daemon keeps running its pre-pull code. Like the mux server it is
     # never auto-restarted (it may be mid-announcement or holding a duck) —
-    # nudge instead, same philosophy as ts-mux restart.
+    # nudge instead, same philosophy as tstack mux restart.
     if (Test-Path $cfgHelper) {
         try {
             . $cfgHelper
@@ -1017,7 +1017,7 @@ function Update-TerminalStack {
                 $r = Invoke-WebRequest -Uri "http://127.0.0.1:$port/healthz" -TimeoutSec 2 -UseBasicParsing
                 $sha = & git -C $SourceDir rev-parse HEAD 2>$null
                 if ($sha -and ($r.Content -notmatch [regex]::Escape($sha))) {
-                    Write-Host "ts-update: note — the tts daemon is running the previous build; 'ts-config tts daemon restart' when convenient."
+                    Write-Host "tstack update: note — the tts daemon is running the previous build; 'tstack config tts daemon restart' when convenient."
                 }
             }
         } catch {}
@@ -1032,9 +1032,8 @@ function Update-TerminalStack {
         Write-Host 'Open a new PowerShell tab after this command finishes to activate the update.'
     }
 }
-Set-Alias -Name ts-update -Value Update-TerminalStack
 
-# Undo the last ts-update: reset the clone to the recorded pre-update SHA and
+# Undo the last tstack update: reset the clone to the recorded pre-update SHA and
 # re-apply. Manual fallback (state file missing): README § Updating & rollback.
 function Restore-TerminalStack {
     [CmdletBinding()]
@@ -1058,19 +1057,18 @@ function Restore-TerminalStack {
         Write-Warning "$SourceDir has uncommitted changes; refusing to reset --hard. Commit or stash first."
         return
     }
-    Write-Host "==> resetting $SourceDir to $sha (recorded before last ts-update)"
+    Write-Host "==> resetting $SourceDir to $sha (recorded before last tstack update)"
     & git -C $SourceDir reset --hard $sha
     if ($LASTEXITCODE -ne 0) { return }
     Invoke-TsSync $SourceDir
-    Write-Host '==> done. run ts-update to return to latest.'
+    Write-Host '==> done. run tstack update to return to latest.'
 }
-Set-Alias -Name ts-rollback -Value Restore-TerminalStack
 
 # Configure the stack: leader key, theme (dark/light/follow), tmux prefix, apps,
 # and the WezTerm mux / startup-restore toggles.
-# Bare `ts-config` opens an interactive menu; `ts-config theme follow` etc. set one
+# Bare `tstack config` opens an interactive menu; `tstack config theme follow` etc. set one
 # value. Writes %LOCALAPPDATA%\terminal-stack\config.json and re-syncs the Windows
-# files. NOTE: in a combined WSL+Windows setup, prefer running `ts-config` from WSL
+# files. NOTE: in a combined WSL+Windows setup, prefer running `tstack config` from WSL
 # (its chezmoi apply is authoritative for the Windows-side files).
 function Set-TerminalStackConfig {
     [CmdletBinding()]
@@ -1100,7 +1098,7 @@ function Set-TerminalStackConfig {
     $agentmemory = Get-TsAgentSetting agentmemoryEnabled
     $memoryBackend = Get-TsAgentSetting memoryBackend
 
-    # Re-run the whole questionnaire, not just one answer. `ts-config apps`
+    # Re-run the whole questionnaire, not just one answer. `tstack config apps`
     # re-asks the apps question alone; this replays every prompt the installer
     # asks and persists all of it. POSIX twin: run_wizard in bootstrap/ts-config.sh.
     # Runs the questionnaire, installs, and persists; returns the answers so the
@@ -1112,7 +1110,7 @@ function Set-TerminalStackConfig {
         # A prompt that throws leaves $w null or half-filled, and Save-TsConfig would
         # then persist '' over real answers (ValidateSet only catches some of them).
         if (-not $w -or -not $w.Leader -or -not $w.Theme -or -not $w.Headroom) {
-            Write-Warning 'ts-config wizard: the questionnaire did not complete — nothing was installed or saved.'
+            Write-Warning 'tstack config wizard: the questionnaire did not complete — nothing was installed or saved.'
             return $null
         }
         Install-TsTerminals -Selected $w.Terminals
@@ -1168,7 +1166,7 @@ function Set-TerminalStackConfig {
                 Write-Host "  cc-tts     : $(if ($ccTts.enabled) { 'on' } else { 'off' })"
                 Write-Host "  wezmux     : $(Get-TsWeztermMux)"
                 Write-Host "  wezrestore : $(Get-TsWeztermRestore)"
-                Write-Host "  wezterm    : $(Get-TsWezChannel)   (ts-config wezterm)"
+                Write-Host "  wezterm    : $(Get-TsWezChannel)   (tstack config wezterm)"
                 Write-Host "  headroom   : $headroom   (Cursor: $headroomCursor)"
                 Write-Host "  caveman    : $caveman"
                 Write-Host "  agentmemory: $agentmemory"
@@ -1227,15 +1225,15 @@ function Set-TerminalStackConfig {
             Write-Host "theme      : $theme   (palette $(Get-TsResolvedTheme $theme))"
             Write-Host "tmux       : $tmux"
             Write-Host "apps       : $($apps -join ', ')"
-            Write-Host "wezmux     : $(Get-TsWeztermMux)   (ts-mux on|off|status)"
-            Write-Host "wezrestore : $(Get-TsWeztermRestore)   (ts-config restore on|off)"
+            Write-Host "wezmux     : $(Get-TsWeztermMux)   (tstack mux on|off|status)"
+            Write-Host "wezrestore : $(Get-TsWeztermRestore)   (tstack config restore on|off)"
             Write-Host "headroom   : $headroom   (Cursor: $headroomCursor)"
             Write-Host "caveman    : $caveman"
             Write-Host "agentmemory: $agentmemory"
         }
-        'leader' { if (-not $Value) { Write-Warning 'usage: ts-config leader <chord>'; return }; $leader = $Value; & $save }
-        'theme'  { if (-not $Value) { Write-Warning 'usage: ts-config theme <dark|light|follow>'; return }; $theme = $Value; & $save }
-        'tmux'   { if (-not $Value) { Write-Warning 'usage: ts-config tmux <chord>'; return }; $tmux = $Value; & $save }
+        'leader' { if (-not $Value) { Write-Warning 'usage: tstack config leader <chord>'; return }; $leader = $Value; & $save }
+        'theme'  { if (-not $Value) { Write-Warning 'usage: tstack config theme <dark|light|follow>'; return }; $theme = $Value; & $save }
+        'tmux'   { if (-not $Value) { Write-Warning 'usage: tstack config tmux <chord>'; return }; $tmux = $Value; & $save }
         'apps'   {
             if ($Value) {
                 switch ($Value) {
@@ -1253,7 +1251,7 @@ function Set-TerminalStackConfig {
                 'status'   { Show-TsWezStatus }
                 'upgrade'  { Update-TsWezterm }
                 'install'  {
-                    if ($Rest[0] -notin 'stable', 'nightly') { Write-Warning 'usage: ts-config wezterm install <stable|nightly>'; return }
+                    if ($Rest[0] -notin 'stable', 'nightly') { Write-Warning 'usage: tstack config wezterm install <stable|nightly>'; return }
                     Install-TsWezterm $Rest[0]
                 }
                 'changes'  {
@@ -1267,7 +1265,7 @@ function Set-TerminalStackConfig {
                         "# WezTerm changes since $($inst.Version)`n`n$text" | Out-Host -Paging
                     }
                 }
-                default    { Write-Warning "ts-config wezterm: unknown '$Value' (status, changes, install <stable|nightly>, upgrade)" }
+                default    { Write-Warning "tstack config wezterm: unknown '$Value' (status, changes, install <stable|nightly>, upgrade)" }
             }
         }
         'wizard'       { $null = & $runWizard }
@@ -1303,13 +1301,13 @@ function Set-TerminalStackConfig {
                     # is somebody trying to do something, and quietly undoing it is
                     # worse than saying the two disagree.
                     if ($spec -ne (Get-TsMemoryComposeSpec $memoryBackend)) {
-                        Write-Warning "COMPOSE_FILE does not match the backend - fix: ts-config memory $memoryBackend"
+                        Write-Warning "COMPOSE_FILE does not match the backend - fix: tstack config memory $memoryBackend"
                     }
                 }
                 return
             }
             if ($want -notin 'agentmemory','headroom','none') {
-                Write-Warning 'usage: ts-config memory [agentmemory|headroom|none|status]'
+                Write-Warning 'usage: tstack config memory [agentmemory|headroom|none|status]'
                 return
             }
             $before = $memoryBackend
@@ -1323,7 +1321,7 @@ function Set-TerminalStackConfig {
             # setting rather than waiting for a second command nobody runs.
             if ($want -eq 'agentmemory') {
                 if (-not (& $agentsRun agentmemory on)) {
-                    Write-Warning 'AgentMemory wiring failed; retry: ts-config agents agentmemory repair'
+                    Write-Warning 'AgentMemory wiring failed; retry: tstack config agents agentmemory repair'
                 }
             } elseif ($before -eq 'agentmemory') {
                 & $agentsRun agentmemory off | Out-Null
@@ -1337,7 +1335,7 @@ function Set-TerminalStackConfig {
             if (Test-Path -LiteralPath $stack) {
                 Write-Host '  restarting headroom so the change takes effect...'
                 & pwsh -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $stack restart headroom | Out-Host
-                if ($LASTEXITCODE -ne 0) { Write-Warning 'headroom restart failed - run: ts-stack restart headroom' }
+                if ($LASTEXITCODE -ne 0) { Write-Warning 'headroom restart failed - run: tstack services restart headroom' }
             }
         }
         'agents' {
@@ -1345,7 +1343,7 @@ function Set-TerminalStackConfig {
             $verb = if ($Rest.Count) { $Rest[0] } else { '' }
             if (-not $agentTool -or $agentTool -eq 'show') { & $agentsShow; return }
             if ($agentTool -notin 'headroom','caveman','agentmemory') {
-                Write-Warning 'usage: ts-config agents <headroom|caveman|agentmemory> on|off|status|repair|uninstall'
+                Write-Warning 'usage: tstack config agents <headroom|caveman|agentmemory> on|off|status|repair|uninstall'
                 return
             }
             if ($agentTool -eq 'headroom' -and $verb -eq 'dashboard') {
@@ -1354,7 +1352,7 @@ function Set-TerminalStackConfig {
             }
             if ($agentTool -eq 'headroom' -and $verb -eq 'cursor') {
                 $mode = if ($Rest.Count -gt 1) { $Rest[1] } else { '' }
-                if ($mode -notin 'mcp','byok','off') { Write-Warning 'usage: ts-config agents headroom cursor <mcp|byok|off>'; return }
+                if ($mode -notin 'mcp','byok','off') { Write-Warning 'usage: tstack config agents headroom cursor <mcp|byok|off>'; return }
                 $headroomCursor = $mode
                 & $save
                 if ($headroom -eq 'on') { & $agentsRun headroom repair $mode | Out-Null }
@@ -1366,12 +1364,12 @@ function Set-TerminalStackConfig {
             # machine -- the combination the wizard is built to make unreachable.
             if ($agentTool -eq 'agentmemory' -and $verb -eq 'on' -and $memoryBackend -ne 'agentmemory') {
                 Write-Warning "memoryBackend is '$memoryBackend', so AgentMemory is not this machine's memory system."
-                Write-Host   '      Only one runs. To switch:  ts-config memory agentmemory'
+                Write-Host   '      Only one runs. To switch:  tstack config memory agentmemory'
                 return
             }
             if (-not $verb) { $verb = 'status' }
             if ($verb -notin 'on','off','status','repair','uninstall') {
-                Write-Warning "usage: ts-config agents $agentTool on|off|status|repair|uninstall"
+                Write-Warning "usage: tstack config agents $agentTool on|off|status|repair|uninstall"
                 return
             }
             $ok = & $agentsRun $agentTool $verb
@@ -1391,7 +1389,7 @@ function Set-TerminalStackConfig {
         # Reopening the last WezTerm session at startup. Stored on its own like the
         # mux key, so flipping it need not re-state every other choice.
         'restore' {
-            if ($Value -notin 'on', 'off') { Write-Warning 'usage: ts-config restore <on|off>'; return }
+            if ($Value -notin 'on', 'off') { Write-Warning 'usage: tstack config restore <on|off>'; return }
             Save-TsConfig -WeztermRestore $Value | Out-Null
             Invoke-TsSync $src
             Write-Host '==> done.'
@@ -1404,7 +1402,7 @@ function Set-TerminalStackConfig {
         #
         # NOTE for a combined WSL+Windows box: prefer running this from WSL. Its
         # chezmoi apply is authoritative for the Windows-side files, same caveat
-        # as the rest of ts-config.
+        # as the rest of tstack config.
         'ghostty' {
             # %LOCALAPPDATA%\ghostty\, NOT the app-named dir. noctty reads both
             # its own %LOCALAPPDATA%\<appname>\config.ghostty and the
@@ -1488,47 +1486,46 @@ function Set-TerminalStackConfig {
                 }
             }
         }
-        # The mux has its own verbs (kill/restart/reset), so ts-config just hands off.
+        # The mux has its own verbs (kill/restart/reset), so tstack config just hands off.
         'mux'    {
             $muxArgs = @(@($Value) + @($Rest) | Where-Object { $_ })
             Invoke-TsMux @muxArgs
         }
-        default { Write-Warning "ts-config: unknown command '$Action' (show, leader, theme, tmux, apps, tts, mux, restore, ghostty, memory, agents, wezterm, wizard)" }
+        default { Write-Warning "tstack config: unknown command '$Action' (show, leader, theme, tmux, apps, tts, mux, restore, ghostty, memory, agents, wezterm, wizard)" }
     }
 }
-Set-Alias -Name ts-config -Value Set-TerminalStackConfig
 
 # WezTerm multiplexer domain — turn it on/off and drive the live mux server.
 # PARALLEL implementation of bootstrap/ts-mux.sh (not a wrapper): change one,
 # change the other, and keep the -h output byte-identical. In a combined
-# WSL+Windows setup prefer the WSL `ts-mux` — its chezmoi apply is authoritative
+# WSL+Windows setup prefer the WSL `tstack mux` — its chezmoi apply is authoritative
 # for the Windows-side files; this one writes config.json and re-syncs.
 $script:TsMuxHelp = @'
-ts-mux — WezTerm multiplexer domain: keep panes alive when the GUI dies.
+tstack mux — WezTerm multiplexer domain: keep panes alive when the GUI dies.
 
 Usage:
-  ts-mux [status]   the setting, the mux server, and the panes it hosts
-  ts-mux on         host panes in the mux domain (unix domain "main")
-  ts-mux off        spawn panes locally (the default)
-  ts-mux list       wezterm cli list — every pane the mux knows about
-  ts-mux kill       stop wezterm-mux-server       [KILLS EVERY PANE IT HOSTS]
-  ts-mux restart    stop it, then start a fresh one, so it re-reads the config
-  ts-mux reset      back to default: off + re-apply + kill + clear stale sockets
-  ts-mux -h         this help
+  tstack mux [status]   the setting, the mux server, and the panes it hosts
+  tstack mux on         host panes in the mux domain (unix domain "main")
+  tstack mux off        spawn panes locally (the default)
+  tstack mux list       wezterm cli list — every pane the mux knows about
+  tstack mux kill       stop wezterm-mux-server       [KILLS EVERY PANE IT HOSTS]
+  tstack mux restart    stop it, then start a fresh one, so it re-reads the config
+  tstack mux reset      back to default: off + re-apply + kill + clear stale sockets
+  tstack mux -h         this help
 
   -y, --yes         skip the confirmation for kill / restart / reset
 
 With the mux on, your shells run inside wezterm-mux-server instead of the GUI, so
 a GUI crash leaves every pane (and everything running in it) alive and relaunching
 WezTerm reattaches. The costs are why it is off by default: the mux server loads
-its OWN copy of .wezterm.lua, so a config change needs "ts-mux restart" — which
+its OWN copy of .wezterm.lua, so a config change needs "tstack mux restart" — which
 kills every pane — and not just a GUI reload; and the Claude per-pane tint needs
 pane:inject_output, which mux panes do not have.
 
 on/off re-render .wezterm.lua and take effect for newly spawned tabs; relaunch
 WezTerm for a clean switch. Panes already hosted in the mux stay there until you
-close them or run "ts-mux kill". The setting is saved with the rest of the config
-(chezmoi [data] weztermMux / config.json weztermMux) and shown by "ts-config show".
+close them or run "tstack mux kill". The setting is saved with the rest of the config
+(chezmoi [data] weztermMux / config.json weztermMux) and shown by "tstack config show".
 '@
 
 function Get-TsWezExe([string]$Name) {
@@ -1567,8 +1564,8 @@ function Invoke-TsMux {
         switch -Regex ($a) {
             '^(-y|--yes)$'       { $yes = $true; break }
             '^(-h|--help|help)$' { Write-Host $script:TsMuxHelp; return }
-            '^-'                 { Write-Warning "ts-mux: unknown flag '$a' (try: ts-mux -h)"; return }
-            default              { if ($cmd) { Write-Warning "ts-mux: unexpected argument '$a'"; return }; $cmd = $a }
+            '^-'                 { Write-Warning "tstack mux: unknown flag '$a' (try: tstack mux -h)"; return }
+            default              { if ($cmd) { Write-Warning "tstack mux: unexpected argument '$a'"; return }; $cmd = $a }
         }
     }
     if (-not $cmd) { $cmd = 'status' }
@@ -1583,7 +1580,7 @@ function Invoke-TsMux {
         param($Prompt)
         if ($yes) { return $true }
         if ([Console]::IsInputRedirected) {
-            Write-Warning 'ts-mux: no terminal to confirm on — re-run with -y if you mean it.'
+            Write-Warning 'tstack mux: no terminal to confirm on — re-run with -y if you mean it.'
             return $false
         }
         $a = Read-Host "$Prompt [y/N]"
@@ -1611,7 +1608,7 @@ function Invoke-TsMux {
         if ((Get-TsMuxProcess).Count) { Write-Host '==> wezterm-mux-server is already running.'; return }
         $bin = Get-TsWezExe 'wezterm-mux-server'
         if (-not $bin) {
-            Write-Warning 'ts-mux: wezterm-mux-server not found — relaunch WezTerm and it will spawn one.'
+            Write-Warning 'tstack mux: wezterm-mux-server not found — relaunch WezTerm and it will spawn one.'
             return
         }
         Write-Host '==> starting wezterm-mux-server --daemonize'
@@ -1630,10 +1627,10 @@ function Invoke-TsMux {
         Write-Host '==> done.'
         if ($Want -eq 'on') {
             Write-Host "    Panes now spawn into the mux domain 'main'. Relaunch WezTerm for a"
-            Write-Host "    clean switch; 'ts-mux status' shows the server once it starts."
+            Write-Host "    clean switch; 'tstack mux status' shows the server once it starts."
         } else {
             Write-Host '    New tabs spawn locally again. Panes already hosted by the mux stay'
-            Write-Host "    there until you close them or run 'ts-mux kill'."
+            Write-Host "    there until you close them or run 'tstack mux kill'."
         }
     }
 
@@ -1642,12 +1639,12 @@ function Invoke-TsMux {
             $setting = Get-TsWeztermMux
             $rendered = Get-TsRenderedMux
             $procs = Get-TsMuxProcess
-            Write-Host 'ts-mux:'
+            Write-Host 'tstack mux:'
             Write-Host "  setting  : $setting   (saved as weztermMux)"
             if (-not $rendered) {
                 Write-Host '  rendered : (no .wezterm.lua found — run sync-windows.ps1)'
             } elseif ($rendered -ne $setting) {
-                Write-Host "  rendered : $rendered   !! stale — run 'ts-update' or sync-windows.ps1"
+                Write-Host "  rendered : $rendered   !! stale — run 'tstack update' or sync-windows.ps1"
             } else {
                 Write-Host "  rendered : $rendered   ($(Join-Path $env:USERPROFILE '.wezterm.lua'))"
             }
@@ -1659,18 +1656,18 @@ function Invoke-TsMux {
             $cli = Get-TsWezExe 'wezterm'
             if ($cli) {
                 $rows = @(& $cli cli list 2>$null | Select-Object -Skip 1 | Where-Object { $_.Trim() })
-                Write-Host "  panes    : $($rows.Count)   ('ts-mux list' for detail)"
+                Write-Host "  panes    : $($rows.Count)   ('tstack mux list' for detail)"
             }
             if ($setting -eq 'off' -and $procs.Count) {
                 Write-Host '  note     : panes spawned while the mux was on are still hosted by it;'
-                Write-Host "             they stay alive until you close them or run 'ts-mux kill'."
+                Write-Host "             they stay alive until you close them or run 'tstack mux kill'."
             }
         }
         'on'  { & $setMux 'on' }
         'off' { & $setMux 'off' }
         'list' {
             $cli = Get-TsWezExe 'wezterm'
-            if (-not $cli) { Write-Warning 'ts-mux: wezterm CLI not found on PATH.'; return }
+            if (-not $cli) { Write-Warning 'tstack mux: wezterm CLI not found on PATH.'; return }
             & $cli cli list
         }
         'kill'    { & $stop | Out-Null }
@@ -1693,24 +1690,22 @@ function Invoke-TsMux {
             Write-Host "==> cleared $n stale socket file(s)"
             Write-Host '==> mux reset to the default (off).'
         }
-        default { Write-Warning "ts-mux: unknown command '$cmd' (status, on, off, list, kill, restart, reset)" }
+        default { Write-Warning "tstack mux: unknown command '$cmd' (status, on, off, list, kill, restart, reset)" }
     }
 }
 # The local Docker service stacks. PARALLEL implementation of
-# bootstrap/ts-stack.sh, reached through the script in the clone so `ts-update`
+# bootstrap/ts-stack.sh, reached through the script in the clone so `tstack update`
 # ships fixes without a profile re-sync -- same shape as Invoke-TsDoctor.
 function Invoke-TsStack {
     $src = Resolve-TsSourceDir
     if (-not $src) { return }
-    $script = Join-Path $src 'bootstrap	s-stack.ps1'
+    $script = Join-Path $src 'bootstrap\ts-stack.ps1'
     if (-not (Test-Path -LiteralPath $script)) {
-        Write-Warning "$script not found; run ts-update."; return
+        Write-Warning "$script not found; run tstack update."; return
     }
     & $script @args
 }
-Set-Alias -Name ts-stack -Value Invoke-TsStack
 
-Set-Alias -Name ts-mux -Value Invoke-TsMux
 
 # Probe known clone locations for one that actually contains the repo — used so
 # the doctor still runs when $env:TERMINAL_STACK_DIR / the default path is wrong.
@@ -1724,7 +1719,7 @@ function Find-TsAnyClone {
     return $null
 }
 
-# Persist $env:TERMINAL_STACK_DIR to profile.local.ps1 so ts-update / ts-config
+# Persist $env:TERMINAL_STACK_DIR to profile.local.ps1 so tstack update / tstack config
 # find a clone that isn't at the default %USERPROFILE%\terminal-stack.
 function Set-TsSourceDirPersisted([string]$SourceDir) {
     $localProfile = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'PowerShell\profile.local.ps1'
@@ -1740,7 +1735,7 @@ function Set-TsSourceDirPersisted([string]$SourceDir) {
 }
 
 # Diagnose / repair the Windows install: missing/moved clone, stale config, leftover
-# old clones. `ts-doctor` checks (read-only); `ts-doctor -Repair` fixes (move the
+# old clones. `tstack doctor` checks (read-only); `tstack doctor -Repair` fixes (move the
 # clone to the canonical location, re-sync, offer cleanup). POSIX counterpart:
 # bootstrap/ts-doctor.sh.
 function Invoke-TsDoctor {
@@ -1765,7 +1760,7 @@ function Invoke-TsDoctor {
                     $src = $canon
                 } else {
                     Write-Warning "'$canon' exists but is not a terminal-stack clone."
-                    Write-Host   "  Move it aside or delete it, then re-run 'ts-doctor -Repair' to relocate '$src'."
+                    Write-Host   "  Move it aside or delete it, then re-run 'tstack doctor -Repair' to relocate '$src'."
                 }
             } elseif (-not [Console]::IsInputRedirected) {
                 $a = Read-Host "Move '$src' to the canonical location '$canon'? [Y/n]"
@@ -1786,7 +1781,7 @@ function Invoke-TsDoctor {
         Test-TsInstall -SourceDir $src | Out-Null
     } else {
         if ($src.TrimEnd('\') -ne $canon.TrimEnd('\') -and -not (Test-TsDevClone $src)) {
-            Write-Host "note: clone is at a legacy location; 'ts-doctor -Repair' can move it to $canon"
+            Write-Host "note: clone is at a legacy location; 'tstack doctor -Repair' can move it to $canon"
         } elseif (Test-TsDevClone $src) {
             Write-Host 'note: pinned at a dev clone (workspace tier path) — deliberate, leaving it alone.'
         }
@@ -1800,11 +1795,11 @@ function Invoke-TsDoctor {
                 if (Test-CcTtsDaemonHealthy) {
                     if (-not $Quiet) { Write-Host '  ok  tts daemon healthy' }
                 } else {
-                    Write-Warning 'tts daemon enabled but not reachable — hooks fall back to direct playback; start: ts-config tts daemon on'
+                    Write-Warning 'tts daemon enabled but not reachable — hooks fall back to direct playback; start: tstack config tts daemon on'
                 }
             }
             if ((Test-Path (Get-CcTtsDuckSnapshotPath)) -and -not (Test-CcTtsDaemonHealthy)) {
-                Write-Host "note: stale duck snapshot — music may be stuck quiet; 'ts-doctor -Repair' restores volumes"
+                Write-Host "note: stale duck snapshot — music may be stuck quiet; 'tstack doctor -Repair' restores volumes"
             }
         }
         $agentDoctor = Join-Path $src 'bootstrap\ts-agents.ps1'
@@ -1823,7 +1818,175 @@ function Invoke-TsDoctor {
 }
 function Test-TerminalStack    { [CmdletBinding()] param([switch]$Quiet) Invoke-TsDoctor -Quiet:$Quiet }
 function Repair-TerminalStack  { Invoke-TsDoctor -Repair }
-Set-Alias -Name ts-doctor -Value Invoke-TsDoctor
+
+# tstack — the single entry point. Routing lives in tstack/commands.conf in the
+# clone, so this function never grows a branch per subcommand: adding one, or
+# porting one to Python, is a table edit and nothing else. Twin: tstack() in
+# dot_zshrc.
+#
+# Help is rendered by tstack/cli.py and never here. Three implementations of one
+# help text is precisely the problem this port exists to remove, and Python is
+# already a hard requirement of this stack (scripts/sync-windows.ps1 throws
+# without it).
+
+# Python 3.10+, matching the bar bootstrap/tts-daemon already sets. `py -3` is
+# tried first on purpose: a bare `python` on a fresh Windows box is often the
+# Microsoft Store stub, which opens a store page instead of running anything.
+function Get-TstackPython {
+    foreach ($candidate in @(
+            @{ Exe = 'py';     Arguments = @('-3') },
+            @{ Exe = 'python'; Arguments = @() },
+            @{ Exe = 'python3'; Arguments = @() })) {
+        $found = Get-Command $candidate.Exe -CommandType Application `
+            -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-not $found) { continue }
+        try {
+            $reported = & $found.Source @($candidate.Arguments + @(
+                    '-c', 'import sys; print("%d.%d" % sys.version_info[:2])'))
+            if ($reported -and ([version]$reported.Trim() -ge [version]'3.10')) {
+                return [pscustomobject]@{ Exe = $found.Source; Arguments = $candidate.Arguments }
+            }
+        } catch {}
+    }
+    return $null
+}
+
+# One parsed row of tstack/commands.conf, or $null. Column 2 is the Windows
+# implementation token; see the conf file header for the vocabulary.
+function Get-TstackImpl([string]$SourceDir, [string]$Name) {
+    $conf = Join-Path $SourceDir 'tstack\commands.conf'
+    if (-not (Test-Path -LiteralPath $conf)) { return $null }
+    foreach ($row in Get-Content -LiteralPath $conf) {
+        $trimmed = $row.Trim()
+        if (-not $trimmed -or $trimmed.StartsWith('#')) { continue }
+        $fields = $trimmed -split '\s+', 4
+        if ($fields.Count -lt 4) { continue }
+        if ($fields[0] -eq $Name) { return $fields[2] }
+    }
+    return $null
+}
+
+function Get-TstackNames([string]$SourceDir) {
+    $conf = Join-Path $SourceDir 'tstack\commands.conf'
+    if (-not (Test-Path -LiteralPath $conf)) { return @() }
+    $out = foreach ($row in Get-Content -LiteralPath $conf) {
+        $trimmed = $row.Trim()
+        if (-not $trimmed -or $trimmed.StartsWith('#')) { continue }
+        $fields = $trimmed -split '\s+', 4
+        if ($fields.Count -ge 4) { $fields[0] }
+    }
+    return @($out)
+}
+
+# No param block on purpose. A [CmdletBinding()] parameter set would try to bind
+# `--version` and `-h` as PowerShell parameter names before tstack ever saw them.
+function Invoke-Tstack {
+    $source = Resolve-TsSourceDir
+    if (-not $source) { return }
+    $passed = @($args)
+
+    $wantsMeta = ($passed.Count -eq 0) -or
+        ($passed[0] -in @('-h', '--help', 'help', '--version', '-V'))
+
+    if ($wantsMeta) {
+        $python = Get-TstackPython
+        if (-not $python) {
+            Write-Warning 'tstack: Python 3.10+ not found; it is required. Install it, then rerun.'
+            return
+        }
+        $forwarded = @(if ($passed.Count -eq 0) { '--help' } else { $passed })
+        Invoke-TstackPython -Python $python -SourceDir $source -Forwarded $forwarded
+        return
+    }
+
+    $name = $passed[0]
+    # The @() is load-bearing. An `if` used as an expression unrolls a
+    # single-element result to a scalar, and splatting a scalar string that
+    # starts with '-' re-parses it as a parameter token: `tstack services -h`
+    # arrived at ts-stack.ps1 as two arguments, '-' and 'h', and reported
+    # "no stack named 'h'". With no tail at all it splatted one empty string.
+    # Both parse cleanly and both are silent. See docs/powershell-quirks.md.
+    $tail = @(if ($passed.Count -gt 1) { $passed[1..($passed.Count - 1)] } else { @() })
+    $impl = Get-TstackImpl -SourceDir $source -Name $name
+
+    if (-not $impl) {
+        Write-Warning "tstack: unknown command '$name'"
+        Write-Host "  try: $((Get-TstackNames -SourceDir $source) -join ', ')"
+        return
+    }
+
+    if ($impl -eq '-') {
+        Write-Warning "tstack ${name}: not available on Windows."
+        return
+    }
+
+    if ($impl -eq 'python') {
+        $python = Get-TstackPython
+        if (-not $python) {
+            Write-Warning "tstack ${name}: Python 3.10+ not found; it is required."
+            return
+        }
+        Invoke-TstackPython -Python $python -SourceDir $source -Forwarded (@($name) + $tail)
+        return
+    }
+
+    if ($impl.StartsWith('@')) {
+        # Runs in THIS session on purpose: update offers to reload the profile and
+        # rollback prompts, neither of which a child process can do for its parent.
+        & $impl.Substring(1) @tail
+        return
+    }
+
+    $script = Join-Path $source ($impl -replace '/', '\')
+    if (-not (Test-Path -LiteralPath $script)) {
+        Write-Warning "tstack ${name}: $script not found; run 'tstack update'."
+        return
+    }
+    if ($impl.EndsWith('.ps1')) {
+        & $script @tail
+    } else {
+        Write-Warning "tstack ${name}: '$impl' is not runnable on Windows."
+    }
+}
+
+# TERMINAL_STACK_DIR is set for the child only, then restored. Leaving it set
+# would turn a one-shot resolution into a session-wide pin, which is exactly the
+# state Resolve-TsSourceDir has to warn about elsewhere.
+function Invoke-TstackPython($Python, [string]$SourceDir, [string[]]$Forwarded) {
+    $previous = $env:TERMINAL_STACK_DIR
+    try {
+        $env:TERMINAL_STACK_DIR = $SourceDir
+        $entry = Join-Path $SourceDir 'tstack\main.py'
+        & $Python.Exe @($Python.Arguments + @($entry) + $Forwarded)
+    } finally {
+        if ($null -eq $previous) {
+            Remove-Item Env:\TERMINAL_STACK_DIR -ErrorAction SilentlyContinue
+        } else {
+            $env:TERMINAL_STACK_DIR = $previous
+        }
+    }
+}
+
+Set-Alias -Name tstack -Value Invoke-Tstack
+
+# Completion reads the same table. Cached per session: Resolve-TsSourceDir shells
+# out to git, which is far too slow to run on every TAB.
+$script:TstackSubcommands = @()
+Register-ArgumentCompleter -Native -CommandName tstack -ScriptBlock {
+    param($wordToComplete, $commandAst, $cursorPosition)
+    if (-not $script:TstackSubcommands -or $script:TstackSubcommands.Count -eq 0) {
+        $resolved = Resolve-TsSourceDir 3>$null 4>$null
+        if (-not $resolved) { return }
+        $script:TstackSubcommands = Get-TstackNames -SourceDir $resolved
+    }
+    $script:TstackSubcommands |
+        Where-Object { $_ -like "$wordToComplete*" } |
+        ForEach-Object {
+            [System.Management.Automation.CompletionResult]::new(
+                $_, $_, 'ParameterValue', $_)
+        }
+}
+
 # ---- terminal-stack-update-end ----
 
 # ---- claude-code-start ----
@@ -1846,7 +2009,7 @@ function ccmute {
     param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Rest)
     $exe = Join-Path $env:LOCALAPPDATA 'terminal-stack\tts-daemon\terminal-stack-tts.exe'
     if (-not (Test-Path -LiteralPath $exe)) {
-        Write-Warning "terminal-stack-tts.exe not found at $exe (ts-config tts daemon install)"
+        Write-Warning "terminal-stack-tts.exe not found at $exe (tstack config tts daemon install)"
         return
     }
     & $exe mute @Rest | Out-Host
@@ -1855,10 +2018,10 @@ function ccmute {
 function cctts {
     param([string]$Action, [string]$Extra)
     switch ($Action) {
-        'on'   { ts-config tts on }
-        'off'  { ts-config tts off }
-        'test' { ts-config tts test }
-        'show' { ts-config tts show }
+        'on'   { tstack config tts on }
+        'off'  { tstack config tts off }
+        'test' { tstack config tts test }
+        'show' { tstack config tts show }
         default {
             # The effective value, not the mirror: local.json is deep-merged over
             # config.json and wins, so the mirror can say ON while the machine is silent.
@@ -1872,7 +2035,7 @@ function cctts {
                     if ($p) { $en = [bool]$p.Value; break }
                 } catch {}
             }
-            if ($en) { Write-Host 'CC TTS: ON  (cctts off to disable; ts-config tts for settings)' }
+            if ($en) { Write-Host 'CC TTS: ON  (cctts off to disable; tstack config tts for settings)' }
             else     { Write-Host 'CC TTS: OFF (cctts on to enable)' }
             ccmute status
         }
@@ -2315,7 +2478,7 @@ function hgrep {
 # ---- workspace-organizer-start ----
 # wso — workspace organizer. Thin wrapper: the verbs live in the clone
 # (bootstrap\_workspace.ps1 + _workspace_cmd.ps1) so they can be fixed with a
-# `ts-update` rather than a profile re-sync, and so the same code serves a
+# `tstack update` rather than a profile re-sync, and so the same code serves a
 # standalone invocation. The bash twin is bootstrap/wso.sh.
 function wso {
     param([Parameter(ValueFromRemainingArguments)] [string[]]$Arguments)
@@ -2323,7 +2486,7 @@ function wso {
     if (-not $src) { return }
     $lib = Join-Path $src 'bootstrap\_workspace.ps1'
     if (-not (Test-Path -LiteralPath $lib)) {
-        Write-Warning "$lib not found; cannot run wso. Try 'ts-update'."
+        Write-Warning "$lib not found; cannot run wso. Try 'tstack update'."
         return
     }
     . $lib

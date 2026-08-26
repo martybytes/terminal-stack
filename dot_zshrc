@@ -518,7 +518,7 @@ ssht() {
   ssh -t -- "$host" "tmux new-session -A -s $(printf '%q' "$sess")"
 }
 
-# Shared resolvers for ts-update / ts-rollback.
+# Shared resolvers for tstack update / tstack rollback.
 # TERMINAL_STACK_CHEZMOI overrides the chezmoi binary (testing / odd installs).
 _ts_chezmoi() {
   if [[ -n "${TERMINAL_STACK_CHEZMOI:-}" ]]; then echo "$TERMINAL_STACK_CHEZMOI"
@@ -592,14 +592,14 @@ _ts_clones() {
 }
 
 # A dangling $TERMINAL_STACK_DIR degrades rather than dead-ending: the pin is
-# inherited by every shell, so a stale one would otherwise brick ts-update / wso
+# inherited by every shell, so a stale one would otherwise brick tstack update / wso
 # / doc with no way out. Fall back to chezmoi's sourceDir, then the candidate
 # list. Twin of the profile's Resolve-TsSourceDir.
 _ts_src() {
   local cz="$1" name="${2:-ts}" src="${TERMINAL_STACK_DIR:-}" stale=""
   if [[ -n "$src" && ! -d "$src/.git" ]]; then
     echo "$name: stale \$TERMINAL_STACK_DIR — no clone at '$src'; searching the usual locations." >&2
-    echo "$name: clear it with 'ts-doctor --repair', or unset it in ~/.zshrc.local." >&2
+    echo "$name: clear it with 'tstack doctor --repair', or unset it in ~/.zshrc.local." >&2
     stale=1
     src=""
   fi
@@ -637,7 +637,7 @@ _ts_chezmoi_apply_guided() {
     echo "==> chezmoi found ${#conflicts} file(s) changed both locally and by terminal-stack."
     if [[ ! -t 0 ]]; then
       printf '  %s\n' "${conflicts[@]}"
-      echo "ts-update: rerun interactively to review; nothing was overwritten." >&2
+      echo "tstack update: rerun interactively to review; nothing was overwritten." >&2
       return 1
     fi
     overwrite=()
@@ -652,11 +652,11 @@ _ts_chezmoi_apply_guided() {
         case "$ans" in
           o|O|overwrite) overwrite+=("$target"); break ;;
           m|M|merge)
-            "$cz" merge -- "$target" || { echo "ts-update: merge failed; nothing was overwritten." >&2; return 1; }
+            "$cz" merge -- "$target" || { echo "tstack update: merge failed; nothing was overwritten." >&2; return 1; }
             if ! _ts_chezmoi_conflicts "$cz" | grep -Fxq -- "$target"; then break; fi
-            echo "ts-update: $target still conflicts after merge; review it again." >&2 ;;
+            echo "tstack update: $target still conflicts after merge; review it again." >&2 ;;
           v|V|view) ;;
-          *) echo "ts-update: cancelled before general apply. Rerun ts-update to resume." >&2; return 1 ;;
+          *) echo "tstack update: cancelled before general apply. Rerun tstack update to resume." >&2; return 1 ;;
         esac
       done
     done
@@ -664,18 +664,18 @@ _ts_chezmoi_apply_guided() {
       echo "The following live-only edits will be discarded:"
       printf '  %s\n' "${overwrite[@]}"
       read -r "ans?Apply terminal-stack's versions to these files? [y/N]: "
-      [[ "$ans" == (y|Y|yes|YES) ]] || { echo "ts-update: cancelled; nothing was overwritten." >&2; return 1; }
+      [[ "$ans" == (y|Y|yes|YES) ]] || { echo "tstack update: cancelled; nothing was overwritten." >&2; return 1; }
       "$cz" apply --force --no-tty -- "${overwrite[@]}" || return 1
     fi
   done
   if ! "$cz" apply --dry-run --error-on-conflict --no-tty --no-pager; then
-    echo "ts-update: chezmoi dry-run failed; no general apply was attempted." >&2
+    echo "tstack update: chezmoi dry-run failed; no general apply was attempted." >&2
     echo "  Diagnose: chezmoi apply --dry-run --verbose --error-on-conflict" >&2
     return 1
   fi
   if ! "$cz" apply --error-on-conflict --no-tty; then
-    echo "ts-update: chezmoi apply failed; later update steps were skipped." >&2
-    echo "  Rerun ts-update, or diagnose with the dry-run command shown above." >&2
+    echo "tstack update: chezmoi apply failed; later update steps were skipped." >&2
+    echo "  Rerun tstack update, or diagnose with the dry-run command shown above." >&2
     return 1
   fi
 }
@@ -693,7 +693,7 @@ _ts_offer_zsh_restart() {
   fi
   jobs_running="$(jobs -p 2>/dev/null)"
   if [[ -n "$jobs_running" ]]; then
-    echo "This shell has background jobs, so ts-update will not replace it automatically."
+    echo "This shell has background jobs, so tstack update will not replace it automatically."
     echo "When those jobs are safe to leave, run: exec zsh"
     return 0
   fi
@@ -706,46 +706,46 @@ _ts_offer_zsh_restart() {
 }
 
 # Pull the latest terminal-stack from GitHub and re-apply via chezmoi.
-# Shows incoming commits and records the pre-update SHA so ts-rollback can undo.
+# Shows incoming commits and records the pre-update SHA so tstack rollback can undo.
 # Same name as the PowerShell alias for cross-shell muscle memory.
-ts-update() {
+_tstack_update() {
   local cz src zshrc_before
   zshrc_before="$(cksum "$HOME/.zshrc" 2>/dev/null || true)"
-  cz="$(_ts_chezmoi)" || { echo "ts-update: chezmoi not found on PATH." >&2; return 1 }
-  src="$(_ts_src "$cz" ts-update)" || return 1
+  cz="$(_ts_chezmoi)" || { echo "tstack update: chezmoi not found on PATH." >&2; return 1 }
+  src="$(_ts_src "$cz" tstack update)" || return 1
   # Preflight: a sourceDir pointing at a non-terminal-stack clone means a stale
-  # install. Nudge toward ts-doctor rather than pulling the wrong repo.
+  # install. Nudge toward tstack doctor rather than pulling the wrong repo.
   git -C "$src" config --get remote.origin.url 2>/dev/null | grep -qi terminal-stack \
-    || echo "ts-update: note — '$src' doesn't look like a terminal-stack clone. Run 'ts-doctor' to check." >&2
+    || echo "tstack update: note — '$src' doesn't look like a terminal-stack clone. Run 'tstack doctor' to check." >&2
   echo "==> clone: $src"
   local dirty
   dirty="$(git -C "$src" status --porcelain 2>/dev/null)"
   if [[ -n "$dirty" ]]; then
-    echo "ts-update: runtime clone has uncommitted changes; refusing to fetch, pull, or apply." >&2
+    echo "tstack update: runtime clone has uncommitted changes; refusing to fetch, pull, or apply." >&2
     print -r -- "$dirty" | sed 's/^/  /' >&2
-    echo "  Make changes in the workspace dev clone, commit them, then rerun ts-update." >&2
+    echo "  Make changes in the workspace dev clone, commit them, then rerun 'tstack update'." >&2
     return 1
   fi
-  # Location notice only — moving is ts-doctor's job, never a side effect of updating.
+  # Location notice only — moving is tstack doctor's job, never a side effect of updating.
   local _canon; _canon="$(_ts_canonical_clone 2>/dev/null)"
   if [[ -n "$_canon" && "$src" != "$_canon" ]] && ! _ts_is_dev_clone "$src"; then
-    echo "ts-update: note — clone is at a legacy location; run 'ts-doctor --repair' to move it to $_canon." >&2
+    echo "tstack update: note — clone is at a legacy location; run 'tstack doctor --repair' to move it to $_canon." >&2
   fi
-  # A leftover second clone is not just untidy: whichever one ts-update picks is
+  # A leftover second clone is not just untidy: whichever one tstack update picks is
   # the one that re-deploys your config, so an unnoticed old clone silently
   # reinstates an old profile. Report the others rather than choosing quietly;
-  # `ts-doctor --repair` repoints chezmoi's sourceDir for good.
+  # `tstack doctor --repair` repoints chezmoi's sourceDir for good.
   local other others=""
   for other in $(_ts_clones); do
     [[ "$other" == "$src" ]] && continue
     others="$others $other"
   done
   if [[ -n "$others" ]]; then
-    echo "ts-update: note — other terminal-stack clones on this machine:" >&2
+    echo "tstack update: note — other terminal-stack clones on this machine:" >&2
     for other in ${=others}; do
       echo "    $other  ($(git -C "$other" log -1 --format='%h %s' 2>/dev/null | cut -c1-50))" >&2
     done
-    echo "    Only '$src' is being updated. Run 'ts-doctor --repair' if that's the wrong one." >&2
+    echo "    Only '$src' is being updated. Run 'tstack doctor --repair' if that's the wrong one." >&2
   fi
   git -C "$src" fetch --quiet || return $?
   local incoming
@@ -757,7 +757,7 @@ ts-update() {
     # a no-op re-run must not clobber the last real rollback point.
     mkdir -p "$_TS_STATE"
     git -C "$src" rev-parse HEAD > "$_TS_STATE/rollback-sha"
-    echo "==> recorded rollback point: $(git -C "$src" rev-parse --short HEAD) (ts-rollback to undo)"
+    echo "==> recorded rollback point: $(git -C "$src" rev-parse --short HEAD) (tstack rollback to undo)"
     git -C "$src" pull --ff-only || return $?
   else
     echo "==> already up to date"
@@ -792,13 +792,13 @@ ts-update() {
         y|Y|yes|YES)
           TERMINAL_STACK_DIR="$src" TERMINAL_STACK_CHEZMOI="$cz" \
             bash "$src/bootstrap/ts-config.sh" apps "$pending" ;;
-        *) echo "    Skipped. Run 'ts-config apps' when you want them." ;;
+        *) echo "    Skipped. Run 'tstack config apps' when you want them." ;;
       esac
     else
-      echo "    Install them with: ts-config apps"
+      echo "    Install them with: tstack config apps"
     fi
   fi
-  # A WezTerm upgrade is not a stack update, but ts-update is the moment you are
+  # A WezTerm upgrade is not a stack update, but tstack update is the moment you are
   # already thinking about being current — and neither channel ever moves on its
   # own. Silent unless there is genuinely something newer on the channel you are
   # already on; silent too when WezTerm is absent, hand-installed, or offline.
@@ -814,95 +814,155 @@ ts-update() {
         y|Y|yes|YES)
           TERMINAL_STACK_DIR="$src" TERMINAL_STACK_CHEZMOI="$cz" \
             bash "$src/bootstrap/ts-wezterm.sh" upgrade ;;
-        *) echo "    Skipped. 'ts-config wezterm' for the details, 'ts-config wezterm upgrade' to do it." ;;
+        *) echo "    Skipped. 'tstack config wezterm' for the details, 'tstack config wezterm upgrade' to do it." ;;
       esac
     else
-      echo "    Upgrade it with: ts-config wezterm upgrade"
+      echo "    Upgrade it with: tstack config wezterm upgrade"
     fi
   fi
   # The tts daemon keeps running its pre-pull code. Like the mux server it is
   # never auto-restarted (it may be mid-announcement or holding a duck) —
-  # nudge instead, same philosophy as ts-mux restart.
+  # nudge instead, same philosophy as tstack mux restart.
   local _tts_note
   _tts_note="$(bash -c 'source "$1/bootstrap/_config.sh" >/dev/null 2>&1 \
     && [ "$(ts_cc_tts_get ccTtsDaemon)" = on ] && ts_cc_tts_daemon_status' _ "$src" 2>/dev/null \
     | grep 'older build' || true)"
   if [[ -n "$_tts_note" ]]; then
-    echo "ts-update: note — the tts daemon is running the previous build; 'ts-config tts daemon restart' when convenient." >&2
+    echo "tstack update: note — the tts daemon is running the previous build; 'tstack config tts daemon restart' when convenient." >&2
   fi
   _ts_offer_zsh_restart "$zshrc_before"
 }
 
-# Undo the last ts-update: reset the clone to the recorded pre-update SHA and
+# Undo the last tstack update: reset the clone to the recorded pre-update SHA and
 # re-apply. Manual fallback (state file missing): README § Updating & rollback.
-ts-rollback() {
+_tstack_rollback() {
   local cz src
-  cz="$(_ts_chezmoi)" || { echo "ts-rollback: chezmoi not found on PATH." >&2; return 1 }
-  src="$(_ts_src "$cz" ts-rollback)" || return 1
+  cz="$(_ts_chezmoi)" || { echo "tstack rollback: chezmoi not found on PATH." >&2; return 1 }
+  src="$(_ts_src "$cz" tstack rollback)" || return 1
   local sha_file="$_TS_STATE/rollback-sha"
   if [[ ! -f "$sha_file" ]]; then
-    echo "ts-rollback: no recorded rollback point ($sha_file)." >&2
+    echo "tstack rollback: no recorded rollback point ($sha_file)." >&2
     echo "  Manual procedure: git -C $src reset --hard <sha> && chezmoi apply" >&2
     return 1
   fi
   local sha; sha="$(<"$sha_file")"
   if ! git -C "$src" rev-parse --verify --quiet "$sha^{commit}" >/dev/null; then
-    echo "ts-rollback: recorded SHA $sha not found in $src." >&2; return 1
+    echo "tstack rollback: recorded SHA $sha not found in $src." >&2; return 1
   fi
   # The clone may double as a dev checkout — never reset --hard over real work.
   if [[ -n "$(git -C "$src" status --porcelain)" ]]; then
-    echo "ts-rollback: $src has uncommitted changes; refusing to reset --hard. Commit or stash first." >&2
+    echo "tstack rollback: $src has uncommitted changes; refusing to reset --hard. Commit or stash first." >&2
     return 1
   fi
-  echo "==> resetting $src to $sha (recorded before last ts-update)"
+  echo "==> resetting $src to $sha (recorded before last tstack update)"
   git -C "$src" reset --hard "$sha" || return $?
   "$cz" apply
-  echo "==> done. run ts-update to return to latest."
+  echo "==> done. run tstack update to return to latest."
 }
 
-# Configure the stack: leader key, theme (dark/light/follow), tmux prefix, apps,
-# and the WezTerm mux / startup-restore toggles.
-# Bare `ts-config` opens an interactive menu; `ts-config theme follow` etc. set one
-# value. Thin wrapper over the shared bootstrap/ts-config.sh in the clone, which
-# persists to chezmoi [data] and re-applies. In a combined WSL+Windows setup, run
-# this from WSL — it also mirrors the choice to the Windows side.
-ts-config() {
-  local cz src
-  cz="$(_ts_chezmoi)" || { echo "ts-config: chezmoi not found on PATH." >&2; return 1 }
-  src="$(_ts_src "$cz" ts-config)" || return 1
-  git -C "$src" config --get remote.origin.url 2>/dev/null | grep -qi terminal-stack \
-    || echo "ts-config: note — '$src' doesn't look like a terminal-stack clone. Run 'ts-doctor' to check." >&2
-  TERMINAL_STACK_DIR="$src" TERMINAL_STACK_CHEZMOI="$cz" bash "$src/bootstrap/ts-config.sh" "$@"
+# ---- tstack -----------------------------------------------------------------
+# The single entry point for the stack. Routing lives in tstack/commands.conf in
+# the clone, so this function never grows a case arm per subcommand: adding one,
+# or porting one to Python, is a table edit and nothing else. Twin: Invoke-Tstack
+# in $PROFILE.
+#
+# Help is rendered by tstack/cli.py and never here. Three implementations of one
+# help text is precisely the problem this port exists to remove, and python3 is
+# already a hard requirement of this stack (run_after_90-sync-windows.sh refuses
+# to render the Windows templates without it).
+
+_tstack_python() {
+  local p
+  for p in python3 python; do
+    command -v "$p" >/dev/null 2>&1 && { command -v "$p"; return 0 }
+  done
+  return 1
 }
 
-# WezTerm multiplexer domain: `ts-mux` (status), `ts-mux on|off` (config + apply),
-# `ts-mux kill|restart|reset` (the live wezterm-mux-server). Thin wrapper over the
-# shared bootstrap/ts-mux.sh in the clone. On WSL the mux server is a WINDOWS
-# process — the script reaches it over interop, so this works from either side.
-ts-mux() {
-  local cz src
-  cz="$(_ts_chezmoi)" || { echo "ts-mux: chezmoi not found on PATH." >&2; return 1 }
-  src="$(_ts_src "$cz" ts-mux)" || return 1
-  if [[ ! -f "$src/bootstrap/ts-mux.sh" ]]; then
-    echo "ts-mux: $src/bootstrap/ts-mux.sh not found. Run 'ts-update'." >&2; return 1
+# The POSIX implementation token for one subcommand (column 2), or nothing.
+# WSL takes this column too: chezmoi is authoritative there and the bash
+# implementations are the ones that know how to reach the Windows side.
+_tstack_impl() {
+  local src="$1" name="$2"
+  [[ -f "$src/tstack/commands.conf" ]] || return 1
+  awk -v n="$name" '!/^#/ && NF>=4 && $1==n { print $2; exit }' "$src/tstack/commands.conf"
+}
+
+_tstack_names() {
+  local src="$1"
+  [[ -f "$src/tstack/commands.conf" ]] || return 1
+  awk '!/^#/ && NF>=4 { print $1 }' "$src/tstack/commands.conf"
+}
+
+tstack() {
+  local cz src py impl name
+  cz="$(_ts_chezmoi)" || { echo "tstack: chezmoi not found on PATH." >&2; return 1 }
+  src="$(_ts_src "$cz" tstack)" || return 1
+
+  if [[ $# -eq 0 || "$1" == -h || "$1" == --help || "$1" == help \
+     || "$1" == --version || "$1" == -V ]]; then
+    py="$(_tstack_python)" || {
+      echo "tstack: python3 not found; it is required. Install it, then rerun." >&2
+      return 1
+    }
+    TERMINAL_STACK_DIR="$src" TERMINAL_STACK_CHEZMOI="$cz" \
+      "$py" "$src/tstack/main.py" "${@:---help}"
+    return $?
   fi
-  TERMINAL_STACK_DIR="$src" TERMINAL_STACK_CHEZMOI="$cz" bash "$src/bootstrap/ts-mux.sh" "$@"
+
+  name="$1"; shift
+  impl="$(_tstack_impl "$src" "$name")"
+  if [[ -z "$impl" ]]; then
+    echo "tstack: unknown command '$name'" >&2
+    echo "  try: ${(j: :)${(f)$(_tstack_names "$src")}}" >&2
+    return 2
+  fi
+
+  case "$impl" in
+    -)
+      echo "tstack $name: not available on this platform." >&2
+      return 2
+      ;;
+    python)
+      py="$(_tstack_python)" || {
+        echo "tstack $name: python3 not found; it is required. Install it, then rerun." >&2
+        return 1
+      }
+      TERMINAL_STACK_DIR="$src" TERMINAL_STACK_CHEZMOI="$cz" \
+        "$py" "$src/tstack/main.py" "$name" "$@"
+      ;;
+    @*)
+      # Runs in THIS shell on purpose: update re-execs zsh and rollback prompts,
+      # neither of which a child process can do for its parent.
+      "${impl#@}" "$@"
+      ;;
+    *.sh)
+      if [[ ! -f "$src/$impl" ]]; then
+        echo "tstack $name: $src/$impl not found. Run 'tstack update'." >&2
+        return 1
+      fi
+      TERMINAL_STACK_DIR="$src" TERMINAL_STACK_CHEZMOI="$cz" bash "$src/$impl" "$@"
+      ;;
+    *)
+      echo "tstack $name: unsupported implementation '$impl' in tstack/commands.conf." >&2
+      return 1
+      ;;
+  esac
 }
 
-# The local Docker service stacks: `ts-stack` (status), `ts-stack up|down|restart`,
-# `ts-stack logs <stack>`, `ts-stack doctor`. Thin wrapper over the shared
-# bootstrap/ts-stack.sh in the clone. On WSL, Docker Desktop's `docker` may be a
-# stub that exits 1 for every command; the script detects that and re-runs the
-# Windows twin over interop rather than pretending the engine is down.
-ts-stack() {
-  local cz src
-  cz="$(_ts_chezmoi)" || { echo "ts-stack: chezmoi not found on PATH." >&2; return 1 }
-  src="$(_ts_src "$cz" ts-stack)" || return 1
-  if [[ ! -f "$src/bootstrap/ts-stack.sh" ]]; then
-    echo "ts-stack: $src/bootstrap/ts-stack.sh not found. Run 'ts-update'." >&2; return 1
+# Completion reads the same table. Cached per shell: resolving the clone shells
+# out to chezmoi, which is far too slow to do on every TAB.
+typeset -ga _TSTACK_SUBS
+_tstack_complete() {
+  if (( ${#_TSTACK_SUBS} == 0 )); then
+    local cz src
+    cz="$(_ts_chezmoi 2>/dev/null)" || return 1
+    src="$(_ts_src "$cz" tstack 2>/dev/null)" || return 1
+    _TSTACK_SUBS=(${(f)"$(_tstack_names "$src" 2>/dev/null)"})
   fi
-  TERMINAL_STACK_DIR="$src" TERMINAL_STACK_CHEZMOI="$cz" bash "$src/bootstrap/ts-stack.sh" "$@"
+  _describe 'tstack command' _TSTACK_SUBS
 }
+(( $+functions[compdef] )) && compdef _tstack_complete tstack
 
 # rclone's stock config wizard opens with a 60+ item provider list and calls the
 # provider type "Storage", which is easy to mistake for a folder/location. Only
@@ -910,7 +970,7 @@ ts-stack() {
 typeset -g _TS_RCLONE_BIN=""
 _ts_rclone_bin() {
   _ts_agent_bin rclone _TS_RCLONE_BIN && return 0
-  print -u2 "rclone: not found. Install it with: ts-config apps rclone"
+  print -u2 "rclone: not found. Install it with: tstack config apps rclone"
   return 127
 }
 rclone-stock() {
@@ -924,7 +984,7 @@ rclone() {
     cz="$(_ts_chezmoi)" || { print -u2 "rclone config: chezmoi not found on PATH."; return 1; }
     src="$(_ts_src "$cz" rclone-config)" || return 1
     if [[ ! -f "$src/bootstrap/ts-rclone-config.sh" ]]; then
-      print -u2 "rclone config: guided setup is missing. Run 'ts-update' or use 'rclone-stock config'."
+      print -u2 "rclone config: guided setup is missing. Run 'tstack update' or use 'rclone-stock config'."
       return 1
     fi
     TERMINAL_STACK_DIR="$src" TERMINAL_STACK_CHEZMOI="$cz" \
@@ -932,19 +992,6 @@ rclone() {
   else
     "$_TS_RCLONE_BIN" "$@"
   fi
-}
-
-# ts-smb — SMB/CIFS shares over rclone: find them, look inside, mount them.
-# Thin wrapper over the shared bootstrap/ts-smb.sh in the clone. macOS and Linux
-# only for now: there is deliberately no pwsh twin (see `ts-smb -h`).
-ts-smb() {
-  local cz src
-  cz="$(_ts_chezmoi)" || { echo "ts-smb: chezmoi not found on PATH." >&2; return 1 }
-  src="$(_ts_src "$cz" ts-smb)" || return 1
-  if [[ ! -f "$src/bootstrap/ts-smb.sh" ]]; then
-    echo "ts-smb: $src/bootstrap/ts-smb.sh not found. Run 'ts-update'." >&2; return 1
-  fi
-  TERMINAL_STACK_DIR="$src" TERMINAL_STACK_CHEZMOI="$cz" bash "$src/bootstrap/ts-smb.sh" "$@"
 }
 
 # Tailscale identity/discovery helpers. `tailscale ip` already resolves peers;
@@ -1049,43 +1096,6 @@ alias tail-ping='tailscale ping'
 alias tail-netcheck='tailscale netcheck'
 alias tail-nc='tailscale nc'
 alias tail-ssh='tailscale ssh'
-
-# ts-wezterm — which WezTerm build you have, what upstream has, and what changed.
-# Also switches channel. Nothing here runs on its own; see `ts-wezterm -h`.
-ts-wezterm() {
-  local cz src
-  cz="$(_ts_chezmoi)" || { echo "ts-wezterm: chezmoi not found on PATH." >&2; return 1 }
-  src="$(_ts_src "$cz" ts-wezterm)" || return 1
-  if [[ ! -f "$src/bootstrap/ts-wezterm.sh" ]]; then
-    echo "ts-wezterm: $src/bootstrap/ts-wezterm.sh not found. Run 'ts-update'." >&2; return 1
-  fi
-  TERMINAL_STACK_DIR="$src" TERMINAL_STACK_CHEZMOI="$cz" bash "$src/bootstrap/ts-wezterm.sh" "$@"
-}
-
-# Diagnose / repair the install: stale chezmoi sourceDir, missing `doc`, leftover
-# old clones, tools off PATH. Read-only by default; `ts-doctor --repair` fixes
-# (repoints sourceDir + re-applies + offers cleanup, confirming each step).
-# Resilient to a broken sourceDir — probes known clone paths so the doctor still
-# runs when `chezmoi source-path` is the very thing that's wrong.
-ts-doctor() {
-  local cz src c
-  cz="$(_ts_chezmoi)" || { echo "ts-doctor: chezmoi not found on PATH." >&2; return 1 }
-  src="${TERMINAL_STACK_DIR:-$("$cz" source-path 2>/dev/null)}"
-  if [[ ! -f "$src/bootstrap/ts-doctor.sh" ]]; then
-    # Probe the shared candidate list (canonical first, dev clones excluded) so
-    # the doctor still runs when `chezmoi source-path` is the very thing broken.
-    while IFS= read -r c; do
-      [[ -n "$c" && -f "$c/bootstrap/ts-doctor.sh" ]] || continue
-      _ts_is_dev_clone "$c" && continue
-      src="$c"; break
-    done < <(_ts_clone_candidates)
-  fi
-  if [[ ! -f "$src/bootstrap/ts-doctor.sh" ]]; then
-    echo "ts-doctor: can't locate a terminal-stack clone. Re-run the install one-liner." >&2
-    return 1
-  fi
-  TERMINAL_STACK_DIR="$src" TERMINAL_STACK_CHEZMOI="$cz" bash "$src/bootstrap/ts-doctor.sh" "$@"
-}
 
 # Workspace navigation (mirrors the ws* PowerShell functions).
 # $WORKSPACE_DIR (set in ~/.zshrc.local) wins; otherwise the first existing
@@ -1332,7 +1342,7 @@ command -v bat    >/dev/null && \
 # rendered by chezmoi from the saved `atuinEnabled` setting and is EMPTY when
 # off, which is the point: atuin is often installed but dormant, so gating on
 # `command -v atuin` here would hijack Ctrl+R without anyone choosing it.
-# Toggle with `ts-config atuin on|off`. (dot_zshrc stays non-templated so
+# Toggle with `tstack config atuin on|off`. (dot_zshrc stays non-templated so
 # `chezmoi re-add ~/.zshrc` keeps working — hence a fragment, not a {{ if }}.)
 [[ -r "$HOME/.config/terminal-stack/atuin.zsh" ]] && source "$HOME/.config/terminal-stack/atuin.zsh"
 # Bold blue directories in eza listings (consistent across WezTerm panes/domains).
@@ -1663,7 +1673,7 @@ _doc_open() {
   if (( ${#m} == 0 )); then
     # Say so BEFORE handing off. This used to drop straight into fzf, which then
     # re-queried the NARROWER per-OS index — so a miss on the full index became
-    # an empty picker with no message at all, and `doc ts-config` looked like
+    # an empty picker with no message at all, and `doc tstack config` looked like
     # the docs simply did not exist.
     echo "doc: no topic matching '$q' (try: doc ls)" >&2
     command -v fzf >/dev/null && { _doc_finder "$os" ""; return; }
@@ -1826,7 +1836,7 @@ ccmute() {
         return 1
     }
     [ -x "$exe" ] || {
-        echo "ccmute: terminal-stack-tts.exe not found — ts-config tts daemon install" >&2
+        echo "ccmute: terminal-stack-tts.exe not found — tstack config tts daemon install" >&2
         return 1
     }
     "$exe" mute "$@"
@@ -1847,17 +1857,17 @@ _cc_tts_effective_enabled() {
 
 cctts() {
     case "${1:-}" in
-        on)   ts-config tts on ;;
-        off)  ts-config tts off ;;
-        test) ts-config tts test ;;
-        show) ts-config tts show ;;
+        on)   tstack config tts on ;;
+        off)  tstack config tts off ;;
+        test) tstack config tts test ;;
+        show) tstack config tts show ;;
         *)
             # Effective value, not just the rendered one: local.json is merged over
             # config.json and wins, so reading config.json alone reports ON while a
             # stale override keeps the machine silent. ts_data_get is bash-only and
             # not sourced here — calling it always reported OFF.
             if [ "$(_cc_tts_effective_enabled)" = true ]; then
-                echo 'CC TTS: ON  (cctts off to disable; ts-config tts for settings)'
+                echo 'CC TTS: ON  (cctts off to disable; tstack config tts for settings)'
             else
                 echo 'CC TTS: OFF (cctts on to enable)'
             fi

@@ -1,6 +1,6 @@
 # Neovim (nvim)
 
-Modal editor. In the app catalog as a **recommended** install — `ts-config apps`
+Modal editor. In the app catalog as a **recommended** install — `tstack config apps`
 (zsh) / `Set-TerminalStackConfig` (pwsh); winget id `Neovim.Neovim`. The stack's
 `$EDITOR` stays `micro`, so run `nvim` explicitly — to make git, `doc edit` and
 friends use it instead, set `EDITOR` in `~/.zshrc.local` / `profile.local.ps1`.

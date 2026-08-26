@@ -12,10 +12,61 @@ import pytest
 
 from tests.shell_support import BASH, bash_path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "bootstrap/agent-tools.json"
 PS_ADAPTER = ROOT / "bootstrap/ts-agents.ps1"
+
+
+def repo_file(rel: str) -> Path:
+    """A repo path a test asserts about, which therefore MUST exist.
+
+    Tests shaped "string X must (not) appear in file Y" go silently vacuous the
+    moment Y is deleted: `assert "docker compose" not in ""` passes forever while
+    enforcing nothing. Routing every such test through here turns a moved or
+    deleted target into a loud failure that names itself.
+    """
+    path = ROOT / rel
+    assert path.exists(), (
+        f"{rel} does not exist. If it moved, repoint this test. If its logic moved "
+        f"into tstack/, repoint the assertion at the new module -- the rule outlives "
+        f"the file that happened to implement it. Do not delete the test."
+    )
+    return path
+
+
+def read_repo(rel: str) -> str:
+    return repo_file(rel).read_text(encoding="utf-8")
+
+
+def impl_paths(name: str) -> list[Path]:
+    """Every file implementing a tstack subcommand right now, per commands.conf.
+
+    Following the registry is what stops a rule from going quiet at port time: a
+    test written against bootstrap/ts-agents.sh keeps enforcing itself once the
+    subcommand becomes tstack/commands/agents.py, because this resolves to
+    whatever the table currently points at.
+    """
+    out: list[Path] = []
+    for row in read_repo("tstack/commands.conf").splitlines():
+        row = row.strip()
+        if not row or row.startswith("#"):
+            continue
+        fields = row.split(None, 3)
+        if len(fields) < 4 or fields[0] != name:
+            continue
+        for token, owner in ((fields[1], "dot_zshrc"),
+                             (fields[2], "windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1")):
+            if token == "-":
+                continue
+            if token == "python":
+                out.append(repo_file(f"tstack/commands/{name}.py"))
+            elif token.startswith("@"):
+                out.append(repo_file(owner))
+            else:
+                out.append(repo_file(token))
+    assert out, f"{name!r} is not in tstack/commands.conf"
+    return out
+
 
 
 def test_manifest_pins_reviewed_versions_and_local_endpoints():
@@ -44,8 +95,14 @@ def test_manifest_pins_reviewed_versions_and_local_endpoints():
 
 
 def test_no_project_scope_or_docker_mutation_in_lifecycle_adapters():
-    text = (PS_ADAPTER.read_text(encoding="utf-8") +
-            (ROOT / "bootstrap/ts-agents.sh").read_text(encoding="utf-8"))
+    """ts-agents never runs docker itself: it prints the verb to run.
+
+    Resolved through tstack/commands.conf so the rule survives the port. The old
+    form read two hard-coded bootstrap paths and would have passed vacuously the
+    day those files were deleted, enforcing nothing while looking green.
+    """
+    text = "".join(p.read_text(encoding="utf-8") for p in impl_paths("agents"))
+    assert text.strip(), "agents implementation resolved to empty text"
     assert "--scope','project" not in text
     assert "--scope project" not in text
     assert "docker compose" not in text.lower()
@@ -76,7 +133,7 @@ def test_launch_wrappers_are_process_local_and_have_stock_escape_hatches():
 def test_ts_update_owns_chezmoi_conflict_handling_and_runtime_guard():
     zsh = (ROOT / "dot_zshrc").read_text(encoding="utf-8")
     ps = (ROOT / "windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1").read_text(encoding="utf-8")
-    update = zsh[zsh.index("_ts_chezmoi_conflicts() {"):zsh.index("ts-rollback() {")]
+    update = zsh[zsh.index("_ts_chezmoi_conflicts() {"):zsh.index("_tstack_rollback() {")]
     assert "status --path-style absolute --exclude scripts" in update
     assert "[o]verwrite, [m]erge, [v]iew again, or [q]uit" in update
     assert "apply --dry-run --error-on-conflict --no-tty" in update
@@ -651,7 +708,7 @@ def test_changelog_slicer_counts_against_a_fixture():
     tally = r.stdout.strip()
     # Hand-counted from the fixture: the Continuous/Nightly section only, since
     # 20240203 is where the slice stops.
-    counts = dict(zip(tally.split()[::2], (int(n) for n in tally.split()[1::2])))
+    counts = dict(zip(tally.split()[::2], (int(n) for n in tally.split()[1::2]), strict=False))
     assert counts == {"Changed": 20, "New": 32, "Fixed": 74, "Updated": 9}, tally
     assert sum(counts.values()) == 135
 
@@ -662,7 +719,7 @@ def test_changelog_slicer_counts_against_a_fixture():
          f'. bootstrap/_wezterm.sh; ts_wez_changelog_fetch() {{ printf "%s\n" "{fixture}"; }}; '
          'ts_wez_changes_tally 19700101-000000-00000000'],
         cwd=ROOT, text=True, capture_output=True, check=False)
-    older = dict(zip(r2.stdout.split()[::2], (int(n) for n in r2.stdout.split()[1::2])))
+    older = dict(zip(r2.stdout.split()[::2], (int(n) for n in r2.stdout.split()[1::2]), strict=False))
     assert sum(older.values()) > sum(counts.values())
 
 
@@ -702,17 +759,17 @@ def test_wezterm_channel_switch_removes_the_other_one_both_ways():
 def test_nothing_installs_or_upgrades_wezterm_automatically():
     """The whole point: every path asks first."""
     zsh = (ROOT / "dot_zshrc").read_text(encoding="utf-8")
-    upd = zsh[zsh.index("ts-update() {"):]
+    upd = zsh[zsh.index("_tstack_update() {"):]
     upd = upd[:upd.index("\n}\n")]
     assert "ts_wezterm_update_available" in upd
     assert "Upgrade WezTerm now? [y/N]" in upd
     assert 'ts-wezterm.sh" upgrade' in upd
     # Non-interactive must print the command, never run it.
-    assert "Upgrade it with: ts-config wezterm upgrade" in upd
+    assert "Upgrade it with: tstack config wezterm upgrade" in upd
     ps = (ROOT / "windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1").read_text(encoding="utf-8")
     assert "Get-TsWezUpdateAvailable" in ps
     assert "Upgrade WezTerm now? [y/N]" in ps
-    assert "Upgrade it with: ts-config wezterm upgrade" in ps
+    assert "Upgrade it with: tstack config wezterm upgrade" in ps
 
 
 def test_ts_config_exposes_wezterm():
@@ -724,7 +781,7 @@ def test_ts_config_exposes_wezterm():
     rng = sh[sh.index("sed -n '2,"):]
     end = int(rng[len("sed -n '2,"):].split("p")[0])
     header = sh.splitlines()[1:end]
-    assert any("ts-config wezterm" in line for line in header), \
+    assert any("tstack config wezterm" in line for line in header), \
         "the wezterm line is outside the range -h prints"
     # run_wizard installs the emulator it just asked about (it used not to).
     wiz = sh[sh.index("run_wizard() {"):]
@@ -806,7 +863,7 @@ def test_python_and_runtimes_are_in_the_questionnaire():
     assert set(_sh_eval('ts_app_group_members runtimes').split()) == {"fnm", "node"}
     # python's binary is python3, not python.
     assert _sh_eval('ts_app_bin python') == "python3"
-    for tool in py + ["fnm"]:
+    for tool in [*py, "fnm"]:
         assert _sh_eval(f'ts_app_desc {tool}'), f"{tool} has no description"
 
 
@@ -829,7 +886,7 @@ def test_agent_cli_installers_use_the_real_upstream_commands():
 @pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_node_managed_binaries_are_visible_to_the_update_check():
     """Global npm binaries live under fnm's per-shell PATH entry; without loading
-    fnm's env first, ts-update would nag about codex/gemini forever."""
+    fnm's env first, tstack update would nag about codex/gemini forever."""
     sh = (ROOT / "bootstrap/_config.sh").read_text(encoding="utf-8")
     assert "ts_load_node_env" in sh
     pending = sh[sh.index("ts_apps_pending() {"):]
@@ -889,7 +946,7 @@ def test_ts_config_wizard_replays_the_whole_questionnaire():
     rng = sh[sh.index("sed -n '2,"):]
     end = int(rng[len("sed -n '2,"):].split("p")[0])
     header = sh.splitlines()[1:end]
-    assert any("ts-config wizard" in line for line in header), \
+    assert any("tstack config wizard" in line for line in header), \
         "the wizard line is outside the range -h prints"
     ps = (ROOT / "windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1").read_text(encoding="utf-8")
     assert "$runWizard = {" in ps and "'wizard'" in ps
@@ -897,7 +954,7 @@ def test_ts_config_wizard_replays_the_whole_questionnaire():
 
 def test_shared_pwsh_prompts_live_where_both_callers_can_reach_them():
     """$PROFILE dot-sources _config.ps1 only; a prompt in windows-bootstrap.ps1
-    is invisible to `ts-config wizard`."""
+    is invisible to `tstack config wizard`."""
     cfg = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
     boot = (ROOT / "bootstrap/windows-bootstrap.ps1").read_text(encoding="utf-8")
     for fn in ("function Read-TsWizard", "function Install-TsTerminals"):
@@ -908,7 +965,7 @@ def test_shared_pwsh_prompts_live_where_both_callers_can_reach_them():
 def test_wizard_callees_are_all_defined_in_config_ps1():
     """Naming the two moved functions is not enough: `Read-TsWizard` calling a
     prompt that stayed in windows-bootstrap.ps1 is a runtime crash for
-    `ts-config wizard` only (this is how Read-TsWorkspaceDir broke it). Derive
+    `tstack config wizard` only (this is how Read-TsWorkspaceDir broke it). Derive
     the callee list from the body instead of maintaining it by hand."""
     cfg = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
     body = cfg[cfg.index("function Read-TsWizard"):]
@@ -917,12 +974,12 @@ def test_wizard_callees_are_all_defined_in_config_ps1():
     called.discard("Read-TsWizard")
     missing = sorted(n for n in called
                      if not re.search(r"^function " + n + r"\b", cfg, re.M))
-    assert not missing, f"Read-TsWizard calls {missing}, which ts-config wizard cannot see"
+    assert not missing, f"Read-TsWizard calls {missing}, which tstack config wizard cannot see"
 
 
 def test_pwsh_wizard_persists_the_workspace_answer():
     """The questionnaire asks for a workspace root; dropping the answer on the
-    `ts-config wizard` path is a silent behaviour difference from the installer."""
+    `tstack config wizard` path is a silent behaviour difference from the installer."""
     ps = (ROOT / "windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1").read_text(encoding="utf-8")
     cfg = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
     assert "function Save-TsWorkspaceOverride" in cfg
@@ -931,13 +988,15 @@ def test_pwsh_wizard_persists_the_workspace_answer():
     assert "did not complete" in ps
 
 
-# ── ts-smb ──────────────────────────────────────────────────────────────────────
+# ── tstack smb ──────────────────────────────────────────────────────────────────────
 
 def _smb_eval(tmp_path, local_conf, snippet, tracked="set default_user guest\n"):
     """Run a snippet with bootstrap/_smb.sh sourced against a sandboxed store."""
-    lib = tmp_path / "lib"; lib.mkdir(exist_ok=True)
+    lib = tmp_path / "lib"
+    lib.mkdir(exist_ok=True)
     (lib / "shares.conf").write_text(tracked, encoding="utf-8", newline="\n")
-    cfg = tmp_path / "cfg" / "terminal-stack"; cfg.mkdir(parents=True, exist_ok=True)
+    cfg = tmp_path / "cfg" / "terminal-stack"
+    cfg.mkdir(parents=True, exist_ok=True)
     (cfg / "shares.local.conf").write_text(local_conf, encoding="utf-8", newline="\n")
     env = dict(os.environ, XDG_CONFIG_HOME=bash_path(tmp_path / "cfg"),
                TS_SMB_LIB_DIR=bash_path(lib))
@@ -1002,14 +1061,14 @@ def test_smb_validate_catches_the_share_vs_path_trap(tmp_path):
 
 @pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_smb_help_works_without_a_clone():
-    """`ts-smb -h` must work on a box where the clone or chezmoi is the broken thing."""
+    """`tstack smb -h` must work on a box where the clone or chezmoi is the broken thing."""
     env = {k: v for k, v in os.environ.items() if k != "TERMINAL_STACK_DIR"}
     env.update({"PATH": "/usr/bin:/bin", "HOME": "/nonexistent"})
     r = subprocess.run([BASH, "bootstrap/ts-smb.sh", "-h"],
                        cwd=ROOT, text=True, encoding="utf-8", capture_output=True,
                        check=False, env=env)
     assert r.returncode == 0, r.stderr
-    assert r.stdout.startswith("ts-smb —")
+    assert r.stdout.startswith("tstack smb —")
     assert "Windows is not supported yet" in r.stdout
 
 
@@ -1053,14 +1112,20 @@ def test_smb_does_not_auto_enable_fskit():
     assert "backend=fskit" not in code
 
 
-def test_smb_exists_in_zshrc_and_is_not_claimed_for_pwsh():
-    """Bash-only by decision, not by drift: the zsh wrapper exists, and the help
-    says Windows is unsupported so nobody 'fixes' the missing twin silently."""
-    zsh = (ROOT / "dot_zshrc").read_text(encoding="utf-8")
-    assert "\nts-smb() {" in zsh
-    assert "bootstrap/ts-smb.sh" in zsh
-    src = (ROOT / "bootstrap/ts-smb.sh").read_text(encoding="utf-8")
-    assert "THERE IS NO pwsh TWIN YET" in src
+def test_smb_exists_and_is_not_claimed_for_pwsh():
+    """Bash-only by decision, not by drift.
+
+    The registry has to say so explicitly -- a '-' in the Windows column is what
+    makes `tstack smb` report "not available on Windows" instead of "not found",
+    and the help has to agree so nobody 'fixes' the missing twin silently.
+    """
+    rows = [r.split(None, 3) for r in read_repo("tstack/commands.conf").splitlines()
+            if r.strip() and not r.startswith("#")]
+    smb = next((r for r in rows if r[0] == "smb"), None)
+    assert smb, "smb missing from tstack/commands.conf"
+    assert smb[1].endswith("ts-smb.sh"), smb
+    assert smb[2] == "-", "the Windows column must stay '-', not a guessed twin"
+    assert "THERE IS NO pwsh TWIN YET" in read_repo("bootstrap/ts-smb.sh")
 
 
 def test_rclone_is_in_the_catalog_with_a_description():
@@ -1073,7 +1138,8 @@ def test_rclone_is_in_the_catalog_with_a_description():
 
 def test_guided_rclone_only_intercepts_exact_bare_config():
     zsh = (ROOT / "dot_zshrc").read_text(encoding="utf-8")
-    body = zsh[zsh.index("rclone() {"):zsh.index("# ts-smb", zsh.index("rclone() {"))]
+    body = zsh[zsh.index("rclone() {"):]
+    body = body[:body.index("\n}\n")]
     assert '(( $# == 1 )) && [[ "$1" == config ]]' in body
     assert '"$_TS_RCLONE_BIN" "$@"' in body
     assert "rclone-stock()" in zsh
@@ -1193,9 +1259,9 @@ def _wez_light_scheme():
     sd = lua[lua.index("scheme_def = {"):]
     sd = sd[:sd.index("\n    },")]
     def one(key):
-        return re.search(r"%s = '(#[0-9A-Fa-f]{6})'" % key, sd).group(1).lower()
+        return re.search(rf"{key} = '(#[0-9A-Fa-f]{{6}})'", sd).group(1).lower()
     def arr(key):
-        block = re.search(r"%s = \{(.*?)\}" % key, sd, re.S).group(1)
+        block = re.search(rf"{key} = \{{(.*?)\}}", sd, re.S).group(1)
         return [c.lower() for c in re.findall(r"'(#[0-9A-Fa-f]{6})'", block)]
     return one, arr
 
@@ -1208,17 +1274,17 @@ def test_ghostty_light_theme_matches_the_wezterm_palette():
     one, arr = _wez_light_scheme()
     pal = dict(re.findall(r"^palette = (\d+)=(#[0-9a-f]{6})$", theme, re.M))
     ansi, brights = arr("ansi"), arr("brights")
-    assert len(pal) == 16, "expected 16 palette entries, got %d" % len(pal)
+    assert len(pal) == 16, f"expected 16 palette entries, got {len(pal)}"
     for i, c in enumerate(ansi):
-        assert pal[str(i)] == c, "palette %d drifted from the Lua ansi table" % i
+        assert pal[str(i)] == c, f"palette {i} drifted from the Lua ansi table"
     for i, c in enumerate(brights):
-        assert pal[str(i + 8)] == c, "palette %d drifted from the Lua brights" % (i + 8)
+        assert pal[str(i + 8)] == c, f"palette {i + 8} drifted from the Lua brights"
     for key, lua_key in (("background", "background"), ("foreground", "foreground"),
                          ("cursor-color", "cursor_bg"), ("cursor-text", "cursor_fg"),
                          ("selection-background", "selection_bg"),
                          ("selection-foreground", "selection_fg")):
-        got = re.search(r"^%s = (#[0-9a-f]{6})$" % key, theme, re.M).group(1)
-        assert got == one(lua_key), "%s drifted from the Lua scheme_def" % key
+        got = re.search(rf"^{key} = (#[0-9a-f]{{6}})$", theme, re.M).group(1)
+        assert got == one(lua_key), f"{key} drifted from the Lua scheme_def"
 
 
 def test_ghostty_config_follows_theme_mode_not_resolved_theme():
@@ -1235,13 +1301,13 @@ def test_ghostty_config_follows_theme_mode_not_resolved_theme():
         if st.startswith("#") or st.startswith("{{") or "=" not in st:
             continue
         assert "#" not in st.split("=", 1)[1] or "color" in st or "palette" in st, \
-            "inline comment would be parsed as part of the value: %r" % ln
+            f"inline comment would be parsed as part of the value: {ln!r}"
 
 
 def test_ghostty_is_gated_and_never_removed_by_chezmoi():
     """.chezmoiignore is evaluated on every machine, so a removal rule there
     would wipe a hand-written Ghostty config on a box that never opted in.
-    Removal is ts-config ghostty off's job, for the machine you run it on."""
+    Removal is tstack config ghostty off's job, for the machine you run it on."""
     ign = (ROOT / ".chezmoiignore").read_text(encoding="utf-8")
     assert ign.count(".config/ghostty/**") == 2, "expected a darwin gate and an off gate"
     rm = (ROOT / ".chezmoiremove").read_text(encoding="utf-8")
@@ -1268,7 +1334,7 @@ def test_windows_ghostty_targets_the_upstream_config_dir():
     assert (ROOT / WIN_GHOSTTY / "themes/vs-code-light-modern").exists()
     for bad in ("AppData/Local/winghostty", "AppData/Local/noctty"):
         assert not (ROOT / bad).exists(), \
-            "%s is app-named and breaks on the rename; use AppData/Local/ghostty" % bad
+            f"{bad} is app-named and breaks on the rename; use AppData/Local/ghostty"
 
 
 def test_windows_ghostty_theme_is_byte_identical_to_the_macos_one():
@@ -1288,7 +1354,7 @@ def test_windows_ghostty_config_carries_no_foreign_token():
     cfg = (ROOT / WIN_GHOSTTY / "config.tmpl").read_text(encoding="utf-8")
     found = set(re.findall(r"__[A-Z0-9_]+__", cfg))
     assert found == {"__GHOSTTY_THEME__", "__GHOSTTY_WINDOW_THEME__"}, \
-        "unexpected token(s) in the Windows Ghostty config: %s" % sorted(found)
+        f"unexpected token(s) in the Windows Ghostty config: {sorted(found)}"
 
 
 def test_windows_ghostty_config_uses_tokens_not_go_templates():
@@ -1303,7 +1369,7 @@ def test_windows_ghostty_config_uses_tokens_not_go_templates():
             continue
         val = st.split("=", 1)[1]
         assert "#" not in val, \
-            "inline comment would be parsed as part of the value: %r" % ln
+            f"inline comment would be parsed as part of the value: {ln!r}"
 
 
 def test_windows_ghostty_drops_the_macos_only_directives():
@@ -1314,15 +1380,15 @@ def test_windows_ghostty_drops_the_macos_only_directives():
     cfg = (ROOT / WIN_GHOSTTY / "config.tmpl").read_text(encoding="utf-8")
     body = "\n".join(l for l in cfg.splitlines() if not l.strip().startswith("#"))
     for directive in ("macos-option-as-alt", "font-thicken", "window-colorspace"):
-        assert directive not in body, "%s is macOS-only" % directive
+        assert directive not in body, f"{directive} is macOS-only"
     assert "cmd+" not in body, "there is no Cmd key on Windows"
 
 
 def test_ghostty_theme_mapping_is_the_same_in_both_sync_paths():
     """Ghostty's config format has no conditionals and Windows mirror files get
     token substitution, so themeMode -> theme is resolved in the sync. That means
-    the mapping exists three times (bash sync, pwsh sync, ts-config diff) and all
-    of them must agree, or `ts-config ghostty diff` reports a phantom change."""
+    the mapping exists three times (bash sync, pwsh sync, tstack config diff) and all
+    of them must agree, or `tstack config ghostty diff` reports a phantom change."""
     sources = {
         "run_after_90-sync-windows.sh": (ROOT / "run_after_90-sync-windows.sh"),
         "scripts/sync-windows.ps1": (ROOT / "scripts/sync-windows.ps1"),
@@ -1331,15 +1397,15 @@ def test_ghostty_theme_mapping_is_the_same_in_both_sync_paths():
     for name, path in sources.items():
         body = path.read_text(encoding="utf-8")
         assert "dark:Catppuccin Mocha,light:vs-code-light-modern" in body, \
-            "%s: follow must use a split theme (it is what tracks the OS)" % name
+            f"{name}: follow must use a split theme (it is what tracks the OS)"
         assert "vs-code-light-modern" in body and "Catppuccin Mocha" in body, name
         for wt in ("'light'", "'auto'", "'dark'"):
-            assert wt in body, "%s: missing window-theme value %s" % (name, wt)
+            assert wt in body, f"{name}: missing window-theme value {wt}"
 
 
 def test_ghostty_off_skips_the_windows_subtree_without_deleting_it():
     """Same rule as the macOS .chezmoiignore gate: `off` stops the config being
-    re-rendered. Deleting is ts-config's job, for the machine you run it on — a
+    re-rendered. Deleting is tstack config's job, for the machine you run it on — a
     sync-side deletion runs everywhere and would wipe a hand-written config."""
     sh = (ROOT / "run_after_90-sync-windows.sh").read_text(encoding="utf-8")
     ps = (ROOT / "scripts/sync-windows.ps1").read_text(encoding="utf-8")
@@ -1347,7 +1413,7 @@ def test_ghostty_off_skips_the_windows_subtree_without_deleting_it():
     assert "AppData/Local/ghostty/*" in ps and "tsGhosttyOn" in ps
     for name, body in (("bash", sh), ("pwsh", ps)):
         assert "rm -rf" not in body.lower() or "ghostty" not in body.lower().split("rm -rf")[1][:200], \
-            "%s sync must never delete the Ghostty tree" % name
+            f"{name} sync must never delete the Ghostty tree"
 
 
 def test_ghostty_is_offered_on_windows_but_never_installed():
@@ -1399,7 +1465,7 @@ def test_windows_ghostty_is_opaque_so_the_dwm_backdrop_stays_off():
     body = [l.strip() for l in cfg.splitlines() if not l.strip().startswith("#")]
     opacity = [l for l in body if l.startswith("background-opacity")]
     assert opacity == ["background-opacity = 1"], \
-        "anything below 1 re-enables the backdrop: %r" % opacity
+        f"anything below 1 re-enables the backdrop: {opacity!r}"
     assert not [l for l in body if l.startswith("background-blur")], \
         "a blur is the other half of shouldUseSystemBackdrop; leave it unset"
     # The macOS side keeps the translucent look; this pair is meant to differ.
@@ -1431,7 +1497,7 @@ def test_pending_apps_refreshes_path_before_probing():
     ts_load_node_env. Without it, anything installed since this process started
     (an installer that edited the User PATH; fnm, whose entry is per-shell) reads
     as missing: grok, gemini and pi were all installed and all three were offered
-    again on every ts-update."""
+    again on every tstack update."""
     ps = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
     body = ps.split("function Get-TsAppsPending {")[1].split("\nfunction ")[0]
     assert "Update-TsSessionPath" in body, \
@@ -1625,7 +1691,7 @@ def test_no_bare_variable_followed_by_non_ascii():
     """macOS ships bash 3.2, whose legal_variable_char() is not multibyte-aware:
     under en_US.UTF-8 the lead byte of a UTF-8 char passes isalnum(), so
     `"$desired…"` parses the NAME as `desired\\xE2` — never set — and `set -u`
-    aborts. It crashed `ts-doctor --repair` mid-run, after repointing sourceDir
+    aborts. It crashed `tstack doctor --repair` mid-run, after repointing sourceDir
     and before `chezmoi apply`. `bash -n` cannot catch it; brace the variable."""
     bad = []
     pat = re.compile(r"\$[A-Za-z_][A-Za-z0-9_]*[^\x00-\x7F\s]")
@@ -1757,7 +1823,7 @@ _EXCL_PWSH = (
 def test_exclusive_group_survives_a_non_member_tick_bash():
     for answers, want in _EXCL_CASES:
         script = _EXCL_BASH.replace(
-            "ANSWERS", " ".join('"%s"' % a for a in answers))
+            "ANSWERS", " ".join(f'"{a}"' for a in answers))
         r = subprocess.run([BASH, "-c", script], cwd=ROOT,
                            text=True, capture_output=True, check=False,
                            stdin=subprocess.DEVNULL, timeout=60)
@@ -1769,7 +1835,7 @@ def test_exclusive_group_survives_a_non_member_tick_pwsh():
     """The pwsh twin must reach the same six answers as the bash one."""
     for answers, want in _EXCL_CASES:
         command = _EXCL_PWSH.replace(
-            "ANSWERS", ",".join("'%s'" % a for a in answers))
+            "ANSWERS", ",".join(f"'{a}'" for a in answers))
         r = subprocess.run([shutil.which("pwsh"), "-NoLogo", "-NoProfile",
                             "-NonInteractive", "-Command", command],
                            cwd=ROOT, text=True, capture_output=True, check=False)
@@ -1806,14 +1872,14 @@ def test_installed_apps_report_survives_a_tool_that_rejects_version():
 
 
 def test_ts_config_wizard_asks_about_terminals_and_saves_first():
-    """`ts-config wizard` never set TS_WIZ_ASK_TERMINALS, so it skipped the
+    """`tstack config wizard` never set TS_WIZ_ASK_TERMINALS, so it skipped the
     question and reported 'none selected' — a re-run could not switch WezTerm
     channel, which is a main reason to run it again. And like the bootstraps it
     must save before installing."""
     body = _uncommented((ROOT / "bootstrap/ts-config.sh").read_text(encoding="utf-8"))
     rw = body[body.index("run_wizard()"):]
     rw = rw[:rw.index("\n}\n")]
-    assert "TS_WIZ_ASK_TERMINALS=1" in rw, "ts-config wizard must ask about terminals"
+    assert "TS_WIZ_ASK_TERMINALS=1" in rw, "tstack config wizard must ask about terminals"
     assert rw.index("ts_save_config") < rw.index("install_apps"), \
         "run_wizard installs before saving the answers"
     assert "ts_note_failure" in rw, "installs here must not be fatal either"
@@ -1926,7 +1992,7 @@ def test_wizard_recommends_and_probes_before_offering():
 
 def test_platform_impossible_apps_are_not_offered_forever():
     """nvtop is Linux-only, so on macOS it can never install — it was reported
-    missing on every ts-update, accepted, and printed 'Linux-only; skipping'."""
+    missing on every tstack update, accepted, and printed 'Linux-only; skipping'."""
     cfg = (ROOT / "bootstrap/_config.sh").read_text(encoding="utf-8")
     assert "ts_app_installable" in cfg
     pend = cfg[cfg.index("ts_apps_pending() {"):]
@@ -2079,11 +2145,11 @@ def test_macos_has_a_synthesis_floor():
 
 
 def test_ts_config_and_tts_are_findable_by_name():
-    """`doc ts-config` matched ZERO labels — the material existed inside
+    """`doc tstack` matched ZERO labels — the material existed inside
     common/stack.md, which no one would guess. And the cross-platform half of
     the TTS docs lived in windows/, which the picker hides on other OSes."""
     kb = ROOT / "docs/kb/common"
-    assert (kb / "ts-config.md").exists(), "no page named for ts-config"
+    assert (kb / "tstack.md").exists(), "no page named for tstack"
     assert (kb / "tts.md").exists(), "no OS-neutral TTS page"
     # The support matrix is the point of the TTS page.
     tts = (kb / "tts.md").read_text(encoding="utf-8")
@@ -2091,8 +2157,8 @@ def test_ts_config_and_tts_are_findable_by_name():
         assert must in tts, f"tts.md missing {must!r}"
     # stack.md should point at the new page, not duplicate it.
     stack = (kb / "stack.md").read_text(encoding="utf-8")
-    assert "doc ts-config" in stack
-    assert "ts-config agents headroom cursor" not in stack, "table left behind in stack.md"
+    assert "doc tstack" in stack
+    assert "tstack config agents headroom cursor" not in stack, "table left behind in stack.md"
     # _index.md advertised windows/ as "pwsh, winget" and omitted the TTS page.
     idx = (ROOT / "docs/kb/_index.md").read_text(encoding="utf-8")
     assert "TTS" in idx.split("`windows/`")[1].split("\n")[0]
@@ -2130,13 +2196,13 @@ def test_tts_wizard_is_platform_aware_and_asks_what_it_says():
         arm = code[code.index(f"        {verb})"):]
         arm = arm[:arm.index("\n            ;;")]
         assert "ts_cc_tts_daemon_supported" in arm, f"{verb} has no platform guard"
-    # Bare `ts-config tts` shows status like every sibling verb.
+    # Bare `tstack config tts` shows status like every sibling verb.
     assert "''|show)" in tts
 
 
 def test_wizard_does_not_reset_tuned_tts_keys():
     """ts_cc_tts_apply_wizard_choice reset every key on BOTH on and off, so each
-    `ts-config wizard` silently discarded any `ts-config tts …` tuning."""
+    `tstack config wizard` silently discarded any `tstack config tts …` tuning."""
     body = (ROOT / "bootstrap/_cc_tts.sh").read_text(encoding="utf-8")
     fn = body[body.index("ts_cc_tts_apply_wizard_choice() {"):]
     fn = fn[:fn.index("\n}\n")]

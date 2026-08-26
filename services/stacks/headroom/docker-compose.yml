@@ -8,7 +8,7 @@
 #
 # Headroom's semantic memory is NOT here. It lives in docker-compose.memory.yml
 # and only runs when `memoryBackend` is `headroom`, because AgentMemory does the
-# same job and only one memory system runs on a machine (`ts-config memory`).
+# same job and only one memory system runs on a machine (`tstack config memory`).
 # Selected by COMPOSE_FILE in .env; see that file and docs/decisions.md.
 #
 # This is a docker-local adaptation of the project's own compose file, not a
@@ -113,7 +113,7 @@ services:
 
 # A plain named volume rather than `external: true`, and that asymmetry IS the
 # safety property: agentmemory's two are external so `down -v` cannot touch them,
-# while this one is removable by design and `ts-stack` gates that behind an
+# while this one is removable by design and `tstack services` gates that behind an
 # explicit --destroy-data plus a verified backup.
 #
 # `name:` is pinned so the volume is exactly this, with no <project>_ prefix. A

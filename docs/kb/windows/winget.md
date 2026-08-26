@@ -1,7 +1,7 @@
 # Windows — winget
 
 Windows' package manager, and how this stack installs its apps. The wizard and
-`Set-TerminalStackConfig` (pwsh) / `ts-config apps` (from WSL) install the app
+`Set-TerminalStackConfig` (pwsh) / `tstack config apps` (from WSL) install the app
 catalog via winget with the ids in `bootstrap/_config.ps1` — each install runs
 `winget install --id <ID> --exact --silent` and may prompt for admin elevation.
 Prerequisites (Nerd Font, Starship, chezmoi, Git) are always installed and aren't
@@ -12,7 +12,7 @@ or `wez.wezterm`, or leave both unticked and keep using Windows Terminal or an
 existing install. Nightly is pre-selected on every machine, including one that already has stable,
 because upstream's newest stable is `20240203`
 (February 2024, no cut since). Switching channel uninstalls the other package
-first — they install to the same place. `ts-config wezterm` shows your build and
+first — they install to the same place. `tstack config wezterm` shows your build and
 its date, the newest on each channel, and what changed in between; nothing
 upgrades on its own. Note nightly's manifest is republished more often than its
 hash is refreshed, so `Installer hash does not match` is a routine outcome — the
@@ -62,7 +62,7 @@ route through `Install-TsPyTool`: `uv tool install <name>` when uv is present
 
 Three of them — `pypa.pipx`, `Python-Poetry.Poetry` and `nicolargo.glances` —
 *were* in the winget table and none of the three ids exists. `pipx` is
-recommended, so every Windows machine was offered it on every `ts-update` and
+recommended, so every Windows machine was offered it on every `tstack update` and
 winget answered "No package found matching input criteria" every time. Check a
 new id resolves (`winget show --id <id> --exact`) before adding it here.
 
@@ -70,10 +70,10 @@ new id resolves (`winget show --id <id> --exact`) before adding it here.
 winget id (bandwhich has no Windows build at all), `atuin` has no winget
 manifest *and* no PowerShell `atuin init` target, and `tmux`, `tldr`, `nvtop`
 and `lazydocker` are WSL/Linux-only. They are absent from the winget table
-rather than mapped to something that always fails, so `ts-update` never nags
+rather than mapped to something that always fails, so `tstack update` never nags
 about them here.
 
-What `ts-update` offers is decided by `Test-TsAppInstallable`, which means *"can
+What `tstack update` offers is decided by `Test-TsAppInstallable`, which means *"can
 this platform install it"*, not *"is it in winget"* — winget ids, the `ai` group
 and the Python group all qualify. It used to be a bare winget lookup, so a
 machine missing `grok`, `gemini`, `pi` or `cursor-agent` was never told.
@@ -106,7 +106,7 @@ stays individually untickable.
 | `winget pin add --id Foo.Bar` | hold a package out of `upgrade --all` |
 | `winget uninstall --id Foo.Bar` | remove |
 
-`ts-update` compares this catalog against what's on PATH after every pull and
+`tstack update` compares this catalog against what's on PATH after every pull and
 offers to install anything the catalog gained — see `doc common/stack`.
 PrettyMark is the one entry whose winget install doesn't land on `PATH`; its
 presence check falls back to the fixed `C:\Program Files\PrettyMark\PrettyMark.exe`

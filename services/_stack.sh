@@ -582,7 +582,7 @@ tss_secret_cache_path() {
 
 # The pre-merge location. Still WRITTEN, not just read: the reader is JavaScript
 # injected into vendor hook files on live machines, and those are only rewritten
-# when `ts-agentmemory --apply` runs -- so a machine can be carrying the old
+# when `tstack agentmemory --apply` runs -- so a machine can be carrying the old
 # reader for a while after this clone updates. Dropping the old path silently
 # turns 401-recovery back into a permanent no-op, which is the exact failure that
 # cost 56 consecutive captures on 2026-08-21 with nothing in any log.
@@ -729,7 +729,7 @@ tss_agentmemory_pinned_version() {
         "$TSS_STACKS/agentmemory/docker-compose.yml" 2>/dev/null | head -n 1 || true
 }
 
-# ── ts-stack: discovery, toggles, engine, compose ────────────────────────────
+# ── tstack services: discovery, toggles, engine, compose ────────────────────────────
 # Everything below is used by bootstrap/ts-stack.sh. Its pwsh twin carries the
 # same logic inline (bootstrap/ts-stack.ps1) — change one, change the other.
 
@@ -849,7 +849,7 @@ tss_engine_advice() {                       # <os> <kind>
                 'command and says nothing about whether the engine is healthy.' \
                 '  fix either way:' \
                 '    Docker Desktop -> Settings -> Resources -> WSL Integration -> enable this distro' \
-                '    or run the Windows twin:  ts-stack <command>   (from PowerShell)' ;;
+                '    or run the Windows twin:  tstack services <command>   (from PowerShell)' ;;
         denied)
             printf '%s\n' \
                 'the engine is there but this user may not talk to it.' \
@@ -935,7 +935,7 @@ EOF
 # ── the pre-ts- volume names ─────────────────────────────────────────────────
 # Renaming a volume is the only part of the naming sweep that touches data.
 # `docker compose up` would create an empty replacement and start the stack with
-# no memories in it, reporting success, so `ts-stack up` refuses while a legacy
+# no memories in it, reporting success, so `tstack services up` refuses while a legacy
 # volume exists and its new name does not.
 #
 # One "old new" pair per line. The headroom three carry their old project
@@ -1228,6 +1228,6 @@ tss_backup_all() {
     for v in $(tss_data_volumes); do
         tss_backup_volume "$v" "$dir" || rc=1
     done
-    [ "$rc" = 0 ] && info "restore with: ts-stack restore $(basename "$dir")"
+    [ "$rc" = 0 ] && info "restore with: tstack services restore $(basename "$dir")"
     return $rc
 }

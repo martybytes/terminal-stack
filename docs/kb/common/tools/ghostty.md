@@ -26,10 +26,10 @@ overwrites it.
 
 | Command | What it does |
 |---|---|
-| `ts-config ghostty status` | managed or not, version, and a live `+validate-config` |
-| `ts-config ghostty diff` | what an apply would change |
-| `ts-config ghostty off` | **revert**: restore your backup (or remove ours) and stop managing |
-| `ts-config ghostty on` | manage it again |
+| `tstack config ghostty status` | managed or not, version, and a live `+validate-config` |
+| `tstack config ghostty diff` | what an apply would change |
+| `tstack config ghostty off` | **revert**: restore your backup (or remove ours) and stop managing |
+| `tstack config ghostty on` | manage it again |
 
 **`off` is a real revert, not just "stop managing".** A config that was already
 there when the stack first applied is preserved as `config.bak.YYYYMMDD[.N]` by
@@ -57,7 +57,7 @@ is deliberate: noctty reads both that and its own
 today and `noctty` the day the rename ships — so the app-named path would
 silently stop being read on upgrade day.
 
-`ts-config ghostty` works on Windows and from WSL (where it drives the
+`tstack config ghostty` works on Windows and from WSL (where it drives the
 Windows-side copy over `/mnt/c/`). Two differences from macOS worth knowing:
 
 - **There is no working syntax gate.** `+validate-config` fails with

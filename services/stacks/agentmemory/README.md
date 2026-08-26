@@ -59,7 +59,7 @@ is pinned by a git commit SHA in its build context. Nothing floats on `:latest`:
 | `AGENTMEMORY_VERSION` | `0.9.29` | the npm package `@agentmemory/agentmemory` |
 | `III_VERSION` | `0.11.2` | the `iiidev/iii` image the `iii` engine binary is copied out of |
 | `III_SDK_VERSION` | `0.11.2` | the `iii-sdk` npm package |
-| console image | `services/stacks/agent007memory/` | the console is its own stack now, built from `services/console/` in this repo. `ts-stack up agent007memory --build` rebuilds it. |
+| console image | `services/stacks/agent007memory/` | the console is its own stack now, built from `services/console/` in this repo. `tstack services up agent007memory --build` rebuilds it. |
 
 The `iii-sdk` pin is the non-obvious one. `Dockerfile:18` writes a `package.json` at build time
 containing an npm `overrides` block, purely to force `iii-sdk` to `III_SDK_VERSION` — otherwise npm
@@ -201,7 +201,7 @@ Env vars reach a process only at launch, so restart Claude Code, Codex and Curso
 | Codex | `http://localhost:3111/_agent/codex` | same, plus the MCP env in `~/.codex/config.toml` |
 | Cursor | `http://localhost:3111/_agent/cursor` | same |
 
-All three are wired by **terminal-stack**, from every `ts-update` / `chezmoi apply`. See
+All three are wired by **terminal-stack**, from every `tstack update` / `chezmoi apply`. See
 "Client wiring is terminal-stack's" below.
 
 The console strips `/_agent/<host>` before forwarding, displays the host in Live Requests, and
@@ -237,9 +237,9 @@ into `~/.claude/settings.json`:
 
 Or don't do it by hand at all: **terminal-stack owns the client wiring now.**
 `bootstrap/ts-agentmemory.ps1` in that repo sets this env block, patches the hook scripts,
-and registers the hooks for all three hosts — and it runs from every `ts-update` /
+and registers the hooks for all three hosts — and it runs from every `tstack update` /
 `chezmoi apply`, which matters because a plugin upgrade replaces the vendor caches and
-silently reverts the hook-script edits. `ts-doctor` reports that condition; the sync fixes
+silently reverts the hook-script edits. `tstack doctor` reports that condition; the sync fixes
 it. Nothing here needs doing per host.
 
 That split is deliberate: which hooks exist, what they run, and what environment they carry
@@ -317,10 +317,10 @@ That repo already manages `~/.claude/settings.json`, `~/.cursor/hooks.json` and 
 carries the merge helpers that stop agentmemory's hook entries being clobbered by its own sync. It
 used to live here purely because the compose file was next door.
 
-What that buys: the wiring re-applies from every `ts-update` / `chezmoi apply`, so a plugin upgrade
+What that buys: the wiring re-applies from every `tstack update` / `chezmoi apply`, so a plugin upgrade
 — which replaces the vendor caches and silently reverts every hook-script edit — repairs itself
-instead of needing a command nobody remembers. `ts-doctor` reports the condition, and
-`ts-agentmemory -Check` is the detailed version.
+instead of needing a command nobody remembers. `tstack doctor` reports the condition, and
+`tstack agentmemory -Check` is the detailed version.
 
 This repo keeps the server: image, compose, `.env`, the in-container bundle patches
 (`patch-agentmemory.mjs`), the data migrations, and the console pin. `check-capture.sh` checks
@@ -410,7 +410,7 @@ The edits live in one place — terminal-stack's `bootstrap/_agentmemory.ps1` �
 six scripts exist twice for Codex (plugin cache for the CLI, `~/.codex/hooks/agentmemory` for
 Desktop) and again for Claude. **A plugin upgrade replaces those caches and silently reverts
 every edit**, which turns retrieval back off with nothing in any log. That is why the wiring
-re-applies from every sync; `ts-doctor` reports the same condition.
+re-applies from every sync; `tstack doctor` reports the same condition.
 
 ### Duplicate capture
 
@@ -749,12 +749,12 @@ cd agentmemory
   -AdminKeyFile C:\path\openai-admin.key `
   -ProjectId proj_... -Apply
 
-ts-stack up agent007memory
+tstack services up agent007memory
 ```
 
 **Billing configuration moved with the console**, to
 `services/stacks/agent007memory/` — `configure-openai-billing.sh` / `.ps1`, `.billing.env` and
-`docker-compose.billing.yml` are all there, and `ts-stack` assembles the env-file list for you. The
+`docker-compose.billing.yml` are all there, and `tstack services` assembles the env-file list for you. The
 rule below is why that assembly exists, and it has not changed.
 
 **Pass both env files, stack `.env` first.** These are compose's *interpolation* source, which is a
@@ -820,7 +820,7 @@ only to refresh the fingerprint.
 cd agentmemory
 .\configure-openai-billing.ps1 -RefreshHints            # preview both fingerprints
 .\configure-openai-billing.ps1 -RefreshHints -Apply
-ts-stack up agent007memory
+tstack services up agent007memory
 ```
 
 Verify the new inference key actually authenticates in-process, rather than trusting `Up`:

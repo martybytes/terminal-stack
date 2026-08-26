@@ -338,7 +338,7 @@ class AudioController(threading.Thread):
 
 
 def restore_volumes_oneshot(snapshot_path: Path) -> int:
-    """`python -m ttsd --restore-volumes` / ts-doctor --repair entry point."""
+    """`python -m ttsd --restore-volumes` / tstack doctor --repair entry point."""
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     ctl = AudioController(cfg=_NullCfg(), snapshot_path=snapshot_path)
     ctl._restore_stale_snapshot()

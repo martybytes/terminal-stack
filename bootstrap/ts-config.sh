@@ -1,23 +1,23 @@
 #!/usr/bin/env bash
 # ts-config.sh — view/change the saved terminal-stack config (leader key, theme,
 # tmux prefix, apps, WezTerm mux + session restore) and re-apply. Driven by the
-# `ts-config` shell wrapper (zsh) and runnable standalone. On Windows the pwsh
-# ts-config is the counterpart.
+# `tstack config` shell wrapper (zsh) and runnable standalone. On Windows the pwsh
+# tstack config is the counterpart.
 #
 # Usage:
-#   ts-config                 interactive menu
-#   ts-config show            print the current config
-#   ts-config leader <chord>  e.g. ctrl-space, ctrl-a, alt-x
-#   ts-config theme  <mode>   dark | light | follow
-#   ts-config tmux   <chord>  tmux prefix, e.g. ctrl-a
-#   ts-config apps [recommended|all|none|id,id,...]   (no arg → interactive picker)
-#   ts-config mux [on|off|...]  hand-off to ts-mux (WezTerm multiplexer domain)
-#   ts-config restore <on|off>  reopen the last WezTerm session at startup
-#   ts-config atuin   <on|off>  atuin shell history (owns Ctrl+R when on)
-#   ts-config ghostty [on|off|status|diff]   managed Ghostty config (macOS/Windows)
-#   ts-config agents [show|<tool> on|off|status|repair|uninstall]
-#   ts-config wezterm [status|changes|install <chan>|upgrade]
-#   ts-config wizard          re-run the whole install questionnaire
+#   tstack config                 interactive menu
+#   tstack config show            print the current config
+#   tstack config leader <chord>  e.g. ctrl-space, ctrl-a, alt-x
+#   tstack config theme  <mode>   dark | light | follow
+#   tstack config tmux   <chord>  tmux prefix, e.g. ctrl-a
+#   tstack config apps [recommended|all|none|id,id,...]   (no arg → interactive picker)
+#   tstack config mux [on|off|...]  hand-off to tstack mux (WezTerm multiplexer domain)
+#   tstack config restore <on|off>  reopen the last WezTerm session at startup
+#   tstack config atuin   <on|off>  atuin shell history (owns Ctrl+R when on)
+#   tstack config ghostty [on|off|status|diff]   managed Ghostty config (macOS/Windows)
+#   tstack config agents [show|<tool> on|off|status|repair|uninstall]
+#   tstack config wezterm [status|changes|install <chan>|upgrade]
+#   tstack config wizard          re-run the whole install questionnaire
 #
 # Config lives in chezmoi [data] (~/.config/chezmoi/chezmoi.toml); changes are
 # persisted with ts_save_config, then `chezmoi apply` re-renders every file.
@@ -27,11 +27,11 @@ CZ="${TERMINAL_STACK_CHEZMOI:-}"
 if [ -z "$CZ" ]; then
     if [ -x "$HOME/.local/bin/chezmoi" ]; then CZ="$HOME/.local/bin/chezmoi"
     elif command -v chezmoi >/dev/null 2>&1; then CZ="$(command -v chezmoi)"
-    else echo "ts-config: chezmoi not found on PATH." >&2; exit 1; fi
+    else echo "tstack config: chezmoi not found on PATH." >&2; exit 1; fi
 fi
 SRC="${TERMINAL_STACK_DIR:-$("$CZ" source-path 2>/dev/null || true)}"
 if [ ! -d "$SRC/bootstrap" ]; then
-    echo "ts-config: cannot locate the terminal-stack clone (set TERMINAL_STACK_DIR)." >&2
+    echo "tstack config: cannot locate the terminal-stack clone (set TERMINAL_STACK_DIR)." >&2
     exit 1
 fi
 # shellcheck source=_config.sh
@@ -72,7 +72,7 @@ install_apps() {
                 . "$SRC/bootstrap/_common-debian.sh"
                 common_install_selected_apps "$apps"
             else
-                echo "ts-config: no supported package manager; recorded selection only."
+                echo "tstack config: no supported package manager; recorded selection only."
             fi ;;
     esac
 }
@@ -109,19 +109,19 @@ install_terminals() {
     esac
 }
 
-# Re-run the whole questionnaire, not just one answer. `ts-config apps` re-asks
+# Re-run the whole questionnaire, not just one answer. `tstack config apps` re-asks
 # the apps question alone; this replays every prompt the installer asks and
 # persists all of it — which also sidesteps ts_save_config's positional trap,
 # since every value is being re-stated anyway. TS_ASSUME_YES=1 makes it
 # non-interactive, and the per-question TS_* vars still skip individual prompts.
 run_wizard() {
     # Ask about the terminal emulator, same rule as the bootstraps: a GUI host
-    # gets the question, a headless one does not. Without this `ts-config wizard`
+    # gets the question, a headless one does not. Without this `tstack config wizard`
     # never asked, TS_WIZ_TERMINALS came back empty, and it reported
     # "Terminal emulator: none selected" — so a re-run could not switch channel,
     # which is precisely what someone runs the wizard again to do.
     ts_is_headless || TS_WIZ_ASK_TERMINALS=1
-    ts_wizard_collect || { echo "ts-config: wizard cancelled; nothing changed."; return 0; }
+    ts_wizard_collect || { echo "tstack config: wizard cancelled; nothing changed."; return 0; }
 
     # Save BEFORE installing. An install that fails must never cost the user the
     # answers they just gave — the same ordering the bootstraps now use.
@@ -132,10 +132,10 @@ run_wizard() {
     ts_atuin_set "${TS_WIZ_ATUIN:-off}"
     ts_cc_tts_apply_wizard_choice "${TS_WIZ_CC_TTS:-off}" off "${TS_WIZ_CC_TTS_MESSAGE:-}"
 
-    install_apps "${TS_WIZ_APPS:-}" || ts_note_failure "optional apps" "retry: ts-config apps"
+    install_apps "${TS_WIZ_APPS:-}" || ts_note_failure "optional apps" "retry: tstack config apps"
     # The pwsh $runWizard has always installed the chosen emulator; this side
-    # never did, so a `ts-config wizard` that picked WezTerm silently did nothing.
-    install_terminals "${TS_WIZ_TERMINALS:-}" || ts_note_failure "terminal emulator" "retry: ts-config wezterm install <channel>"
+    # never did, so a `tstack config wizard` that picked WezTerm silently did nothing.
+    install_terminals "${TS_WIZ_TERMINALS:-}" || ts_note_failure "terminal emulator" "retry: tstack config wezterm install <channel>"
     ts_report_installed_apps "${TS_WIZ_APPS:-}"
     ts_report_failures
     finish
@@ -185,14 +185,14 @@ ghostty_paths() {
             u="$(/mnt/c/Windows/System32/cmd.exe /c 'echo %USERNAME%' 2>/dev/null | tr -d '\r\n' || true)"
         fi
         if [ -z "$u" ]; then
-            echo "ts-config ghostty: could not resolve the Windows username." >&2
+            echo "tstack config ghostty: could not resolve the Windows username." >&2
             echo "  Add windowsUsername to [data] in ~/.config/chezmoi/chezmoi.toml." >&2
             return 1
         fi
         GHOSTTY_PLATFORM=wsl
         GHOSTTY_DIR="/mnt/c/Users/$u/AppData/Local/ghostty"
     else
-        echo "ts-config ghostty: macOS or WSL only. Ghostty runs on macOS, and on" >&2
+        echo "tstack config ghostty: macOS or WSL only. Ghostty runs on macOS, and on" >&2
         echo "  Windows as noctty/winghostty; this stack's native-Linux hosts are" >&2
         echo "  headless, so there is no GUI here to configure." >&2
         return 1
@@ -252,7 +252,7 @@ ghostty_status_binary() {
                 fi
             fi
         else
-            echo "  ghostty: not installed (ts-config wizard installs the cask)"
+            echo "  ghostty: not installed (tstack config wizard installs the cask)"
         fi
         return 0
     fi
@@ -339,13 +339,13 @@ ghostty_on() {
     echo "==> ghostty config on. $(ghostty_reload_hint)"
 }
 
-# The mux has its own verbs (kill/restart/reset), so ts-config just hands off.
+# The mux has its own verbs (kill/restart/reset), so tstack config just hands off.
 run_mux() {
     TERMINAL_STACK_DIR="$SRC" TERMINAL_STACK_CHEZMOI="$CZ" bash "$SRC/bootstrap/ts-mux.sh" "$@"
 }
 
 # WezTerm build info / channel switching. Hand-off like run_mux: the logic lives
-# in bootstrap/ts-wezterm.sh so `ts-wezterm` works standalone too.
+# in bootstrap/ts-wezterm.sh so `tstack wezterm` works standalone too.
 run_wezterm() {
     TERMINAL_STACK_DIR="$SRC" TERMINAL_STACK_CHEZMOI="$CZ" \
         bash "$SRC/bootstrap/ts-wezterm.sh" "$@"
@@ -372,7 +372,7 @@ memory_show() {
         # COMPOSE_FILE is somebody trying to do something, and quietly undoing it
         # is worse than saying it disagrees.
         if [ "${spec:-docker-compose.yml}" != "$(ts_memory_compose_spec "$b")" ]; then
-            echo "  $WARN COMPOSE_FILE does not match the backend — fix: ts-config memory $b"
+            echo "  $WARN COMPOSE_FILE does not match the backend — fix: tstack config memory $b"
         fi
     fi
 }
@@ -384,10 +384,10 @@ memory_set() {
     echo "saved: memoryBackend = $backend"
 
     # The agent wiring is what actually captures, so it moves with the setting.
-    # ts-agents refuses to persist a state it cannot verify, which is why this
+    # tstack agents refuses to persist a state it cannot verify, which is why this
     # runs it rather than only writing the key.
     if [ "$backend" = agentmemory ]; then
-        run_agent_adapter agentmemory on || echo "  $WARN AgentMemory wiring failed; retry: ts-config agents agentmemory repair" >&2
+        run_agent_adapter agentmemory on || echo "  $WARN AgentMemory wiring failed; retry: tstack config agents agentmemory repair" >&2
     elif [ "$before" = agentmemory ]; then
         run_agent_adapter agentmemory off || true
         echo "  AgentMemory hooks removed from Claude/Codex/Cursor."
@@ -398,9 +398,9 @@ memory_set() {
     # file is exactly the silent mismatch this whole change exists to remove.
     if command -v docker >/dev/null 2>&1; then
         echo "  restarting headroom so the change takes effect..."
-        bash "$SRC/bootstrap/ts-stack.sh" restart headroom ||             echo "  $WARN headroom restart failed — run: ts-stack restart headroom" >&2
+        bash "$SRC/bootstrap/ts-stack.sh" restart headroom ||             echo "  $WARN headroom restart failed — run: tstack services restart headroom" >&2
     else
-        echo "  no docker on PATH; apply it later with: ts-stack restart headroom"
+        echo "  no docker on PATH; apply it later with: tstack services restart headroom"
     fi
 }
 
@@ -422,10 +422,10 @@ agents_set() {
         headroom) key=headroomEnabled ;;
         caveman) key=cavemanEnabled ;;
         agentmemory) key=agentmemoryEnabled ;;
-        # No ts-agents adapter: this one only records intent, and ts-stack acts
-        # on it. status defers to ts-stack, which is the thing that knows.
+        # No tstack agents adapter: this one only records intent, and tstack services acts
+        # on it. status defers to tstack services, which is the thing that knows.
         playwright) key=playwrightEnabled ;;
-        *) echo "usage: ts-config agents <headroom|caveman|agentmemory|playwright> on|off|status|repair|uninstall" >&2; return 2 ;;
+        *) echo "usage: tstack config agents <headroom|caveman|agentmemory|playwright> on|off|status|repair|uninstall" >&2; return 2 ;;
     esac
     # AgentMemory is DERIVED from memoryBackend, so turning it on directly while
     # the backend is something else would create a two-memory-system machine --
@@ -434,7 +434,7 @@ agents_set() {
         local backend; backend="$(ts_agent_get memoryBackend)"
         if [ "$backend" != agentmemory ]; then
             echo "$WARN memoryBackend is '$backend', so AgentMemory is not this machine's memory system." >&2
-            echo "      Only one runs. To switch:  ts-config memory agentmemory" >&2
+            echo "      Only one runs. To switch:  tstack config memory agentmemory" >&2
             return 2
         fi
     fi
@@ -447,9 +447,9 @@ agents_set() {
             else run_agent_adapter "$tool" off; ts_agent_set "$key" off; fi ;;
         uninstall) run_agent_adapter "$tool" uninstall; ts_agent_set "$key" off ;;
         status|repair)
-            if [ "$tool" = playwright ]; then echo "  playwright: $(ts_agent_get playwrightEnabled) — run 'ts-stack status' for the container"
+            if [ "$tool" = playwright ]; then echo "  playwright: $(ts_agent_get playwrightEnabled) — run 'tstack services status' for the container"
             else run_agent_adapter "$tool" "$action"; fi ;;
-        *) echo "usage: ts-config agents $tool on|off|status|repair|uninstall" >&2; return 2 ;;
+        *) echo "usage: tstack config agents $tool on|off|status|repair|uninstall" >&2; return 2 ;;
     esac
 }
 
@@ -460,7 +460,7 @@ agents_config() {
         headroom)
             if [ "$action" = dashboard ]; then run_agent_adapter headroom dashboard; return; fi
             if [ "$action" = cursor ]; then
-                case "$extra" in mcp|byok|off) ;; *) echo "usage: ts-config agents headroom cursor <mcp|byok|off>" >&2; return 2;; esac
+                case "$extra" in mcp|byok|off) ;; *) echo "usage: tstack config agents headroom cursor <mcp|byok|off>" >&2; return 2;; esac
                 ts_agent_set headroomCursorMode "$extra"
                 [ "$(ts_agent_get headroomEnabled)" = on ] && run_agent_adapter headroom repair "$extra" || true
                 agents_show
@@ -468,7 +468,7 @@ agents_config() {
             fi
             agents_set headroom "${action:-status}" ;;
         caveman|agentmemory) agents_set "$sub" "${action:-status}" ;;
-        *) echo "ts-config agents: unknown tool '$sub'" >&2; return 2 ;;
+        *) echo "tstack config agents: unknown tool '$sub'" >&2; return 2 ;;
     esac
 }
 
@@ -496,13 +496,13 @@ show() {
     echo "  theme      : $(cur themeMode dark)   (baked palette: $(cur resolvedTheme dark))"
     echo "  tmux       : $(cur tmuxPrefix ctrl-b)   (prefix: $(cur tmuxPrefixResolved C-b))"
     echo "  apps       : $(curapps)"
-    echo "  wezmux     : $(ts_wez_mux_get)   (ts-mux on|off|status)"
-    echo "  wezrestore : $(ts_wez_restore_get)   (ts-config restore on|off)"
-    echo "  atuin      : $(ts_atuin_get)   (ts-config atuin on|off)"
+    echo "  wezmux     : $(ts_wez_mux_get)   (tstack mux on|off|status)"
+    echo "  wezrestore : $(ts_wez_restore_get)   (tstack config restore on|off)"
+    echo "  atuin      : $(ts_atuin_get)   (tstack config atuin on|off)"
     if [ "$(uname -s)" = Darwin ]; then
-        echo "  ghostty    : $(ts_ghostty_get)   (ts-config ghostty on|off)"
+        echo "  ghostty    : $(ts_ghostty_get)   (tstack config ghostty on|off)"
     fi
-    echo "  wezterm    : $(ts_wezterm_channel)$(_ts_cfg_wezterm_built)   (ts-config wezterm)"
+    echo "  wezterm    : $(ts_wezterm_channel)$(_ts_cfg_wezterm_built)   (tstack config wezterm)"
     echo "  headroom   : $(ts_agent_get headroomEnabled)   (Cursor: $(ts_agent_get headroomCursorMode))"
     echo "  caveman    : $(ts_agent_get cavemanEnabled)"
     echo "  agentmemory: $(ts_agent_get agentmemoryEnabled)"
@@ -538,9 +538,9 @@ menu() {
 case "${1:-}" in
     "")     menu ;;
     show)   show ;;
-    leader) [ -n "${2:-}" ] || { echo "usage: ts-config leader <chord>" >&2; exit 2; }; set_leader "$2" ;;
-    theme)  [ -n "${2:-}" ] || { echo "usage: ts-config theme <dark|light|follow>" >&2; exit 2; }; set_theme "$2" ;;
-    tmux)   [ -n "${2:-}" ] || { echo "usage: ts-config tmux <chord>" >&2; exit 2; }; set_tmux "$2" ;;
+    leader) [ -n "${2:-}" ] || { echo "usage: tstack config leader <chord>" >&2; exit 2; }; set_leader "$2" ;;
+    theme)  [ -n "${2:-}" ] || { echo "usage: tstack config theme <dark|light|follow>" >&2; exit 2; }; set_theme "$2" ;;
+    tmux)   [ -n "${2:-}" ] || { echo "usage: tstack config tmux <chord>" >&2; exit 2; }; set_tmux "$2" ;;
     apps)
         if [ -n "${2:-}" ]; then set_apps "$(ts_expand_apps "$2")"
         else set_apps "$(ts_pick_apps)"; fi ;;
@@ -556,11 +556,11 @@ case "${1:-}" in
         run_mux "$@" ;;
     restore)
         case "${2:-}" in on|off) ;; *)
-            echo "usage: ts-config restore <on|off>" >&2; exit 2 ;; esac
+            echo "usage: tstack config restore <on|off>" >&2; exit 2 ;; esac
         set_restore "$2" ;;
     atuin)
         case "${2:-}" in on|off) ;; *)
-            echo "usage: ts-config atuin <on|off>" >&2; exit 2 ;; esac
+            echo "usage: tstack config atuin <on|off>" >&2; exit 2 ;; esac
         set_atuin "$2" ;;
     ghostty)
         case "${2:-status}" in
@@ -568,13 +568,13 @@ case "${1:-}" in
             off)    ghostty_off ;;
             status) ghostty_status ;;
             diff)   ghostty_diff ;;
-            *) echo "usage: ts-config ghostty [on|off|status|diff]" >&2; exit 2 ;;
+            *) echo "usage: tstack config ghostty [on|off|status|diff]" >&2; exit 2 ;;
         esac ;;
     memory)
         case "${2:-status}" in
             agentmemory|headroom|none) memory_set "$2" ;;
             status|show) memory_show ;;
-            *) echo "usage: ts-config memory [agentmemory|headroom|none|status]" >&2; exit 2 ;;
+            *) echo "usage: tstack config memory [agentmemory|headroom|none|status]" >&2; exit 2 ;;
         esac ;;
     agents)
         shift
@@ -582,15 +582,15 @@ case "${1:-}" in
     -h|--help|help)
         sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'
         echo "  tts show|on|off|test|reset|engine|message|voice|..."
-        echo "  mux status|on|off|list|kill|restart|reset  (see: ts-mux -h)"
+        echo "  mux status|on|off|list|kill|restart|reset  (see: tstack mux -h)"
         echo "  restore on|off   reopen the last WezTerm session at startup"
         echo "  atuin on|off     atuin shell history; when on it owns Ctrl+R (fzf keeps Ctrl+T/Alt+C)"
         echo "  ghostty [on|off|status|diff]   managed Ghostty config (macOS only; off restores your backup)"
         echo "  memory [agentmemory|headroom|none|status]   which memory system runs — only ever one"
         echo "  agents [show|<headroom|caveman|agentmemory> on|off|status|repair|uninstall]"
-        echo "  wezterm [status|changes|install <stable|nightly>|upgrade]  (see: ts-wezterm -h)"
+        echo "  wezterm [status|changes|install <stable|nightly>|upgrade]  (see: tstack wezterm -h)"
         echo "  wizard           re-run the whole install questionnaire (TS_ASSUME_YES=1 to accept defaults)"
         echo "  agents headroom cursor <mcp|byok|off> | dashboard"
         ;;
-    *) echo "ts-config: unknown command '$1' (try: show, leader, theme, tmux, apps, tts, mux, restore, atuin, ghostty, agents, wezterm, wizard)" >&2; exit 2 ;;
+    *) echo "tstack config: unknown command '$1' (try: show, leader, theme, tmux, apps, tts, mux, restore, atuin, ghostty, agents, wezterm, wizard)" >&2; exit 2 ;;
 esac

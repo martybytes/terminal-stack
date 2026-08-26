@@ -36,13 +36,13 @@ LIB="${HOME}/.claude/hooks/cc-tts-lib.sh"
 
 if [ "$mode" = daemon ]; then
     # POST a synthetic stop event; the daemon should accept (202) and speak it.
-    cc_tts_daemon_ready || { echo "cc-tts-test: daemon not enabled/reachable from this host (ts-config tts daemon status)" >&2; exit 1; }
+    cc_tts_daemon_ready || { echo "cc-tts-test: daemon not enabled/reachable from this host (tstack config tts daemon status)" >&2; exit 1; }
     input='{"session_id":"cc-tts-test","last_assistant_message":"Daemon test. <!-- speak: Daemon test successful. -->"}'
     if cc_tts_daemon_send "$source" stop waiting "$input" "Daemon test from cc-tts-test."; then
         echo "cc-tts-test: daemon accepted the event — expect speech shortly."
         exit 0
     fi
-    echo "cc-tts-test: daemon did not accept the event (ts-config tts daemon status)" >&2
+    echo "cc-tts-test: daemon did not accept the event (tstack config tts daemon status)" >&2
     exit 1
 fi
 

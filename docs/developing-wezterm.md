@@ -26,9 +26,9 @@ Run WezTerm normally (no special launch flags). After saving WezTerm files in yo
 & C:\path\to\terminal-stack\scripts\sync-windows.ps1 -SourceDir C:\path\to\terminal-stack
 ```
 
-`sync-windows.ps1` renders `.tmpl` files (leader key, theme tokens, `__WIN_USER__`, etc.) and copies only targets whose bytes differ. Same script `install.ps1` runs at the end of a Windows install, and `ts-update` runs it after a pull.
+`sync-windows.ps1` renders `.tmpl` files (leader key, theme tokens, `__WIN_USER__`, etc.) and copies only targets whose bytes differ. Same script `install.ps1` runs at the end of a Windows install, and `tstack update` runs it after a pull.
 
-A dev clone at a workspace tier path is **invisible** to `ts-update` and the clone resolvers — pinning `$env:TERMINAL_STACK_DIR` at it is exactly how you develop against it (the canonical install at `%LOCALAPPDATA%\terminal-stack\stack` needs no pin). Point the stack at the dev clone once in `Documents\PowerShell\profile.local.ps1`:
+A dev clone at a workspace tier path is **invisible** to `tstack update` and the clone resolvers — pinning `$env:TERMINAL_STACK_DIR` at it is exactly how you develop against it (the canonical install at `%LOCALAPPDATA%\terminal-stack\stack` needs no pin). Point the stack at the dev clone once in `Documents\PowerShell\profile.local.ps1`:
 
 ```powershell
 $env:TERMINAL_STACK_DIR = 'C:\DATA\Workspace\src\github.com\martybytes\terminal-stack'   # stale pins are warned-through, not fatal
@@ -45,7 +45,7 @@ Then sync with:
 - Changes to `.wezterm.lua` — WezTerm usually auto-reloads when the deployed file changes on disk.
 - Changes to `pane_nav.lua` — press **`Ctrl+Space` `r`** (`ReloadConfiguration`). Lua modules are not always picked up without an explicit reload.
 
-You do not need to quit and relaunch WezTerm — with one caveat, and only if you turned the multiplexer domain on (`ts-mux on`; it is off by default). With the mux on, panes are hosted in `wezterm-mux-server` and the mux server loads its **own** copy of `.wezterm.lua`: a GUI reload does not update the config the mux uses for spawning panes. Both sync scripts print a reminder when a WezTerm file changed and the mux is on; nothing restarts it automatically, because that would kill every live pane. When convenient (closes all panes!): `ts-mux restart`. `ts-mux status` shows the setting, the rendered setting, and the live server.
+You do not need to quit and relaunch WezTerm — with one caveat, and only if you turned the multiplexer domain on (`tstack mux on`; it is off by default). With the mux on, panes are hosted in `wezterm-mux-server` and the mux server loads its **own** copy of `.wezterm.lua`: a GUI reload does not update the config the mux uses for spawning panes. Both sync scripts print a reminder when a WezTerm file changed and the mux is on; nothing restarts it automatically, because that would kill every live pane. When convenient (closes all panes!): `tstack mux restart`. `tstack mux status` shows the setting, the rendered setting, and the live server.
 
 ### Plugins (sessionizer / resurrect)
 
@@ -53,7 +53,7 @@ Note before you tidy it: the resurrect block deliberately does **not** call
 `resurrect.setup()`. That helper registers a `gui-startup` handler
 unconditionally and offers no opt-out, which is what made WezTerm replay the
 previous session at every launch. We drive its two save engines directly and
-register the handler ourselves only when `ts-config restore` is on — see
+register the handler ourselves only when `tstack config restore` is on — see
 `docs/decisions.md` § "Why the startup session restore is opt-in".
 
 The `Ctrl+Space` `p` project picker (`sessionizer.wezterm`) and session save/restore (`resurrect.wezterm`) are WezTerm plugins loaded from **pinned forks under `github.com/martybytes`**, so an upstream archival or breaking change can't take the stack down. `wezterm.plugin.require` clones each fork at the **first GUI start** — that one start needs network access; afterwards the clone is cached in WezTerm's plugin directory. Each load is pcall-guarded: if either fails, only its keybindings are lost. (The tab bar and status bar are **not** plugins — they are hand-rolled in the config itself; `tabline.wez` was dropped, see `docs/decisions.md` § "Why the tab bar is fancy and fully hand-rolled".)
@@ -66,7 +66,7 @@ Full tables: **`doc wezterm/dev-config`**. Summary:
 
 - **Synced and enough for pwsh WezTerm testing:** `.wezterm.lua`, `pane_nav.lua`, `$PROFILE` (`cc*` tab titles), `.claude` hooks/settings (tab tint), Starship in pwsh panes, and `docs/kb` (for `doc`/`wzr` only).
 - **After sync:** `Ctrl+Space` `r` (required for `pane_nav.lua`); new pwsh tab for `$PROFILE`/Starship; restart Claude Code for hook changes.
-- **Not synced:** WSL zsh panes (`chezmoi apply` from WSL); WezTerm/font winget packages; wizard tokens unless `ts-config` / `config.json` was refreshed before sync.
+- **Not synced:** WSL zsh panes (`chezmoi apply` from WSL); WezTerm/font winget packages; wizard tokens unless `tstack config` / `config.json` was refreshed before sync.
 
 ### Auto-sync on save (optional)
 

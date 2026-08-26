@@ -1,12 +1,12 @@
 <#
-.NAME        ts-agentmemory
+.NAME        tstack agentmemory
 .SYNOPSIS    Wire Claude Code, Codex and Cursor to a local agentmemory server: tagged URLs,
              retrieval on by default, the deployment hook-script edits, and the duplicate-
              invocation guard. Previews by default.
 .PLATFORM    windows
 .USAGE       bootstrap\ts-agentmemory.ps1 [-Apply] [-Undo] [-Check] [-Host claude|codex|cursor]
 .WHEN        Runs automatically from both sync paths, so a plugin upgrade that reverts the
-             hook-script edits is repaired on the next `ts-update` / `chezmoi apply`. Run it by
+             hook-script edits is repaired on the next `tstack update` / `chezmoi apply`. Run it by
              hand to preview, to check, or to undo.
 .NOTE        Why this lives in terminal-stack and not next to the Docker stack: this repo owns
              the harness surface — ~/.claude/settings.json, ~/.cursor/hooks.json, dot_codex/**,
@@ -16,7 +16,7 @@
              file and in-container patches stay under services/. Which hooks exist and what they
              run is a terminal-stack concern; what the server does with the request is not.
 
-             `ts-config agents agentmemory on|off` owns the saved per-machine setting and
+             `tstack config agents agentmemory on|off` owns the saved per-machine setting and
              calls this low-level adapter. This script still gates each host on its plugin
              cache and never gates on server reachability, so the wiring survives a stopped
              container. Direct invocation remains useful for preview/check/repair.
@@ -52,7 +52,7 @@ $stamp = Get-Date -Format 'yyyyMMdd'
 $wanted = if ($HostName) { $HostName } else { $script:TsAmHosts | ForEach-Object { $_.Name } }
 
 if (-not $Check) {
-    Write-Host "ts-agentmemory  mode=$mode" -ForegroundColor White
+    Write-Host "tstack agentmemory  mode=$mode" -ForegroundColor White
     if (-not $execute) { Write-Host '(preview only - add -Apply to write, or -Undo -Apply to remove)' -ForegroundColor DarkGray }
 }
 
@@ -213,7 +213,7 @@ function Invoke-AmClaude {
         Warn "$settingsPath does not exist yet; start Claude Code once, then re-run"
     } else {
         $liveText = Get-Content -LiteralPath $settingsPath -Raw
-        $live = Read-TsJsonObject $settingsPath $liveText 'ts-agentmemory'
+        $live = Read-TsJsonObject $settingsPath $liveText 'tstack agentmemory'
         if ($null -eq $live) { Fail "could not parse $settingsPath" }
         else {
             $env0 = if ($live.Contains('env') -and $live['env'] -is [System.Collections.IDictionary]) { $live['env'] } else { [ordered]@{} }
@@ -235,7 +235,7 @@ function Invoke-AmClaude {
                     try {
                         Set-Content -LiteralPath $tmp -Value $fragText -Encoding utf8 -NoNewline
                         Merge-TsJsonSettings -FragmentPath $tmp -FragmentText $fragText `
-                            -LivePath $settingsPath -Label 'ts-agentmemory'
+                            -LivePath $settingsPath -Label 'tstack agentmemory'
                     } finally { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
                 }
             }

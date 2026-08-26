@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # ts-stack.sh — the local Docker service stacks: bring them up, prove they work.
-# Driven by the `ts-stack` shell wrapper (zsh) and runnable standalone.
+# Driven by the `tstack services` shell wrapper (zsh) and runnable standalone.
 #
-# The pwsh `ts-stack` (bootstrap/ts-stack.ps1) is the PARALLEL implementation for
+# The pwsh `tstack services` (bootstrap/ts-stack.ps1) is the PARALLEL implementation for
 # Windows-standalone installs, not a wrapper: change one, change the other, and
 # keep the -h output byte-identical.
 #
 # This is the ONLY thing in the repo that starts, stops or builds a container.
-# `ts-agents` may probe one and print a verb from here; it may never run docker
+# `tstack agents` may probe one and print a verb from here; it may never run docker
 # (tests/test_agent_tools.py pins that, as a substring match over the whole file,
 # so not even in a comment). services/ is the service side; everything outside it
 # configures a program running on this host. See docs/decisions.md.
@@ -20,22 +20,22 @@
 # bind-mountable — a failure that would land after the stack was already down.
 set -euo pipefail
 
-HELP='ts-stack — the local Docker service stacks: bring them up, prove they work.
+HELP='tstack services — the local Docker service stacks: bring them up, prove they work.
 
 Usage:
-  ts-stack [status]            one line per stack: state, health, published ports
-  ts-stack up [<stack>]        docker compose up -d
-  ts-stack down [<stack>]      docker compose down          (every volume kept)
-  ts-stack restart [<stack>]   down, then up
-  ts-stack logs <stack>        docker compose logs
-  ts-stack config [<stack>]    what compose actually resolves to on this machine
-  ts-stack bootstrap           first run here: .env files, secrets, volumes
-  ts-stack doctor              engine, .env files, health, ports, toggle drift
-  ts-stack test                take it all down, bring it back up, prove the chain
-  ts-stack backup [<stack>]    cold tar of every data volume, with a manifest
-  ts-stack reset [<stack>]     containers and locally built images, back to clean
-  ts-stack migrate-volumes     the one-time rename to the ts- volume names
-  ts-stack -h                  this help
+  tstack services [status]            one line per stack: state, health, published ports
+  tstack services up [<stack>]        docker compose up -d
+  tstack services down [<stack>]      docker compose down          (every volume kept)
+  tstack services restart [<stack>]   down, then up
+  tstack services logs <stack>        docker compose logs
+  tstack services config [<stack>]    what compose actually resolves to on this machine
+  tstack services bootstrap           first run here: .env files, secrets, volumes
+  tstack services doctor              engine, .env files, health, ports, toggle drift
+  tstack services test                take it all down, bring it back up, prove the chain
+  tstack services backup [<stack>]    cold tar of every data volume, with a manifest
+  tstack services reset [<stack>]     containers and locally built images, back to clean
+  tstack services migrate-volumes     the one-time rename to the ts- volume names
+  tstack services -h                  this help
 
   --dry-run          print the exact docker argv and change nothing
   -a, --all          include stacks whose saved terminal-stack setting is off
@@ -55,10 +55,10 @@ is skipped and reported as skipped, never as broken; naming it explicitly runs i
 anyway, because asking by name is consent.
 
 Every published port binds 127.0.0.1 only and none of these services
-authenticate, which is why "ts-stack doctor" audits the bindings even when
+authenticate, which is why "tstack services doctor" audits the bindings even when
 everything else is failing.'
 
-# Help before anything else: `ts-stack -h` must work on a box where the clone,
+# Help before anything else: `tstack services -h` must work on a box where the clone,
 # chezmoi or docker is the very thing that is broken.
 case "${1:-}" in -h|--help|help) printf '%s\n' "$HELP"; exit 0 ;; esac
 
@@ -80,7 +80,7 @@ if [ -z "$SRC" ]; then
     SRC="$(cd -- "$(dirname -- "$_self")/.." && pwd -P)"
 fi
 if [ ! -d "$SRC/services/stacks" ]; then
-    echo "ts-stack: cannot locate the service tree (set TERMINAL_STACK_DIR)." >&2
+    echo "tstack services: cannot locate the service tree (set TERMINAL_STACK_DIR)." >&2
     exit 1
 fi
 
@@ -90,7 +90,7 @@ destroy_data=0; purge=0; assume_yes=0
 while [ $# -gt 0 ]; do
     case "$1" in
         status|up|down|restart|logs|config|doctor|bootstrap|migrate-volumes|test|backup|reset)
-            [ -z "$cmd" ] || { echo "ts-stack: two commands given ($cmd, $1)" >&2; exit 2; }
+            [ -z "$cmd" ] || { echo "tstack services: two commands given ($cmd, $1)" >&2; exit 2; }
             cmd="$1"; shift ;;
         --dry-run)      TS_STACK_DRY_RUN=1; shift ;;
         -a|--all)       all=1; shift ;;
@@ -102,15 +102,15 @@ while [ $# -gt 0 ]; do
         --purge)        purge=1; destroy_data=1; shift ;;
         --no-colour|--no-color) NO_COLOR=1; shift ;;
         --stack)        want_stack="${2:?--stack needs a value}"; shift 2 ;;
-        -*)             echo "ts-stack: unknown option: $1 (try -h)" >&2; exit 2 ;;
-        *)              [ -z "$want_stack" ] || { echo "ts-stack: two stacks given" >&2; exit 2; }
+        -*)             echo "tstack services: unknown option: $1 (try -h)" >&2; exit 2 ;;
+        *)              [ -z "$want_stack" ] || { echo "tstack services: two stacks given" >&2; exit 2; }
                         want_stack="$1"; shift ;;
     esac
 done
 cmd="${cmd:-status}"
 export TS_STACK_DRY_RUN="${TS_STACK_DRY_RUN:-0}"
 export NO_COLOR="${NO_COLOR:-}"
-case "$tail_n" in *[!0-9]*|'') echo "ts-stack: --tail wants a number" >&2; exit 2 ;; esac
+case "$tail_n" in *[!0-9]*|'') echo "tstack services: --tail wants a number" >&2; exit 2 ;; esac
 
 # ── libraries ───────────────────────────────────────────────────────────────────
 # shellcheck source=_config.sh
@@ -120,7 +120,7 @@ case "$tail_n" in *[!0-9]*|'') echo "ts-stack: --tail wants a number" >&2; exit 
 # shellcheck source=../services/_stack.sh
 . "$SRC/services/_stack.sh"
 
-# The library's step/info/pass/fail helpers read TSS_APPLY. ts-stack acts
+# The library's step/info/pass/fail helpers read TSS_APPLY. tstack services acts
 # immediately, so it is 1 unless --dry-run says otherwise.
 TSS_APPLY=1
 [ "$TS_STACK_DRY_RUN" = 1 ] && TSS_APPLY=0
@@ -136,14 +136,14 @@ if [ "$(tss_docker_kind)" = wsl-shim ] && [ "$TS_STACK_DRY_RUN" != 1 ]; then
                 [ -x "$p" ] && { ps="$p"; break; }
             done
             if [ -n "$ps" ]; then
-                echo "ts-stack: no Linux Docker CLI in this WSL distro — re-running the Windows twin."
+                echo "tstack services: no Linux Docker CLI in this WSL distro — re-running the Windows twin."
                 win="$(wslpath -w "$SRC/bootstrap/ts-stack.ps1")"
                 set -- "$cmd"
                 [ -n "$want_stack" ] && set -- "$@" "$want_stack"
                 exec "$ps" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass \
                     -File "$win" "$@"
             fi
-            echo "ts-stack: no Linux Docker CLI in this WSL distro, and no pwsh 7 to hand off to." >&2
+            echo "tstack services: no Linux Docker CLI in this WSL distro, and no pwsh 7 to hand off to." >&2
             tss_engine_advice "$(tss_os)" wsl-shim >&2
             exit 1 ;;
     esac
@@ -169,7 +169,7 @@ stack_state() {                             # <stack>
 }
 
 all_stacks="$(tss_stack_list)"
-[ -n "$all_stacks" ] || { echo "ts-stack: no stacks found under $TSS_STACKS" >&2; exit 1; }
+[ -n "$all_stacks" ] || { echo "tstack services: no stacks found under $TSS_STACKS" >&2; exit 1; }
 if [ -n "$want_stack" ]; then
     # Matched in the shell, not through `| grep -q`: that exits on the first match
     # and SIGPIPEs the producer, which `pipefail` turns into a failed pipeline.
@@ -179,7 +179,7 @@ $all_stacks
         *"
 $want_stack
 "*) ;;
-        *) echo "ts-stack: no stack named '$want_stack' — have: $(printf '%s' "$all_stacks" | tr '\n' ' ')" >&2; exit 2 ;;
+        *) echo "tstack services: no stack named '$want_stack' — have: $(printf '%s' "$all_stacks" | tr '\n' ' ')" >&2; exit 2 ;;
     esac
     stacks="$want_stack"; all=1        # naming a stack is consent
 else
@@ -217,7 +217,7 @@ if [ "$need_engine" = 1 ] && [ "$engine_ok" = 0 ] && [ "$TS_STACK_DRY_RUN" != 1 
 fi
 
 # ── output ──────────────────────────────────────────────────────────────────────
-# terminal-stack's doctor vocabulary, so `ts-doctor` can indent this straight in.
+# terminal-stack's doctor vocabulary, so `tstack doctor` can indent this straight in.
 # The absorbed tree keeps its own OK/X/! gutter in services/**; two dialects in
 # one command is worse than either.
 issues=0
@@ -250,7 +250,7 @@ cmd_status() {
             # Intent and reality disagree. A warn, not a failure: this is exactly
             # what a doctor exists to surface, and it is not "broken".
             printf '  %s   %-15s running, but %s\n' "$WARN" "$s" "${state#off:}"
-            printf '      %s\n' "ts-config agents ${s} on   (keep it)   |   ts-stack down $s   (stop it)"
+            printf '      %s\n' "tstack config agents ${s} on   (keep it)   |   tstack services down $s   (stop it)"
             issues=$((issues + 1))
             continue
         fi
@@ -303,7 +303,7 @@ case "$cmd" in
         done ;;
 
     logs)
-        [ -n "$want_stack" ] || { echo "ts-stack: logs needs a stack name" >&2; exit 2; }
+        [ -n "$want_stack" ] || { echo "tstack services: logs needs a stack name" >&2; exit 2; }
         if [ "$follow" = 1 ]; then tss_compose "$want_stack" logs --tail "$tail_n" -f
         else                       tss_compose "$want_stack" logs --tail "$tail_n"; fi ;;
 
@@ -315,7 +315,7 @@ case "$cmd" in
         if [ -n "$pending" ] && [ "$TS_STACK_DRY_RUN" != 1 ]; then
             _bad 'volumes still carry their pre-ts- names:'
             printf '%s\n' "$pending" | sed 's/^/        /'
-            _note 'run:  ts-stack migrate-volumes     (copies, verifies, keeps the old volume)'
+            _note 'run:  tstack services migrate-volumes     (copies, verifies, keeps the old volume)'
             exit 1
         fi
         warn_unseeded
@@ -414,7 +414,7 @@ PY
             done
             if [ -n "$legacy" ] && docker volume inspect "$legacy" >/dev/null 2>&1; then
                 _bad "'$legacy' still holds this stack's data — NOT creating an empty '$v'"
-                _note 'run:  ts-stack migrate-volumes'
+                _note 'run:  tstack services migrate-volumes'
                 continue
             fi
             step "docker volume create $v"
@@ -422,8 +422,8 @@ PY
         done
 
         section 'next'
-        _note 'ts-stack up        start the stacks your settings enable'
-        _note 'ts-stack doctor    check the engine, the .env files and the ports' ;;
+        _note 'tstack services up        start the stacks your settings enable'
+        _note 'tstack services doctor    check the engine, the .env files and the ports' ;;
 
     migrate-volumes)
         # With the engine down `docker volume inspect` fails for BOTH names, so an
@@ -474,12 +474,12 @@ PY
         fi
         _ok "engine reachable"
         for s in $(selected); do
-            tss_env_seeded "$(tss_stack_dir "$s")" || { _bad "$s: .env missing — ts-stack bootstrap"; exit 2; }
+            tss_env_seeded "$(tss_stack_dir "$s")" || { _bad "$s: .env missing — tstack services bootstrap"; exit 2; }
             if tss_compose "$s" config -q >/dev/null 2>&1; then _ok "$s: compose config parses"
             else _bad "$s: compose config failed — a required value is missing"; exit 2; fi
         done
         pending="$(tss_volumes_pending 2>/dev/null || true)"
-        [ -z "$pending" ] || { _bad 'volumes still carry their pre-ts- names — ts-stack migrate-volumes'; exit 2; }
+        [ -z "$pending" ] || { _bad 'volumes still carry their pre-ts- names — tstack services migrate-volumes'; exit 2; }
         # The snapshot is what turns "the services came back" into "my data came
         # back". Counts only; nothing here reads a memory's content.
         before_mem="$(curl -s --max-time 5 'http://127.0.0.1:3110/agentmemory/memories?limit=1' 2>/dev/null | wc -c | tr -d ' ')"
@@ -575,7 +575,7 @@ PY
         if [ "$engine_ok" = 0 ]; then _skip 'volume names need the engine'
         elif [ -z "$pending" ]; then _ok 'volume names are current'
         else
-            _bad 'volumes still carry their pre-ts- names — ts-stack migrate-volumes'
+            _bad 'volumes still carry their pre-ts- names — tstack services migrate-volumes'
             printf '%s\n' "$pending" | sed 's/^/        /'
         fi
         section 'configuration'
@@ -597,11 +597,11 @@ PY
         _ok "backend: $_mb"
         # Derived state that has drifted is worse than either state on its own:
         # it means something wrote agentmemoryEnabled without going through
-        # ts-config memory, and the machine is now half-configured for two
+        # tstack config memory, and the machine is now half-configured for two
         # memory systems.
         case "$_mb:$_am" in
             agentmemory:on|headroom:off|none:off) ;;
-            *) _bad "memoryBackend is '$_mb' but agentmemoryEnabled is '$_am' — fix: ts-config memory $_mb" ;;
+            *) _bad "memoryBackend is '$_mb' but agentmemoryEnabled is '$_am' — fix: tstack config memory $_mb" ;;
         esac
         if [ "$engine_ok" = 1 ]; then
             _cmd="$(docker inspect ts-headroom-proxy --format '{{json .Config.Cmd}}' 2>/dev/null || true)"
@@ -613,13 +613,13 @@ PY
                     '')         _skip 'headroom proxy is not running' ;;
                     # THE bug this whole setting came from: databases up, memory
                     # never engaged, everything reporting healthy.
-                    *) _bad 'memoryBackend is headroom but the proxy is running WITHOUT --memory: it stores nothing, and Qdrant and Neo4j will stay empty — ts-stack restart headroom' ;;
+                    *) _bad 'memoryBackend is headroom but the proxy is running WITHOUT --memory: it stores nothing, and Qdrant and Neo4j will stay empty — tstack services restart headroom' ;;
                 esac
-                [ -n "$_qd" ] && [ -n "$_n4" ] || _bad 'headroom memory is selected but Qdrant/Neo4j are not both running — ts-stack up headroom'
+                [ -n "$_qd" ] && [ -n "$_n4" ] || _bad 'headroom memory is selected but Qdrant/Neo4j are not both running — tstack services up headroom'
             else
                 if [ -n "$_qd" ] || [ -n "$_n4" ]; then
                     echo "  note: Qdrant/Neo4j are still running but this machine's memory backend is '$_mb', so nothing writes to them."
-                    echo "        Clear them out with:  ts-stack down headroom && ts-stack up headroom"
+                    echo "        Clear them out with:  tstack services down headroom && tstack services up headroom"
                 fi
             fi
         fi ;;
@@ -627,8 +627,8 @@ esac
 
 if [ "$cmd" = doctor ] || [ "$cmd" = status ]; then
     printf '\n'
-    if [ "$issues" = 0 ]; then printf 'ts-stack %s: all checks passed\n' "$cmd"
-    else printf 'ts-stack %s: %s issue(s) found\n' "$cmd" "$issues"; exit 1; fi
+    if [ "$issues" = 0 ]; then printf 'tstack services %s: all checks passed\n' "$cmd"
+    else printf 'tstack services %s: %s issue(s) found\n' "$cmd" "$issues"; exit 1; fi
 fi
 if [ "$TS_STACK_DRY_RUN" = 1 ]; then
     printf '\n%s\n' 'Nothing changed (--dry-run).'

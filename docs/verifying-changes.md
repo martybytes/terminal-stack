@@ -167,7 +167,7 @@ is what identified `resurrect: restoring workspace '…' on gui-startup`.
 ## 3. Parallel implementations must render identically
 
 `ts_prompt_choice` (bash) and `Read-TsChoice` (pwsh) are required to produce
-byte-identical menus, as are the `wso` and `ts-mux` `-h` texts. Eyeballing them
+byte-identical menus, as are the `wso` and `tstack mux` `-h` texts. Eyeballing them
 misses a single space or an em dash. Diff the bytes.
 
 The bash side needs a pty — `ts_prompt_choice` writes the menu to `/dev/tty` and it
@@ -209,7 +209,7 @@ Then strip ANSI and blank lines, drop the trailing `Choose …` line (it differs
 legitimately: a live prompt vs `(non-interactive — taking the default)`), and
 `Compare-Object`.
 
-A pwsh prompt must also be **reachable from the `ts-config wizard` path**, which
+A pwsh prompt must also be **reachable from the `tstack config wizard` path**, which
 dot-sources `bootstrap/_config.ps1` and nothing else. A prompt that lives in
 `windows-bootstrap.ps1` works during install and dies mid-questionnaire on a
 re-run, discarding every answer already given. Resolve the whole callee list from
@@ -227,7 +227,7 @@ $b = $b.Substring(0, $b.IndexOf("`nfunction ", 1))
 '@
 ```
 
-Anything it prints is a prompt `ts-config wizard` cannot see.
+Anything it prints is a prompt `tstack config wizard` cannot see.
 `test_wizard_callees_are_all_defined_in_config_ps1` pins the same rule.
 
 ## 4. Config-store changes — use a throwaway store
@@ -253,9 +253,9 @@ $env:LOCALAPPDATA = (New-Item -ItemType Directory -Force "$env:TEMP\ts-test").Fu
 ```
 
 **Always regression-test the carry-forward guard.** Several `Save-TsConfig` callers
-pass no value for a given key — `Update-TsResolvedTheme`, and `ts-update`'s
+pass no value for a given key — `Update-TsResolvedTheme`, and `tstack update`'s
 app-backfill. Without `$PSBoundParameters.ContainsKey(...)` handling, every
-`ts-update` silently resets the user's choice:
+`tstack update` silently resets the user's choice:
 
 ```powershell
 Save-TsConfig -<Key> 'on' | Out-Null
@@ -397,20 +397,20 @@ The invariants to drill after touching the hook senders:
   on an unchanged config must produce **zero** `updated` lines for
   `settings.json` / `hooks.json`, and the hooks must not POST anywhere
   (`cc_tts_daemon_ready` gates on `.daemon.enabled`).
-- **Both entry shells:** drill the pwsh verbs (`ts-config tts daemon on` in
+- **Both entry shells:** drill the pwsh verbs (`tstack config tts daemon on` in
   pwsh, `Update-TerminalStack`) as well as the bash ones — day-to-day driving
   happens from PowerShell, and the daemon's first activation failed only on
   that path (`& pwsh` output capture; see `powershell-quirks.md`). Remember
-  pwsh `ts-config tts` saves don't survive a WSL apply — persistence checks
+  pwsh `tstack config tts` saves don't survive a WSL apply — persistence checks
   belong on the WSL side.
 
 Duck-restore drill (music playing): trigger speech, kill the daemon mid-duck
 (`taskkill /f /im terminal-stack-tts.exe`), confirm music is stuck quiet, then
-`ts-doctor --repair` (or restart the daemon) — volumes must come back and
+`tstack doctor --repair` (or restart the daemon) — volumes must come back and
 `state\duck-snapshot.json` must be gone.
 
 New wizard/menu text (`ts_prompt_cc_tts_daemon` ↔ `Read-TsCcTtsDaemon`,
-`ts-config tts -h` both shells, both TTS submenus) goes through the §3
+`tstack config tts -h` both shells, both TTS submenus) goes through the §3
 byte-diff like everything else.
 
 ## 4c. Sync changes — run the whole sync against a throwaway profile
@@ -447,7 +447,7 @@ For the per-entry merges, TTS off is a distinct case, not a weaker version of TT
 off must remove every one of ours and keep every one of theirs, and turning it back on must
 return to exactly the starting counts with no duplicates.
 
-## 4d. `ts-smb` changes (`bootstrap/ts-smb.sh`, `bootstrap/_smb.sh`)
+## 4d. `tstack smb` changes (`bootstrap/ts-smb.sh`, `bootstrap/_smb.sh`)
 
 The store parser, the engine probe and the mount lifecycle are all testable without
 an SMB server; only the last two steps need one.
@@ -475,7 +475,7 @@ TERMINAL_STACK_DIR="$PWD" bash bootstrap/ts-smb.sh mount NAME -n
 
 Mount-record states are testable with synthetic records — no mount required. Write a
 `<name>.mnt` into the state dir with a live pid and a mountpoint that is not mounted
-and `ts-smb list` must report `zombie`; a dead pid and no mount must report `gone`
+and `tstack smb list` must report `zombie`; a dead pid and no mount must report `gone`
 and be pruned on sight.
 
 For the real thing, a container is enough:
@@ -494,13 +494,13 @@ Two things to check every time you touch the credential path:
   `ps auxww | grep '[r]clone'` must show the connection string and flags and no
   password. It travels in `RCLONE_SMB_PASS`, and it must be **obscured** there —
   rclone rejects plaintext with "input too short when revealing password".
-- **`--password-stdin` is consumed exactly once.** `ts-smb probe` tries several
+- **`--password-stdin` is consumed exactly once.** `tstack smb probe` tries several
   credential candidates; re-reading an exhausted stdin used to leave rclone
   retrying against an empty password until it timed out.
 
 And two platform traps worth re-confirming rather than assuming, because both fail
 *silently*: Homebrew's macOS rclone refuses to mount at all (a build-time guard, so
-`ts-smb doctor` should say so), and `-o backend=fskit` must never be passed
+`tstack smb doctor` should say so), and `-o backend=fskit` must never be passed
 automatically — a test pins that, because it fails on macOS 26.6 where fuse-t's
 default NFS backend does not.
 
@@ -551,7 +551,7 @@ bash -uc 'desired=/tmp; echo "$desired…"'    # bash: desired?: unbound variabl
 **A catalog entry is a claim about a package manager — check it.** A winget id
 that does not resolve costs nothing at parse time and never stops failing:
 `pypa.pipx` sat in `$TsWingetIds` while `pipx` was in the *recommended* set, so
-every Windows machine was offered it on every `ts-update`, accepted, and watched
+every Windows machine was offered it on every `tstack update`, accepted, and watched
 winget answer "No package found matching input criteria". Two of the other three
 Python entries were dead the same way. Sweep the whole table after touching it:
 
@@ -600,7 +600,7 @@ deliberately invisible to resolution. So `chezmoi apply` run while working in a 
 tree deploys the *old* code and proves nothing about your change.
 
 Do not apply from the dev tree to "test" something. Verify with §§1–4, commit, then
-`ts-update` on the target machine and check there.
+`tstack update` on the target machine and check there.
 
 A newly added `[data]` key is safe in that gap: every consumer defaults it (`hasKey`
 guards in chezmoi templates, `cfg <key> <default>` in the sync hook, `else` fallbacks

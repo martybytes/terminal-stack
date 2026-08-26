@@ -3,8 +3,8 @@
 What gets captured, how each agent retrieves it, and what to run when it stops.
 Long-form reference: `services/stacks/agentmemory/README.md`.
 
-> Only one memory backend runs on a machine. `ts-config memory status` says which,
-> and `ts-config memory headroom` swaps AgentMemory out for Headroom's own store.
+> Only one memory backend runs on a machine. `tstack config memory status` says which,
+> and `tstack config memory headroom` swaps AgentMemory out for Headroom's own store.
 
 ## The shape
 
@@ -27,8 +27,8 @@ made it.
 
 | | |
 |---|---|
-| the server, its image, the compose file | `services/stacks/agentmemory/`, driven by `ts-stack` |
-| which hooks each agent registers, what they run, the environment they carry | `bootstrap/ts-agentmemory.{sh,ps1}`, driven by `ts-update` and `chezmoi apply` |
+| the server, its image, the compose file | `services/stacks/agentmemory/`, driven by `tstack services` |
+| which hooks each agent registers, what they run, the environment they carry | `bootstrap/ts-agentmemory.{sh,ps1}`, driven by `tstack update` and `chezmoi apply` |
 
 Both halves ship in this repo, but the split is deliberate: the wiring edits
 `~/.claude`, `~/.codex` and `~/.cursor`, which are host files, so it lives
@@ -37,9 +37,9 @@ outside `services/`.
 ## Turning it on
 
 ```sh
-ts-config agents agentmemory on    # the saved setting, this machine only
-ts-stack up agentmemory            # the server
-ts-agentmemory --check             # is the host wiring in place
+tstack config agents agentmemory on    # the saved setting, this machine only
+tstack services up agentmemory            # the server
+tstack agentmemory --check             # is the host wiring in place
 ```
 
 ## Capture is invisible when it breaks
@@ -52,7 +52,7 @@ everything**. There is no log to read.
 So the only real check is a round trip:
 
 ```sh
-ts-stack test                              # includes a write-then-read probe
+tstack services test                              # includes a write-then-read probe
 services/stacks/agentmemory/ts-verify.sh   # just that probe
 services/stacks/agentmemory/check-capture.sh --apply   # the deep diagnostic
 ```
@@ -62,7 +62,7 @@ Two failures worth knowing about, because both were silent:
 - **A plugin upgrade reverts the wiring.** The hook scripts are vendor files in a
   plugin cache; an upgrade replaces the cache and every edit with it, turning
   retrieval off with nothing in any log. Both sync paths re-apply it, so
-  `ts-update` and `chezmoi apply` repair it; `ts-doctor` reports it.
+  `tstack update` and `chezmoi apply` repair it; `tstack doctor` reports it.
 - **A stale secret 401s forever.** An exported variable only reaches processes
   started after it was set, so a long-lived shell keeps a pre-rotation secret and
   every request from that session fails — silently, because `/observe` swallows
@@ -92,7 +92,7 @@ adds the *derived* layer: summaries, knowledge-graph extraction, consolidation.
 
 The volume `ts-agentmemory-data` is `external: true`, which means `docker compose
 down -v` **cannot** remove it. That is on purpose: it is every memory you have
-ever saved. Only `ts-stack reset --purge` removes it, and that wants a verified
-backup and a typed phrase. `ts-stack backup` takes one on demand.
+ever saved. Only `tstack services reset --purge` removes it, and that wants a verified
+backup and a typed phrase. `tstack services backup` takes one on demand.
 
 See also: `doc agentmemory-console` · `doc services` · `doc troubleshooting`

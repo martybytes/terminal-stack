@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ts-verify.sh — agent007memory: prove the console proxies to AgentMemory and
-# serves its own UI. Run by `ts-stack test`; safe to run by hand. Exit 0 = pass.
+# serves its own UI. Run by `tstack services test`; safe to run by hand. Exit 0 = pass.
 #
 # Windows twin: ts-verify.ps1. Change one, change the other.
 #
@@ -30,7 +30,7 @@ elif tss_wait_http "$BYPASS/agentmemory/livez" 2 2xx; then
     fail 'the proxy on 3111 is not forwarding, though the server behind it is healthy — is this container on ts-agentmemory-net?'
     rc=1
 else
-    fail 'the agentmemory server itself is down, so the proxy has nothing to forward to (start it: ts-stack up agentmemory)'
+    fail 'the agentmemory server itself is down, so the proxy has nothing to forward to (start it: tstack services up agentmemory)'
     rc=1
 fi
 

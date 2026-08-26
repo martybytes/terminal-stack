@@ -36,10 +36,18 @@ services/**/out.mp3
 services/**/*.wav
 
 # Console build artifacts. node_modules/ or dist/ visible to `git status` inside
-# the runtime clone would make every later `chezmoi apply` and `ts-update` refuse.
+# the runtime clone would make every later `chezmoi apply` and `tstack update` refuse.
 services/console/node_modules/
 services/console/dist/
 services/console/*.log
 services/console/.env
 services/console/.env.local
 services/console/.agent007memory/
+
+# Python tooling artifacts (pyproject.toml configures all three)
+/.coverage
+/.coverage.*
+/htmlcov/
+/.mypy_cache/
+/.ruff_cache/
+tstack/**/__pycache__/

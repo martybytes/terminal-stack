@@ -30,7 +30,7 @@
 # export DROPBOX_DIR="$HOME/Dropbox (Work)"
 
 # ── Runtime clone location (rarely needed) ────────────────────────────────────
-# ts-update / ts-config / wso / doc find the clone on their own: $TERMINAL_STACK_DIR,
+# tstack update / tstack config / wso / doc find the clone on their own: $TERMINAL_STACK_DIR,
 # then chezmoi's sourceDir, then the canonical location and the legacy defaults.
 # On POSIX the installer records the clone as chezmoi's sourceDir, so you should
 # not normally need this at all — export it only to point at a clone kept
@@ -38,7 +38,7 @@
 # resolution on purpose).
 #
 # If you see "stale $TERMINAL_STACK_DIR", the line below points at a path with
-# no clone. Delete it, or run 'ts-doctor --repair'.
+# no clone. Delete it, or run 'tstack doctor --repair'.
 #
 # export TERMINAL_STACK_DIR="$HOME/dotfiles/terminal-stack"
 

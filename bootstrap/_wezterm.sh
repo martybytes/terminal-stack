@@ -4,7 +4,7 @@
 # mac-bootstrap.sh and _common-debian.sh. Do not `exit` here — return non-zero.
 #
 # WezTerm publishes two channels and the stack installs NEITHER automatically:
-# the wizard asks, ts-update offers, ts-config changes it. Upstream's newest
+# the wizard asks, tstack update offers, tstack config changes it. Upstream's newest
 # stable is 20240203 (February 2024, no cut since), which is why nightly is the
 # pre-selected answer rather than the forced one — see docs/decisions.md
 # § "Why the WezTerm channel is a question, and why it is not a saved setting".
@@ -298,7 +298,7 @@ ts_wezterm_status() {
             [ -n "$commits" ] && [ -n "$tally" ] && printf ' —'
             [ -n "$tally" ] && printf ' %s' "$tally"
             printf '\n'
-            [ -n "$tally" ] && echo "    Full notes: ts-config wezterm changes"
+            [ -n "$tally" ] && echo "    Full notes: tstack config wezterm changes"
         fi
     fi
 }
@@ -415,13 +415,13 @@ ts_wezterm_upgrade() {
     case "$channel" in
         stable|nightly) ts_wezterm_install "$channel" ;;
         unknown) echo "$INFO WezTerm: installed outside a package manager; upgrade it the way you installed it." ;;
-        *)       echo "$INFO WezTerm: not installed. 'ts-config wezterm install nightly' to add it." ;;
+        *)       echo "$INFO WezTerm: not installed. 'tstack config wezterm install nightly' to add it." ;;
     esac
 }
 
 # Is there something newer than the installed build on its own channel? Prints a
 # one-line reason when yes, nothing when no / unknown / offline. This is what
-# ts-update gates its offer on, so silence is the common case.
+# tstack update gates its offer on, so silence is the common case.
 ts_wezterm_update_available() {
     local inst channel ver date
     inst="$(ts_wezterm_installed 2>/dev/null || true)"

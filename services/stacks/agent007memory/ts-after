@@ -3,5 +3,5 @@
 # agent007memory joins ts-agentmemory-net, which the agentmemory stack creates.
 # An external network cannot be joined before it exists, and lexical order puts
 # agent007memory FIRST ('0' sorts before 'm'), so without this file every fresh
-# `ts-stack up` failed with "network ts-agentmemory-net not found".
+# `tstack services up` failed with "network ts-agentmemory-net not found".
 agentmemory

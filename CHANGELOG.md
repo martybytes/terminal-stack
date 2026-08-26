@@ -2,11 +2,71 @@
 
 All notable changes captured here. Format loosely follows [Keep a Changelog](https://keepachangelog.com/). Dates are MM/DD/YYYY for display, `git log` is authoritative.
 
-- **Codex now speaks clarifying questions (08/25/2026).** Enhanced Codex profiles register an asynchronous `PreToolUse` matcher for `request_user_input`, dispatching existing `question/question` TTS events before the agent blocks on user input. Question text, session identity, project name, mute rules, event filters, daemon history, and direct fallback all reuse the established pipeline. Windows, WSL, macOS, and Linux input helpers now preserve the `codex` source instead of relabeling fallback speech as Claude. `Stop` completion speech remains unchanged; unrelated tools and `codex-stock` remain silent. New sessions must review and trust the added hook through `/hooks`.
-
 ## [Unreleased]
 
+### Added
+
+- **One command: `tstack` (08/25/2026).** The eight `ts-*` commands are replaced by a
+  single entry point with subcommands: `tstack config`, `doctor`, `update`, `rollback`,
+  `mux`, `services`, `smb`, `wezterm`, `agents`, `agentmemory`, `doc`. **No `ts-*` name
+  survives and no alias is provided**, in either shell.
+
+  Routing lives in `tstack/commands.conf`, a whitespace-delimited table read by four
+  consumers: `tstack/registry.py`, the `tstack()` shim in `dot_zshrc`, `Invoke-Tstack` in
+  `$PROFILE`, and the completion providers (the first in this repo). Help is rendered by
+  `tstack/cli.py` and nowhere else, so the bash and pwsh help texts are identical by
+  construction rather than by the manual pty diff.
+
+  Nothing was reimplemented: every subcommand still routes to the shell that implements it
+  today. Flipping a row to `python` is what ports a subsystem, and that is the whole
+  mechanism for the rest of the work in `REVAMP-PLAN.md`.
+
+- **Python core, gates and CI.** New `tstack/` package (dispatcher, registry, clone
+  resolution, platform detection), `pyproject.toml` (ruff, mypy, pytest, branch coverage
+  with a ratcheted floor), `.github/workflows/ci.yml` covering ubuntu, macos, windows
+  **and WSL**, and a `.githooks/pre-push` full gate beside the existing pre-commit one.
+
+### Fixed
+
+- **`ts-stack` had been broken on Windows since `54da056`.** `$PROFILE:1705` held a literal
+  TAB byte where a backslash-t was intended, inside a single-quoted string, so `Join-Path` produced
+  `<src>\bootstrap\<TAB>s-stack.ps1`, `Test-Path` failed, and every invocation printed
+  "not found; run ts-update". A lint now fails on any literal TAB inside a single-quoted
+  PowerShell string.
+
+- **The only automated gate had never run.** `.githooks/pre-commit` said it was "installed
+  by `bootstrap.sh --apply` / `bootstrap.ps1 -Apply`". Neither file has ever existed here,
+  nothing set `core.hooksPath`, and it was unset in every clone. `ts_install_git_hooks` /
+  `Install-TsGitHooks` now set it, all three bash bootstraps call it, and a test asserts
+  both. This is why the TAB byte survived and why `services/console`'s suite stayed red.
+
+- **Argument splatting dropped the leading dash.** `tstack services -h` reached
+  `ts-stack.ps1` as two arguments, `-` and `h`, reporting "no stack named 'h'". An `if`
+  used as an expression unrolls a single-element array to a scalar, and splatting a scalar
+  string beginning with `-` re-parses it as a parameter token; with no tail it splatted one
+  empty string. Both parse cleanly and fail silently. Fixed with `@()`, pinned by a test.
+
+- **Claims that nothing enforced.** `ts-mux` and `wso` `-h` were documented as
+  byte-identical between their twins with nothing comparing them; `Test-TsAppInstallable`
+  was unpinned while its bash twin was pinned twice; "never pipe `Where-Object` into
+  `Set-Content`" was prose only. All four are now tests. `CLAUDE.md`'s opening claim that
+  there is "no build, no test suite, no lint" was false in three ways and contradicted
+  nineteen lines later. Full list in `docs/decisions.md` § "The claims audit".
+
+- **Tests that would have gone vacuous.** The chezmoi/Docker boundary test asserted that
+  `docker compose` appears nowhere in `bootstrap/ts-agents.{sh,ps1}` — an assertion that
+  passes forever once those files are deleted. It now resolves its targets through
+  `tstack/commands.conf`, and `repo_file()` makes any "string X must appear in file Y" test
+  fail loudly when Y is missing.
+
+- **`check-capture.sh` probed for a command that never existed.** `command -v
+  ts-agentmemory` led its candidate list; there has never been an executable by that name,
+  so it matched nothing on every host, silently. Its `fail` branch also claimed no `.sh`
+  twin exists, which stopped being true some time ago.
+
 ### Changed
+
+- **Codex now speaks clarifying questions (08/25/2026).** Enhanced Codex profiles register an asynchronous `PreToolUse` matcher for `request_user_input`, dispatching existing `question/question` TTS events before the agent blocks on user input. Question text, session identity, project name, mute rules, event filters, daemon history, and direct fallback all reuse the established pipeline. Windows, WSL, macOS, and Linux input helpers now preserve the `codex` source instead of relabeling fallback speech as Claude. `Stop` completion speech remains unchanged; unrelated tools and `codex-stock` remain silent. New sessions must review and trust the added hook through `/hooks`.
 
 - **The console zooms itself, and its grids follow the content (08/24/2026).** There was a UI scale already, but it was buried in the Customize drawer, capped at 80-125%, and stored **per page** — so it reset when you changed page, which is a per-page layout tweak rather than a zoom. People reach for the browser's zoom instead, and that shrinks the *viewport*: the app frame gets shorter and the SystemBar pinned at its bottom goes off the end of the window.
 

@@ -52,7 +52,7 @@ the exact pane mapping and Stop TTS wait for hook trust.
 ## agentmemory
 
 Wired by `bootstrap\ts-agentmemory.ps1` from every sync when
-`ts-config agents agentmemory on` is saved for this computer.
+`tstack config agents agentmemory on` is saved for this computer.
 Codex is the awkward host, for two reasons:
 
 - **It retrieves on the prompt, not the tool call.** Codex emits `Bash` for most tool calls, and a
@@ -64,7 +64,7 @@ Codex is the awkward host, for two reasons:
   the duplicate is dropped inside the hook before any request. Without it, Codex received the same
   context block twice per prompt.
 
-`ts-config agents agentmemory status` now checks the complete Codex seam: all six
+`tstack config agents agentmemory status` now checks the complete Codex seam: all six
 plugin scripts, all six stable Desktop copies, their terminal-stack edits, and
 exactly one owned `~/.codex/hooks.json` command for each of `SessionStart`,
 `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PreCompact`, and `Stop`. Missing,
@@ -79,11 +79,11 @@ Reference: [OpenAI Codex hooks](https://developers.openai.com/codex/hooks/) and
 ## Headroom and Caveman
 
 Codex writes hook trust hashes into `[hooks.state]` in the terminal-stack
-profile. That state is Codex-owned and survives `ts-update`; terminal-stack
+profile. That state is Codex-owned and survives `tstack update`; terminal-stack
 updates only its dashboard and hook definitions. A normal update should never
 ask to overwrite the profile merely because `/hooks` was trusted.
 
-With `ts-config agents headroom on`, enhanced interactive launches get a
+With `tstack config agents headroom on`, enhanced interactive launches get a
 session-local custom provider named `headroom`. The wrapper passes its base URL,
 maps `HEADROOM_PROXY_TOKEN` to `X-Headroom-Proxy-Token`, and selects that provider
 only for the child process; it never overrides Codex's reserved built-in `openai`
@@ -94,9 +94,9 @@ bypasses Headroom.
 Recovery is explicit and reversible:
 
 ```text
-ts-config agents headroom off     # direct mode; remove Headroom MCP registrations
-ts-config agents headroom on      # authenticate first, then enable and register
-ts-config agents headroom repair  # re-check and repair registrations
+tstack config agents headroom off     # direct mode; remove Headroom MCP registrations
+tstack config agents headroom on      # authenticate first, then enable and register
+tstack config agents headroom repair  # re-check and repair registrations
 ```
 
 `on` and `repair` must receive a successful authenticated `/stats` response.
@@ -113,8 +113,8 @@ independent.
 Caveman installs only the pinned global `caveman` skill and a marked block in the
 active global `~/.codex/AGENTS.md`. The rest of Caveman's skill collection is not
 installed, and existing global instructions are preserved with a dated backup.
-Confirm both layers with `ts-config agents headroom status` and
-`ts-config agents caveman status`. Only enhanced interactive Codex launches are
+Confirm both layers with `tstack config agents headroom status` and
+`tstack config agents caveman status`. Only enhanced interactive Codex launches are
 wrapped automatically; utility commands such as `codex exec` remain stock. In
 Headroom's dashboard, routed Codex traffic is identified as OpenAI/Codex
 WebSocket traffic, while a separate Claude smoke test is labeled
@@ -132,24 +132,24 @@ global Codex `notify` configuration is not replaced. With TTS enabled, test the
 source explicitly:
 
 ```text
-ts-config tts test --source codex
+tstack config tts test --source codex
 ```
 
-`ts-config tts summarizer self` installs the spoken-summary marker in Codex's
+`tstack config tts summarizer self` installs the spoken-summary marker in Codex's
 active global `$CODEX_HOME/AGENTS.md` (or `AGENTS.override.md`). Start a new
 Codex session to load that instruction. Existing sessions still get a locally
 derived sentence from their final-response hook text instead of repeating the
 fixed waiting template.
 
-Use `ts-config tts prefix codex on|off|<label>` to control the spoken `Codex.`
+Use `tstack config tts prefix codex on|off|<label>` to control the spoken `Codex.`
 prefix. If the tray daemon predates this feature, run
-`ts-config tts daemon restart` after updating.
+`tstack config tts daemon restart` after updating.
 
 The dashboard stays quiet when audio is healthy or TTS is disabled. It shows a
 red speaker warning only when enabled Codex speech is misconfigured or its
 configured daemon is unreachable.
 
-Question hooks load when a Codex session starts. After `ts-update`, start new
+Question hooks load when a Codex session starts. After `tstack update`, start new
 enhanced session, run `/hooks`, and trust new `PreToolUse` command.
 `codex-stock` intentionally bypasses dashboard and voice hooks.
 

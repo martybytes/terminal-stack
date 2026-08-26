@@ -2,10 +2,10 @@
 .NAME     ts-verify.ps1
 .SYNOPSIS playwright: prove the MCP server actually drives a browser.
 .PLATFORM Windows (pwsh 7). Twin of ts-verify.sh -- change one, change the other.
-.USAGE    ts-verify.ps1            (run by `ts-stack test`; safe by hand)
+.USAGE    ts-verify.ps1            (run by `tstack services test`; safe by hand)
 .NOTE     A healthy container proves the process started, not that a browser can
           be opened in it. check-playwright.mjs opens two isolated sessions and
-          closes them; this is the thin wrapper ts-stack test discovers.
+          closes them; this is the thin wrapper tstack services test discovers.
 #>
 [CmdletBinding()]
 param()

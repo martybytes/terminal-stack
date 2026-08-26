@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # ts-doctor.sh — diagnose and repair the terminal-stack install. Driven by the
-# `ts-doctor` shell wrapper (zsh) and runnable standalone. On Windows the pwsh
+# `tstack doctor` shell wrapper (zsh) and runnable standalone. On Windows the pwsh
 # Test-TerminalStack / Repair-TerminalStack are the counterparts.
 #
 # Usage:
-#   ts-doctor                 run health checks (read-only)
-#   ts-doctor --repair        diagnose, then fix issues (repoint sourceDir,
+#   tstack doctor                 run health checks (read-only)
+#   tstack doctor --repair        diagnose, then fix issues (repoint sourceDir,
 #                             re-apply, offer to clean up old clones/leftovers)
-#   ts-doctor --quiet         checks only, suppress the per-check "ok" lines
+#   tstack doctor --quiet         checks only, suppress the per-check "ok" lines
 #
 # Run from WSL in a combined WSL+Windows setup — it repoints the WSL chezmoi
 # source of truth. Exit status mirrors the health (0 healthy, 1 issues found).
@@ -17,7 +17,7 @@ CZ="${TERMINAL_STACK_CHEZMOI:-}"
 if [ -z "$CZ" ]; then
     if [ -x "$HOME/.local/bin/chezmoi" ]; then CZ="$HOME/.local/bin/chezmoi"
     elif command -v chezmoi >/dev/null 2>&1; then CZ="$(command -v chezmoi)"
-    else echo "ts-doctor: chezmoi not found on PATH." >&2; exit 1; fi
+    else echo "tstack doctor: chezmoi not found on PATH." >&2; exit 1; fi
 fi
 export TERMINAL_STACK_CHEZMOI="$CZ"
 
@@ -39,5 +39,5 @@ case "${1:-}" in
                      # Pass an explicit desired clone if the caller set one.
                      ts_repair "${TERMINAL_STACK_DIR:-}" ;;
     -h|--help|help)  sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//' ;;
-    *) echo "ts-doctor: unknown command '$1' (try: --repair, --quiet, --help)" >&2; exit 2 ;;
+    *) echo "tstack doctor: unknown command '$1' (try: --repair, --quiet, --help)" >&2; exit 2 ;;
 esac

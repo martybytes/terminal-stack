@@ -126,7 +126,7 @@ def test_sh_scripts_are_bash_32_clean():
         r";;&": ";;& fallthrough",
     }
     problems = []
-    for p in list(sh_scripts()) + [SERVICES / "_stack.sh"]:
+    for p in [*list(sh_scripts()), SERVICES / "_stack.sh"]:
         text = strip_comments(read(p))
         for pattern, what in banned.items():
             if re.search(pattern, text):
@@ -155,7 +155,7 @@ def test_sh_scripts_have_the_house_prologue():
 
 def test_sh_files_have_no_cr_and_no_bom():
     """A BOM sits before the shebang; a CR breaks `sh -c` under set -eu."""
-    for p in list(sh_scripts()) + [SERVICES / "_stack.sh"]:
+    for p in [*list(sh_scripts()), SERVICES / "_stack.sh"]:
         raw = p.read_bytes()
         rel = p.relative_to(ROOT)
         assert not raw.startswith(b"\xef\xbb\xbf"), f"{rel}: has a UTF-8 BOM"

@@ -10,7 +10,7 @@ across `bootstrap/`, `dot_zshrc` and `$PROFILE`, and every user-facing menu
 exists **twice** — bash and pwsh — under a rule that their rendered output stay
 byte-identical, verified by a manual pty diff (`docs/verifying-changes.md` § 3).
 That rule is the cost a single binary eventually removes. The surface itself is
-also past the point where a flat command list is discoverable: `ts-config` alone
+also past the point where a flat command list is discoverable: `tstack config` alone
 fronts leader/theme/tmux/apps/mux/restore/atuin/ghostty/agents/wezterm/wizard,
 and the TTS subtree has **43 `ccTts*` keys**.
 
@@ -21,7 +21,7 @@ front-end, not a replacement.
 ## The load-bearing decision: the TUI never writes config itself
 
 **Every mutation shells out to the existing scripts.** Reads go through new
-`--json` modes; writes invoke `ts-config`, `ts_data_set`, `ts_save_config` and
+`--json` modes; writes invoke `tstack config`, `ts_data_set`, `ts_save_config` and
 friends exactly as a human would.
 
 This is not timidity, it is the repo's own history:
@@ -59,10 +59,10 @@ Add `--json` read models to:
 
 | Command | Emits |
 |---|---|
-| `ts-config show` | every key, its value, its default, and where it came from |
-| `ts-doctor` | one record per check: id, status, message, repair hint |
+| `tstack config show` | every key, its value, its default, and where it came from |
+| `tstack doctor` | one record per check: id, status, message, repair hint |
 | `wso status` | one record per repo: path, dirty, unpushed, detached |
-| `ts-smb list` | one record per share/mount, with derived liveness |
+| `tstack smb list` | one record per share/mount, with derived liveness |
 
 **These are worth building whether or not the TUI ever exists** — they make the
 stack scriptable, and they are what `check-capture.sh`-style external probes
@@ -70,12 +70,12 @@ want too.
 
 ## Surface the TUI must cover
 
-- `ts-config`: leader, theme, tmux prefix, apps, mux, session restore, atuin,
+- `tstack config`: leader, theme, tmux prefix, apps, mux, session restore, atuin,
   ghostty, agents, WezTerm channel, re-run wizard
 - the TTS subtree: 43 `ccTts*` keys, engines, voices, templates, daemon, history
 - `wso`: status, plan, migrate, archive/unarchive checklists
-- `ts-smb`: hosts → shares → probe → browse → mount
-- `ts-doctor`: checks and `--repair`
+- `tstack smb`: hosts → shares → probe → browse → mount
+- `tstack doctor`: checks and `--repair`
 - the `doc` knowledge base
 
 ## Distribution: prebuilt binaries only
@@ -94,13 +94,13 @@ name their ARM asset `aarch64`, not `arm64`.
 Windows-only, opt-in (`ccTtsDaemon` defaults off), and its Python 3.10+
 toolchain is already in the catalog and present on essentially every machine.
 Rust is in neither the catalog nor any bootstrap. A toolchain requirement gating
-`ts-config` itself is a different proposition from one gating an optional
-feature, and `cargo build --release` on every `ts-update` is minutes, not
+`tstack config` itself is a different proposition from one gating an optional
+feature, and `cargo build --release` on every `tstack update` is minutes, not
 seconds.
 
 ## Fetch UX: offer, never force
 
-`ts-update` detects a newer release and prompts `[y/N]`, mirroring exactly what
+`tstack update` detects a newer release and prompts `[y/N]`, mirroring exactly what
 it already does for `ts_apps_pending` and `ts_wezterm_update_available`. Plus a
 standalone `ts-tui update` for on-demand.
 
@@ -112,7 +112,7 @@ changes a machine without asking.
 This is the real risk in the release approach and it must be designed for, not
 discovered.
 
-`ts-update` is `git pull --ff-only` + `chezmoi apply`. `ts-rollback` is
+`tstack update` is `git pull --ff-only` + `chezmoi apply`. `tstack rollback` is
 `git reset --hard <sha>` + `chezmoi apply`. **A separately-fetched binary
 participates in neither**, so a rollback leaves a *newer* binary driving *older*
 scripts — and since the TUI shells out to those scripts, that is exactly the
@@ -122,12 +122,12 @@ The TTS daemon already solved this and the TUI must copy it wholesale:
 
 - stamp the **git SHA/tag** into the binary at build time (the daemon does this
   in its PyInstaller spec) and expose it as `ts-tui --version`
-- `ts-doctor` reports a mismatch between the binary's stamp and the clone's HEAD
+- `tstack doctor` reports a mismatch between the binary's stamp and the clone's HEAD
 - keep a `.previous` artifact beside the installed one
 - install as **stage → validate → atomic swap**, restoring `.previous` if the
   final move leaves no binary (`bootstrap/install-tts-daemon.ps1` is the
   reference)
-- `ts-rollback` must fetch the binary matching the SHA it rolled back to, or
+- `tstack rollback` must fetch the binary matching the SHA it rolled back to, or
   refuse and say so
 
 ## Two hard runtime rules
@@ -135,8 +135,8 @@ The TTS daemon already solved this and the TUI must copy it wholesale:
 - **Never `stat`, `ls` or glob an SMB mountpoint.** A dead FUSE mount blocks
   forever and takes the calling process with it — in a TUI that means a frozen
   render loop with no way out. Liveness comes from the kernel mount table, which
-  is why `ts-smb` derives it rather than storing it.
-- **`ts-update` and `ts-rollback` are ~140 lines of zsh inside `dot_zshrc`**,
+  is why `tstack smb` derives it rather than storing it.
+- **`tstack update` and `tstack rollback` are ~140 lines of zsh inside `dot_zshrc`**,
   with no `.sh` file. Shell out to them (`zsh -ic`), do not reimplement. They are
   also *interactive* multi-stage flows with their own prompts, so the TUI must
   hand the terminal over rather than trying to drive them.
@@ -151,7 +151,7 @@ The TTS daemon already solved this and the TUI must copy it wholesale:
    list, filter, preview and key handling while risking no config write.
 3. Read-only dashboard over the `--json` models
 4. Mutations, shelling out
-5. cargo-dist release pipeline + `ts-tui update` + the `ts-update` offer
+5. cargo-dist release pipeline + `ts-tui update` + the `tstack update` offer
 
 Ratatui **0.30.2** is the current release. `cargo` is not installed on the
 development Mac; the prototype needs `rustup` locally, which is deliberately

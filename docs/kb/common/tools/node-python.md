@@ -1,7 +1,7 @@
 # Node & Python runtimes
 
 Two catalog groups, both asked about at install and re-askable with
-`ts-config apps` / `ts-config wizard`.
+`tstack config apps` / `tstack config wizard`.
 
 ## Node — managed by fnm
 
@@ -22,7 +22,7 @@ switches Node automatically.
 
 **Global npm binaries live under the active Node**, and fnm's PATH entry is
 created per shell. That is why `ts_apps_pending` calls `ts_load_node_env` before
-probing — without it, `ts-update` would nag about `codex`/`gemini` forever even
+probing — without it, `tstack update` would nag about `codex`/`gemini` forever even
 with both installed.
 
 Picking `fnm` at install also installs the current LTS: the manager alone gives
@@ -82,7 +82,7 @@ is present, falling back to `py -m pip install --user <name>`.
 
 Three of them used to be listed as winget ids that do not exist — `pypa.pipx`,
 `Python-Poetry.Poetry` and `nicolargo.glances`. `pipx` is in the recommended set,
-so every Windows machine was offered it on every `ts-update`, accepted, and got
+so every Windows machine was offered it on every `tstack update`, accepted, and got
 "No package found matching input criteria" back, forever. `ipython`, `httpie` and
 `pre-commit` had no id and were skipped silently. Both halves are fixed; the
 whole group installs on Windows now.

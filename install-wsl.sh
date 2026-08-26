@@ -201,7 +201,7 @@ echo "$INFO Running chezmoi apply -v"
 # 6. Health check (non-fatal): sourceDir + zshrc + tools; flags leftover clones.
 if [ -f "$TARGET_DIR/bootstrap/ts-doctor.sh" ]; then
     TERMINAL_STACK_DIR="$TARGET_DIR" bash "$TARGET_DIR/bootstrap/ts-doctor.sh" --quiet </dev/null \
-        || echo "$INFO Run 'ts-doctor --repair' to resolve the items above."
+        || echo "$INFO Run 'tstack doctor --repair' to resolve the items above."
 fi
 
 echo ""

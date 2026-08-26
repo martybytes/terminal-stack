@@ -209,7 +209,7 @@ function Sync-MirrorTree {
 
             # ghosttyConfig=off: skip the subtree, never delete it. Twin of the
             # same guard in run_after_90-sync-windows.sh; removing what is already
-            # there is ts-config's job, so a hand-written config on a box that
+            # there is tstack config's job, so a hand-written config on a box that
             # never opted in is untouched by a sync.
             if ($script:tsGhosttyOn -ne 'on' -and
                 ($rel -replace '\\', '/') -like 'AppData/Local/ghostty/*') { return }
@@ -370,9 +370,9 @@ Write-Host "sync-windows: user=$WinUser, $created created, $updated updated, $un
 # and only when the mux is actually the thing hosting panes.
 if ($weztermChanged -and $tok['__WEZ_MUX__'] -eq 'on') {
     Write-Warning 'WezTerm config changed. The GUI reloads live, but wezterm-mux-server keeps the old config for spawning panes.'
-    Write-Warning "When convenient (closes all panes!): 'ts-mux restart'."
+    Write-Warning "When convenient (closes all panes!): 'tstack mux restart'."
 }
 
 # A failed -Check followed by a successful repair leaves PowerShell's process-wide
-# LASTEXITCODE at 1. The sync itself succeeded; do not make ts-update report failure.
+# LASTEXITCODE at 1. The sync itself succeeded; do not make tstack update report failure.
 $global:LASTEXITCODE = 0

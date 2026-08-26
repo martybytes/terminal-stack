@@ -1,7 +1,7 @@
 # ripgrep (rg)
 
 Fast recursive grep — respects `.gitignore`, skips binaries. A **recommended**
-catalog app (`ts-config apps`; winget id `BurntSushi.ripgrep.MSVC`).
+catalog app (`tstack config apps`; winget id `BurntSushi.ripgrep.MSVC`).
 
 ## In this stack
 

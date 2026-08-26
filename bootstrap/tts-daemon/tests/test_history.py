@@ -115,7 +115,7 @@ def test_fails_open_when_the_database_cannot_be_used(tmp_path, monkeypatch):
 
 
 def test_summary_reports_downtime_and_duplicates(tmp_path, monkeypatch):
-    """What ts-doctor reads: a dead daemon's age, and whether anything spoke twice."""
+    """What tstack doctor reads: a dead daemon's age, and whether anything spoke twice."""
     _isolate(tmp_path, monkeypatch)
     conn = history._connect()
     base = time.time()

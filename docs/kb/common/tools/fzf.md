@@ -13,7 +13,7 @@ Every interactive picker in this stack is fzf underneath.
   `bat` is installed** — a preview command whose binary is missing breaks the
   widget, so it is not set unconditionally. `Ctrl-R` and `Alt-C` deliberately
   get no preview: there is nothing useful to show.
-- If `atuin` is enabled (`ts-config atuin on`), **`Ctrl-R` becomes atuin's**
+- If `atuin` is enabled (`tstack config atuin on`), **`Ctrl-R` becomes atuin's**
   history search instead of fzf's. `Ctrl-T` and `Alt-C` are unaffected. See
   `doc common/tools/atuin`.
 - **pwsh**: no key bindings — `Ctrl+R` there is PSReadLine's own history

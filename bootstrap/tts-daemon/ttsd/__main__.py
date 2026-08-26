@@ -4,7 +4,7 @@
     python -m ttsd hook ...            # console-free lifecycle hook client
     python -m ttsd --no-tray           # run headless (debugging)
     python -m ttsd --simulate f.json   # push one fixture through the pipeline
-    python -m ttsd --restore-volumes   # oneshot stale-duck repair (ts-doctor)
+    python -m ttsd --restore-volumes   # oneshot stale-duck repair (tstack doctor)
     python -m ttsd history [--dupes]   # what was said, and what was suppressed
     python -m ttsd mute [on|off]       # absolute mute, honoured by every path
 """
@@ -111,14 +111,14 @@ def _cli_mute(arg: str) -> int:
 
 
 def _print_history(limit: int, dupes: bool, within: float, check: bool = False) -> int:
-    """Render the utterance history for `ts-config tts history`.
+    """Render the utterance history for `tstack config tts history`.
 
     One formatter for both shells: bash calls this through WSL interop and pwsh calls it
     directly, so there is no parallel implementation to keep in sync.
     """
     db = history_store.db_path()
     if check:
-        # One line, stable keys, ASCII: ts-doctor parses this with shell string ops.
+        # One line, stable keys, ASCII: tstack doctor parses this with shell string ops.
         s = history_store.summary(dupe_window=within)
         silent = s["daemon_silent_for"]
         write_stdout(f"spoken={s['spoken']} deduped={s['deduped']} dupes={s['dupes']} "

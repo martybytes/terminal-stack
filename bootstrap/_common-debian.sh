@@ -69,7 +69,7 @@ common_install_selected_apps() {
             ncdu)    apt_pkgs="$apt_pkgs ncdu" ;;
             btop)    apt_pkgs="$apt_pkgs btop" ;;         # 22.04+; github fallback below
             glances) apt_pkgs="$apt_pkgs glances" ;;
-            rclone)  apt_pkgs="$apt_pkgs rclone" ;;      # apt lags upstream; fine for ts-smb
+            rclone)  apt_pkgs="$apt_pkgs rclone" ;;      # apt lags upstream; fine for tstack smb
             nvtop)   command -v nvidia-smi >/dev/null 2>&1 && apt_pkgs="$apt_pkgs nvtop" ;;
         esac
     done
@@ -230,7 +230,7 @@ common_install_glow() {
 # used rather than an AppImage because it is the only method with an update path
 # — `apt upgrade` keeps it current — and it carries BOTH channels, so switching
 # is a package swap. The install itself lives in _wezterm.sh (ts_wezterm_install),
-# shared with macOS and with `ts-config wezterm`.
+# shared with macOS and with `tstack config wezterm`.
 _ts_is_wsl() { [ -r /proc/version ] && grep -qi microsoft /proc/version 2>/dev/null; }
 
 
@@ -540,8 +540,8 @@ common_install_all() {
     if [ -n "${TS_PERSIST_HOOK:-}" ] && command -v "$TS_PERSIST_HOOK" >/dev/null 2>&1; then
         "$TS_PERSIST_HOOK"
     fi
-    common_install_selected_apps "$TS_WIZ_APPS" || ts_note_failure "optional apps" "retry: ts-config apps"
-    common_install_terminals "${TS_WIZ_TERMINALS:-}" || ts_note_failure "terminal emulator" "retry: ts-config wezterm install <channel>"
+    common_install_selected_apps "$TS_WIZ_APPS" || ts_note_failure "optional apps" "retry: tstack config apps"
+    common_install_terminals "${TS_WIZ_TERMINALS:-}" || ts_note_failure "terminal emulator" "retry: tstack config wezterm install <channel>"
     common_oh_my_zsh
     common_login_shell_zsh
     common_starship

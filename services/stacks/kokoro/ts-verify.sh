@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ts-verify.sh — kokoro: prove it actually synthesises audio.
-# Run by `ts-stack test`; safe to run by hand. Exit 0 = pass.
+# Run by `tstack services test`; safe to run by hand. Exit 0 = pass.
 #
 # Windows twin: ts-verify.ps1. Change one, change the other.
 #

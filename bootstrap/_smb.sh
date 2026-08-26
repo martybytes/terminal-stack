@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# _smb.sh — SMB/CIFS share library for `ts-smb`. Everything goes through rclone:
+# _smb.sh — SMB/CIFS share library for `tstack smb`. Everything goes through rclone:
 # one binary, one flag vocabulary, on macOS and Linux alike. Listing the root of
 # an SMB host enumerates its shares, so `rclone lsd` is both the discovery
 # primitive and the browse primitive.
@@ -667,7 +667,7 @@ ts_smb_valid_token() {
 # ------------------------------------------------------------- validation ----
 
 # Report anything wrong with the store, one finding per line. Used by
-# `ts-smb config` before it saves and by `ts-smb doctor`. Note that `share` is
+# `tstack smb config` before it saves and by `tstack smb doctor`. Note that `share` is
 # the stanza OPENER, so a stray `share Media` meant as the SMB share name
 # silently opens a second stanza — a stanza with no `host` is usually that
 # mistake, which is why it is called out by name.

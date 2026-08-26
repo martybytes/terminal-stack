@@ -1,5 +1,5 @@
 <#
-.NAME        ts-agents
+.NAME        tstack agents
 .SYNOPSIS    Reconcile user-global Headroom, Caveman and AgentMemory integrations.
 .USAGE       ts-agents.ps1 [-Tool all|headroom|caveman|agentmemory]
                            [-Action status|on|off|repair|uninstall|dashboard]

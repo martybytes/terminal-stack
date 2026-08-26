@@ -39,7 +39,7 @@ Everything else still loads: UTF-8 codepage, zoxide, git shortcuts, `ws`/`doc`, 
 **Escape hatch:** `plain` — nested `pwsh -NoLogo -NoProfile` (no profile at all);
 `exit` returns to the customized shell. WezTerm launch menu has a matching entry.
 
-**Cursor IDE automation** (VS Code tasks, not agent shells): `ts-update` / sync
+**Cursor IDE automation** (VS Code tasks, not agent shells): `tstack update` / sync
 merges `terminal.integrated.automationProfile.windows` from
 `windows/AppData/Roaming/Cursor/User/terminal-stack.terminal.json` into
 `%APPDATA%\Cursor\User\settings.json` — a bare `pwsh -NoProfile` with Git on PATH.

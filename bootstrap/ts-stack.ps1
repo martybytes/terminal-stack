@@ -3,11 +3,11 @@
 .SYNOPSIS The local Docker service stacks: bring them up, prove they work.
 .PLATFORM Windows (pwsh 7). PARALLEL implementation of bootstrap/ts-stack.sh --
           not a wrapper. Change one, change the other, and keep -h byte-identical.
-.USAGE    ts-stack [status|up|down|restart|logs|config|doctor] [<stack>] [flags]
+.USAGE    tstack services [status|up|down|restart|logs|config|doctor] [<stack>] [flags]
 .WHEN     Day to day: bringing the services up after a reboot, seeing what is
           healthy, tailing a container that misbehaves.
 .NOTE     This is the ONLY thing in the repo that starts, stops or builds a
-          container. ts-agents may probe one and print a verb from here; it may
+          container. tstack agents may probe one and print a verb from here; it may
           never run docker. services\ is the service side; everything outside it
           configures a program running on this host. See docs/decisions.md.
 #>
@@ -34,22 +34,22 @@ $ErrorActionPreference = 'Stop'
 
 # Byte-identical to the HELP string in bootstrap/ts-stack.sh. A test pins that.
 $HELP = @'
-ts-stack — the local Docker service stacks: bring them up, prove they work.
+tstack services — the local Docker service stacks: bring them up, prove they work.
 
 Usage:
-  ts-stack [status]            one line per stack: state, health, published ports
-  ts-stack up [<stack>]        docker compose up -d
-  ts-stack down [<stack>]      docker compose down          (every volume kept)
-  ts-stack restart [<stack>]   down, then up
-  ts-stack logs <stack>        docker compose logs
-  ts-stack config [<stack>]    what compose actually resolves to on this machine
-  ts-stack bootstrap           first run here: .env files, secrets, volumes
-  ts-stack doctor              engine, .env files, health, ports, toggle drift
-  ts-stack test                take it all down, bring it back up, prove the chain
-  ts-stack backup [<stack>]    cold tar of every data volume, with a manifest
-  ts-stack reset [<stack>]     containers and locally built images, back to clean
-  ts-stack migrate-volumes     the one-time rename to the ts- volume names
-  ts-stack -h                  this help
+  tstack services [status]            one line per stack: state, health, published ports
+  tstack services up [<stack>]        docker compose up -d
+  tstack services down [<stack>]      docker compose down          (every volume kept)
+  tstack services restart [<stack>]   down, then up
+  tstack services logs <stack>        docker compose logs
+  tstack services config [<stack>]    what compose actually resolves to on this machine
+  tstack services bootstrap           first run here: .env files, secrets, volumes
+  tstack services doctor              engine, .env files, health, ports, toggle drift
+  tstack services test                take it all down, bring it back up, prove the chain
+  tstack services backup [<stack>]    cold tar of every data volume, with a manifest
+  tstack services reset [<stack>]     containers and locally built images, back to clean
+  tstack services migrate-volumes     the one-time rename to the ts- volume names
+  tstack services -h                  this help
 
   --dry-run          print the exact docker argv and change nothing
   -a, --all          include stacks whose saved terminal-stack setting is off
@@ -69,7 +69,7 @@ is skipped and reported as skipped, never as broken; naming it explicitly runs i
 anyway, because asking by name is consent.
 
 Every published port binds 127.0.0.1 only and none of these services
-authenticate, which is why "ts-stack doctor" audits the bindings even when
+authenticate, which is why "tstack services doctor" audits the bindings even when
 everything else is failing.
 '@
 
@@ -80,7 +80,7 @@ if ($ShowHelp -or $Command -in '-h', '--help', 'help') { Write-Host $HELP; exit 
 $ROOT = Split-Path -Parent $PSScriptRoot
 $STACK_ROOT = if ($env:TS_STACK_ROOT) { $env:TS_STACK_ROOT } else { Join-Path $ROOT 'services\stacks' }
 if (-not (Test-Path -LiteralPath $STACK_ROOT)) {
-    Write-Error "ts-stack: cannot locate the service tree at $STACK_ROOT"
+    Write-Error "tstack services: cannot locate the service tree at $STACK_ROOT"
     exit 1
 }
 . (Join-Path $PSScriptRoot '_config.ps1')
@@ -502,10 +502,10 @@ function Invoke-TsStackCompose([string]$Name, [string[]]$ComposeArgs) {
 
 # ── selection ───────────────────────────────────────────────────────────────────
 $stackNames = @(Get-TsStackList)
-if (-not $stackNames.Count) { Write-Error "ts-stack: no stacks found under $STACK_ROOT"; exit 1 }
+if (-not $stackNames.Count) { Write-Error "tstack services: no stacks found under $STACK_ROOT"; exit 1 }
 if ($Stack) {
     if ($stackNames -notcontains $Stack) {
-        Write-Error "ts-stack: no stack named '$Stack' — have: $($stackNames -join ' ')"
+        Write-Error "tstack services: no stack named '$Stack' — have: $($stackNames -join ' ')"
         exit 2
     }
     $chosen = @($Stack)
@@ -559,7 +559,7 @@ function Show-TsStackStatus {
             # Intent and reality disagree. A warn, not a failure: that is what a
             # doctor exists to surface, and it is not "broken".
             Bad ("{0,-15} running, but {1}" -f $s, $state)
-            Note "ts-config agents $s on   (keep it)   |   ts-stack down $s   (stop it)"
+            Note "tstack config agents $s on   (keep it)   |   tstack services down $s   (stop it)"
             continue
         }
         if (-not $engineOk) { Note ("{0,-15} enabled (engine unreachable, state unknown)" -f $s) }
@@ -584,7 +584,7 @@ switch ($Command) {
     'config' { foreach ($s in Selected) { Section $s; Invoke-TsStackCompose $s @('config') | Out-Null } }
 
     'logs' {
-        if (-not $Stack) { Write-Error 'ts-stack: logs needs a stack name'; exit 2 }
+        if (-not $Stack) { Write-Error 'tstack services: logs needs a stack name'; exit 2 }
         $a = @('logs', '--tail', $Tail); if ($Follow) { $a += '-f' }
         Invoke-TsStackCompose $Stack $a | Out-Null
     }
@@ -597,7 +597,7 @@ switch ($Command) {
         if ($pending.Count -and -not $DryRun) {
             Bad 'volumes still carry their pre-ts- names:'
             $pending | ForEach-Object { Note "$($_.Old) -> $($_.New)" }
-            Note 'run:  ts-stack migrate-volumes     (copies, verifies, keeps the old volume)'
+            Note 'run:  tstack services migrate-volumes     (copies, verifies, keeps the old volume)'
             exit 1
         }
         foreach ($s in $chosen) {
@@ -689,7 +689,7 @@ switch ($Command) {
             $legacy = ($VOLUME_RENAMES.GetEnumerator() | Where-Object { $_.Value -eq $v } | Select-Object -First 1).Key
             if ($legacy -and (Test-TsVolume $legacy)) {
                 Bad "'$legacy' still holds this stack's data — NOT creating an empty '$v'"
-                Note 'run:  ts-stack migrate-volumes'
+                Note 'run:  tstack services migrate-volumes'
                 continue
             }
             Step "docker volume create $v"
@@ -698,8 +698,8 @@ switch ($Command) {
         }
 
         Section 'next'
-        Note 'ts-stack up        start the stacks your settings enable'
-        Note 'ts-stack doctor    check the engine, the .env files and the ports'
+        Note 'tstack services up        start the stacks your settings enable'
+        Note 'tstack services doctor    check the engine, the .env files and the ports'
     }
 
     'migrate-volumes' {
@@ -739,12 +739,12 @@ switch ($Command) {
         }
         Ok 'engine reachable'
         foreach ($s in Selected) {
-            if (-not (Test-TsStackEnvSeeded $s)) { Bad "$s`: .env missing — ts-stack bootstrap"; exit 2 }
+            if (-not (Test-TsStackEnvSeeded $s)) { Bad "$s`: .env missing — tstack services bootstrap"; exit 2 }
             if ((Invoke-TsStackCompose $s @('config', '-q')) -eq 0) { Ok "$s`: compose config parses" }
             else { Bad "$s`: compose config failed — a required value is missing"; exit 2 }
         }
         if (@(Get-TsVolumesPending).Count) {
-            Bad 'volumes still carry their pre-ts- names — ts-stack migrate-volumes'; exit 2
+            Bad 'volumes still carry their pre-ts- names — tstack services migrate-volumes'; exit 2
         }
 
         # PHASE 1 — backup, only when something is about to be destroyed.
@@ -836,7 +836,7 @@ switch ($Command) {
             $pending = @(Get-TsVolumesPending)
             if (-not $pending.Count) { Ok 'volume names are current' }
             else {
-                Bad 'volumes still carry their pre-ts- names — ts-stack migrate-volumes'
+                Bad 'volumes still carry their pre-ts- names — tstack services migrate-volumes'
                 $pending | ForEach-Object { Note "$($_.Old) -> $($_.New)" }
             }
         }
@@ -866,9 +866,9 @@ switch ($Command) {
         $expected = if ($mb -eq 'agentmemory') { 'on' } else { 'off' }
         if ($am -ne $expected) {
             # Drift means something wrote agentmemoryEnabled without going
-            # through ts-config memory, leaving the machine half-configured for
+            # through tstack config memory, leaving the machine half-configured for
             # two memory systems.
-            Bad "memoryBackend is '$mb' but agentmemoryEnabled is '$am' - fix: ts-config memory $mb"
+            Bad "memoryBackend is '$mb' but agentmemoryEnabled is '$am' - fix: tstack config memory $mb"
         }
         if ($engineOk) {
             $cmd = (& docker inspect ts-headroom-proxy --format '{{json .Config.Cmd}}' 2>$null) -join ''
@@ -877,21 +877,21 @@ switch ($Command) {
             if ($mb -eq 'headroom') {
                 if (-not $cmd) { Skip 'headroom proxy is not running' }
                 elseif ($cmd -match '--memory') { Ok 'the proxy is running with --memory' }
-                else { Bad 'memoryBackend is headroom but the proxy is running WITHOUT --memory: it stores nothing, and Qdrant and Neo4j will stay empty - ts-stack restart headroom' }
-                if (-not $qd -or -not $n4) { Bad 'headroom memory is selected but Qdrant/Neo4j are not both running - ts-stack up headroom' }
+                else { Bad 'memoryBackend is headroom but the proxy is running WITHOUT --memory: it stores nothing, and Qdrant and Neo4j will stay empty - tstack services restart headroom' }
+                if (-not $qd -or -not $n4) { Bad 'headroom memory is selected but Qdrant/Neo4j are not both running - tstack services up headroom' }
             } elseif ($qd -or $n4) {
                 Note "Qdrant/Neo4j are still running but this machine's memory backend is '$mb', so nothing writes to them."
-                Note 'Clear them out with:  ts-stack down headroom && ts-stack up headroom'
+                Note 'Clear them out with:  tstack services down headroom && tstack services up headroom'
             }
         }
     }
 
-    default { Write-Error "ts-stack: unknown command '$Command' (try -h)"; exit 2 }
+    default { Write-Error "tstack services: unknown command '$Command' (try -h)"; exit 2 }
 }
 
 if ($Command -in 'doctor', 'status') {
     Write-Host ''
-    if ($script:Issues -eq 0) { Write-Host "ts-stack $Command`: all checks passed" }
-    else { Write-Host "ts-stack $Command`: $($script:Issues) issue(s) found"; exit 1 }
+    if ($script:Issues -eq 0) { Write-Host "tstack services $Command`: all checks passed" }
+    else { Write-Host "tstack services $Command`: $($script:Issues) issue(s) found"; exit 1 }
 }
 if ($DryRun) { Write-Host ''; Write-Host 'Nothing changed (--dry-run).' }

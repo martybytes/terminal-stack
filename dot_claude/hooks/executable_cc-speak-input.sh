@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # cc-speak-input.sh — agent input hooks (Notification / AskUserQuestion).
-# The `permission` state is still accepted (ts-config tts test, and Cursor), but no
+# The `permission` state is still accepted (tstack config tts test, and Cursor), but no
 # Claude hook sends it any more: PermissionRequest echoed the tool name twice and
 # Notification already announces permission prompts in Claude’s own words.
 # Usage: cc-speak-input.sh <notification|permission|question>

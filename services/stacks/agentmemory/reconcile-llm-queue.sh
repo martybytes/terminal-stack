@@ -327,7 +327,7 @@ stop_stack_then_die() {                   # <message>
     # Say how to get it back. The stack is deliberately left down so the state
     # can be inspected, and someone reading only the last line of a long run
     # should not have to work out which command undoes that.
-    warn 'the stack is stopped for inspection; bring it back with: ts-stack up agentmemory && ts-stack up agent007memory'
+    warn 'the stack is stopped for inspection; bring it back with: tstack services up agentmemory && tstack services up agent007memory'
     die "$1"
 }
 

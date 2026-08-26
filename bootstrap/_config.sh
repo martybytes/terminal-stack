@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # _config.sh — terminal-stack configuration store (POSIX/Debian/macOS side).
-# Sourced by the bootstraps, the wizard, and (indirectly) ts-config.
+# Sourced by the bootstraps, the wizard, and (indirectly) tstack config.
 #
 # Source of truth on this side is chezmoi [data] in ~/.config/chezmoi/chezmoi.toml.
 # We store the RAW choices (leaderChord, themeMode, tmuxPrefix, resolvedTheme,
@@ -10,7 +10,7 @@
 #
 # This file is sourced, not executed. Do not `exit`; return non-zero instead.
 
-# Log colors — the bootstraps define these before sourcing us, but ts-config and
+# Log colors — the bootstraps define these before sourcing us, but tstack config and
 # the doctor source this file standalone, so provide a fallback.
 : "${INFO:=$'\033[1;34m==>\033[0m'}"
 : "${WARN:=$'\033[1;33m!!\033[0m'}"
@@ -109,7 +109,7 @@ ts_app_desc() {
         glances)    echo "cross-platform system monitor";;
         bandwhich)  echo "which process is using the bandwidth";;
         gping)      echo "ping with a live graph";;
-        rclone)     echo "sync/mount 70+ storage backends, SMB shares included (ts-smb)";;
+        rclone)     echo "sync/mount 70+ storage backends, SMB shares included (tstack smb)";;
         claude)     echo "Claude Code CLI (cc/ccd wrappers drive it)";;
         codex)      echo "OpenAI Codex CLI (cx/cy wrappers drive it)";;
         cursor-agent) echo "Cursor's CLI agent";;
@@ -162,10 +162,10 @@ ts_app_is_ai() {
 # the user's saved selection (an install that failed or a tool later removed),
 # AND anything since added to TS_APPS_RECOMMENDED. The second half is the point —
 # a machine configured before a tool joined the catalog would otherwise never
-# get it however many times ts-update ran, which is exactly how gh/ghq/lazygit
+# get it however many times tstack update ran, which is exactly how gh/ghq/lazygit
 # would have missed every existing install.
 # Global npm binaries live under whatever Node fnm has active, and fnm's PATH
-# entry is created per-shell — so a bash subshell (which is how ts-update calls
+# entry is created per-shell — so a bash subshell (which is how tstack update calls
 # this) cannot see codex/gemini and would nag about them forever. Load fnm's env
 # first when it is available.
 ts_load_node_env() {
@@ -179,7 +179,7 @@ ts_load_node_env() {
 # The Windows side has always done this ("Only offer what this platform can
 # actually install" in Get-TsAppsPending); POSIX did not, so a macOS user who
 # picked "install everything" was told nvtop was missing on every single
-# ts-update, accepted, and watched it print "Linux-only; skipping" forever.
+# tstack update, accepted, and watched it print "Linux-only; skipping" forever.
 ts_app_installable() {
     case "$(uname -s 2>/dev/null)" in
         Darwin)
@@ -221,7 +221,7 @@ ts_apps_install_note() {
 #
 # "Answering" is the test, NOT a 2xx. AgentMemory returns 404 on `/` and 401 on
 # `/agentmemory/health`; both prove a server is listening and speaking HTTP.
-# `curl -fsS` treats either as failure, which is why `ts-agents agentmemory
+# `curl -fsS` treats either as failure, which is why `tstack agents agentmemory
 # status` reported the service down while it was up and serving.
 
 # ts_probe_http <url> [timeout] — 0 if anything answered, 1 if nothing did.
@@ -250,7 +250,7 @@ ts_docker_ports() {
 }
 
 # ts_probe_headroom — 0 when the proxy is ready. Echoes a human summary.
-# MCP runs on demand through Docker stdio; ts-agents performs the real JSON-RPC
+# MCP runs on demand through Docker stdio; tstack agents performs the real JSON-RPC
 # initialize probe before it writes any client registration.
 # The absorbed compose stacks live at <clone>/services/stacks/<name>/. Resolved
 # from the clone — $TERMINAL_STACK_DIR, else chezmoi's source path — because that
@@ -445,8 +445,8 @@ ts_brew_install_apps() {
             brew install --cask zed || ts_note_failure "zed" "install it by hand later"
         fi ;;
     esac
-    ts_install_node_lts "$apps" || ts_note_failure "Node LTS" "retry: ts-config apps node"
-    ts_install_ai_clis "$apps"  || ts_note_failure "agent CLIs" "retry: ts-config apps claude,codex,…"
+    ts_install_node_lts "$apps" || ts_note_failure "Node LTS" "retry: tstack config apps node"
+    ts_install_ai_clis "$apps"  || ts_note_failure "agent CLIs" "retry: tstack config apps claude,codex,…"
     return 0
 }
 
@@ -529,7 +529,7 @@ ts_install_ai_cli() {
                 # Node is the supported path, and `fnm` in the runtimes group
                 # is how you get one.
                 echo "!! $id needs Node $want+ to install from npm (found: ${major:-none})."
-                echo "   Install the runtime first: ts-config apps fnm   (then: fnm install --lts)"
+                echo "   Install the runtime first: tstack config apps fnm   (then: fnm install --lts)"
             fi ;;
         *)
             echo "!! $id: no agent-CLI installer defined" ;;
@@ -608,6 +608,30 @@ ts_win_user() {
         [ -n "$wu" ] && { printf '%s' "$wu"; return 0; }
     fi
     return 1
+}
+
+# Point a clone's git hooks at .githooks, so the pre-commit and pre-push gates
+# actually run in it.
+#
+# This existed only as a claim. .githooks/pre-commit said it was "installed by
+# bootstrap.sh --apply / bootstrap.ps1 -Apply, which set core.hooksPath" -- and
+# neither of those files has ever existed in this repo, nothing anywhere set
+# core.hooksPath, and it was unset in every clone. The repo's only automated gate
+# had never run. That is how a literal TAB byte in $PROFILE survived from 54da056,
+# and how services/console's suite stayed red without anyone seeing it.
+#
+# core.hooksPath is per-clone config, so it has to be set per clone. Safe to run
+# on a runtime clone too: the hooks only fire on commit or push, which nothing
+# does there. Twin: Install-TsGitHooks in bootstrap/_config.ps1.
+ts_install_git_hooks() {
+    local dir="${1:-}"
+    [ -n "$dir" ] && [ -d "$dir/.git" ] || return 0
+    [ -d "$dir/.githooks" ] || return 0
+    local want=".githooks" have=""
+    have="$(git -C "$dir" config --local --get core.hooksPath 2>/dev/null || true)"
+    [ "$have" = "$want" ] && return 0
+    git -C "$dir" config --local core.hooksPath "$want" 2>/dev/null || return 0
+    echo "  git hooks: core.hooksPath -> $want (pre-commit and pre-push gates active)"
 }
 
 # (TERMINAL_STACK_DIR) are only for NON-canonical locations. Twins:
@@ -889,17 +913,17 @@ ts_agents_save_config() {
 ts_agents_apply_wizard() {
     local script="${1:-}"
     [ -f "$script" ] || return 0
-    [ "${TS_WIZ_HEADROOM:-off}" = on ] && bash "$script" headroom on "${TS_WIZ_HEADROOM_CURSOR:-mcp}" || [ "${TS_WIZ_HEADROOM:-off}" != on ] || echo "$WARN Headroom client setup failed; retry: ts-config agents headroom repair" >&2
-    [ "${TS_WIZ_CAVEMAN:-off}" = on ] && bash "$script" caveman on || [ "${TS_WIZ_CAVEMAN:-off}" != on ] || echo "$WARN Caveman setup failed; retry: ts-config agents caveman repair" >&2
-    [ "${TS_WIZ_AGENTMEMORY:-off}" = on ] && bash "$script" agentmemory on || [ "${TS_WIZ_AGENTMEMORY:-off}" != on ] || echo "$WARN AgentMemory setup failed; retry: ts-config agents agentmemory repair" >&2
+    [ "${TS_WIZ_HEADROOM:-off}" = on ] && bash "$script" headroom on "${TS_WIZ_HEADROOM_CURSOR:-mcp}" || [ "${TS_WIZ_HEADROOM:-off}" != on ] || echo "$WARN Headroom client setup failed; retry: tstack config agents headroom repair" >&2
+    [ "${TS_WIZ_CAVEMAN:-off}" = on ] && bash "$script" caveman on || [ "${TS_WIZ_CAVEMAN:-off}" != on ] || echo "$WARN Caveman setup failed; retry: tstack config agents caveman repair" >&2
+    [ "${TS_WIZ_AGENTMEMORY:-off}" = on ] && bash "$script" agentmemory on || [ "${TS_WIZ_AGENTMEMORY:-off}" != on ] || echo "$WARN AgentMemory setup failed; retry: tstack config agents agentmemory repair" >&2
 }
 
 # ── WezTerm multiplexer domain ──────────────────────────────────────────────────
 # "on"  → .wezterm.lua sets unix_domains = {{ name = 'main' }} + default_domain,
 #         so panes live in wezterm-mux-server and survive a GUI crash.
-# "off" → panes are spawned locally by the GUI (the default; see ts-mux -h for the
+# "off" → panes are spawned locally by the GUI (the default; see tstack mux -h for the
 #         trade-offs). Stored on its own, not through ts_save_config, so the
-#         ts-mux command can flip it without re-stating every other choice.
+#         tstack mux command can flip it without re-stating every other choice.
 ts_wez_mux_get() {
     local v; v="$(ts_data_get weztermMux 2>/dev/null || true)"
     case "$v" in on|off) echo "$v" ;; *) echo off ;; esac
@@ -966,7 +990,7 @@ ts_atuin_set() {
 #
 # Turning it off does NOT itself delete anything: .chezmoiignore is evaluated on
 # every machine, so a removal rule there would wipe a hand-written Ghostty config
-# on a box that never opted in. `ts-config ghostty off` does the removal (and the
+# on a box that never opted in. `tstack config ghostty off` does the removal (and the
 # backup restore) explicitly, for the machine you run it on.
 ts_ghostty_get() {
     local v; v="$(ts_data_get ghosttyConfig 2>/dev/null || true)"
@@ -1030,7 +1054,7 @@ ts_save_config() {
     ts_mirror_windows_config
 }
 
-# Refresh only resolvedTheme from the live OS (used by ts-update for follow mode).
+# Refresh only resolvedTheme from the live OS (used by tstack update for follow mode).
 ts_refresh_resolved_theme() {
     local mode; mode="$(ts_data_get themeMode)"; [ -n "$mode" ] || mode="dark"
     ts_data_set resolvedTheme "$(resolve_os_theme "$mode")"
@@ -1038,7 +1062,7 @@ ts_refresh_resolved_theme() {
 }
 
 # Mirror the derived config to the Windows side so sync-windows.ps1 / a
-# Windows-standalone ts-config agree with the WSL source of truth.
+# Windows-standalone tstack config agree with the WSL source of truth.
 ts_mirror_windows_config() {
     [ -d /mnt/c/Users ] || return 0
     # One render up front, so the ~49 reads below cost one chezmoi spawn between them.
@@ -1050,7 +1074,7 @@ ts_mirror_windows_config() {
         # Loud on purpose. A silent skip leaves the Windows mirror stale while the save
         # reports success, and the next pwsh sync renders from those old values.
         echo "warning: could not resolve the Windows username - the Windows config mirror was NOT updated." >&2
-        echo "  Windows-side settings keep their previous values; ts-doctor reports the divergence." >&2
+        echo "  Windows-side settings keep their previous values; tstack doctor reports the divergence." >&2
         return 0
     fi
     local dst="/mnt/c/Users/$winuser/AppData/Local/terminal-stack"
