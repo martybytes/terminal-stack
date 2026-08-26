@@ -410,9 +410,19 @@ def replace_in_file(path: Path, pattern: str, replacement: str) -> bool:
             before = handle.read()
     except OSError:
         return False
-    after = re.sub(pattern, replacement, before, flags=re.MULTILINE)
-    if after == before or not after:
+
+    # A uniformly-CRLF file is matched in its LF form and re-emitted as CRLF.
+    # Without this, a caller's line-anchored `^KEY=.*$` swallows the \r (`.`
+    # matches it, `$` matches before the \n) and that one line silently becomes
+    # LF -- half-converting a tracked .env that another tool also writes. The
+    # node-based helper this replaces had the same flaw; it is fixed here rather
+    # than reproduced.
+    crlf = "\r\n" in before and before.count("\n") == before.count("\r\n")
+    subject = before.replace("\r\n", "\n") if crlf else before
+    result = re.sub(pattern, replacement, subject, flags=re.MULTILINE)
+    if result == subject or not result:
         return False
+    after = result.replace("\n", "\r\n") if crlf else result
     tmp = path.with_name(path.name + f".tmp{os.getpid()}")
     with tmp.open("w", encoding="utf-8", newline="") as handle:
         handle.write(after)
