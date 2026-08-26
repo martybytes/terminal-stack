@@ -101,6 +101,44 @@ jobs:
           got="$(python3 -c 'import sys; sys.path.insert(0, "."); from tstack import platform as p; print(p.kind())')"
           [ "$got" = "wsl" ] || { echo "platform.kind() reported '$got', expected 'wsl'"; exit 1; }
 
+  docs:
+    # Every ts-* name died in one change set, across ~650 occurrences in prose.
+    # A link checker is the only thing that catches the ones that pointed at a
+    # file which moved with them - docs/kb/common/ts-config.md became tstack.md,
+    # and a kb topic label IS its filename.
+    name: docs links
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check relative links in tracked markdown
+        run: |
+          python3 - <<'PY'
+          import pathlib, re, subprocess, sys
+          files = subprocess.run(["git", "ls-files", "*.md"],
+                                 capture_output=True, text=True, check=True).stdout.split()
+          # tests/fixtures/ holds vendored upstream text (WezTerm's changelog);
+          # its links point at that project's doc site, not ours.
+          files = [f for f in files if not f.startswith("tests/fixtures/")]
+          link = re.compile(r"\[[^\]]*\]\(([^)#]+?)(?:#[^)]*)?\)")
+          bad = []
+          for rel in files:
+              src = pathlib.Path(rel)
+              for n, line in enumerate(src.read_text(encoding="utf-8").splitlines(), 1):
+                  for target in link.findall(line):
+                      # Absolute URLs, and shell/template expressions that only
+                      # look like paths ($style, ${VAR}, <placeholder>).
+                      if target.startswith(("http://", "https://", "mailto:", "<")):
+                          continue
+                      if "$" in target or target.startswith("%"):
+                          continue
+                      if not (src.parent / target).exists():
+                          bad.append(f"{rel}:{n} -> {target}")
+          for b in bad:
+              print(b)
+          print(f"{len(files)} markdown files checked, {len(bad)} broken link(s)")
+          sys.exit(1 if bad else 0)
+          PY
+
   console:
     # The services/console suite has been red since it was merged and nothing in
     # the repo ran it. Wiring it up here is the only way that stays visible.

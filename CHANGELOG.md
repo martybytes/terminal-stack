@@ -28,6 +28,19 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **Two tests hung forever on Linux and nowhere else.** `ts_prompt_multi` reads from
+  `/dev/tty`, not stdin, so `stdin=DEVNULL` did nothing: wherever a controlling terminal
+  exists the prompt blocked without limit. It does under WSL and does not under Git Bash,
+  so the suite passed on Windows and stalled on Linux with no failure to read. Every test
+  subprocess is now detached with `start_new_session=True` and carries a `timeout=`, both
+  enforced by a lint. A hang is worse than a failure: locally it reads as slowness, and in
+  CI as an unattributed timeout.
+
+- **Two tests only passed on an already-installed machine.** The first CI run this repo
+  has ever had found both on all four targets: one required a gitignored `.env` that
+  `tstack services bootstrap` creates, the other assumed a clone is always resolvable
+  (a CI checkout lives at a path the candidate list deliberately excludes).
+
 - **`ts-stack` had been broken on Windows since `54da056`.** `$PROFILE:1705` held a literal
   TAB byte where a backslash-t was intended, inside a single-quoted string, so `Join-Path` produced
   `<src>\bootstrap\<TAB>s-stack.ps1`, `Test-Path` failed, and every invocation printed
