@@ -35,6 +35,8 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
   per-subcommand and `config` also serves `leader`, `theme`, `apps`, `tts` and `wizard`.
   See `REVAMP-PLAN.md` § Status for why the phase boundary sits here.
 
+  Coverage floor 78% -> 80%.
+
 - **`tstack doctor` is Python, and runs the same checks everywhere (08/25/2026).** The first
   subsystem ported off the shell twins. `bootstrap/ts-doctor.sh` and `bootstrap/_doctor.sh`
   are deleted, and `Invoke-TsDoctor` / `Test-TerminalStack` / `Repair-TerminalStack` are gone
