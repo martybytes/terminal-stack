@@ -7,6 +7,7 @@ developer's real chezmoi.toml corrupts the machine it is meant to protect.
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -310,3 +311,64 @@ def test_a_mirror_list_is_written_as_json(monkeypatch, tmp_path):
     import json as _json
 
     assert _json.loads(mirror.read_text(encoding="utf-8"))["apps"] == ["fzf", "bat"]
+
+
+def test_the_mirror_nests_the_tts_block_and_get_knows_it(tmp_path, monkeypatch):
+    """The two stores do not agree on shape: chezmoi [data] is flat
+    (ccTtsEnabled), the Windows mirror nests (ccTts.enabled) because the TTS
+    daemon reads that file too and wants it structured.
+
+    Looking the flat name up in the mirror misses SILENTLY and falls through to
+    the default, which is how `tstack services status` reported kokoro as
+    "running, but voice notifications are off" on a machine with voice
+    notifications on. Every other test in this suite injects a store, so nothing
+    could catch it; this one uses the real reader.
+    """
+    mirror = tmp_path / "terminal-stack" / "config.json"
+    mirror.parent.mkdir(parents=True)
+    mirror.write_text(
+        json.dumps(
+            {
+                "themeMode": "light",
+                "ccTts": {
+                    "enabled": True,
+                    "engine": "kokoro",
+                    "daemon": {"enabled": True},
+                    "summarize": {"mode": "haiku"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    # The autouse fixture stubs `mirror` itself to {}; this test is about the real
+    # reader, so it puts the genuine one back and points it at the file above.
+    import functools
+
+    monkeypatch.setattr(store, "chezmoi_data", lambda: {})
+    monkeypatch.setattr(store, "mirror_path", lambda: mirror)
+    monkeypatch.setattr(
+        store,
+        "mirror",
+        functools.partial(lambda path: json.loads(path.read_text(encoding="utf-8")), mirror),
+    )
+
+    assert store.get("ccTtsEnabled", "false") == "true"
+    assert store.get("ccTtsEngine", "edge") == "kokoro"
+    assert store.get("ccTtsDaemon", "off") == "true"
+    assert store.get("ccTtsSummarizer", "template") == "haiku"
+    # A key that is flat in both stores still resolves.
+    assert store.get("themeMode", "dark") == "light"
+    # And an absent key still reaches its default rather than inventing one.
+    assert store.get("weztermMux", "off") == "off"
+    store.clear_cache()
+
+
+def test_the_mirror_key_mapping_covers_every_divergence_pair():
+    """DIVERGENCE_PAIRS is the table of keys the two stores spell differently, so
+    it has to be the same table `get` reads through -- otherwise the divergence
+    check and the reader disagree about where a value lives."""
+    for flat, dotted in store.DIVERGENCE_PAIRS:
+        assert store.mirror_key(flat) == dotted, flat
+    # The general rule covers TTS keys the pair list does not name.
+    assert store.mirror_key("ccTtsKokoroVoice") == "ccTts.kokoroVoice"
+    assert store.mirror_key("apps") == "apps"

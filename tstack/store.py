@@ -170,12 +170,37 @@ def mirror_value(dotted: str) -> str:
     return str(node)
 
 
+def mirror_key(key: str) -> str:
+    """The dotted path a flat chezmoi `[data]` key has in the Windows mirror.
+
+    The two stores do not agree on shape. `[data]` is flat (`ccTtsEnabled`); the
+    mirror nests the TTS block (`ccTts.enabled`), because that file is also read
+    by the TTS daemon, which wants it structured.
+
+    Looking up the flat name in the mirror therefore MISSES, silently, and falls
+    through to the default -- which is how `tstack services status` reported kokoro
+    as "running, but voice notifications are off" on a Windows box with voice
+    notifications very much on. Found by running the command through the pwsh shim
+    rather than by a test, because every test injects a store.
+    """
+    explicit = dict(DIVERGENCE_PAIRS)
+    if key in explicit:
+        return explicit[key]
+    if key.startswith("ccTts") and len(key) > 5:
+        rest = key[5:]
+        return f"ccTts.{rest[0].lower()}{rest[1:]}"
+    return key
+
+
 def get(key: str, default: str | None = None) -> str:
     """A setting, preferring chezmoi `[data]`, then the mirror, then the default."""
     data = chezmoi_data()
     if key in data and data[key] != "":
         return data[key]
-    from_mirror = mirror_value(key)
+    from_mirror = mirror_value(mirror_key(key))
+    if from_mirror == MISSING or from_mirror == "":
+        # A mirror written before a key was nested, or a key that is flat in both.
+        from_mirror = mirror_value(key)
     if from_mirror != MISSING and from_mirror != "":
         return from_mirror
     if default is not None:

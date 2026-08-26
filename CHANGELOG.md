@@ -232,6 +232,22 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **The Windows mirror nests the TTS block, and the reader did not know (08/26/2026).**
+  chezmoi `[data]` is flat (`ccTtsEnabled`); `config.json` nests (`ccTts.enabled`),
+  because the TTS daemon reads that file too and wants it structured. `store.get`
+  looked the flat name up in the mirror, missed, and fell through to the default -
+  so on Windows `tstack services status` reported *"kokoro running, but voice
+  notifications are off"* on a machine with voice notifications very much on.
+
+  `store.mirror_key` now maps between the two shapes, using `DIVERGENCE_PAIRS` as
+  the explicit table so the reader and the divergence check cannot disagree about
+  where a value lives, plus a general `ccTts*` rule for the keys that table does
+  not name.
+
+  Found by running the commands through the **pwsh shim** rather than by a test:
+  every test in the suite injects a store, so none of them could see it. The new
+  test uses the real reader against a real mirror file.
+
 - **Two tests hung forever on Linux and nowhere else.** `ts_prompt_multi` reads from
   `/dev/tty`, not stdin, so `stdin=DEVNULL` did nothing: wherever a controlling terminal
   exists the prompt blocked without limit. It does under WSL and does not under Git Bash,
