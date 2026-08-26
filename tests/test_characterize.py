@@ -92,6 +92,19 @@ def test_python_reproduces_the_recorded_behaviour(path: Path):
     if argv in (["-h"], ["--help"]):
         pytest.skip("help text is argparse's now, and deliberately not the shell's")
 
+    # A corpus is recorded BEFORE the port, so between recording and porting the
+    # subsystem still routes to the shell and `main.py <name>` exits 2 saying so.
+    # Those fixtures are pending, not failing: they become a gate the moment the
+    # registry row flips, which is exactly when they should start biting.
+    sys.path.insert(0, str(ROOT))
+    from tstack import registry
+
+    command = registry.get(subsystem)
+    if command is None:
+        pytest.fail(f"{subsystem!r} has fixtures but is not in tstack/commands.conf")
+    if not command.is_ported():
+        pytest.skip(f"{subsystem} is still {command.impl()!r}; fixtures are pending the port")
+
     # A fixture records one FAMILY's behaviour, and the line that matters is
     # Windows vs POSIX: bootstrap/*.sh under Git Bash behaves POSIX-ish and checks
     # ~/.zshrc, while the port on that same host correctly detects Windows and
