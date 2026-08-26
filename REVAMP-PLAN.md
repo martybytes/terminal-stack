@@ -224,11 +224,27 @@ Each is its own branch, `merge --no-ff` into `main`, with docs and a `CHANGELOG.
 |---|---|
 | 0 foundation | **done** - `tstack` is the only command surface; CI, lint, types and coverage gates in place |
 | 1 `doctor` | **done** - shell twins deleted, registry flipped, characterization corpus established |
-| 2 `config show` + schema | next |
+| 2 settings schema + the one writer | **done** - infrastructure, no registry flip (see below) |
 | 3-8 | not started |
 
 Each landed on its own branch and was green on Windows, WSL, ubuntu, macos and
 the WSL CI job before merging.
+
+**Phase 2 is a foundation phase, not a subsystem port.** The original table said
+"`config show` + schema", which cannot flip a registry row: the row is
+per-subcommand, and `tstack config` also has to keep serving `leader`, `theme`,
+`apps`, `tts`, `wizard` and the rest. Half a subcommand cannot route to Python.
+
+So phase 2 delivers what everything after it needs - `tstack/schema.py` and the
+write side of `tstack/store.py` - and flips nothing. The `config` row moves when
+its dispatch does, which is phase 4.
+
+There is one more reason the split lands here. `Set-TerminalStackConfig`'s
+dispatch lives inside `$PROFILE`, which a child process cannot call, so porting
+`config` means removing that dispatch rather than delegating to it. Every other
+piece it needs (`_cc_tts.sh`, `Invoke-TsConfigTts` in `_config.ps1`, `_wizard.sh`)
+lives in a **sourceable library file** and can be delegated to, which is what
+makes phase 4 tractable at all.
 
 **Phase 0 — foundation.** The `tstack/` package with the dispatcher, `--help`,
 `--version` and the routing. Shims in `dot_zshrc` and `$PROFILE`. Every `ts-*` name

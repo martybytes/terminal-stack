@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -20,7 +21,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 # Every sandbox this corpus knows how to build. Adding one is a function here
 # plus a name in a fixture; nothing else.
-SANDBOXES = ("empty-home", "clone-only")
+SANDBOXES = ("empty-home", "clone-only", "throwaway-store")
 
 
 def build(name: str, root: Path) -> dict[str, str]:
@@ -45,6 +46,59 @@ def build(name: str, root: Path) -> dict[str, str]:
         "TERMINAL_STACK_CHEZMOI": str(root / "no-such-chezmoi"),
         "NO_COLOR": "1",
     }
+
+    if name == "throwaway-store":
+        # The recipe from docs/verifying-changes.md section 4: a temp HOME with
+        # its own chezmoi.toml pointing at the real source tree. That is what
+        # makes `config show` produce real output without reading -- or writing --
+        # the developer's actual store.
+        #
+        # windowsUsername is deliberately omitted, which makes
+        # ts_mirror_windows_config a no-op, so a recording can never reach the
+        # real Windows mirror.
+        cfg = home / ".config" / "chezmoi"
+        cfg.mkdir(parents=True, exist_ok=True)
+        (cfg / "chezmoi.toml").write_text(
+            "\n".join(
+                [
+                    f'sourceDir = "{ROOT.as_posix()}"',
+                    "",
+                    "[data]",
+                    'os = "linux"',
+                    'leaderChord = "ctrl-space"',
+                    'leaderKey = "phys:Space"',
+                    'leaderMods = "CTRL"',
+                    'themeMode = "dark"',
+                    'resolvedTheme = "dark"',
+                    'tmuxPrefix = "ctrl-b"',
+                    'tmuxPrefixResolved = "C-b"',
+                    'apps = ["fzf", "bat"]',
+                    'weztermMux = "off"',
+                    'weztermRestore = "off"',
+                    'atuinEnabled = "off"',
+                    'memoryBackend = "agentmemory"',
+                    'agentmemoryEnabled = "on"',
+                    'headroomEnabled = "off"',
+                    'headroomCursorMode = "mcp"',
+                    'cavemanEnabled = "off"',
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        env["TERMINAL_STACK_DIR"] = str(ROOT)
+        # Pin the REAL chezmoi by absolute path. It normally lives at
+        # ~/.local/bin/chezmoi, and overriding HOME to the sandbox is exactly what
+        # stops the scripts finding it -- so resolve it against the real home
+        # before the override takes effect.
+        real_home = Path(os.path.expanduser("~"))
+        for candidate in (real_home / ".local" / "bin" / "chezmoi", None):
+            found = str(candidate) if candidate and candidate.is_file() else shutil.which("chezmoi")
+            if found:
+                env["TERMINAL_STACK_CHEZMOI"] = found
+                break
+        # The real chezmoi: a fake one cannot render [data], and rendering is the
+        # whole of what `show` does.
 
     if name == "clone-only":
         clone = root / "clone"

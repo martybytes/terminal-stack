@@ -1,10 +1,9 @@
 """The saved-settings store: chezmoi `[data]` and the Windows `config.json` mirror.
 
-READ SIDE ONLY for now. Writes arrive with the config port (phase 4), and when
-they do they arrive HERE and nowhere else -- one writer is the whole point. Two
-stores that each render a valid file from their own copy is how this stack lost
-all five Claude TTS hooks in one day, and how a pwsh-side `tts` save stopped
-surviving a WSL apply.
+ONE WRITER. Every persisted setting goes through set() / set_list() below and
+nowhere else. Two stores that each render a valid file from their own copy is how
+this stack lost all five Claude TTS hooks in one day, and how a pwsh-side `tts`
+save stopped surviving a WSL apply.
 
 Two stores, one meaning:
 
@@ -19,8 +18,10 @@ compare meaning, not spelling. `normalise()` is that.
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import json
+import os
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -238,3 +239,186 @@ def clear_cache() -> None:
         clear = getattr(fn, "cache_clear", None)
         if clear is not None:
             clear()
+
+
+# ---------------------------------------------------------------- write side
+#
+# ONE writer. Two stores that each render a valid file from their own copy is how
+# this stack lost all five Claude TTS hooks in a single day, and why a pwsh-side
+# `tts` save stopped surviving a WSL apply. Everything that persists a setting
+# goes through set() or save(); nothing else may touch chezmoi.toml or the mirror.
+
+
+class StoreError(RuntimeError):
+    """A write could not be completed. Never swallowed: a save that reports
+    success while changing nothing is the failure mode this file exists to end."""
+
+
+def toml_path() -> Path:
+    """chezmoi's config, which holds the [data] block. Mirrors ts_toml."""
+    return Path.home() / ".config" / "chezmoi" / "chezmoi.toml"
+
+
+def writes_to_mirror() -> bool:
+    """True when config.json is the authoritative store, not chezmoi [data].
+
+    A Windows-standalone install has no chezmoi at all: `sync-windows.ps1` renders
+    from config.json and nothing ever reads a chezmoi.toml. Writing [data] there
+    creates a file no code path consults, so the save reports success and changes
+    nothing that matters - the exact failure this module exists to prevent, just
+    on one platform instead of all of them.
+
+    WSL is NOT this case even though it can see the mirror: chezmoi is
+    authoritative there, and `ts_mirror_windows_config` derives config.json from
+    [data] afterwards.
+    """
+    if plat.kind() != plat.WINDOWS:
+        return False
+    chezmoi = plat.find_chezmoi()
+    return not (chezmoi and Path(chezmoi).exists())
+
+
+def _set_in_mirror(key: str, value: object) -> None:
+    """Write one key into the Windows config.json, preserving everything else."""
+    path = mirror_path()
+    if path is None:
+        raise StoreError("no %LOCALAPPDATA%: cannot locate the Windows config mirror")
+    current: dict[str, Any] = {}
+    if path.is_file():
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                current = loaded
+        except (OSError, ValueError) as exc:
+            # Never overwrite a file we could not read: it may hold settings this
+            # version does not know about, and clobbering them is silent loss.
+            raise StoreError(
+                f"{path} is not readable JSON; refusing to overwrite it: {exc}"
+            ) from exc
+    current[key] = value
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _atomic_write(path, json.dumps(current, indent=2) + "\n")
+    clear_cache()
+
+
+def _render_line(key: str, value: str) -> str:
+    return f'{key} = "{value}"'
+
+
+def set(key: str, value: str) -> None:
+    """Write one key into chezmoi [data], creating the block if needed.
+
+    Port of ts_data_set. Three cases, in the same order:
+      1. the key already exists   -> replace that line in place
+      2. [data] exists            -> insert immediately after the header
+      3. neither                  -> append a [data] block
+
+    Values are written quoted. A list value (apps) is the caller's job to format,
+    because TOML arrays are not strings and quoting one would corrupt it.
+    """
+    if writes_to_mirror():
+        _set_in_mirror(key, value)
+        return
+    path = toml_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        # Through _atomic_write like every other path, so a failure surfaces as a
+        # StoreError rather than a bare OSError. This used to be the one case that
+        # reported differently, and it is the worst one to get wrong: it is the
+        # fresh-install path.
+        _atomic_write(path, "[data]\n" + _render_line(key, value) + "\n")
+        clear_cache()
+        return
+
+    original = path.read_text(encoding="utf-8")
+    lines = original.split("\n")
+    prefix = f"{key} = "
+    for i, line in enumerate(lines):
+        if line.startswith(prefix):
+            lines[i] = _render_line(key, value)
+            break
+    else:
+        for i, line in enumerate(lines):
+            if line.strip() == "[data]":
+                lines.insert(i + 1, _render_line(key, value))
+                break
+        else:
+            if lines and lines[-1] != "":
+                lines.append("")
+            lines += ["[data]", _render_line(key, value), ""]
+
+    updated = "\n".join(lines)
+    _atomic_write(path, updated)
+    clear_cache()
+
+
+def set_list(key: str, values: list[str]) -> None:
+    """A TOML array, for `apps`. Quoted per element, never as one string."""
+    if writes_to_mirror():
+        # A JSON array, not a TOML one: the mirror is JSON.
+        _set_in_mirror(key, list(values))
+        return
+    rendered = ", ".join(f'"{v}"' for v in values)
+    path = toml_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    body = path.read_text(encoding="utf-8") if path.exists() else "[data]\n"
+    lines = body.split("\n")
+    literal = f"{key} = [{rendered}]"
+    prefix = f"{key} = "
+    for i, line in enumerate(lines):
+        if line.startswith(prefix):
+            lines[i] = literal
+            break
+    else:
+        for i, line in enumerate(lines):
+            if line.strip() == "[data]":
+                lines.insert(i + 1, literal)
+                break
+        else:
+            lines += ["[data]", literal, ""]
+    _atomic_write(path, "\n".join(lines))
+    clear_cache()
+
+
+def _atomic_write(path: Path, text: str) -> None:
+    """Write via a temp file in the same directory, then replace.
+
+    A half-written chezmoi.toml is worse than an unchanged one: chezmoi refuses to
+    run at all, which takes out every command in the stack including the doctor
+    that would have explained it.
+    """
+    tmp = path.with_name(path.name + f".tmp.{os.getpid()}")
+    try:
+        tmp.write_text(text, encoding="utf-8", newline="\n")
+        os.replace(tmp, path)
+    except OSError as exc:
+        raise StoreError(f"could not write {path}: {exc}") from exc
+    finally:
+        if tmp.exists():
+            with contextlib.suppress(OSError):
+                tmp.unlink()
+
+
+def chezmoi_init() -> bool:
+    """Re-run `chezmoi init`, which regenerates the DERIVED keys.
+
+    leaderKey, leaderMods, tmuxPrefixResolved and resolvedTheme are computed by
+    .chezmoi.toml.tmpl from the keys the user actually chose. Skipping this leaves
+    them describing the previous answer, so the leader chord changes in [data] and
+    nothing in the rendered configs moves.
+    """
+    chezmoi = plat.find_chezmoi()
+    if not chezmoi or not Path(chezmoi).exists():
+        return False
+    try:
+        out = subprocess.run(
+            [chezmoi, "init"],
+            capture_output=True,
+            text=True,
+            timeout=300,
+            check=False,
+            start_new_session=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return out.returncode == 0
