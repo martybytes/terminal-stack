@@ -646,24 +646,43 @@ def test_the_env_file_order_puts_the_stacks_own_env_last():
     Checked against the real tree rather than against source text: the ordering
     used to be asserted by slicing a bash function body, which pins the shape of
     an implementation rather than the rule it exists to keep.
+
+    The real ts-envfiles content, in a copy of the stack directory with the
+    untracked files it would have on an installed machine. Reading the live tree
+    instead made this pass here and fail on every clean checkout, because .env is
+    gitignored -- the same "only green on an already-installed machine" trap CI
+    caught once before.
     """
+    import shutil
+    import tempfile
+
     root = ROOT / "services" / "stacks"
-    checked = 0
-    for extra in sorted(root.glob("*/ts-envfiles")):
-        names = stacks.env_file_list(extra.parent)
-        if ".env" not in names:
-            continue
-        listed = [
-            ln.strip()
-            for ln in extra.read_text(encoding="utf-8").splitlines()
-            if ln.strip() and not ln.strip().startswith("#") and (extra.parent / ln.strip()).is_file()
-        ]
-        for name in listed:
-            assert names.index(name) < names.index(".env"), f"{extra.parent.name}: {name} after .env"
-        if ".billing.env" in names:
+    sources = sorted(root.glob("*/ts-envfiles"))
+    assert sources, "no ts-envfiles tree to check"
+    for extra in sources:
+        with tempfile.TemporaryDirectory() as raw:
+            stack_dir = Path(raw) / extra.parent.name
+            shutil.copytree(extra.parent, stack_dir)
+            (stack_dir / ".env").write_text("A=1\n", encoding="utf-8")
+            (stack_dir / ".billing.env").write_text("B=2\n", encoding="utf-8")
+            listed = [
+                ln.strip()
+                for ln in extra.read_text(encoding="utf-8").splitlines()
+                if ln.strip() and not ln.strip().startswith("#")
+            ]
+            # An entry that names a file in ANOTHER stack has to exist there too.
+            for name in listed:
+                target = stack_dir / name
+                if not target.exists():
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_text("C=3\n", encoding="utf-8")
+
+            names = stacks.env_file_list(stack_dir)
+            for name in listed:
+                assert names.index(name) < names.index(".env"), (
+                    f"{extra.parent.name}: {name} comes after .env"
+                )
             assert names.index(".env") < names.index(".billing.env")
-        checked += 1
-    assert checked or not list(root.glob("*/ts-envfiles")), "no ts-envfiles tree to check"
 
 
 def test_ts_envfiles_never_becomes_an_env_file_entry():

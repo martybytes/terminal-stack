@@ -89,6 +89,14 @@ for name in "${wanted[@]}"; do
             set -e
             cp -a /repo/. /work/
             git config --global --add safe.directory /work
+            # Drop everything git ignores, so the container sees what a CLEAN
+            # CHECKOUT sees. Copying the tree verbatim inherits the developer`s
+            # untracked files -- services/stacks/*/.env among them -- and that
+            # made a test that only passes on an installed machine green here and
+            # red on every CI runner. Uncommitted *tracked* changes stay, which
+            # is the whole point of running this against the working tree.
+            git -C /work ls-files --others --ignored --exclude-standard -z \
+                | xargs -0 -r rm -f --
             zsh -n dot_zshrc
             for f in bootstrap/*.sh services/*.sh services/stacks/*/*.sh \
                      install-*.sh run_after_90-sync-windows.sh run_before_*.sh; do

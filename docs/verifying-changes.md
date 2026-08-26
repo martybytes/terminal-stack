@@ -30,6 +30,12 @@ native-Linux branch was only ever exercised by CI. That is a slow loop and one
 nobody watches while writing the code. The containers run the whole suite in
 about two seconds, against each distro's *own* Python, bash and zsh.
 
+The container is a CLEAN CHECKOUT, not a copy of your tree: everything git
+ignores is deleted after the copy, so `services/stacks/*/.env` and friends are
+absent exactly as they are on a runner. Uncommitted *tracked* changes are still
+what gets tested. Copying verbatim let a test that only passes on an installed
+machine go green here and red in CI.
+
 That last part is the point. The runner-provided Python hides a class of problem:
 CI uses 3.12, this machine has 3.14, and Ubuntu 22.04 - an LTS still in support -
 ships 3.10. A test importing `tomllib` (3.11+) broke collection of the entire

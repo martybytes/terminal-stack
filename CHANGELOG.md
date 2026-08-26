@@ -6,6 +6,17 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Added
 
+- **Parity containers now mirror a clean checkout (08/26/2026).**
+  `tests/parity/run.sh` copied the working tree verbatim, which inherited the
+  developer's *untracked* files - `services/stacks/*/.env` among them. A test that
+  read the live tree therefore passed in the container and failed on every CI
+  runner, which is exactly the "only green on an already-installed machine" class
+  the harness exists to catch. The copy now deletes everything git ignores, so
+  uncommitted *tracked* changes are still what gets tested and nothing else is.
+
+  Found by CI on the first commit after the harness landed: 4 stack `.env` files
+  before, 0 after.
+
 - **`tstack wezterm` is Python (08/26/2026).**
   `bootstrap/ts-wezterm.sh` (90 lines) is deleted and `bootstrap/_wezterm.sh` drops
   from 446 lines to 66 shims. That file was already half Python: five of its
