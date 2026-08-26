@@ -30,12 +30,17 @@ else
     python3 -m pytest tests/
 fi
 
-# The characterization corpus only exists once a subsystem is being ported. Its
-# absence is normal in phase 0 and must not fail the push; an empty run that
-# looks like it passed is the thing to avoid, so say which it was.
-if [ -d "$root/tests/characterize" ]; then
-    echo "pre-push: characterization fixtures"
-    python3 -m pytest "$root/tests/characterize" -q
+# The replay lives in tests/test_characterize.py; tests/characterize/ holds the
+# fixtures and the sandbox helpers and contains no tests at all. Pointing pytest
+# at the directory collected nothing and exited 5, which failed the push for a
+# reason that had nothing to do with the change.
+#
+# The corpus only exists once a subsystem is being ported, so its absence is
+# normal early on and must not fail a push -- but an empty run that looks like it
+# passed is the thing to avoid, so say which one happened.
+if [ -f "$root/tests/test_characterize.py" ]; then
+    echo "pre-push: characterization replay"
+    python3 -m pytest "$root/tests/test_characterize.py" -q
 else
-    echo "pre-push: no tests/characterize yet (nothing ported)."
+    echo "pre-push: no characterization corpus yet (nothing ported)."
 fi
