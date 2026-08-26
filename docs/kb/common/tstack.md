@@ -30,14 +30,15 @@ in a script: **0 healthy, 1 issues found**.
 | | |
 |---|---|
 | `tstack doctor` | every check, with an `ok` line each |
-| `tstack doctor --quiet` | only what is wrong. Prints nothing at all on a healthy machine |
+| `tstack doctor --quiet` | drops the `ok` lines. Problems and `note:` advisories still print |
 | `tstack doctor --json` | one record per check: `check`, `status`, `message`, optional `hint` |
 | `tstack doctor --repair` | fix what is fixable, confirming each step |
 
-Three severities. `ok` is suppressed by `--quiet`. `!!` is a problem and counts
+Three severities. `ok` is the only one `--quiet` drops. `!!` is a problem and counts
 toward the exit status. `note:` is worth telling you and never counts - a leftover
-clone, a legacy clone location, a dev-clone pin. Folding notes into failures would
-train you to ignore the exit code.
+clone, a legacy clone location, a dev-clone pin - and it survives `--quiet`,
+because an advisory you only see in verbose output is one you never see. Folding
+notes into failures would instead train you to ignore the exit code.
 
 `--json` is a read model, not the prose reformatted: `check` is a stable id safe
 to match on, while the message wording is free to improve. That is what the
