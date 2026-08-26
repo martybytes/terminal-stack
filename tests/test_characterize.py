@@ -92,15 +92,27 @@ def test_python_reproduces_the_recorded_behaviour(path: Path):
     if argv in (["-h"], ["--help"]):
         pytest.skip("help text is argparse's now, and deliberately not the shell's")
 
-    # A fixture records one platform's behaviour. bootstrap/*.sh under Git Bash on
-    # Windows behaves POSIX-ish and checks ~/.zshrc; the port on that same host
-    # correctly detects Windows and checks $PROFILE. Replaying one against the
-    # other compares two different, both-correct behaviours.
+    # A fixture records one FAMILY's behaviour, and the line that matters is
+    # Windows vs POSIX: bootstrap/*.sh under Git Bash behaves POSIX-ish and checks
+    # ~/.zshrc, while the port on that same host correctly detects Windows and
+    # checks $PROFILE. Replaying one against the other compares two different,
+    # both-correct behaviours.
+    #
+    # Matching the exact platform instead would strand a wsl-recorded fixture on
+    # the ubuntu and macos CI jobs, which is most of the corpus doing nothing. The
+    # sandbox filters the Windows-side checks out of a WSL recording anyway, so
+    # what remains is the behaviour every POSIX host shares.
     sys.path.insert(0, str(ROOT))
     from tstack import platform as plat
 
-    if fixture.get("platform") != plat.kind():
-        pytest.skip(f"recorded on {fixture.get('platform')}, running on {plat.kind()}")
+    def family(kind: str) -> str:
+        return "windows" if kind == plat.WINDOWS else "posix"
+
+    if family(fixture.get("platform", "")) != family(plat.kind()):
+        pytest.skip(
+            f"recorded on {fixture.get('platform')} ({family(fixture.get('platform', ''))}), "
+            f"running on {plat.kind()} ({family(plat.kind())})"
+        )
 
     with tempfile.TemporaryDirectory(prefix="ts-char-") as tmp:
         root = Path(tmp)
