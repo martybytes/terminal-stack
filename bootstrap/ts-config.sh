@@ -415,7 +415,7 @@ agents_show() {
 
 run_agent_adapter() {
     local tool="$1" action="$2" cursor_mode="${3:-$(ts_agent_get headroomCursorMode)}"
-    bash "$SRC/bootstrap/ts-agents.sh" "$tool" "$action" "$cursor_mode"
+    "$(ts_python)" "$SRC/tstack/main.py" agents "$tool" "$action" "$cursor_mode"
 }
 
 agents_set() {

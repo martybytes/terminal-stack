@@ -118,6 +118,6 @@ accidentally put a hook installer in the Docker repo, because it was a different
 clone. Absorbing that repo removes the enforcement, so the rule is written down
 and tested instead: `tests/test_agent_tools.py` asserts that `docker compose`,
 `docker rm` and `restart: unless-stopped` appear nowhere in
-`bootstrap/ts-agents.{sh,ps1}` — as a case-insensitive match over the whole file,
+`tstack/commands/agents.py` — as a case-insensitive match over the whole file,
 so even a comment naming the compose command fails it. When a probe fails,
 `tstack agents` prints the *verb* (`tstack services up playwright`), never the command.

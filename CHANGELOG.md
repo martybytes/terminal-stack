@@ -6,6 +6,30 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Added
 
+- **`tstack agents` is Python (08/26/2026).**
+  `bootstrap/ts-agents.sh` (359 lines) and `bootstrap/ts-agents.ps1` (431) are
+  deleted; `tstack/commands/agents.py` is the one implementation. The merge takes
+  the **union**, because the two had drifted: the pwsh status checked the Claude
+  plugin list, the global skill file, the AgentMemory viewer and a TCP fallback,
+  and the bash status checked none of them, while the bash status was the one that
+  probed AgentMemory with a plain request rather than `curl -fsS` - that service
+  answers 404 on `/` and 401 on `/health`, so the strict form reported it down
+  while it was up. Both behaviours now apply everywhere.
+
+  **The WSL handoff is now a re-exec of the same program.** On a combined install
+  the GUI agents and their configuration are Windows-side: `~/.claude.json`,
+  `~/.cursor/mcp.json` and the Codex home belong to Windows processes. The bash
+  twin handled that by re-exec'ing the pwsh twin, which is exactly where the two
+  were free to drift; it now re-execs itself under the Windows Python, and
+  `user_root()` names the boundary explicitly so a registration cannot land in the
+  WSL home where nothing reads it.
+
+  Rules that were comments are tests now: a failed MCP `initialize` handshake
+  REMOVES stale registrations rather than leaving a command no client can run; a
+  Cursor `mcp.json` that will not parse is never overwritten; every rewrite takes a
+  dated backup that never clobbers a same-day one; the proxy token is never
+  printed; and `uninstall` always passes `--keep-data`.
+
 - **Parity containers now mirror a clean checkout (08/26/2026).**
   `tests/parity/run.sh` copied the working tree verbatim, which inherited the
   developer's *untracked* files - `services/stacks/*/.env` among them. A test that

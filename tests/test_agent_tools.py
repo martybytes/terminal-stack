@@ -14,7 +14,6 @@ from tests.shell_support import BASH, bash_path
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "bootstrap/agent-tools.json"
-PS_ADAPTER = ROOT / "bootstrap/ts-agents.ps1"
 
 
 def repo_file(rel: str) -> Path:
@@ -170,20 +169,39 @@ def test_codex_profile_is_partially_owned_on_every_sync_path():
     assert "== modify_*" in wsl_sync
 
 
-def test_headroom_enable_requires_authenticated_proxy_and_disable_restores_direct_mode():
-    adapter = (ROOT / "bootstrap/ts-agents.sh").read_text(encoding="utf-8")
-    ps_adapter = PS_ADAPTER.read_text(encoding="utf-8")
-    config = (ROOT / "bootstrap/ts-config.sh").read_text(encoding="utf-8")
-    assert "X-Headroom-Proxy-Token: $token" in adapter
-    assert '"$proxy/stats"' in adapter
-    assert "headroom_status && headroom_apply && headroom_status" in adapter
-    assert "function Test-TsHeadroomAuth" in ps_adapter
-    assert "if (-not (Test-TsHeadroomAuth))" in ps_adapter
-    assert "MCP stdio initialize handshake works" in ps_adapter
-    assert "Test-TsHeadroomMcp" in ps_adapter
-    # `off` must BOTH remove the client wiring and clear the saved setting, in that
-    # order. Asserted as intent rather than one exact line: playwright has no
-    # adapter to call, so the arm is no longer a single statement.
+def test_headroom_enable_requires_authenticated_proxy(monkeypatch, capsys):
+    """`on` and `repair` must refuse while the proxy will not authenticate.
+
+    Registering an MCP command that cannot answer leaves every client retrying a
+    broken command on every start, silently.
+    """
+    from tstack.commands import agents
+
+    out = agents.Out()
+    headroom = agents.Headroom(ROOT, out, "mcp")
+    monkeypatch.setattr(headroom, "probe_auth", lambda: (False, "HTTP 401"))
+    registered = []
+    monkeypatch.setattr(headroom, "register", lambda add: registered.append(add))
+
+    assert headroom.run("on") == 1
+    assert headroom.run("repair") == 1
+    assert registered == [], "registrations were changed despite a failed probe"
+    text = capsys.readouterr().out
+    assert "HTTP 401" in text, "the reason must reach the person reading it"
+    assert "leaving direct mode unchanged" in text
+    assert "registrations were not changed" in text
+
+    monkeypatch.setattr(headroom, "probe_auth", lambda: (True, ""))
+    monkeypatch.setattr(headroom, "status", lambda: True)
+    assert headroom.run("on") == 0
+    assert registered == [True]
+
+
+def test_turning_headroom_off_clears_the_saved_setting_too(capsys):
+    """`off` must BOTH remove the client wiring and clear the saved setting, in
+    that order. Asserted as intent rather than one exact line: playwright has no
+    adapter call, so the arm is no longer a single statement."""
+    config = read_repo("bootstrap/ts-config.sh")
     off_arm = config[config.index("        off)") :]
     off_arm = off_arm[: off_arm.index(";;")]
     assert 'run_agent_adapter "$tool" off' in off_arm
@@ -255,51 +273,138 @@ def test_fnm_ignores_package_json_engines_in_both_shells():
     )
 
 
-def test_headroom_auth_probe_retries_and_names_the_failure():
+def test_headroom_auth_probe_retries_and_names_the_failure(monkeypatch):
     """A single 2s probe called a cold proxy broken, and `on`/`repair` gate on it,
     so a slow first hit printed "registrations were not changed" with no cause -
-    while the missing MCP registrations it was meant to fix stayed missing. Both
-    twins now retry a connection failure, never retry a real HTTP answer, and put
-    the reason in the message."""
-    adapter = (ROOT / "bootstrap/ts-agents.sh").read_text(encoding="utf-8")
-    ps_adapter = PS_ADAPTER.read_text(encoding="utf-8")
-    probe = adapter[
-        adapter.index("headroom_probe_auth() {") : adapter.index("\nheadroom_status() {")
-    ]
-    assert "--max-time 5" in probe, "2s is a false negative against a cold container"
-    assert "for attempt in 1 2" in probe
-    assert "printf unreachable" in probe
-    # curl prints 000 itself on a connection failure; `|| echo 000` yields 000000.
-    assert "|| code=000" in probe and "|| echo 000" not in _uncommented(probe)
-    assert 'why="$(headroom_probe_auth "$token" "$proxy")"' in adapter
-    assert "proxy authentication failed at $proxy: $why" in adapter
-    ps_probe = ps_adapter[ps_adapter.index("function Test-TsHeadroomAuth") :]
-    ps_probe = ps_probe[: ps_probe.index("\n}\n")]
-    assert "-TimeoutSec 5" in ps_probe
-    assert "foreach ($attempt in 1, 2)" in ps_probe
-    assert "$script:TsHeadroomAuthReason = 'unreachable'" in ps_probe
-    assert '"HTTP $code"' in ps_probe, "a real HTTP answer must be reported, not retried"
-    # And every caller of the gate must print the reason it just recorded.
-    for verb in ("leaving direct mode unchanged", "registrations were not changed"):
-        line = [l for l in ps_adapter.splitlines() if verb in l]
-        assert line and "$script:TsHeadroomAuthReason" in line[0], (
-            f"the '{verb}' message does not say why auth failed"
-        )
+    while the missing MCP registrations meant the fix stayed missing.
+
+    Retry a connection failure; never retry a real HTTP answer; put the reason in
+    the message.
+    """
+    import urllib.error
+
+    from tstack.commands import agents
+
+    headroom = agents.Headroom(ROOT, agents.Out(), "mcp")
+    monkeypatch.setattr(headroom, "token", lambda: "t")
+
+    attempts = []
+
+    def refuse(request, timeout=None):
+        attempts.append(timeout)
+        raise urllib.error.URLError("connection refused")
+
+    monkeypatch.setattr(agents.urllib.request, "urlopen", refuse)
+    assert headroom.probe_auth() == (False, "unreachable")
+    assert attempts == [5, 5], "a connection failure must be retried exactly once"
+    assert all(t == 5 for t in attempts), "2s produced false negatives on a cold container"
+
+    attempts.clear()
+
+    def unauthorized(request, timeout=None):
+        attempts.append(timeout)
+        raise urllib.error.HTTPError("u", 401, "no", {}, None)
+
+    monkeypatch.setattr(agents.urllib.request, "urlopen", unauthorized)
+    assert headroom.probe_auth() == (False, "HTTP 401")
+    assert len(attempts) == 1, "a real HTTP answer is conclusive and must not be retried"
+
+    monkeypatch.setattr(headroom, "token", lambda: "")
+    ok, why = headroom.probe_auth()
+    assert not ok and "HEADROOM_PROXY_TOKEN" in why
 
 
-def test_headroom_mcp_uses_docker_stdio_and_removes_failed_registrations():
-    adapter = (ROOT / "bootstrap/ts-agents.sh").read_text(encoding="utf-8")
-    ps_adapter = PS_ADAPTER.read_text(encoding="utf-8")
-    apply = adapter[adapter.index("headroom_apply() {") : adapter.index("\ncaveman_rule() {")]
-    assert "if headroom_mcp_probe" in apply
-    assert 'codex mcp add headroom -- "$HEADROOM_MCP_COMMAND"' in apply
-    assert "codex mcp remove headroom" in apply
-    assert "removed stale client registrations" in apply
-    assert "$mcpReady = $spec -and (Test-TsHeadroomMcp)" in ps_adapter
-    assert "if ($Verb -eq 'add' -and $mcpReady)" in ps_adapter
-    assert "'mcp','add','headroom','--',$spec.Command" in ps_adapter
-    assert "(?m)^\\s*transport:" in ps_adapter
-    assert "^[[:space:]]*transport:" in adapter
+def test_the_headroom_token_is_never_printed(monkeypatch, capsys):
+    """It is a credential. The probe reports HTTP status, never the value."""
+    from tstack.commands import agents
+
+    headroom = agents.Headroom(ROOT, agents.Out(), "mcp")
+    monkeypatch.setattr(headroom, "token", lambda: "sekrit-token-value")
+    monkeypatch.setattr(headroom, "probe_auth", lambda: (False, "unreachable"))
+    monkeypatch.setattr(headroom, "mcp_spec", lambda: None)
+    monkeypatch.setattr(agents, "find_agent", lambda name: None)
+    headroom.status()
+    assert "sekrit-token-value" not in capsys.readouterr().out
+
+
+def test_headroom_mcp_uses_docker_stdio_and_removes_failed_registrations(monkeypatch):
+    """Port 8788 is dashboard-only; the MCP server starts on demand over Docker
+    stdio. Registering it without proving the handshake leaves Codex probing a
+    command that cannot answer, so a failed probe REMOVES stale registrations
+    rather than leaving them."""
+    from tstack.commands import agents
+
+    calls = []
+    monkeypatch.setattr(agents, "find_agent", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(agents, "_run", lambda argv, timeout=60, stdin=None: calls.append(argv))
+    written = []
+    monkeypatch.setattr(agents, "_write_cursor_mcp", lambda name, entry: written.append(entry))
+
+    headroom = agents.Headroom(ROOT, agents.Out(), "mcp")
+    monkeypatch.setattr(headroom, "mcp_spec", lambda: ("/usr/bin/docker", ["exec", "-i", "c", "x"]))
+    monkeypatch.setattr(headroom, "mcp_ready", lambda: True)
+    monkeypatch.setattr(agents.Path, "is_dir", lambda self: True)
+    headroom.register(add=True)
+    flat = [" ".join(c) for c in calls]
+    assert any("mcp add --scope user headroom -- /usr/bin/docker exec -i c x" in f for f in flat)
+    assert any("codex mcp add headroom -- /usr/bin/docker exec -i c x" in f for f in flat)
+    assert written and written[-1]["command"] == "/usr/bin/docker"
+
+    calls.clear()
+    written.clear()
+    monkeypatch.setattr(headroom, "mcp_ready", lambda: False)
+    headroom.mcp_reason = "docker MCP command failed"
+    headroom.register(add=True)
+    flat = [" ".join(c) for c in calls]
+    assert any("mcp remove --scope user headroom" in f for f in flat)
+    assert any("codex mcp remove headroom" in f for f in flat)
+    assert written == [None], "a failed handshake must clear the Cursor entry"
+    assert not any("mcp add" in f for f in flat)
+
+
+def test_the_mcp_handshake_is_json_rpc_not_a_port_check(monkeypatch):
+    """`initialize` has to come back naming headroom AND advertising tools. A
+    container that merely accepts stdin is not an MCP server."""
+    from tstack.commands import agents
+
+    headroom = agents.Headroom(ROOT, agents.Out(), "mcp")
+    monkeypatch.setattr(headroom, "mcp_spec", lambda: ("/usr/bin/docker", ["exec"]))
+
+    class Got:
+        returncode = 0
+        stdout = ""
+
+    monkeypatch.setattr(agents, "_run", lambda argv, timeout=60, stdin=None: Got())
+    Got.stdout = '{"jsonrpc":"2.0","id":1,"result":{"serverInfo":{"name":"other"}}}'
+    assert headroom.mcp_ready() is False
+    assert "not a Headroom MCP server" in headroom.mcp_reason
+
+    Got.stdout = (
+        '{"jsonrpc":"2.0","id":1,"result":{"serverInfo":{"name":"headroom"},'
+        '"capabilities":{"tools":{}}}}'
+    )
+    assert headroom.mcp_ready() is True
+
+    Got.returncode = 1
+    assert headroom.mcp_ready() is False
+    assert "docker MCP command failed" in headroom.mcp_reason
+
+
+def test_the_codex_registration_check_requires_stdio_transport(monkeypatch):
+    from tstack.commands import agents
+
+    class Got:
+        returncode = 0
+        stdout = "transport: stdio\ncommand: /usr/bin/docker\nargs: exec -i c x\n"
+
+    monkeypatch.setattr(agents, "find_agent", lambda name: "/usr/bin/codex")
+    monkeypatch.setattr(agents, "_run", lambda argv, timeout=60, stdin=None: Got())
+    headroom = agents.Headroom(ROOT, agents.Out(), "mcp")
+    spec = ("/usr/bin/docker", ["exec", "-i", "c", "x"])
+    assert headroom.codex_registered(spec) is True
+
+    Got.stdout = "transport: http\ncommand: /usr/bin/docker\n"
+    assert headroom.codex_registered(spec) is False
 
 
 def test_claude_instructions_fit_claude_code_limit():
@@ -315,8 +420,11 @@ def test_updates_reconcile_only_enabled_tools():
         assert key in sh
 
 
-@pytest.mark.skipif(not shutil.which("pwsh"), reason="PowerShell 7 is unavailable")
-def test_headroom_off_preserves_foreign_cursor_mcp(tmp_path):
+def test_headroom_off_preserves_foreign_cursor_mcp(tmp_path, monkeypatch):
+    """Cursor's mcp.json belongs to the user: removing our entry must leave every
+    other server exactly as it was, and never rewrite a file we cannot parse."""
+    from tstack.commands import agents
+
     home = tmp_path / "home"
     cursor = home / ".cursor"
     cursor.mkdir(parents=True)
@@ -326,40 +434,30 @@ def test_headroom_off_preserves_foreign_cursor_mcp(tmp_path):
             {
                 "mcpServers": {
                     "foreign": {"url": "http://127.0.0.1:9999/mcp"},
-                    "headroom": {"url": "http://127.0.0.1:8788/mcp"},
+                    "headroom": {"command": "docker", "args": ["exec"]},
                 }
             }
         ),
         encoding="utf-8",
     )
-    env = os.environ.copy()
-    env["USERPROFILE"] = str(home)
-    env["PATH"] = ""
-    result = subprocess.run(
-        [
-            shutil.which("pwsh"),
-            "-NoLogo",
-            "-NoProfile",
-            "-NonInteractive",
-            "-File",
-            str(PS_ADAPTER),
-            "-Tool",
-            "headroom",
-            "-Action",
-            "off",
-        ],
-        env=env,
-        text=True,
-        capture_output=True,
-        check=False,
-        timeout=300,
-        start_new_session=True,
-    )
-    assert result.returncode == 0, result.stderr
+    monkeypatch.setattr(agents, "user_root", lambda: home)
+    agents._write_cursor_mcp("headroom", None)
     servers = json.loads(mcp.read_text(encoding="utf-8"))["mcpServers"]
     assert servers == {"foreign": {"url": "http://127.0.0.1:9999/mcp"}}
+    assert list(cursor.glob("mcp.json.bak.*")), "the file was rewritten with no backup"
 
 
+def test_a_malformed_cursor_config_is_never_overwritten(tmp_path, monkeypatch, capsys):
+    from tstack.commands import agents
+
+    home = tmp_path / "home"
+    (home / ".cursor").mkdir(parents=True)
+    mcp = home / ".cursor" / "mcp.json"
+    mcp.write_text("{ not json", encoding="utf-8")
+    monkeypatch.setattr(agents, "user_root", lambda: home)
+    agents._write_cursor_mcp("headroom", {"command": "docker", "args": []})
+    assert mcp.read_text(encoding="utf-8") == "{ not json"
+    assert "refusing to overwrite malformed JSON" in capsys.readouterr().err
 @pytest.mark.skipif(not shutil.which("pwsh"), reason="PowerShell 7 is unavailable")
 def test_windows_config_preserves_agent_settings_when_other_values_change(tmp_path):
     home = tmp_path / "home"
@@ -1832,9 +1930,8 @@ def test_agentmemory_hook_commands_are_posix_not_cmd_exe():
 
 
 def test_agentmemory_codex_check_requires_all_scripts_and_exact_hook_registrations():
-    ps = (ROOT / "bootstrap/ts-agentmemory.ps1").read_text(encoding="utf-8")
+    ps = read_repo("bootstrap/ts-agentmemory.ps1")
     sh = AM_ENTRY.read_text(encoding="utf-8")
-    adapter = PS_ADAPTER.read_text(encoding="utf-8")
     for event in (
         "SessionStart",
         "UserPromptSubmit",
@@ -1851,8 +1948,11 @@ def test_agentmemory_codex_check_requires_all_scripts_and_exact_hook_registratio
     assert '"$plugin_count" -ne 6' in sh
     assert '"$stable_count" -ne 6' in sh
     assert "has a stale AgentMemory command" in sh
-    assert adapter.count("function Test-TsTcp") == 1
-    assert "Test-TsTcp '127.0.0.1' 3111" in adapter
+    # The status probe falls back to a TCP connect: the REST server answers 404
+    # on / and 401 on /health, so "no 2xx" is not "not listening".
+    agents_impl = "".join(p.read_text(encoding="utf-8") for p in impl_paths("agents"))
+    assert "tcp_answers" in agents_impl
+    assert 'tcp_answers("127.0.0.1", 3111)' in agents_impl
 
 
 def test_agentmemory_secret_recovery_uses_the_unix_cache_not_the_registry():
@@ -1933,12 +2033,36 @@ def test_doctor_checks_agentmemory_natively_not_only_on_wsl():
     )
 
 
-def test_ts_agents_invokes_the_hook_wiring():
+def test_the_agents_command_invokes_the_hook_wiring(monkeypatch, tmp_path):
     """Installing the plugin is only half the job: without the deployment edits
-    the hooks POST nothing and nothing logs it."""
-    body = (ROOT / "bootstrap/ts-agents.sh").read_text(encoding="utf-8")
-    assert "ts-agentmemory.sh" in body
-    assert "--apply" in body and "--undo --apply" in body
+    the hooks POST nothing and retrieval never fires, and nothing logs it because
+    every vendor hook does fetch(...).catch(() => {}) then exits 0. Re-run on
+    every on/repair, because a plugin upgrade replaces the cache and silently
+    reverts every edit."""
+    from tstack.commands import agents
+
+    ran = []
+    monkeypatch.setattr(agents, "find_agent", lambda name: None)
+    monkeypatch.setattr(
+        agents.subprocess, "run", lambda argv, **k: ran.append(argv) or _Ok()
+    )
+    memory = agents.AgentMemory(ROOT, agents.Out())
+    monkeypatch.setattr(memory, "adapter", lambda: ["bash", "ts-agentmemory.sh"])
+
+    memory.install()
+    assert ran and ran[-1][-1] == "--apply"
+
+    ran.clear()
+    memory.remove(uninstall=False)
+    # The undo runs FIRST, while the plugin cache it patched is still present:
+    # the restore reads the backups beside the vendor scripts.
+    assert ran[0][-2:] == ["--undo", "--apply"]
+
+
+class _Ok:
+    returncode = 0
+    stdout = ""
+    stderr = ""
 
 
 def test_tmux_title_format_uses_the_variable_name_not_the_shorthand():
@@ -2288,32 +2412,33 @@ def test_ts_config_sources_what_it_calls():
 # ── wizard recommendations + readiness probing ──────────────────────────────────
 
 
-@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
-def test_service_probes_treat_any_http_response_as_up():
-    """AgentMemory answers 404 on / and 401 on /agentmemory/health. `curl -fsS`
-    turns either into a failure, which is why `ts-agents agentmemory status`
-    reported the service down while it was up and serving. Any response proves
-    something is listening; only a refused connection is 'down'."""
-    script = (
-        ". bootstrap/_config.sh >/dev/null 2>&1\n"
-        # port 9 (discard) is reliably not an HTTP server
-        "ts_probe_http http://127.0.0.1:9 1 && echo BAD_UP || echo ok_down\n"
-        "ts_probe_http_ok http://127.0.0.1:9 1 && echo BAD_OK || echo ok_not_ok\n"
-    )
-    r = subprocess.run(
-        [BASH, "-c", script],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        timeout=300,
-        start_new_session=True,
-    )
-    assert "BAD_" not in r.stdout, r.stdout
-    assert r.stdout.split() == ["ok_down", "ok_not_ok"], r.stdout
-    agents = _uncommented((ROOT / "bootstrap/ts-agents.sh").read_text(encoding="utf-8"))
-    assert 'curl -fsS --max-time 1 "$(json_get agentmemory.restUrl)"' not in agents, (
-        "-f makes a 404/401 look like the service is down"
-    )
+def test_service_probes_treat_any_http_response_as_up(monkeypatch):
+    """AgentMemory answers 404 on / and 401 on /agentmemory/health, and `curl
+    -fsS` turns either into a failure - so this reported the service DOWN while it
+    was up and serving. Any HTTP response proves something is listening."""
+    import urllib.error
+
+    from tstack.commands import agents
+
+    def answer(status):
+        def probe(url, timeout=None):
+            raise urllib.error.HTTPError(url, status, "no", {}, None)
+
+        return probe
+
+    for status in (401, 404, 500):
+        monkeypatch.setattr(agents.urllib.request, "urlopen", answer(status))
+        assert agents.http_answers("http://127.0.0.1:3111") is True, status
+
+    def refuse(url, timeout=None):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(agents.urllib.request, "urlopen", refuse)
+    assert agents.http_answers("http://127.0.0.1:3111") is False
+
+    # And the shell that still probes services keeps the same rule.
+    body = _uncommented(read_repo("bootstrap/_config.sh"))
+    assert "curl -fsS" not in body or "ts_probe_http_ok" in body
 
 
 def test_wizard_recommends_and_probes_before_offering():

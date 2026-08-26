@@ -922,12 +922,18 @@ ts_agents_save_config() {
     ts_mirror_windows_config
 }
 
+# The argument is kept for call-site compatibility with the installers; what
+# actually runs is `tstack agents`, which is one implementation on every platform.
 ts_agents_apply_wizard() {
-    local script="${1:-}"
-    [ -f "$script" ] || return 0
-    [ "${TS_WIZ_HEADROOM:-off}" = on ] && bash "$script" headroom on "${TS_WIZ_HEADROOM_CURSOR:-mcp}" || [ "${TS_WIZ_HEADROOM:-off}" != on ] || echo "$WARN Headroom client setup failed; retry: tstack config agents headroom repair" >&2
-    [ "${TS_WIZ_CAVEMAN:-off}" = on ] && bash "$script" caveman on || [ "${TS_WIZ_CAVEMAN:-off}" != on ] || echo "$WARN Caveman setup failed; retry: tstack config agents caveman repair" >&2
-    [ "${TS_WIZ_AGENTMEMORY:-off}" = on ] && bash "$script" agentmemory on || [ "${TS_WIZ_AGENTMEMORY:-off}" != on ] || echo "$WARN AgentMemory setup failed; retry: tstack config agents agentmemory repair" >&2
+    local script="${1:-}" root entry python
+    root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd -P)" || return 0
+    entry="$root/tstack/main.py"
+    [ -f "$entry" ] || return 0
+    python="$(ts_python)" || return 0
+    set -- "$python" "$entry" agents
+    [ "${TS_WIZ_HEADROOM:-off}" = on ] && "$@" headroom on "${TS_WIZ_HEADROOM_CURSOR:-mcp}" || [ "${TS_WIZ_HEADROOM:-off}" != on ] || echo "$WARN Headroom client setup failed; retry: tstack config agents headroom repair" >&2
+    [ "${TS_WIZ_CAVEMAN:-off}" = on ] && "$@" caveman on || [ "${TS_WIZ_CAVEMAN:-off}" != on ] || echo "$WARN Caveman setup failed; retry: tstack config agents caveman repair" >&2
+    [ "${TS_WIZ_AGENTMEMORY:-off}" = on ] && "$@" agentmemory on || [ "${TS_WIZ_AGENTMEMORY:-off}" != on ] || echo "$WARN AgentMemory setup failed; retry: tstack config agents agentmemory repair" >&2
 }
 
 # ── WezTerm multiplexer domain ──────────────────────────────────────────────────

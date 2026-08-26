@@ -351,7 +351,7 @@ The fix belongs in terminal-stack, not here. It needs:
   `reg query "HKCU\Environment"`, which on Unix throws, is caught, and leaves the recovery a
   permanent no-op.
 
-Note also that `ts-agents.sh` already handles the *plugin install* half in bash — it is only the
+Note also that `tstack agents` already handles the *plugin install* half in bash — it is only the
 hook wiring that is missing.
 
 ## Retrieval: how each host asks

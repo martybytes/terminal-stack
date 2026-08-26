@@ -1300,7 +1300,7 @@ At the command level the same line is `tstack services` versus `tstack agents`. 
 in this repo that starts, stops or builds a container; `tstack agents` may only probe one.** That is not
 a style preference — `test_no_project_scope_or_docker_mutation_in_lifecycle_adapters` asserts the
 strings `docker compose`, `docker rm` and `restart: unless-stopped` appear nowhere in
-`bootstrap/ts-agents.{sh,ps1}`, as case-insensitive matches over the whole file, **so even a comment
+`tstack/commands/agents.py`, as case-insensitive matches over the whole file, **so even a comment
 naming the compose command fails it**. When a probe fails, `tstack agents` prints the *verb*
 (`tstack services up playwright`), never the command. Having an in-repo verb to point at is what makes that
 guardrail easy to keep: before the merge there was no such command, which is precisely why inlining

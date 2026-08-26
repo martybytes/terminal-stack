@@ -5,7 +5,7 @@
 #
 # Usage: ts-agentmemory.sh [--apply] [--undo] [--check] [--host claude|codex|cursor]
 #
-# POSIX twin of ts-agentmemory.ps1. Runs from ts-agents.sh's agentmemory verb, so
+# POSIX twin of ts-agentmemory.ps1. Runs from `tstack agents agentmemory`, so
 # a plugin upgrade that reverts the hook-script edits is repaired on the next
 # `tstack update`. services/stacks/agentmemory/check-capture.sh probes for this exact
 # path, which is why the name is not negotiable.
@@ -599,7 +599,7 @@ echo
 if [ "$PROBLEMS" -gt 0 ]; then
     # Exit non-zero on problems in EVERY mode, not just --check. The .ps1 reports
     # and still exits 0, so a caller cannot tell a clean apply from one where an
-    # edit's anchor had moved — and ts-agents.sh needs to know.
+    # edit's anchor had moved - and `tstack agents` needs to know.
     printf '%s problem(s) - see the ! lines above.\n' "$PROBLEMS"
     exit 1
 elif [ "$EXECUTE" != 1 ]; then

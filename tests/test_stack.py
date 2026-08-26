@@ -121,9 +121,10 @@ def test_only_ts_stack_may_run_docker():
     print the tstack services verb but never the compose command — the existing
     lifecycle-adapter test matches `docker compose` as a substring over the whole
     file, so even a helpful comment fails it."""
-    for rel in ("bootstrap/ts-agents.sh", "bootstrap/ts-agents.ps1"):
-        text = (ROOT / rel).read_text(encoding="utf-8").lower()
-        assert "docker compose" not in text, f"{rel} must not name the compose command"
+    text = (ROOT / "tstack/commands/agents.py").read_text(encoding="utf-8").lower()
+    assert "docker compose" not in text, "tstack agents must not name the compose command"
+    assert "docker rm" not in text
+    assert "restart: unless-stopped" not in text
     # And the one place that may is the compose choke point. Every docker argv is
     # built there, which is the whole reason the invariants below are testable at
     # all: a second site would be a second set of rules nobody checks.
@@ -279,11 +280,14 @@ def test_the_stack_env_file_resolves_from_the_clone_in_every_copy():
     and, post-merge, can only find a stale file from an archived repo -- whose
     token may be for a proxy that has since rotated, producing a 401 that reads
     like a broken install. There is no fallback to the old path on purpose."""
-    posix = ("bootstrap/ts-agents.sh", "bootstrap/_config.sh", "dot_zshrc")
-    windows = (
-        "bootstrap/ts-agents.ps1",
-        "windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1",
-    )
+    posix = ("bootstrap/_config.sh", "dot_zshrc")
+    windows = ("windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1",)
+    # The agents implementation is Python now, and resolves the same way: from the
+    # clone, never by walking a workspace for a sibling checkout.
+    agents_py = (ROOT / "tstack/commands/agents.py").read_text(encoding="utf-8")
+    assert 'source / "services" / "stacks" / "headroom" / ".env"' in agents_py
+    assert "HEADROOM_ENV_FILE" in agents_py
+    assert "docker-local" not in agents_py
     for rel in posix:
         body = (ROOT / rel).read_text(encoding="utf-8")
         # _config.sh takes the stack name as an argument; the rest name headroom.

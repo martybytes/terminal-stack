@@ -32,7 +32,7 @@ At the command level the same line is **`tstack services` versus `tstack agents`
 `tstack services` is the only thing in this repo that starts, stops or builds a
 container; `tstack agents` may only probe one. That is not a style preference —
 `tests/test_agent_tools.py` asserts that `docker compose`, `docker rm` and
-`restart: unless-stopped` appear nowhere in `bootstrap/ts-agents.{sh,ps1}`, as a
+`restart: unless-stopped` appear nowhere in `tstack/commands/agents.py`, as a
 case-insensitive match over the whole file, **so even a comment naming the
 compose command fails it**. When a probe fails, `tstack agents` prints the verb
 (`tstack services up playwright`), never the command.
