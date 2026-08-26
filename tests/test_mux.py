@@ -211,3 +211,113 @@ def test_the_windows_pid_probe_ignores_a_localized_no_tasks_line(monkeypatch):
 
     Got.stdout = '"wezterm-mux-server.exe","1234","Console","1","70,000 K"\r\n'
     assert mux.mux_pids() == ["1234"]
+
+
+def test_on_a_native_host_the_plain_binaries_are_used(monkeypatch):
+    monkeypatch.setattr(plat, "kind", lambda: plat.LINUX)
+    monkeypatch.setattr(mux.shutil, "which", lambda name: f"/usr/bin/{name}")
+    assert mux.wez_cli() == "/usr/bin/wezterm"
+    assert mux.mux_bin() == "/usr/bin/wezterm-mux-server"
+    monkeypatch.setattr(mux.shutil, "which", lambda name: None)
+    assert mux.wez_cli() is None
+    assert mux.mux_bin() is None
+
+
+def test_a_missing_binary_is_none_rather_than_an_exception(monkeypatch):
+    """_run swallows OSError on purpose: probing for a tool that is not there is
+    the normal case, not an error to propagate."""
+    monkeypatch.setattr(
+        mux.subprocess, "run", lambda *a, **k: (_ for _ in ()).throw(OSError("nope"))
+    )
+    assert mux._run(["no-such-binary"]) is None
+
+
+def test_the_posix_pid_probe_reads_pgrep(monkeypatch):
+    monkeypatch.setattr(plat, "kind", lambda: plat.LINUX)
+
+    class Got:
+        returncode = 0
+        stdout = "111\n222\n"
+
+    monkeypatch.setattr(mux, "_run", lambda argv, timeout=30: Got())
+    assert mux.mux_pids() == ["111", "222"]
+
+    Got.returncode = 1
+    assert mux.mux_pids() == []
+
+
+def test_start_reports_a_missing_server_binary(monkeypatch, capsys):
+    monkeypatch.setattr(mux, "mux_pids", lambda: [])
+    monkeypatch.setattr(mux, "mux_bin", lambda: None)
+    assert mux.do_start() == 1
+    assert "relaunch WezTerm" in capsys.readouterr().err
+
+
+def test_start_is_a_no_op_when_one_is_already_running(monkeypatch, capsys):
+    monkeypatch.setattr(mux, "mux_pids", lambda: ["9"])
+    assert mux.do_start() == 0
+    assert "already running" in capsys.readouterr().out
+
+
+def test_start_daemonizes(monkeypatch, capsys):
+    ran = []
+
+    class Got:
+        returncode = 0
+
+    monkeypatch.setattr(mux, "mux_pids", lambda: [])
+    monkeypatch.setattr(mux, "mux_bin", lambda: "/usr/bin/wezterm-mux-server")
+    monkeypatch.setattr(mux, "_run", lambda argv, timeout=30: ran.append(argv) or Got())
+    assert mux.do_start() == 0
+    assert ran == [["/usr/bin/wezterm-mux-server", "--daemonize"]]
+
+
+def test_a_failed_start_is_reported(monkeypatch, capsys):
+    class Got:
+        returncode = 1
+
+    monkeypatch.setattr(mux, "mux_pids", lambda: [])
+    monkeypatch.setattr(mux, "mux_bin", lambda: "/usr/bin/wezterm-mux-server")
+    monkeypatch.setattr(mux, "_run", lambda argv, timeout=30: Got())
+    assert mux.do_start() == 1
+    assert "start failed" in capsys.readouterr().err
+
+
+def test_status_counts_the_panes_the_mux_knows_about(quiet_store, monkeypatch, capsys):
+    class Got:
+        returncode = 0
+        stdout = "WINID TABID PANEID\n0 1 2\n0 1 3\n"
+
+    monkeypatch.setattr(mux, "mux_pids", lambda: [])
+    monkeypatch.setattr(mux, "wez_cli", lambda: "/usr/bin/wezterm")
+    monkeypatch.setattr(mux, "_run", lambda argv, timeout=30: Got())
+    monkeypatch.setattr(mux, "rendered_cfg", lambda: None)
+    mux.main(["status"])
+    assert "panes    : 2" in capsys.readouterr().out
+
+
+def test_turning_it_on_without_a_clone_fails_rather_than_half_writing(monkeypatch, capsys):
+    from tstack import paths
+
+    def missing(**kwargs):
+        raise paths.CloneNotFound("no clone here")
+
+    monkeypatch.setattr(paths, "resolve_source_dir", missing)
+    written = []
+    monkeypatch.setattr(store, "set", lambda key, value: written.append(key))
+    assert mux.main(["on"]) == 1
+    assert written == [], "the setting was written with no clone to apply it from"
+    assert "no clone here" in capsys.readouterr().err
+
+
+def test_apply_without_chezmoi_says_so_rather_than_pretending(monkeypatch, capsys):
+    monkeypatch.setattr(plat, "find_chezmoi", lambda: None)
+    mux._apply()
+    out = capsys.readouterr().out
+    assert "applying" in out
+    assert "no chezmoi here" in out
+
+
+def test_an_unreadable_rendered_config_is_not_a_crash(monkeypatch, tmp_path):
+    monkeypatch.setattr(mux, "rendered_cfg", lambda: tmp_path / "gone.lua")
+    assert mux.rendered_mux() is None
