@@ -152,7 +152,13 @@ def test_candidates_are_deduplicated_case_insensitively(monkeypatch, tmp_path):
 
 def make_clone(root: Path) -> Path:
     root.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["git", "init", "-q", str(root)], check=True, capture_output=True, timeout=300)
+    subprocess.run(
+        ["git", "init", "-q", str(root)],
+        check=True,
+        capture_output=True,
+        timeout=300,
+        start_new_session=True,
+    )
     subprocess.run(
         [
             "git",
@@ -166,6 +172,7 @@ def make_clone(root: Path) -> Path:
         check=True,
         capture_output=True,
         timeout=300,
+        start_new_session=True,
     )
     return root
 
@@ -235,7 +242,11 @@ def test_clone_version_reports_dirtiness(tmp_path):
     clone = make_clone(tmp_path / "c")
     (clone / "f.txt").write_text("x", encoding="utf-8")
     subprocess.run(
-        ["git", "-C", str(clone), "add", "-A"], check=True, capture_output=True, timeout=300
+        ["git", "-C", str(clone), "add", "-A"],
+        check=True,
+        capture_output=True,
+        timeout=300,
+        start_new_session=True,
     )
     subprocess.run(
         [
@@ -253,6 +264,7 @@ def test_clone_version_reports_dirtiness(tmp_path):
         check=True,
         capture_output=True,
         timeout=300,
+        start_new_session=True,
     )
     assert paths.clone_version(clone)["dirty"] is False
     (clone / "f.txt").write_text("y", encoding="utf-8")

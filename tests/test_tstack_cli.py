@@ -122,6 +122,7 @@ def run_cli(*args: str) -> subprocess.CompletedProcess:
         encoding="utf-8",
         timeout=60,
         check=False,
+        start_new_session=True,
     )
 
 
@@ -315,12 +316,14 @@ def test_every_subprocess_call_in_the_suite_has_a_timeout():
                         break
                 i += 1
             call = src[match.start() : i + 1]
-            if "timeout=" not in call:
-                line = src[: match.start()].count("\n") + 1
-                offenders.append(f"{path.relative_to(ROOT)}:{line}")
+            line = src[: match.start()].count("\n") + 1
+            missing = [k for k in ("timeout=", "start_new_session=") if k not in call]
+            if missing:
+                offenders.append(f"{path.relative_to(ROOT)}:{line} missing {', '.join(missing)}")
     assert not offenders, (
-        "subprocess.run without timeout= (a hang here stalls the whole suite): "
-        + ", ".join(offenders)
+        "every test subprocess needs timeout= (a hang stalls the suite) and "
+        "start_new_session=True (no controlling terminal, so a /dev/tty prompt "
+        "cannot block): " + "; ".join(offenders)
     )
 
 
@@ -377,6 +380,7 @@ def test_splatting_a_lone_dash_flag_survives_the_shim():
         text=True,
         timeout=120,
         check=False,
+        start_new_session=True,
     )
     assert out.returncode == 0, out.stderr
     counts = [int(x) for x in out.stdout.split()]

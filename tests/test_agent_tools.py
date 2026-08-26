@@ -353,6 +353,7 @@ def test_headroom_off_preserves_foreign_cursor_mcp(tmp_path):
         capture_output=True,
         check=False,
         timeout=300,
+        start_new_session=True,
     )
     assert result.returncode == 0, result.stderr
     servers = json.loads(mcp.read_text(encoding="utf-8"))["mcpServers"]
@@ -380,6 +381,7 @@ def test_windows_config_preserves_agent_settings_when_other_values_change(tmp_pa
         capture_output=True,
         check=False,
         timeout=300,
+        start_new_session=True,
     )
     assert result.returncode == 0, result.stderr
     cfg = json.loads((local / "terminal-stack/config.json").read_text(encoding="utf-8-sig"))
@@ -421,6 +423,7 @@ def test_existing_agentmemory_install_migrates_missing_toggle_to_on(tmp_path):
         capture_output=True,
         check=False,
         timeout=300,
+        start_new_session=True,
     )
     assert result.returncode == 0, result.stderr
     cfg = json.loads(cfg_path.read_text(encoding="utf-8-sig"))
@@ -456,7 +459,13 @@ def test_shell_entrypoints_parse():
         "bootstrap/ts-rclone-config.sh",
     ]
     result = subprocess.run(
-        [BASH, "-n", *files], cwd=ROOT, text=True, capture_output=True, check=False, timeout=300
+        [BASH, "-n", *files],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=300,
+        start_new_session=True,
     )
     assert result.returncode == 0, result.stderr
 
@@ -470,6 +479,7 @@ def test_zshrc_parses_under_zsh():
         capture_output=True,
         check=False,
         timeout=300,
+        start_new_session=True,
     )
     assert result.returncode == 0, result.stderr
 
@@ -538,6 +548,7 @@ def test_no_pwsh_local_shadows_a_typed_parameter():
         capture_output=True,
         check=False,
         timeout=300,
+        start_new_session=True,
     )
     assert result.returncode == 0, result.stdout + result.stderr
 
@@ -622,6 +633,7 @@ print "after=[$PROBE]"
         capture_output=True,
         check=False,
         timeout=300,
+        start_new_session=True,
     )
     assert result.returncode == 0, result.stderr
     assert "FOUND_TOO_EARLY" not in result.stdout
@@ -681,6 +693,7 @@ def test_claude_settings_splice_preserves_foreign_keys(tmp_path):
         capture_output=True,
         check=False,
         timeout=300,
+        start_new_session=True,
     )
     assert result.returncode == 0, result.stderr
     out = json.loads(result.stdout)
@@ -697,6 +710,7 @@ def test_claude_settings_splice_preserves_foreign_keys(tmp_path):
         capture_output=True,
         check=False,
         timeout=300,
+        start_new_session=True,
     )
     assert result.returncode == 0
     assert result.stdout == broken
@@ -806,6 +820,7 @@ def test_wezterm_env_var_channel_mapping_is_exact():
             capture_output=True,
             check=False,
             timeout=300,
+            start_new_session=True,
         )
         assert r.returncode == 0, r.stderr
         sel, chan = r.stdout.split("|")
@@ -828,6 +843,7 @@ def test_wezterm_version_string_parses_to_a_date():
         capture_output=True,
         check=False,
         timeout=300,
+        start_new_session=True,
     )
     assert r.returncode == 0, r.stderr
     lines = [l for l in r.stdout.splitlines() if l.strip()]
@@ -854,6 +870,7 @@ def test_changelog_slicer_counts_against_a_fixture():
         capture_output=True,
         check=False,
         timeout=300,
+        start_new_session=True,
     )
     assert r.returncode == 0, r.stderr
     tally = r.stdout.strip()
@@ -877,6 +894,7 @@ def test_changelog_slicer_counts_against_a_fixture():
         capture_output=True,
         check=False,
         timeout=300,
+        start_new_session=True,
     )
     older = dict(
         zip(r2.stdout.split()[::2], (int(n) for n in r2.stdout.split()[1::2]), strict=False)
@@ -899,6 +917,7 @@ def test_wezterm_queries_fail_open_when_offline():
         capture_output=True,
         check=False,
         timeout=300,
+        start_new_session=True,
     )
     assert r.returncode == 0, r.stderr
     assert "RC=0" in r.stdout
@@ -976,6 +995,7 @@ def _sh_eval(snippet):
         capture_output=True,
         check=False,
         timeout=300,
+        start_new_session=True,
     )
     assert r.returncode == 0, r.stderr
     return r.stdout.strip()
@@ -1223,6 +1243,7 @@ def _smb_eval(tmp_path, local_conf, snippet, tracked="set default_user guest\n")
         check=False,
         env=env,
         timeout=300,
+        start_new_session=True,
     )
     assert r.returncode == 0, r.stderr
     return r.stdout.strip()
@@ -1295,6 +1316,7 @@ def test_smb_help_works_without_a_clone():
         check=False,
         env=env,
         timeout=300,
+        start_new_session=True,
     )
     assert r.returncode == 0, r.stderr
     assert r.stdout.startswith("tstack smb —")
@@ -1430,7 +1452,11 @@ def test_common_arch_tag_rust_uses_aarch64_not_arm64():
     def tag(machine, style):
         script = f'{fn.group(0)}\nuname() {{ echo "{machine}"; }}\ncommon_arch_tag {style}\n'
         return subprocess.run(
-            [BASH, "-c", script], capture_output=True, text=True, timeout=300
+            [BASH, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=300,
+            start_new_session=True,
         ).stdout.strip()
 
     assert tag("aarch64", "rust") == "aarch64"
@@ -2124,6 +2150,7 @@ def test_exclusive_group_survives_a_non_member_tick_bash():
             check=False,
             stdin=subprocess.DEVNULL,
             timeout=60,
+            start_new_session=True,
         )
         assert r.stdout.split() == want, f"{answers}: got {r.stdout.split()!r}"
 
@@ -2140,6 +2167,7 @@ def test_exclusive_group_survives_a_non_member_tick_pwsh():
             capture_output=True,
             check=False,
             timeout=300,
+            start_new_session=True,
         )
         line = next((l for l in r.stdout.splitlines() if l.startswith("RESULT=")), None)
         assert line is not None, r.stdout + r.stderr
@@ -2162,7 +2190,14 @@ def test_installed_apps_report_survives_a_tool_that_rejects_version():
         'PATH=/tmp/_tsbin:$PATH ts_report_installed_apps "tmux" >/dev/null\n'
         "echo SURVIVED\n"
     )
-    r = subprocess.run([BASH, "-c", script], cwd=ROOT, capture_output=True, text=True, timeout=300)
+    r = subprocess.run(
+        [BASH, "-c", script],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=300,
+        start_new_session=True,
+    )
     assert "SURVIVED" in r.stdout, f"report aborted: {r.stderr.strip()[:200]}"
     # And the guard must be in the source, not incidental.
     cfg = _uncommented((ROOT / "bootstrap/_config.sh").read_text(encoding="utf-8"))
@@ -2262,7 +2297,14 @@ def test_service_probes_treat_any_http_response_as_up():
         "ts_probe_http http://127.0.0.1:9 1 && echo BAD_UP || echo ok_down\n"
         "ts_probe_http_ok http://127.0.0.1:9 1 && echo BAD_OK || echo ok_not_ok\n"
     )
-    r = subprocess.run([BASH, "-c", script], cwd=ROOT, capture_output=True, text=True, timeout=300)
+    r = subprocess.run(
+        [BASH, "-c", script],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=300,
+        start_new_session=True,
+    )
     assert "BAD_" not in r.stdout, r.stdout
     assert r.stdout.split() == ["ok_down", "ok_not_ok"], r.stdout
     agents = _uncommented((ROOT / "bootstrap/ts-agents.sh").read_text(encoding="utf-8"))
@@ -2355,6 +2397,7 @@ def test_nightly_is_preticked_even_when_stable_is_installed():
             text=True,
             stdin=subprocess.DEVNULL,
             timeout=300,
+            start_new_session=True,
         )
         return r.stdout.split()
 
@@ -2387,6 +2430,7 @@ def _self_summary_sh(text):
         capture_output=True,
         text=True,
         timeout=300,
+        start_new_session=True,
     )
     return r.stdout.strip()
 
@@ -2441,6 +2485,7 @@ def test_codex_direct_stop_message_feeds_self_summary(tmp_path):
         check=True,
         env=env,
         timeout=300,
+        start_new_session=True,
     )
     assert "Codex used its own summary" in result.stdout
     assert "I'm waiting for you" not in result.stdout
@@ -2469,6 +2514,7 @@ def test_speak_marker_is_never_spoken_verbatim():
         capture_output=True,
         text=True,
         timeout=300,
+        start_new_session=True,
     )
     assert "hidden text" not in r.stdout and "<!--" not in r.stdout, r.stdout
     lib = CC_TTS_LIB.read_text(encoding="utf-8")

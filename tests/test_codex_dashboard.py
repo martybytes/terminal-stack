@@ -29,6 +29,7 @@ def test_enhanced_profile_hides_native_status_line():
         capture_output=True,
         check=True,
         timeout=300,
+        start_new_session=True,
     ).stdout
     profile = tomllib.loads(rendered)
     assert profile["tui"]["status_line"] == []
@@ -42,6 +43,7 @@ def test_enhanced_profile_registers_async_question_hook():
         capture_output=True,
         check=True,
         timeout=300,
+        start_new_session=True,
     ).stdout
     profile = tomllib.loads(rendered)
     question = profile["hooks"]["PreToolUse"]
@@ -106,6 +108,7 @@ def test_profile_modifier_preserves_codex_hook_trust_state():
         capture_output=True,
         check=True,
         timeout=300,
+        start_new_session=True,
     ).stdout
     second = subprocess.run(
         [sys.executable, str(PROFILE)],
@@ -114,6 +117,7 @@ def test_profile_modifier_preserves_codex_hook_trust_state():
         capture_output=True,
         check=True,
         timeout=300,
+        start_new_session=True,
     ).stdout
     parsed = tomllib.loads(first)
     assert parsed["tui"]["status_line"] == []

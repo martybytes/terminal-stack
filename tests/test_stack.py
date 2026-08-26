@@ -105,6 +105,7 @@ def _dry_run(*args):
         text=True,
         env=env,
         timeout=300,
+        start_new_session=True,
     )
     return r.stdout
 
@@ -151,7 +152,13 @@ def test_status_survives_an_absent_engine():
         "PATH": "/usr/bin:/bin",
     }
     r = subprocess.run(
-        [BASH, str(SH), "status"], cwd=ROOT, capture_output=True, text=True, env=env, timeout=300
+        [BASH, str(SH), "status"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=300,
+        start_new_session=True,
     )
     assert r.returncode == 0, r.stdout + r.stderr
     assert "engine unreachable" in r.stdout + r.stderr
@@ -173,7 +180,14 @@ def test_docker_kind_calls_the_desktop_stub_what_it_is():
         'TS_STACK_DOCKER_PROBE=wsl-shim tss_engine_advice linux "$(TS_STACK_DOCKER_PROBE=wsl-shim tss_docker_kind)"\n'
         'rm -rf "$bin"\n'
     )
-    r = subprocess.run([BASH, "-c", script], cwd=ROOT, capture_output=True, text=True, timeout=300)
+    r = subprocess.run(
+        [BASH, "-c", script],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=300,
+        start_new_session=True,
+    )
     assert "wsl-shim" in r.stdout, r.stdout + r.stderr
     assert "WSL Integration" in r.stdout, "the advice must name the actual fix"
     assert "is Docker Desktop running" not in r.stdout
@@ -411,7 +425,12 @@ def test_no_tracked_file_carries_personal_infrastructure():
     # This file names the strings it forbids, and CHANGELOG/decisions are history.
     exempt = {"CHANGELOG.md", "docs/decisions.md", "LICENSE", "tests/test_stack.py"}
     files = subprocess.run(
-        ["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, timeout=300
+        ["git", "ls-files"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=300,
+        start_new_session=True,
     ).stdout.split()
     for rel in files:
         if rel in exempt or rel.startswith("services/console/public/"):
