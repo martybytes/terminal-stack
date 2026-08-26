@@ -6,7 +6,24 @@ import subprocess
 import sys
 from pathlib import Path
 
-import tomllib
+try:
+    import tomllib  # Python 3.11+
+except ModuleNotFoundError:  # pragma: no cover - depends on the interpreter
+    tomllib = None  # type: ignore[assignment]
+
+import pytest
+
+# Ubuntu 22.04 -- an LTS still in support -- ships Python 3.10, where tomllib does
+# not exist, and the whole suite failed to COLLECT there rather than skipping one
+# file. The stack's declared floor is 3.10 (pyproject.toml, and the pwsh probe in
+# $PROFILE), so this file steps aside instead; raising the floor to 3.11 would
+# break the stack on an LTS that is still supported.
+#
+# Found by tests/parity/run.sh in two seconds. CI never saw it: the runners use
+# 3.12, WSL has 3.14 and Windows has 3.14.
+pytestmark = pytest.mark.skipif(
+    tomllib is None, reason="tomllib needs Python 3.11; the stack supports 3.10"
+)
 
 HELPER = Path(__file__).resolve().parents[1] / "dot_codex/hooks/terminal_stack.py"
 PROFILE = (

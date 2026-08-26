@@ -16,6 +16,34 @@ a change you just made.
 Every technique below was worked out the hard way. None of it needs a GUI, a second
 machine, or a real `chezmoi apply`.
 
+## 0. Parity: run it on a real Linux, in two seconds
+
+```sh
+tests/parity/run.sh                  # debian13, ubuntu2404, ubuntu2204, bash32
+tests/parity/run.sh ubuntu2204       # one target
+tests/parity/run.sh --shell debian13 # a shell inside it, to poke about
+```
+
+**WSL is not native Linux here.** `/mnt/c` exists, interop exists, and
+`tstack/platform.py` reports `wsl` rather than `linux` deliberately - so every
+native-Linux branch was only ever exercised by CI. That is a slow loop and one
+nobody watches while writing the code. The containers run the whole suite in
+about two seconds, against each distro's *own* Python, bash and zsh.
+
+That last part is the point. The runner-provided Python hides a class of problem:
+CI uses 3.12, this machine has 3.14, and Ubuntu 22.04 - an LTS still in support -
+ships 3.10. A test importing `tomllib` (3.11+) broke collection of the entire
+suite there, invisibly to every other gate.
+
+**macOS cannot be added.** Containers share the host kernel, so Darwin cannot be
+containerised, and macOS VMs are restricted to Apple hardware. The `bash32` target
+covers the part of macOS that actually bites this repo - `/bin/bash` is 3.2 there
+and `services/**/*.sh` must be clean under it - but only for *syntax*. It does
+**not** reproduce the locale-dependent multibyte trap (`"$var<non-ascii>"` under
+`set -u`), because musl handles locales differently from Darwin; verified, not
+assumed. That trap stays covered by the test that greps for `$var` followed by a
+non-ASCII byte, which works everywhere. Real macOS remains CI's job.
+
 ## 1. Syntax gates (always, every touched file)
 
 ```sh

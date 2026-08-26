@@ -101,6 +101,64 @@ jobs:
           got="$(python3 -c 'import sys; sys.path.insert(0, "."); from tstack import platform as p; print(p.kind())')"
           [ "$got" = "wsl" ] || { echo "platform.kind() reported '$got', expected 'wsl'"; exit 1; }
 
+  parity:
+    # The runner-provided Python hides a whole class of problem. ubuntu-latest
+    # gives 3.12; this repo's floor is 3.10, which is what Ubuntu 22.04 ships --
+    # an LTS still in support. A test importing tomllib (3.11+) broke collection
+    # of the ENTIRE suite there, and nothing else in this workflow could see it.
+    #
+    # Debian is here because it is a first-class target of the stack and was
+    # never actually tested, only assumed to behave like Ubuntu.
+    name: parity (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    container: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["debian:13-slim", "ubuntu:24.04", "ubuntu:22.04"]
+    steps:
+      - name: Install the suite's dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            python3 python3-pip python3-venv bash zsh git ca-certificates
+          python3 -m venv /opt/venv
+          /opt/venv/bin/pip install --no-cache-dir pytest pytest-cov hypothesis
+      - uses: actions/checkout@v4
+      - name: Syntax gates with this distro's own bash and zsh
+        run: |
+          set -e
+          git config --global --add safe.directory "$PWD"
+          zsh -n dot_zshrc
+          for f in bootstrap/*.sh services/*.sh services/stacks/*/*.sh \
+                   install-*.sh run_after_90-sync-windows.sh run_before_*.sh; do
+            [ -e "$f" ] || continue
+            case "$f" in *.tmpl) continue ;; esac
+            bash -n "$f"
+          done
+      - name: pytest on this distro's own Python
+        run: |
+          /opt/venv/bin/python -V
+          /opt/venv/bin/python -m pytest tests/ -o addopts= -q
+
+  bash32:
+    # /bin/bash on macOS is 3.2, and services/**/*.sh are required to be clean
+    # under it. Catches bash-4-only syntax; does NOT reproduce the locale
+    # multibyte trap, which musl handles differently from Darwin -- see the note
+    # in tests/parity/run.sh.
+    name: bash 3.2 (macOS shell proxy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          docker run --rm -v "$PWD:/repo:ro" bash:3.2 bash -c '
+            rc=0
+            for f in /repo/services/*.sh /repo/services/stacks/*/*.sh; do
+              [ -e "$f" ] || continue
+              bash -n "$f" || rc=1
+            done
+            exit $rc'
+
   docs:
     # Every ts-* name died in one change set, across ~650 occurrences in prose.
     # A link checker is the only thing that catches the ones that pointed at a

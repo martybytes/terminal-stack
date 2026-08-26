@@ -49,12 +49,24 @@ python3 -m pytest tests/ --cov
 
 `.githooks/pre-commit` runs the first four; `.githooks/pre-push` adds coverage and
 the characterization fixtures. They only fire when the clone has
-`core.hooksPath=.githooks` — `ts_install_git_hooks` sets it, and until 2026-08-25
+`core.hooksPath=.githooks` - `ts_install_git_hooks` sets it, and until 2026-08-25
 nothing did, so the gate had never run anywhere. Check it in a fresh clone.
 
 **Two platforms must both be green on the same commit**: native pwsh and WSL
-Ubuntu. macOS and native Debian/Ubuntu are covered by
-`.github/workflows/ci.yml`, which cannot be run from this machine.
+Ubuntu. macOS is covered only by `.github/workflows/ci.yml` and cannot be run from
+this machine.
+
+Native Linux is not one of those two, and WSL is not a stand-in for it -
+`tstack/platform.py` reports `wsl` there on purpose. Run it for real:
+
+```sh
+tests/parity/run.sh
+```
+
+Debian 13, Ubuntu 24.04, Ubuntu 22.04 and a bash 3.2 syntax gate, in containers, in
+about two seconds, each on its *own* Python. That last part is why it exists: the
+repo's floor is Python 3.10, which is what Ubuntu 22.04 ships, while CI has 3.12 and
+this machine has 3.14. Same jobs run in CI. Details: `docs/verifying-changes.md` § 0.
 
 - Do not use `chezmoi re-add` on templated terminal-stack targets; it replaces
   template directives with machine-rendered content. Full rule, including the
@@ -63,7 +75,7 @@ Ubuntu. macOS and native Debian/Ubuntu are covered by
 ## Never weaken a gate to make it pass
 
 Do not skip, `xfail`, delete or loosen a test to get green. If a test fails,
-either the code is wrong or the test's anchor moved — repoint the anchor, keeping
+either the code is wrong or the test's anchor moved - repoint the anchor, keeping
 the rule it enforces. A test that asserts a string appears in a file must fail
 when that file is missing; use `repo_file()` in `tests/test_agent_tools.py` rather
 than reading a path directly, or the assertion goes vacuous the day the file is

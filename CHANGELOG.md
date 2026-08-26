@@ -6,6 +6,29 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Added
 
+- **Parity containers: the suite on a real Linux, in two seconds (08/25/2026).**
+  `tests/parity/run.sh` runs the whole suite inside Debian 13, Ubuntu 24.04 and
+  Ubuntu 22.04 containers, against each distro's *own* Python, bash and zsh, plus a
+  `bash32` target that syntax-checks `services/**` under the bash 3.2 that macOS
+  ships as `/bin/bash`. WSL is not native Linux for this repo: `/mnt/c` exists,
+  interop exists, and `tstack/platform.py` reports `wsl` rather than `linux` on
+  purpose, so every native-Linux branch was previously exercised only by CI - a
+  slow loop nobody watches while writing the code. These run in about two seconds.
+
+  It found a real break on its first run. Ubuntu 22.04 - an LTS still in support -
+  ships Python 3.10, where `tomllib` does not exist, and
+  `tests/test_codex_dashboard.py` imported it at module scope. That failed
+  *collection* of the entire suite, not one file. Nothing else could see it: CI
+  uses 3.12, WSL has 3.14 and Windows has 3.14. The file now skips itself rather
+  than raising the stack's floor to 3.11 and dropping a supported LTS.
+
+  macOS cannot be added and is not pretended at: containers share the host kernel,
+  so Darwin cannot be containerised. `bash32` covers the part of macOS that
+  actually bites here, and only for syntax - the locale-dependent multibyte
+  `set -u` trap does **not** reproduce under musl (verified, not assumed) and stays
+  covered by the test that greps for `$var` followed by a non-ASCII byte. The same
+  three distros plus `bash32` are now CI jobs.
+
 - **The settings schema, and one writer for the config store (08/26/2026).**
   `tstack/schema.py` says what every saved setting *is* - kind, allowed values, default,
   which group it belongs to, and **which layer supplied its current value**. That last

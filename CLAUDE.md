@@ -6,7 +6,7 @@ Architecture and invariants. Process rules (which clone, what to commit, how to 
 
 A chezmoi source tree that deploys a Windows 11 + WSL2 Ubuntu + native Linux (Debian/Ubuntu) terminal stack (WezTerm, tmux, Starship, zsh, PowerShell `$PROFILE`, Claude Code hooks/settings, modern CLI tools) from one git repo to three targets with a single `chezmoi apply`. On native Linux the `run_after` Windows-sync hook self-no-ops (no `/mnt/c/` mount), so the same source tree is correct everywhere.
 
-"Running" the project means applying configs to the host. Gates: `pytest tests/`, `ruff check` / `ruff format --check` / `mypy` (`pyproject.toml`), CI (`.github/workflows/ci.yml`: ubuntu + macos + windows + WSL), `.githooks/pre-commit` and `pre-push`.
+"Running" the project means applying configs to the host. Gates: `pytest tests/`, `ruff check` / `ruff format --check` / `mypy` (`pyproject.toml`), CI (`.github/workflows/ci.yml`: ubuntu + macos + windows + WSL + parity containers), `.githooks/pre-commit` and `pre-push`.
 
 **Verify a claim before repeating it.** Every "X is pinned by a test" here was checked against `tests/`; several were false, one of which meant no gate ran at all. See `docs/decisions.md` § "The claims audit".
 
@@ -27,7 +27,7 @@ chezmoi re-add ~/.zshrc
 
 **The one `re-add` rule.** Correct **only** when the stack owns the target outright **and** its source is not a template. `~/.zshrc`: safe. Part-owned (`~/.claude/settings.json`, `~/.cursor/hooks.json`): never, they hold another tool's state. Templated (`*.tmpl` source): never, re-add writes back the *rendered* file and destroys the directives. ARCHITECTURE.md and AGENTS.md each state one case; scope was the missing word.
 
-CI (`.github/workflows/ci.yml`) covers macOS and native Debian/Ubuntu, which no local run can. It does not replace `docs/verifying-changes.md`, which holds what a machine cannot assert for you (headless WezTerm load test, throwaway config stores, the Nerd Font glyph check); `INSTALL.md` § Phase 9 is the fresh-machine smoke test.
+CI covers macOS, which no local run can; `tests/parity/run.sh` covers native Debian/Ubuntu locally in containers, on each distro's own Python. It does not replace `docs/verifying-changes.md`, which holds what a machine cannot assert for you (headless WezTerm load test, throwaway config stores, the Nerd Font glyph check); `INSTALL.md` § Phase 9 is the fresh-machine smoke test.
 
 ## The architectural twist: one source repo, three targets
 
@@ -142,7 +142,7 @@ same-day backup. Stated in full, with the incident behind it, in
 - `docs/cross-side-chezmoi.md` — deep dive on the chezmoi + run_after mechanism
 - `docs/developing-wezterm.md` — edit → sync/apply → reload loop for WezTerm config (Windows `sync-windows.ps1`, macOS chezmoi)
 - `docs/powershell-quirks.md` — every weird Windows-side workaround with cause and fix
-- `docs/verifying-changes.md` — how to check a change before committing (replaces the missing CI)
+- `docs/verifying-changes.md` — how to check a change before committing, including `tests/parity/run.sh`
 - `docs/decisions.md` — design choices that aren't obvious from the code
 
 ## Personal-path note
