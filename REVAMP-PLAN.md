@@ -225,7 +225,8 @@ Each is its own branch, `merge --no-ff` into `main`, with docs and a `CHANGELOG.
 | 0 foundation | **done** - `tstack` is the only command surface; CI, lint, types and coverage gates in place |
 | 1 `doctor` | **done** - shell twins deleted, registry flipped, characterization corpus established |
 | 2 settings schema + the one writer | **done** - infrastructure, no registry flip (see below) |
-| 3-8 | not started |
+| 3 `services` | characterized; port not started (see below) |
+| 4-8 | not started |
 
 Each landed on its own branch and was green on Windows, WSL, ubuntu, macos and
 the WSL CI job before merging.
@@ -238,6 +239,35 @@ per-subcommand, and `tstack config` also has to keep serving `leader`, `theme`,
 So phase 2 delivers what everything after it needs - `tstack/schema.py` and the
 write side of `tstack/store.py` - and flips nothing. The `config` row moves when
 its dispatch does, which is phase 4.
+
+### Phase 3 (`services`): what the characterization found
+
+Measured before writing any of it, because the answer changes the design.
+
+**The library split is clean.** `services/_stack.sh` defines 58 functions.
+`bootstrap/ts-stack.sh` uses 16 of them and the per-stack `ts-verify.sh` scripts
+use 21 - and the two sets share exactly **one**, `tss_os`, a three-line OS probe.
+So the port moves 15 functions (244 lines) into Python and `_stack.sh` shrinks;
+it does not fork into a bash copy and a Python copy. That was the thing worth
+checking first, because if the overlap had been large this port would have
+recreated the twin problem in a new place rather than removing it.
+
+Total surface: 635 (`ts-stack.sh`) + 897 (`ts-stack.ps1`) + 244 (library) =
+about **1,776 lines**, the largest of the phases.
+
+**The WSL handoff exists only because the logic lives twice.** On a WSL distro
+with no Linux Docker CLI, `ts-stack.sh` prints "re-running the Windows twin" and
+re-execs `ts-stack.ps1` through `wslpath`. Recorded live in
+`tests/characterize/services/`. One Python implementation can call `docker.exe`
+over interop directly, so that handoff - and the failure mode where the twin
+errors with a mangled line number - disappears rather than being ported.
+
+**Two things make this phase harder than the ones before it.** It is the only
+subsystem that can destroy data (`reset --purge`, `down -v`, `migrate-volumes`),
+and its real behaviour needs a running Docker engine, which CI does not have. The
+characterization corpus therefore covers the argument and discovery paths; the
+destructive paths need `--dry-run` assertions on the exact `docker` argv, which is
+what `ts-stack --dry-run` already exists to print.
 
 There is one more reason the split lands here. `Set-TerminalStackConfig`'s
 dispatch lives inside `$PROFILE`, which a child process cannot call, so porting

@@ -25,6 +25,13 @@ ROOT = sandbox.ROOT
 # are where a port silently diverges, and they are the ones nobody thinks to
 # check by hand.
 CASES: dict[str, list[dict]] = {
+    "services": [
+        {"case": "help", "sandbox": "throwaway-store", "argv": ["-h"]},
+        {"case": "bad-verb", "sandbox": "throwaway-store", "argv": ["definitely-not-a-verb"]},
+        {"case": "logs-no-stack", "sandbox": "throwaway-store", "argv": ["logs"]},
+        {"case": "bad-stack", "sandbox": "throwaway-store", "argv": ["up", "no-such-stack"]},
+        {"case": "no-clone", "sandbox": "empty-home", "argv": ["status"]},
+    ],
     "config": [
         {"case": "show", "sandbox": "throwaway-store", "argv": ["show"]},
         {"case": "no-clone", "sandbox": "empty-home", "argv": ["show"]},
