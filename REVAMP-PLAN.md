@@ -218,6 +218,18 @@ Each is its own branch, `merge --no-ff` into `main`, with docs and a `CHANGELOG.
 [Unreleased]` entry shipping with the change. Each later phase ends by flipping one
 `registry.py` entry to `python` and deleting the shell twin pair.
 
+## Status
+
+| Phase | State |
+|---|---|
+| 0 foundation | **done** - `tstack` is the only command surface; CI, lint, types and coverage gates in place |
+| 1 `doctor` | **done** - shell twins deleted, registry flipped, characterization corpus established |
+| 2 `config show` + schema | next |
+| 3-8 | not started |
+
+Each landed on its own branch and was green on Windows, WSL, ubuntu, macos and
+the WSL CI job before merging.
+
 **Phase 0 — foundation.** The `tstack/` package with the dispatcher, `--help`,
 `--version` and the routing. Shims in `dot_zshrc` and `$PROFILE`. Every `ts-*` name
 deleted. `$PROFILE:1705` TAB bug fixed. Completions from the registry (the first in the
