@@ -34,6 +34,11 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
   Windows the apply path is `scripts/sync-windows.ps1` and chezmoi is usually present only
   because winget installed it, pointing somewhere unrelated.
 
+- **Failure-path tests for the doctor.** The branches that only run when something is
+  already wrong -- an unreachable service, a probe whose binary is missing, a subprocess
+  timeout, a stale pin, a clone that is not ours -- are exactly the ones a live run on a
+  healthy machine never reaches. Coverage floor 74% -> 78%.
+
 - **Characterization fixtures (`tests/characterize/`).** What the shell did, recorded before it
   was replaced, replayed against the port. Deliberate divergences need a written reason, and a
   test rejects a reason too thin to review. Fixtures carry the platform they represent and are

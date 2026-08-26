@@ -66,4 +66,4 @@ exclude_lines = [
 # RATCHET: raise this with each phase, never lower it. Phase 0 ships the
 # dispatcher, the registry and clone resolution; the number goes up as the shell
 # ports land, because every ported subsystem arrives with its own tests.
-fail_under = 74
+fail_under = 78
