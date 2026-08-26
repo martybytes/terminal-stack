@@ -620,6 +620,18 @@ ts_win_user() {
 # had never run. That is how a literal TAB byte in $PROFILE survived from 54da056,
 # and how services/console's suite stayed red without anyone seeing it.
 #
+# The interpreter tstack itself runs on. python3 is already a hard requirement of
+# this stack (run_after_90-sync-windows.sh refuses to render the Windows templates
+# without it), so a miss here is a broken install rather than a missing option.
+# Twin: _tstack_python in dot_zshrc, Get-TstackPython in $PROFILE.
+ts_python() {
+    local p
+    for p in python3 python; do
+        command -v "$p" >/dev/null 2>&1 && { command -v "$p"; return 0; }
+    done
+    return 1
+}
+
 # core.hooksPath is per-clone config, so it has to be set per clone. Safe to run
 # on a runtime clone too: the hooks only fire on commit or push, which nothing
 # does there. Twin: Install-TsGitHooks in bootstrap/_config.ps1.

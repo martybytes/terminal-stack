@@ -1331,10 +1331,11 @@ function Set-TerminalStackConfig {
             # Restart rather than print the command: the setting and the running
             # state must not disagree, and a headroom still running the old compose
             # file is exactly the silent mismatch this change exists to remove.
-            $stack = Join-Path $src 'bootstrap\ts-stack.ps1'
-            if (Test-Path -LiteralPath $stack) {
+            $python = Get-TstackPython
+            $entry  = Join-Path $src 'tstack\main.py'
+            if ($python -and (Test-Path -LiteralPath $entry)) {
                 Write-Host '  restarting headroom so the change takes effect...'
-                & pwsh -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $stack restart headroom | Out-Host
+                & $python $entry services restart headroom | Out-Host
                 if ($LASTEXITCODE -ne 0) { Write-Warning 'headroom restart failed - run: tstack services restart headroom' }
             }
         }
@@ -1693,19 +1694,6 @@ function Invoke-TsMux {
         default { Write-Warning "tstack mux: unknown command '$cmd' (status, on, off, list, kill, restart, reset)" }
     }
 }
-# The local Docker service stacks. PARALLEL implementation of
-# bootstrap/ts-stack.sh, reached through the script in the clone so `tstack update`
-# ships fixes without a profile re-sync.
-function Invoke-TsStack {
-    $src = Resolve-TsSourceDir
-    if (-not $src) { return }
-    $script = Join-Path $src 'bootstrap\ts-stack.ps1'
-    if (-not (Test-Path -LiteralPath $script)) {
-        Write-Warning "$script not found; run tstack update."; return
-    }
-    & $script @args
-}
-
 
 # Probe known clone locations for one that actually contains the repo — used so
 # the doctor still runs when $env:TERMINAL_STACK_DIR / the default path is wrong.
@@ -1819,8 +1807,8 @@ function Invoke-Tstack {
     # The @() is load-bearing. An `if` used as an expression unrolls a
     # single-element result to a scalar, and splatting a scalar string that
     # starts with '-' re-parses it as a parameter token: `tstack services -h`
-    # arrived at ts-stack.ps1 as two arguments, '-' and 'h', and reported
-    # "no stack named 'h'". With no tail at all it splatted one empty string.
+    # arrived at the services implementation as two arguments, '-' and 'h', and
+    # reported "no stack named 'h'". With no tail it splatted one empty string.
     # Both parse cleanly and both are silent. See docs/powershell-quirks.md.
     $tail = @(if ($passed.Count -gt 1) { $passed[1..($passed.Count - 1)] } else { @() })
     $impl = Get-TstackImpl -SourceDir $source -Name $name

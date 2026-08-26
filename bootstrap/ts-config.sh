@@ -398,7 +398,8 @@ memory_set() {
     # file is exactly the silent mismatch this whole change exists to remove.
     if command -v docker >/dev/null 2>&1; then
         echo "  restarting headroom so the change takes effect..."
-        bash "$SRC/bootstrap/ts-stack.sh" restart headroom ||             echo "  $WARN headroom restart failed — run: tstack services restart headroom" >&2
+        "$(ts_python)" "$SRC/tstack/main.py" services restart headroom || \
+            echo "  $WARN headroom restart failed — run: tstack services restart headroom" >&2
     else
         echo "  no docker on PATH; apply it later with: tstack services restart headroom"
     fi

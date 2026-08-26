@@ -2107,3 +2107,86 @@ registration. Model routing stays independently gated by authenticated `/stats`.
 Trade-off: Docker and `ts-headroom-proxy` must be available when an MCP client
 starts. That dependency already exists for Headroom, and failed reconciliation
 removes stale registrations so Codex starts cleanly in direct mode.
+
+
+## Why `tstack services` stopped handing WSL work to PowerShell
+
+Inside WSL with Docker Desktop's integration switched off, `docker` on PATH is
+Desktop's stub: it exits 1 for every command and prints its complaint on STDOUT,
+so `command -v docker` is true and useless. `bootstrap/ts-stack.sh` handled that
+by re-exec'ing `bootstrap/ts-stack.ps1` through interop for `up`, `down`,
+`restart`, `logs` and `config`, on the reasoning that compose resolves `-f`, build
+contexts and bind mounts as *Windows* paths and a `\\wsl.localhost` 9p share is
+not reliably bind-mountable - a failure that would land after the stack was
+already down.
+
+The reasoning about paths was right. The handoff was a consequence of the logic
+existing twice, and it had two costs that were never written down:
+
+- **It gave up entirely with no pwsh 7**, printing "no Linux Docker CLI in this
+  WSL distro, and no pwsh 7 to hand off to" and exiting 1. Nothing was wrong with
+  the engine; the wrong process was being asked to talk to it.
+- **It covered five verbs of twelve.** `bootstrap`, `test`, `backup`, `reset`,
+  `migrate-volumes`, `doctor` and `status` never handed off, so on exactly the
+  machine that needed the handoff they ran against the stub and failed.
+
+There is one implementation now, so there is nothing to hand off *to*. The Python
+port runs `docker.exe` through interop from the same process
+(`tstack/engine.py:binary_for`), which reaches the identical engine, works with no
+pwsh installed, and covers every verb.
+
+The path constraint is still real and is now stated rather than side-stepped:
+`require_windows_visible` refuses a stack tree that a Windows engine cannot
+bind-mount, **before** anything is torn down, and names the fix. A clone under
+`/mnt/<drive>` is fine, which the canonical
+`%LOCALAPPDATA%\terminal-stack\stack` always is; a clone inside the WSL
+filesystem is not.
+
+That check is pure string work on a POSIX path and must stay that way.
+`Path.resolve()` on Windows - where this suite also runs - turns `/mnt/c/x` into a
+drive-relative path and inverts the answer.
+
+## Why kokoro was never reported as off (and how a twin hid it)
+
+`bootstrap/ts-stack.sh` gated the kokoro stack with:
+
+```sh
+on="$(ts_cc_tts_get enabled 2>/dev/null || echo true)"
+engine="$(ts_cc_tts_get engine 2>/dev/null || echo kokoro)"
+```
+
+The keys are `ccTtsEnabled` and `ccTtsEngine`. `ts_cc_tts_get enabled` therefore
+looked up a `[data]` key that does not exist, got nothing, fell through to
+`ts_cc_tts_default`, whose `*)` branch is the bare word `1` - a command, not a
+value, so the function exited 127. The `|| echo true` guard then turned that
+failure into "TTS is on", and the second line turned it into "engine is kokoro".
+
+**kokoro was reported as enabled on every macOS and Linux machine, whatever the
+settings said**, including machines with voice notifications off entirely. The
+pwsh twin read the real values through `Get-CcTtsConfig` and behaved correctly, so
+the two disagreed on every such machine and nothing compared them: the parity test
+for this subsystem checked that both files *contained the string* `ccTts`, which
+both did.
+
+That is the shape of the failure this whole port exists to remove - not a missing
+test, but a test that could only ever check the two files looked alike. There is
+one implementation now (`tstack/stacks.py:stack_state`) and the test drives it
+with real values instead.
+
+## Why the compose choke point is a class, not a helper
+
+Every docker argv is built in `tstack/stacks.py`'s `Compose.argv`, and
+`tests/test_stack.py` asserts that no other file under `tstack/` builds one. Three
+invariants ride on that being literally true:
+
+- `down` never receives `-v`. Volumes are destroyed only by explicitly gated
+  paths, and the two that do are `test --destroy-data` and `reset --destroy-data`.
+- `--env-file .env` always precedes `--env-file .billing.env`. A lone
+  `--env-file .billing.env` *replaces* `.env` as compose's interpolation source,
+  so every `${OPENAI_*}`-derived `LLM_*` display value resolves to empty: a blank
+  provider panel in the console, no error, everything healthy.
+- `--dry-run` prints the exact argv and runs nothing, naming the real binary
+  (`docker.exe` on the interop path) rather than a plausible-looking `docker`.
+
+A second builder would be a second set of rules that nothing checks, which is how
+the ordering bug happened the first time.

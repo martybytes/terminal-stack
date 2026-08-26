@@ -6,6 +6,37 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Added
 
+- **`tstack services` is one Python program (08/25/2026).**
+  `bootstrap/ts-stack.sh` (635 lines) and `bootstrap/ts-stack.ps1` (897) are
+  deleted, along with 508 lines of `services/_stack.sh` that only they called.
+  What replaces them is `tstack/commands/services.py`, `tstack/stacks.py` and
+  `tstack/engine.py` - one implementation of twelve verbs, on all four platforms.
+  `services/_stack.sh` keeps everything each stack's own `ts-verify.sh` uses; the
+  scripts *inside* the service tree still exist twice, deliberately.
+
+  Two bugs fall out of the merge rather than out of anyone noticing them.
+
+  **kokoro was never reported as off on macOS or Linux.** The bash twin asked for
+  `enabled` and `engine`, where the keys are `ccTtsEnabled` and `ccTtsEngine`, so
+  the lookup always missed, fell through to a default branch that runs the bare
+  word `1` as a command, and the `|| echo true` guard turned that failure into
+  "TTS is on with kokoro". The pwsh twin read the real values, so the two
+  disagreed on every machine with voice notifications off - and the parity test
+  passed throughout, because it checked that both files contained the string
+  `ccTts`.
+
+  **The WSL handoff is gone.** The bash twin re-exec'd the pwsh twin through
+  interop for five of the twelve verbs, gave up entirely on a machine with no
+  pwsh 7, and left the other seven running against Docker Desktop's stub. There
+  is nothing to hand off to now: the same process runs `docker.exe` through
+  interop. The path constraint that motivated the handoff is stated instead of
+  side-stepped - a stack tree a Windows engine cannot bind-mount is refused
+  *before* anything is torn down, naming the fix.
+
+  Exit codes are consistent for the first time: 0 healthy, 1 problems found, 2 the
+  command line was wrong. The same mistake used to exit 2 through Git Bash and 1
+  through the WSL handoff.
+
 - **Parity containers: the suite on a real Linux, in two seconds (08/25/2026).**
   `tests/parity/run.sh` runs the whole suite inside Debian 13, Ubuntu 24.04 and
   Ubuntu 22.04 containers, against each distro's *own* Python, bash and zsh, plus a

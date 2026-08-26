@@ -53,6 +53,27 @@ DIVERGENCES: dict[str, str] = {
 }
 
 
+# A fixture whose EXIT CODE the port deliberately does not reproduce. Keyed by
+# fixture id, because an exit code is a whole-run property rather than a line.
+EXIT_DIVERGENCES: dict[str, str] = {
+    "services/bad-verb": (
+        "Recorded exit 2 through Git Bash and exit 1 through the WSL handoff for the "
+        "same mistake, depending only on which machine ran it. An unknown verb is a "
+        "usage error and the port always exits 2, on every platform."
+    ),
+    "services/bad-stack": (
+        "The bash twin validated the stack name only after re-exec'ing the pwsh twin "
+        "through WSL interop, so a misspelt stack surfaced as a PowerShell Write-Error "
+        "and exit 1. There is one implementation now: the name is checked before "
+        "anything else happens and a bad one is exit 2, with the list of real names."
+    ),
+    "services/logs-no-stack": (
+        "Same handoff, same cause: `logs` with no stack name exited 1 on WSL and 2 "
+        "elsewhere. It is a usage error in both places and now says so in both places."
+    ),
+}
+
+
 def fixture_id(path: Path) -> str:
     return f"{path.parent.name}/{path.stem}"
 
@@ -148,6 +169,17 @@ def test_python_reproduces_the_recorded_behaviour(path: Path):
             f"port output:\n" + "\n".join(f"  {line}" for line in got)
         )
 
+    # Exit codes: 0 healthy, 1 problems found, 2 the command line was wrong. The
+    # third is a deliberate correction rather than a match, so it needs a written
+    # reason like any other divergence.
+    if proc.returncode == 2:
+        reason = EXIT_DIVERGENCES.get(fixture_id(path))
+        assert reason, (
+            f"{fixture_id(path)}: the port exits 2 (usage) where the shell exited "
+            f"{fixture['exit_code']}, and there is no entry in EXIT_DIVERGENCES saying why.\n"
+            f"port output:\n" + "\n".join(f"  {line}" for line in got)
+        )
+        return
     assert proc.returncode in (0, 1), f"unexpected exit {proc.returncode}"
     if expected:
         assert proc.returncode == 1, "problems were detected but the exit code says healthy"
@@ -156,7 +188,7 @@ def test_python_reproduces_the_recorded_behaviour(path: Path):
 def test_every_divergence_is_explained():
     """The waiver list is the review surface. An empty reason is a silent waiver,
     which is the thing this whole corpus exists to prevent."""
-    for needle, reason in DIVERGENCES.items():
+    for needle, reason in {**DIVERGENCES, **EXIT_DIVERGENCES}.items():
         assert needle.strip(), "empty divergence key"
         assert len(reason.split()) >= 12, f"{needle!r}: reason is too thin to review"
 

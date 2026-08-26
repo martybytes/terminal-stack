@@ -68,7 +68,17 @@ rather than a failure.
 
 - **engine down** — `tstack services doctor` names which runtime it looked for and how
   to start it. In WSL, `docker` may exist and be Docker Desktop's stub, which
-  exits 1 for every command; doctor says so rather than guessing.
+  exits 1 for every command; doctor says so rather than guessing, and every verb
+  reaches the Windows engine through `docker.exe` instead of failing.
+
+  One case is refused rather than attempted: a clone **inside** the WSL
+  filesystem. A Windows engine cannot bind-mount `\\wsl.localhost`, and the
+  failure would land after the stack was already down. Keep the clone under a
+  Windows drive (the canonical `%LOCALAPPDATA%\terminal-stack\stack` is), or
+  enable this distro under Docker Desktop → Settings → Resources → WSL
+  Integration.
+- **exit codes** — `0` healthy, `1` something is wrong, `2` the command line was
+  wrong (unknown verb, unknown stack, `logs` with no stack).
 - **a stack will not start** — `tstack services config <stack>` first. A missing
   required value fails there, by name.
 - **it says "Up" but does not work** — that is what `tstack services test` is for.

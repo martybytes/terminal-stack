@@ -225,7 +225,7 @@ Each is its own branch, `merge --no-ff` into `main`, with docs and a `CHANGELOG.
 | 0 foundation | **done** - `tstack` is the only command surface; CI, lint, types and coverage gates in place |
 | 1 `doctor` | **done** - shell twins deleted, registry flipped, characterization corpus established |
 | 2 settings schema + the one writer | **done** - infrastructure, no registry flip (see below) |
-| 3 `services` | characterized; port not started (see below) |
+| 3 `services` | **done** - both twins deleted, registry flipped to python |
 | 4-8 | not started |
 
 Each landed on its own branch and was green on Windows, WSL, ubuntu, macos and

@@ -37,6 +37,12 @@ case-insensitive match over the whole file, **so even a comment naming the
 compose command fails it**. When a probe fails, `tstack agents` prints the verb
 (`tstack services up playwright`), never the command.
 
+Every docker argv in the repo is built in one place, `tstack/stacks.py`'s
+`Compose.argv`, and a test asserts no second file builds one. That choke point is
+what makes the data-safety rules testable rather than merely intended: `down`
+never receives `-v`, and `--env-file .env` always precedes `--env-file
+.billing.env`.
+
 Three consequences. `bootstrap/ts-agentmemory.*` stays outside this tree although
 its whole subject is agentmemory, because it edits `~/.claude`, `~/.codex` and
 `~/.cursor`. `stacks/agentmemory/patch-agentmemory.mjs` stays inside, because it
@@ -69,10 +75,17 @@ server-side record is evidence, because the hook always exits 0.
 - **Only one memory backend runs.** AgentMemory or headroom's own store, decided
   by the `memoryBackend` setting outside this tree. Nothing here may make both
   reachable at once.
-- **Every script exists twice** (`foo.sh` + `foo.ps1`), flags mapping one to one.
-  `tests/test_service_script_parity.py` fails otherwise, and deliberate
-  differences go in the divergence register in `docs/service-conventions.md`,
-  which that test reads.
+- **Every script *in this tree* exists twice** (`foo.sh` + `foo.ps1`), flags
+  mapping one to one. `tests/test_service_script_parity.py` fails otherwise, and
+  deliberate differences go in the divergence register in
+  `docs/service-conventions.md`, which that test reads.
+
+  **The CLI that drives them no longer does.** `bootstrap/ts-stack.{sh,ps1}` were
+  a 1,532-line pair kept in agreement by hand; they are now one Python program
+  (`tstack/commands/services.py` + `tstack/stacks.py` + `tstack/engine.py`) and
+  the pair is deleted. The rule survives here because these scripts run *inside*
+  the service tree, are discovered by filename, and each is small enough that a
+  twin is cheaper than an interpreter dependency in a container context.
 
 ## Working here
 

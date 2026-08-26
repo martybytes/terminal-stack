@@ -1,41 +1,48 @@
 """tstack services: the service-lifecycle CLI.
 
-The high-value tests here need no Docker, which is the point — most machines
+The high-value tests here need no Docker, which is the point - most machines
 running this suite have no engine, and the WSL ones have Docker Desktop's stub
 (see test_docker_kind_calls_the_desktop_stub_what_it_is). What they pin instead
 is the argv the CLI *would* run, which is where the data-safety contract lives.
+
+These used to scan two shell twins for agreement. There is one implementation
+now, so they exercise it instead: the rules are the same rules, checked against
+behaviour rather than against two files' source text.
 """
 
+import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
-from tests.shell_support import BASH
+from tstack import engine, stacks
+from tstack.commands import services
 
 ROOT = Path(__file__).resolve().parents[1]
-SH = ROOT / "bootstrap/ts-stack.sh"
-PS = ROOT / "bootstrap/ts-stack.ps1"
+MAIN = ROOT / "tstack/main.py"
 
 
-def _help_text(path, marker):
-    """The HELP block out of either twin, without running anything."""
-    text = path.read_text(encoding="utf-8")
-    start = text.index(marker) + len(marker)
-    end = text.index("'@" if marker.endswith("@'\n") else "'\n\n", start)
-    return text[start:end]
-
-
-def test_help_is_byte_identical_between_the_twins():
-    """`change one, change the other` is only checkable if -h is pinned. Both
-    twins carry the text inline rather than shelling out, because -h has to work
-    on a box where the clone or the engine is the thing that is broken."""
-    sh = _help_text(SH, "HELP='")
-    ps = _help_text(PS, "$HELP = @'\n")
-    assert sh.rstrip("\n") == ps.rstrip("\n"), (
-        "the -h text diverged:\n--- sh\n" + sh + "\n--- ps\n" + ps
-    )
+def test_there_is_exactly_one_help_text_and_it_covers_every_verb():
+    """The old rule was "keep the two -h strings byte-identical", enforced by
+    diffing bootstrap/ts-stack.sh against bootstrap/ts-stack.ps1. One
+    implementation makes that structurally true, so what is worth pinning now is
+    that the help and the dispatch table cannot drift apart -- a verb that runs
+    but is undocumented is the same failure in a new place.
+    """
+    for verb in services.VERBS:
+        listed = f"tstack services {verb}" in services.HELP
+        # status is documented as the default, in brackets.
+        listed = listed or f"tstack services [{verb}]" in services.HELP
+        assert listed, f"{verb} is not in the help"
+    for verb in services.VERBS:
+        assert verb in services._HANDLERS, f"{verb} parses but has no handler"
+    assert set(services._HANDLERS) == set(services.VERBS)
+    # And nothing else in the repo carries a competing copy to drift from.
+    assert not (ROOT / "bootstrap/ts-stack.sh").exists()
+    assert not (ROOT / "bootstrap/ts-stack.ps1").exists()
 
 
 def test_no_two_script_scope_pwsh_variables_differ_only_by_case():
@@ -62,17 +69,50 @@ def test_no_two_script_scope_pwsh_variables_differ_only_by_case():
     assert not offenders, "\n".join(offenders)
 
 
-def test_toggle_map_is_the_same_in_both_twins():
-    """A stack gated on the wrong saved setting is skipped for the wrong reason."""
-    sh = SH.read_text(encoding="utf-8") + (ROOT / "services/_stack.sh").read_text(encoding="utf-8")
-    ps = PS.read_text(encoding="utf-8")
+def test_every_stack_is_gated_on_the_right_saved_setting():
+    """A stack gated on the wrong saved setting is skipped for the wrong reason.
+
+    This was two files being scanned for the same strings, which is why the twins
+    could both contain 'ccTts' while only one of them read it correctly -- see
+    test_kokoro_reads_the_real_tts_keys.
+    """
     for stack, key in (
         ("agentmemory", "agentmemoryEnabled"),
+        ("agent007memory", "agentmemoryEnabled"),
         ("headroom", "headroomEnabled"),
         ("playwright", "playwrightEnabled"),
         ("kokoro", "ccTts"),
     ):
-        assert key in sh and key in ps, f"{stack} -> {key} missing from a twin"
+        assert stacks.toggle_for(stack) == key
+    # A stack nobody gated runs everywhere, which is the safe default.
+    assert stacks.toggle_for("something-new") == ""
+
+
+def test_kokoro_reads_the_real_tts_keys(monkeypatch):
+    """The bash twin asked for `enabled` and `engine`; the keys are `ccTtsEnabled`
+    and `ccTtsEngine`. Its lookup therefore always missed, fell through to a
+    default branch that ran the non-existent command `1`, and its `|| echo true`
+    guard turned that failure into "TTS is on, engine kokoro" -- so kokoro was
+    never once reported as off on macOS or Linux however the machine was set up,
+    while the pwsh twin read the real values and disagreed.
+    """
+    from tstack import store
+
+    seen: dict[str, str] = {}
+
+    def fake_get(key, default=None):
+        return seen.get(key, default if default is not None else "")
+
+    monkeypatch.setattr(store, "get", fake_get)
+
+    seen = {"ccTtsEnabled": "false", "ccTtsEngine": "kokoro"}
+    assert stacks.stack_state("kokoro") == "voice notifications are off"
+
+    seen = {"ccTtsEnabled": "true", "ccTtsEngine": "edge"}
+    assert stacks.stack_state("kokoro") == "ccTts.engine=edge"
+
+    seen = {"ccTtsEnabled": "true", "ccTtsEngine": "kokoro"}
+    assert stacks.stack_state("kokoro") == ""
 
 
 def test_only_ts_stack_may_run_docker():
@@ -84,22 +124,40 @@ def test_only_ts_stack_may_run_docker():
     for rel in ("bootstrap/ts-agents.sh", "bootstrap/ts-agents.ps1"):
         text = (ROOT / rel).read_text(encoding="utf-8").lower()
         assert "docker compose" not in text, f"{rel} must not name the compose command"
-    # And the CLI that may is the one that says so.
-    assert "docker compose" in SH.read_text(encoding="utf-8")
-    assert "docker compose" in PS.read_text(encoding="utf-8")
+    # And the one place that may is the compose choke point. Every docker argv is
+    # built there, which is the whole reason the invariants below are testable at
+    # all: a second site would be a second set of rules nobody checks.
+    argv = stacks.Compose(ROOT, engine.NATIVE).argv("agentmemory", ["up", "-d"])
+    assert argv[:2] == ["docker", "compose"], argv
+    builders = [
+        f.name
+        for f in sorted((ROOT / "tstack").rglob("*.py"))
+        if '"compose"' in f.read_text(encoding="utf-8")
+    ]
+    assert builders == ["stacks.py"], f"compose argv is built in more than one place: {builders}"
 
 
 # ── the argv contract ─────────────────────────────────────────────────────────
-def _dry_run(*args):
-    env = {
-        "TERMINAL_STACK_DIR": str(ROOT),
-        "TS_STACK_DOCKER_PROBE": "absent",
-        "NO_COLOR": "1",
-        "HOME": str(Path.home()),
-        "PATH": "/usr/bin:/bin",
-    }
-    r = subprocess.run(
-        [BASH, str(SH), *args, "--dry-run"],
+def _run_cli(*args):
+    """The real entry point, in a child process, with no engine and no store.
+
+    A child rather than an in-process call on purpose: exit codes and stderr are
+    part of this CLI's contract, and the shims act on them.
+    """
+    env = dict(os.environ)
+    env.update(
+        {
+            "TERMINAL_STACK_DIR": str(ROOT),
+            "TS_STACK_DOCKER_PROBE": "absent",
+            "NO_COLOR": "1",
+            "PYTHONIOENCODING": "utf-8",
+            # No chezmoi: every toggle falls back to its default, so the argv is a
+            # property of the code rather than of the machine running the suite.
+            "TERMINAL_STACK_CHEZMOI": str(ROOT / "no-such-chezmoi"),
+        }
+    )
+    return subprocess.run(
+        [sys.executable, str(MAIN), "services", *args],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -107,10 +165,12 @@ def _dry_run(*args):
         timeout=300,
         start_new_session=True,
     )
-    return r.stdout
 
 
-@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+def _dry_run(*args):
+    return _run_cli(*args, "--dry-run").stdout
+
+
 def test_down_never_receives_dash_v():
     """`down -v` destroys the headroom knowledge graph and every vector. The
     invariant is that -v cannot reach this argv, and it is a test rather than a
@@ -121,7 +181,6 @@ def test_down_never_receives_dash_v():
     assert "docker volume rm" not in out
 
 
-@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_restart_is_down_then_up_not_compose_restart():
     """`docker compose restart` reuses the existing container, so it ignores the
     changed .env or overlay that is the whole reason anyone restarts."""
@@ -132,7 +191,6 @@ def test_restart_is_down_then_up_not_compose_restart():
     assert out.index("down") < out.index("up -d")
 
 
-@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_naming_a_stack_overrides_its_saved_toggle():
     """Asking by name is consent; otherwise a machine with the setting off could
     never start the stack to try it."""
@@ -140,57 +198,78 @@ def test_naming_a_stack_overrides_its_saved_toggle():
     assert re.search(r"\(headroom\) docker compose\b.*\bup -d\b", out), out
 
 
-@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_status_survives_an_absent_engine():
     """The most common state on a fresh box, and on any box where Docker Desktop
     is not running. One headline, not a wall of failures."""
-    env = {
-        "TERMINAL_STACK_DIR": str(ROOT),
-        "TS_STACK_DOCKER_PROBE": "absent",
-        "NO_COLOR": "1",
-        "HOME": str(Path.home()),
-        "PATH": "/usr/bin:/bin",
-    }
-    r = subprocess.run(
-        [BASH, str(SH), "status"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        env=env,
-        timeout=300,
-        start_new_session=True,
-    )
+    r = _run_cli("status")
     assert r.returncode == 0, r.stdout + r.stderr
     assert "engine unreachable" in r.stdout + r.stderr
+    # One headline, and no stack reported as broken: with no engine their state is
+    # unknown, not wrong. `!!` is the problem gutter, and it must not appear.
+    assert "!!" not in r.stdout, r.stdout
+    assert "all checks passed" in r.stdout
 
 
-@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
-def test_docker_kind_calls_the_desktop_stub_what_it_is():
+def test_a_usage_error_exits_two_and_a_failure_exits_one():
+    """The shell twins blurred these: `logs` with no stack exited 1 on WSL because
+    it had already handed off to pwsh, and 2 elsewhere. A caller cannot key off
+    that. Usage is always 2."""
+    assert _run_cli("definitely-not-a-verb").returncode == 2
+    assert _run_cli("logs").returncode == 2
+    assert _run_cli("up", "no-such-stack").returncode == 2
+    assert _run_cli("--tail", "banana", "logs", "agentmemory").returncode == 2
+    assert _run_cli("-h").returncode == 0
+
+
+def test_docker_kind_calls_the_desktop_stub_what_it_is(tmp_path, monkeypatch):
     """`docker` on PATH inside WSL is Docker Desktop's stub when integration is
     off: it exits 1 for every command and prints its complaint on STDOUT, so
-    `command -v docker` is true and useless. Diagnosing that as "is Docker
-    Desktop running?" is wrong — the engine may be perfectly healthy on the
-    Windows side."""
-    script = (
-        f'. "{(ROOT / "services/_stack.sh").as_posix()}"\n'
-        "bin=$(mktemp -d)\n"
-        'printf "#!/bin/sh\\necho \\"The command \'docker\' could not be found in this WSL 2 distro.\\"\\nexit 1\\n" > "$bin/docker"\n'
-        'chmod +x "$bin/docker"\n'
-        'PATH="$bin:$PATH" tss_docker_kind; echo\n'
-        'TS_STACK_DOCKER_PROBE=wsl-shim tss_engine_advice linux "$(TS_STACK_DOCKER_PROBE=wsl-shim tss_docker_kind)"\n'
-        'rm -rf "$bin"\n'
-    )
-    r = subprocess.run(
-        [BASH, "-c", script],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        timeout=300,
-        start_new_session=True,
-    )
-    assert "wsl-shim" in r.stdout, r.stdout + r.stderr
-    assert "WSL Integration" in r.stdout, "the advice must name the actual fix"
-    assert "is Docker Desktop running" not in r.stdout
+    `which docker` is true and useless. Diagnosing that as "is Docker Desktop
+    running?" is wrong - the engine may be perfectly healthy on the Windows side.
+    """
+    stub = tmp_path / ("docker.bat" if os.name == "nt" else "docker")
+    if os.name == "nt":
+        stub.write_text(
+            "@echo off\r\n"
+            "echo The command 'docker' could not be found in this WSL 2 distro.\r\n"
+            "exit /b 1\r\n",
+            encoding="utf-8",
+        )
+    else:
+        stub.write_text(
+            "#!/bin/sh\n"
+            "echo \"The command 'docker' could not be found in this WSL 2 distro.\"\n"
+            "exit 1\n",
+            encoding="utf-8",
+        )
+        stub.chmod(0o755)
+    monkeypatch.delenv("TS_STACK_DOCKER_PROBE", raising=False)
+    monkeypatch.setenv("PATH", str(tmp_path) + os.pathsep + os.environ.get("PATH", ""))
+    monkeypatch.setenv("PATHEXT", ".BAT;.EXE" if os.name == "nt" else "")
+    assert engine.docker_kind() == engine.WSL_SHIM
+
+    advice = "\n".join(engine.engine_advice(engine.LINUX, engine.WSL_SHIM))
+    assert "WSL Integration" in advice, "the advice must name the actual fix"
+    assert "is Docker Desktop running" not in advice
+
+
+def test_the_wsl_shim_runs_docker_exe_rather_than_handing_off_to_pwsh():
+    """The bash twin re-exec'd bootstrap/ts-stack.ps1 through interop, gave up
+    entirely on a machine with no pwsh 7, and only ever covered five of the twelve
+    verbs that way. One implementation reaches the same engine directly."""
+    assert engine.binary_for(engine.WSL_SHIM) == "docker.exe"
+    assert engine.binary_for(engine.NATIVE) == "docker"
+    argv = stacks.Compose(ROOT, engine.WSL_SHIM).argv("agentmemory", ["up", "-d"])
+    assert argv[0] == "docker.exe"
+
+
+def test_a_wsl_only_clone_is_refused_before_anything_is_torn_down():
+    """A Windows engine cannot bind-mount a \\\\wsl.localhost 9p path, and the
+    failure surfaces inside a container as tar saying "Cannot open" - which reads
+    as a broken archive rather than a broken mount, after the stack is down."""
+    assert engine.require_windows_visible(Path("/mnt/c/Users/x/stack")) is None
+    reason = engine.require_windows_visible(Path("/home/x/stack"))
+    assert reason and "cannot bind-mount" in reason
 
 
 # ── one resolution rule, six copies ───────────────────────────────────────────
@@ -321,49 +400,67 @@ def test_the_volume_rename_map_names_the_volumes_as_they_are_on_disk():
     headroom, while the two agentmemory volumes are external and never had one.
     Getting this wrong means the guard never fires and compose starts the stack
     on an empty volume, reporting success."""
-    lib = (ROOT / "services/_stack.sh").read_text(encoding="utf-8")
-    ps = PS.read_text(encoding="utf-8")
-    for old, new in (
+    assert stacks.VOLUME_RENAMES == (
         ("agentmemory_iii-data", "ts-agentmemory-data"),
         ("agent007memory_history", "ts-agentmemory-console-history"),
         ("headroom_headroom_workspace", "ts-headroom-workspace"),
         ("headroom_qdrant_data", "ts-headroom-qdrant"),
         ("headroom_neo4j_data", "ts-headroom-neo4j"),
-    ):
-        assert f"{old} {new}" in lib, f"bash map missing {old}"
-        assert old in ps and new in ps, f"pwsh map missing {old}"
+    )
+    # The two memory volumes are the ones you would miss, so backup lists them
+    # first and --purge is the only thing that removes them.
+    assert stacks.DATA_VOLUMES[:2] == stacks.MEMORY_VOLUMES
 
 
-def test_up_refuses_while_a_legacy_volume_has_no_replacement():
+def test_up_refuses_while_a_legacy_volume_has_no_replacement(monkeypatch, capsys):
     """Compose would create an empty ts- volume and start the stack with no
-    memories in it, reporting success. Both twins refuse and name one command."""
-    for text, name in (
-        (SH.read_text(encoding="utf-8"), "bash"),
-        (PS.read_text(encoding="utf-8"), "pwsh"),
-    ):
-        i = text.index("    'up' {") if name == "pwsh" else text.index("    up)")
-        window = text[i : i + 1200]
-        assert "migrate-volumes" in window, f"the {name} up path does not name the fix"
-        assert "pre-ts- names" in window, f"the {name} up path does not explain the refusal"
+    memories in it, reporting success. It refuses, names one command, and starts
+    nothing."""
+    started = []
+    monkeypatch.setattr(
+        stacks, "volumes_pending", lambda kind: [("agentmemory_iii-data", "ts-agentmemory-data")]
+    )
+    monkeypatch.setattr(
+        stacks.Compose, "run", lambda self, stack, args, capture=False: started.append(args)
+    )
+    svc = services.Services(ROOT, services.parse(["up"]))
+    svc.stacks = ["agentmemory"]
+    with pytest.raises(SystemExit) as raised:
+        services.cmd_up(svc)
+    assert raised.value.code == 1
+    out = capsys.readouterr().out
+    assert "migrate-volumes" in out, "the refusal does not name the fix"
+    assert "pre-ts- names" in out, "the refusal does not explain itself"
+    assert started == [], "it started something anyway"
 
 
-@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_the_billing_overlay_never_replaces_the_default_env_file():
     """A lone `--env-file .billing.env` REPLACES .env as compose's interpolation
     source, so every ${OPENAI_*}-derived LLM_* display value resolves to empty:
     a blank provider panel in the console, no error, everything healthy. The
     ordering used to live in update-console.*, which this replaced."""
-    # The bash choke point is tss_compose in the shared library; the pwsh one is
-    # Invoke-TsStackCompose in the script itself.
-    for text in (
-        (ROOT / "services/_stack.sh").read_text(encoding="utf-8"),
-        PS.read_text(encoding="utf-8"),
-    ):
-        i = text.index(".billing.env")
-        window = text[max(0, i - 600) : i + 200]
-        assert "--env-file" in window
-        assert window.index(".env") < window.index(".billing.env")
-    # And when this machine actually has one, the emitted argv proves it.
+    # Order out of the choke point itself, on a tree built for the purpose, so it
+    # is asserted on every machine rather than only on one that happens to have a
+    # billing file.
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as raw:
+        stack_dir = Path(raw) / "services" / "stacks" / "agentmemory"
+        stack_dir.mkdir(parents=True)
+        (stack_dir / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
+        (stack_dir / ".env").write_text("A=1\n", encoding="utf-8")
+        (stack_dir / ".billing.env").write_text("B=2\n", encoding="utf-8")
+        (stack_dir / "extra.env").write_text("C=3\n", encoding="utf-8")
+        (stack_dir / "ts-envfiles").write_text("# a comment\nextra.env\nmissing.env\n", "utf-8")
+
+        assert stacks.env_file_list(stack_dir) == ["extra.env", ".env", ".billing.env"]
+        argv = stacks.Compose(Path(raw), engine.NATIVE).argv("agentmemory", ["up", "-d"])
+        joined = " ".join(argv)
+        assert joined.index("--env-file .env") < joined.index("--env-file .billing.env"), joined
+        # ts-envfiles names interpolation sources ONLY. A file it lists that does
+        # not exist is skipped rather than passed on to compose.
+        assert "missing.env" not in joined
+    # And when this machine actually has one, the emitted argv proves it too.
     out = _dry_run("up", "agentmemory")
     if "--env-file" in out:
         assert out.index("--env-file .env") < out.index("--env-file .billing.env"), out
@@ -544,10 +641,29 @@ def test_the_env_file_order_puts_the_stacks_own_env_last():
     source, which is how the console's provider panel went blank while every
     container reported healthy. Extras from ts-envfiles are interpolation
     sources for values another stack owns, so they come first and the stack's
-    own .env wins; .billing.env is written by a generator and wins over both."""
-    sh = (ROOT / "services" / "_stack.sh").read_text(encoding="utf-8")
-    body = sh.split("tss_env_file_list()", 1)[1].split("tss_compose()", 1)[0]
-    assert body.index("ts-envfiles") < body.index("'%s\n' .env") < body.index(".billing.env")
+    own .env wins; .billing.env is written by a generator and wins over both.
+
+    Checked against the real tree rather than against source text: the ordering
+    used to be asserted by slicing a bash function body, which pins the shape of
+    an implementation rather than the rule it exists to keep.
+    """
+    root = ROOT / "services" / "stacks"
+    checked = 0
+    for extra in sorted(root.glob("*/ts-envfiles")):
+        names = stacks.env_file_list(extra.parent)
+        if ".env" not in names:
+            continue
+        listed = [
+            ln.strip()
+            for ln in extra.read_text(encoding="utf-8").splitlines()
+            if ln.strip() and not ln.strip().startswith("#") and (extra.parent / ln.strip()).is_file()
+        ]
+        for name in listed:
+            assert names.index(name) < names.index(".env"), f"{extra.parent.name}: {name} after .env"
+        if ".billing.env" in names:
+            assert names.index(".env") < names.index(".billing.env")
+        checked += 1
+    assert checked or not list(root.glob("*/ts-envfiles")), "no ts-envfiles tree to check"
 
 
 def test_ts_envfiles_never_becomes_an_env_file_entry():
