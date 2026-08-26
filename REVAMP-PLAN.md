@@ -226,10 +226,46 @@ Each is its own branch, `merge --no-ff` into `main`, with docs and a `CHANGELOG.
 | 1 `doctor` | **done** - shell twins deleted, registry flipped, characterization corpus established |
 | 2 settings schema + the one writer | **done** - infrastructure, no registry flip (see below) |
 | 3 `services` | **done** - both twins deleted, registry flipped to python |
-| 4-8 | not started |
+| 5a `mux` | **done** - `ts-mux.sh` + `Invoke-TsMux` deleted |
+| 5b `wezterm` | **done** - `ts-wezterm.sh` deleted, `_wezterm.sh` reduced to 66 lines of shims |
+| 5c `agents` | **done** - both twins deleted, all four external callers repointed |
+| 4 `config` writes + wizard | not started |
+| 5d `agentmemory`, 5e `smb` | not started |
+| 6 `wso` | not started |
+| 7 `update` / `rollback` | not started - **deliberately last**, see below |
+| 8 `tstack ui` | not started |
 
-Each landed on its own branch and was green on Windows, WSL, ubuntu, macos and
-the WSL CI job before merging.
+Each landed on its own branch and was green on Windows, WSL, Debian 13, Ubuntu
+24.04, Ubuntu 22.04 and a bash 3.2 syntax gate, plus the CI matrix, before being
+pushed.
+
+**Phase 5 was taken before phase 4 deliberately.** `tstack config` fans out into
+`mux`, `wezterm`, `agents`, `ghostty`, `tts` and `memory`, so porting it first
+would have meant either a Python `config` shelling back into shell subsystems, or
+one enormous change. Doing the leaves first means each `config` verb now hands off
+to something already ported, and phase 4 shrinks to the config store, the menu and
+the wizard.
+
+**Phase 7 is last on purpose, and stays last.** `tstack update` is the command
+that pulls this work onto a machine. A defect there is discovered only *after* the
+pull that shipped it, and the recovery is a manual `git pull` in a clone whose
+location the user then has to find. It is ported when someone is awake to test it
+on a real machine, not overnight.
+
+### Line count, measured
+
+Counted with `git ls-tree`, every tracked `.sh`, `.ps1` and `dot_zshrc`:
+
+| | at `f67ed5f` | now | delta |
+|---|---|---|---|
+| tracked shell + PowerShell | 32,123 (100 files) | 28,161 (93 files) | **-3,962** |
+| `tstack/**.py` | 0 | 6,101 (17 files) | +6,101 |
+
+The Python is larger than the shell it replaced, and that is the expected shape:
+it carries the docstrings that explain *why* each rule exists, and it is one copy
+where the shell was two. The comparison that matters is 3,962 lines of
+hand-synchronised duplicate gone, against 4 twin pairs still to go - `config`,
+`agentmemory`, `wso`, `smb` - which are where the remaining bulk is.
 
 **Phase 2 is a foundation phase, not a subsystem port.** The original table said
 "`config show` + schema", which cannot flip a registry row: the row is

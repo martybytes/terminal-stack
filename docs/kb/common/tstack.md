@@ -11,7 +11,7 @@ commands any more, and no aliases for them.
 | `tstack rollback` | undo the last update |
 | `tstack services` | the Docker service stacks - see `doc services` |
 | `tstack mux` | the WezTerm multiplexer domain |
-| `tstack wezterm` | WezTerm channel and updates (POSIX only) |
+| `tstack wezterm` | WezTerm channel and updates |
 | `tstack smb` | SMB shares over rclone (POSIX only) - see `doc smb-shares` |
 | `tstack agents` | agent CLI wiring - see `doc agentmemory`, `doc headroom` |
 | `tstack agentmemory` | the agentmemory hook harness; `--check` reports reverted edits |
@@ -20,7 +20,13 @@ commands any more, and no aliases for them.
 | `tstack --version` | clone path, branch, commit, and whether it is dirty |
 
 A subcommand reported as "not available on <platform>" is deliberate, not a
-broken install: `smb` and `wezterm` have no PowerShell implementation.
+broken install: `smb` has no PowerShell implementation.
+
+`doctor`, `services`, `mux`, `wezterm` and `agents` are one Python program that
+runs identically on Windows, WSL, Linux and macOS. `config`, `update`, `rollback`,
+`smb` and `agentmemory` are still shell, and `tstack` routes to whichever the
+registry (`tstack/commands.conf`) says - so the command you type never changes as
+each one is ported.
 
 ## `tstack doctor`
 
