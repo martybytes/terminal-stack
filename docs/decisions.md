@@ -188,7 +188,7 @@ Defaulting to *off* rather than preserving the shipped-on behaviour is deliberat
 | `tstack mux kill` / `restart` | stop / cycle `wezterm-mux-server` (confirmed — it kills every pane it hosts) |
 | `tstack mux reset` | back to the default: off + re-apply + kill + clear stale sockets |
 
-Two implementations, as everywhere else in this repo: `bootstrap/ts-mux.sh` (zsh wrapper in `dot_zshrc`) and `Invoke-TsMux` in `$PROFILE`. On WSL the GUI, the mux server and the rendered config are all Windows-side, so the bash script drives them over interop (`tasklist.exe` / `taskkill.exe` / `wezterm.exe`) rather than the Linux process table.
+One implementation, `tstack/commands/mux.py`. It was two - `bootstrap/ts-mux.sh` and `Invoke-TsMux` in `$PROFILE` - kept in agreement by hand. On WSL the GUI, the mux server and the rendered config are all Windows-side, so the bash script drives them over interop (`tasklist.exe` / `taskkill.exe` / `wezterm.exe`) rather than the Linux process table.
 
 `status` deliberately reports the **rendered** value separately from the saved one. A config written before this toggle existed has no `MUX_ENABLED` line at all, so it reads the unconditional `config.default_domain = 'main'` and reports `on (pre-toggle)` — which is exactly the state a machine is in between pulling this change and applying it.
 

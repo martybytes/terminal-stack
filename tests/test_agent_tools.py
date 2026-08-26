@@ -446,7 +446,6 @@ def test_shell_entrypoints_parse():
         "run_after_90-sync-windows.sh",
         # These were never covered by the gate; a syntax error in any of them
         # only showed up when someone ran the command.
-        "bootstrap/ts-mux.sh",
         "bootstrap/ts-wezterm.sh",
         "bootstrap/wso.sh",
         "bootstrap/_workspace.sh",

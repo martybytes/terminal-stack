@@ -1196,7 +1196,7 @@ function Set-TerminalStackConfig {
                             $caveman = $w.Caveman; $agentmemory = $w.Agentmemory
                         }
                     }
-                    '7' { Invoke-TsMux status }
+                    '7' { Invoke-TstackSub -Name 'mux' -Forwarded @('status') }
                     '8' { $restore = Read-TsWeztermRestore; Save-TsConfig -WeztermRestore $restore | Out-Null; Invoke-TsSync $src; Write-Host '==> done.' }
                     '9' {
                         & $agentsShow
@@ -1490,208 +1490,9 @@ function Set-TerminalStackConfig {
         # The mux has its own verbs (kill/restart/reset), so tstack config just hands off.
         'mux'    {
             $muxArgs = @(@($Value) + @($Rest) | Where-Object { $_ })
-            Invoke-TsMux @muxArgs
+            Invoke-TstackSub -Name 'mux' -Forwarded $muxArgs
         }
         default { Write-Warning "tstack config: unknown command '$Action' (show, leader, theme, tmux, apps, tts, mux, restore, ghostty, memory, agents, wezterm, wizard)" }
-    }
-}
-
-# WezTerm multiplexer domain — turn it on/off and drive the live mux server.
-# PARALLEL implementation of bootstrap/ts-mux.sh (not a wrapper): change one,
-# change the other, and keep the -h output byte-identical. In a combined
-# WSL+Windows setup prefer the WSL `tstack mux` — its chezmoi apply is authoritative
-# for the Windows-side files; this one writes config.json and re-syncs.
-$script:TsMuxHelp = @'
-tstack mux — WezTerm multiplexer domain: keep panes alive when the GUI dies.
-
-Usage:
-  tstack mux [status]   the setting, the mux server, and the panes it hosts
-  tstack mux on         host panes in the mux domain (unix domain "main")
-  tstack mux off        spawn panes locally (the default)
-  tstack mux list       wezterm cli list — every pane the mux knows about
-  tstack mux kill       stop wezterm-mux-server       [KILLS EVERY PANE IT HOSTS]
-  tstack mux restart    stop it, then start a fresh one, so it re-reads the config
-  tstack mux reset      back to default: off + re-apply + kill + clear stale sockets
-  tstack mux -h         this help
-
-  -y, --yes         skip the confirmation for kill / restart / reset
-
-With the mux on, your shells run inside wezterm-mux-server instead of the GUI, so
-a GUI crash leaves every pane (and everything running in it) alive and relaunching
-WezTerm reattaches. The costs are why it is off by default: the mux server loads
-its OWN copy of .wezterm.lua, so a config change needs "tstack mux restart" — which
-kills every pane — and not just a GUI reload; and the Claude per-pane tint needs
-pane:inject_output, which mux panes do not have.
-
-on/off re-render .wezterm.lua and take effect for newly spawned tabs; relaunch
-WezTerm for a clean switch. Panes already hosted in the mux stay there until you
-close them or run "tstack mux kill". The setting is saved with the rest of the config
-(chezmoi [data] weztermMux / config.json weztermMux) and shown by "tstack config show".
-'@
-
-function Get-TsWezExe([string]$Name) {
-    $c = Get-Command $Name -ErrorAction SilentlyContinue
-    if ($c) { return $c.Source }
-    $p = Join-Path $env:ProgramFiles "WezTerm\$Name.exe"
-    if (Test-Path -LiteralPath $p) { return $p }
-    return $null
-}
-
-function Get-TsMuxProcess { @(Get-Process -Name 'wezterm-mux-server' -ErrorAction SilentlyContinue) }
-
-# The RENDERED config the GUI actually loads — used to spot a saved setting that
-# has not been synced yet.
-function Get-TsRenderedMux {
-    $f = Join-Path $env:USERPROFILE '.wezterm.lua'
-    if (-not (Test-Path -LiteralPath $f)) { return $null }
-    $lines = Get-Content -LiteralPath $f
-    foreach ($line in $lines) {
-        if ($line -match "^local MUX_ENABLED = '(on|off)'") { return $Matches[1] }
-    }
-    # A config rendered before this toggle existed: the domain was unconditional.
-    if ($lines | Where-Object { $_ -match "^config\.default_domain = 'main'" }) { return 'on (pre-toggle)' }
-    return 'off (pre-toggle)'
-}
-
-function Invoke-TsMux {
-    [CmdletBinding()]
-    param([Parameter(ValueFromRemainingArguments = $true)][string[]]$MuxArgs)
-
-    $yes = $false
-    $cmd = ''
-    foreach ($a in @($MuxArgs)) {
-        # `break` on every case: switch -Regex falls through, so without it '-y'
-        # would also hit the '^-' unknown-flag arm below.
-        switch -Regex ($a) {
-            '^(-y|--yes)$'       { $yes = $true; break }
-            '^(-h|--help|help)$' { Write-Host $script:TsMuxHelp; return }
-            '^-'                 { Write-Warning "tstack mux: unknown flag '$a' (try: tstack mux -h)"; return }
-            default              { if ($cmd) { Write-Warning "tstack mux: unexpected argument '$a'"; return }; $cmd = $a }
-        }
-    }
-    if (-not $cmd) { $cmd = 'status' }
-
-    $src = Resolve-TsSourceDir
-    if (-not $src) { return }
-    $helper = Join-Path $src 'bootstrap\_config.ps1'
-    if (-not (Test-Path $helper)) { Write-Warning "$helper not found; cannot configure."; return }
-    . $helper
-
-    $confirm = {
-        param($Prompt)
-        if ($yes) { return $true }
-        if ([Console]::IsInputRedirected) {
-            Write-Warning 'tstack mux: no terminal to confirm on — re-run with -y if you mean it.'
-            return $false
-        }
-        $a = Read-Host "$Prompt [y/N]"
-        if ($a -match '^(y|yes)$') { return $true }
-        Write-Host 'aborted.'
-        return $false
-    }
-
-    $stop = {
-        $procs = Get-TsMuxProcess
-        if (-not $procs.Count) { Write-Host '==> wezterm-mux-server is not running.'; return $true }
-        $pidList = ($procs | ForEach-Object { $_.Id }) -join ' '
-        if (-not (& $confirm "Stop wezterm-mux-server (pid $pidList)? Every pane it hosts dies — including this one, if you are in one")) { return $false }
-        $procs | Stop-Process -Force -ErrorAction SilentlyContinue
-        Start-Sleep -Milliseconds 500
-        if ((Get-TsMuxProcess).Count) {
-            Write-Warning 'wezterm-mux-server is still running — kill it by hand.'
-            return $false
-        }
-        Write-Host '==> wezterm-mux-server stopped.'
-        return $true
-    }
-
-    $start = {
-        if ((Get-TsMuxProcess).Count) { Write-Host '==> wezterm-mux-server is already running.'; return }
-        $bin = Get-TsWezExe 'wezterm-mux-server'
-        if (-not $bin) {
-            Write-Warning 'tstack mux: wezterm-mux-server not found — relaunch WezTerm and it will spawn one.'
-            return
-        }
-        Write-Host '==> starting wezterm-mux-server --daemonize'
-        Start-Process -FilePath $bin -ArgumentList '--daemonize' -WindowStyle Hidden
-    }
-
-    $setMux = {
-        param($Want)
-        $c = Get-TsConfig
-        if ((Get-TsWeztermMux) -eq $Want) {
-            Write-Host "==> mux already $Want; re-syncing anyway to refresh the rendered config."
-        }
-        Save-TsConfig -LeaderChord $c.leaderChord -ThemeMode $c.themeMode -TmuxPrefix $c.tmuxPrefix `
-                      -Apps @($c.apps) -WeztermMux $Want -CcTts $c.ccTts | Out-Null
-        Invoke-TsSync $src
-        Write-Host '==> done.'
-        if ($Want -eq 'on') {
-            Write-Host "    Panes now spawn into the mux domain 'main'. Relaunch WezTerm for a"
-            Write-Host "    clean switch; 'tstack mux status' shows the server once it starts."
-        } else {
-            Write-Host '    New tabs spawn locally again. Panes already hosted by the mux stay'
-            Write-Host "    there until you close them or run 'tstack mux kill'."
-        }
-    }
-
-    switch ($cmd) {
-        'status' {
-            $setting = Get-TsWeztermMux
-            $rendered = Get-TsRenderedMux
-            $procs = Get-TsMuxProcess
-            Write-Host 'tstack mux:'
-            Write-Host "  setting  : $setting   (saved as weztermMux)"
-            if (-not $rendered) {
-                Write-Host '  rendered : (no .wezterm.lua found — run sync-windows.ps1)'
-            } elseif ($rendered -ne $setting) {
-                Write-Host "  rendered : $rendered   !! stale — run 'tstack update' or sync-windows.ps1"
-            } else {
-                Write-Host "  rendered : $rendered   ($(Join-Path $env:USERPROFILE '.wezterm.lua'))"
-            }
-            if ($procs.Count) {
-                Write-Host "  server   : running (pid $(($procs | ForEach-Object { $_.Id }) -join ' '))"
-            } else {
-                Write-Host '  server   : not running'
-            }
-            $cli = Get-TsWezExe 'wezterm'
-            if ($cli) {
-                $rows = @(& $cli cli list 2>$null | Select-Object -Skip 1 | Where-Object { $_.Trim() })
-                Write-Host "  panes    : $($rows.Count)   ('tstack mux list' for detail)"
-            }
-            if ($setting -eq 'off' -and $procs.Count) {
-                Write-Host '  note     : panes spawned while the mux was on are still hosted by it;'
-                Write-Host "             they stay alive until you close them or run 'tstack mux kill'."
-            }
-        }
-        'on'  { & $setMux 'on' }
-        'off' { & $setMux 'off' }
-        'list' {
-            $cli = Get-TsWezExe 'wezterm'
-            if (-not $cli) { Write-Warning 'tstack mux: wezterm CLI not found on PATH.'; return }
-            & $cli cli list
-        }
-        'kill'    { & $stop | Out-Null }
-        'restart' { if (& $stop) { & $start } }
-        'reset' {
-            if (-not (& $confirm 'Reset the WezTerm mux: set it off, re-sync, stop the server (every pane it hosts dies) and clear stale sockets')) { return }
-            $yes = $true
-            & $setMux 'off'
-            & $stop | Out-Null
-            $n = 0
-            $dir = Join-Path $env:LOCALAPPDATA 'wezterm'
-            if (Test-Path -LiteralPath $dir) {
-                foreach ($f in @('sock', 'gui-sock-*')) {
-                    Get-ChildItem -LiteralPath $dir -Filter $f -ErrorAction SilentlyContinue | ForEach-Object {
-                        Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue
-                        $n++
-                    }
-                }
-            }
-            Write-Host "==> cleared $n stale socket file(s)"
-            Write-Host '==> mux reset to the default (off).'
-        }
-        default { Write-Warning "tstack mux: unknown command '$cmd' (status, on, off, list, kill, restart, reset)" }
     }
 }
 
@@ -1784,6 +1585,18 @@ function Get-TstackNames([string]$SourceDir) {
 
 # No param block on purpose. A [CmdletBinding()] parameter set would try to bind
 # `--version` and `-h` as PowerShell parameter names before tstack ever saw them.
+# Run a PORTED subcommand from inside another $PROFILE function. The shim
+# (Invoke-Tstack) is for what the user types; this is for one stack function
+# handing off to another, which used to be a direct call to a pwsh twin.
+function Invoke-TstackSub {
+    param([string]$Name, [string[]]$Forwarded = @())
+    $src = Resolve-TsSourceDir
+    if (-not $src) { Write-Warning "tstack ${Name}: no terminal-stack clone found."; return }
+    $python = Get-TstackPython
+    if (-not $python) { Write-Warning 'tstack: python3 not found on PATH.'; return }
+    & $python (Join-Path $src 'tstack\main.py') $Name @Forwarded
+}
+
 function Invoke-Tstack {
     $source = Resolve-TsSourceDir
     if (-not $source) { return }

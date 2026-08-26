@@ -19,9 +19,10 @@
 | `chezmoi re-add ~/.zshrc` | capture a hand-edit of a managed file back into the repo |
 | `scripts\sync-windows.ps1 -SourceDir <clone>` | Windows-side deploy — see `doc wezterm/dev-config` |
 
-pwsh function names: `Update-TerminalStack`, `Restore-TerminalStack`,
-`Set-TerminalStackConfig`, `Invoke-TsDoctor`, `Invoke-TsMux` — all aliased to the
-same `ts-*` names.
+Ported subcommands (`doctor`, `services`, `mux`) run the same Python on every
+platform. What is left in pwsh is what has not been ported yet:
+`Update-TerminalStack`, `Restore-TerminalStack`, `Set-TerminalStackConfig` - and
+they are reached through `tstack <name>`, never by their own names.
 
 ## Clone locations
 

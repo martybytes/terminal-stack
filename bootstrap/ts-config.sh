@@ -341,7 +341,8 @@ ghostty_on() {
 
 # The mux has its own verbs (kill/restart/reset), so tstack config just hands off.
 run_mux() {
-    TERMINAL_STACK_DIR="$SRC" TERMINAL_STACK_CHEZMOI="$CZ" bash "$SRC/bootstrap/ts-mux.sh" "$@"
+    TERMINAL_STACK_DIR="$SRC" TERMINAL_STACK_CHEZMOI="$CZ" \
+        "$(ts_python)" "$SRC/tstack/main.py" mux "$@"
 }
 
 # WezTerm build info / channel switching. Hand-off like run_mux: the logic lives

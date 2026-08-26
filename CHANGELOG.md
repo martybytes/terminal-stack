@@ -6,6 +6,20 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Added
 
+- **`tstack mux` is Python (08/25/2026).**
+  `bootstrap/ts-mux.sh` (301 lines) and `Invoke-TsMux` in `$PROFILE` (197) are
+  deleted; `tstack/commands/mux.py` is the one implementation. The WSL interop
+  rule survives with a test rather than a comment: the mux server is a Windows
+  process, so pids come from `tasklist.exe` and not `pgrep`, which finds nothing
+  inside WSL while a healthy server runs on the same machine. So does the rule
+  that nothing here ever auto-restarts the server - a refused confirmation now
+  stops `restart` outright instead of killing and then starting.
+
+  `tstack config mux ...` on both sides hands off to it. On Windows that goes
+  through a new `Invoke-TstackSub`, which is how a `$PROFILE` function calls a
+  ported subcommand: the user-facing shim is for what someone types, and one
+  stack function calling another should not go through argument re-parsing.
+
 - **`tstack services` is one Python program (08/25/2026).**
   `bootstrap/ts-stack.sh` (635 lines) and `bootstrap/ts-stack.ps1` (897) are
   deleted, along with 508 lines of `services/_stack.sh` that only they called.

@@ -156,7 +156,6 @@ terminal-stack/
 │   ├── _wizard.sh           # install-wizard prompts (ts_prompt_choice)
 │   ├── _cleanup.sh / _cleanup.ps1 # old-clone checklist; ts_backup_file lives here
 │   ├── ts-config.sh         # backend for the `tstack config` shell command
-│   ├── ts-mux.sh            # backend for `tstack mux` (WezTerm multiplexer domain)
 │   ├── ts-smb.sh            # backend for `tstack smb` (SMB shares over rclone)
 │   ├── _smb.sh              # share store, engine probe, mount lifecycle
 │   ├── shares.conf          # tracked tstack smb defaults (never a real host)

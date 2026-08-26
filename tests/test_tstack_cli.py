@@ -192,13 +192,19 @@ def test_version_json_is_stable():
 # --------------------------------------------- claims the audit found unenforced
 
 
-def test_ts_mux_help_is_byte_identical_between_the_twins():
-    """CLAUDE.md asserts this pair is kept byte-identical. Nothing checked it."""
-    sh = (ROOT / "bootstrap/ts-mux.sh").read_text(encoding="utf-8")
-    ps = PROFILE.read_text(encoding="utf-8")
-    bash_help = sh.split("HELP='", 1)[1].split("'\n", 1)[0]
-    pwsh_help = ps.split("$script:TsMuxHelp = @'\n", 1)[1].split("\n'@", 1)[0]
-    assert bash_help.rstrip("\n") == pwsh_help.rstrip("\n")
+def test_the_mux_help_exists_once_and_nowhere_else():
+    """CLAUDE.md asserted the two -h strings were kept byte-identical, and nothing
+    checked it. The pair is gone: there is one implementation, so what is left to
+    pin is that no second copy came back to drift from."""
+    from tstack.commands import mux
+
+    for verb in ("status", "on", "off", "list", "kill", "restart", "reset"):
+        # status is documented as the default, in brackets.
+        documented = f"tstack mux {verb}" in mux.HELP or f"tstack mux [{verb}]" in mux.HELP
+        assert documented, f"{verb} is undocumented"
+    assert not (ROOT / "bootstrap/ts-mux.sh").exists()
+    assert "TsMuxHelp" not in PROFILE.read_text(encoding="utf-8")
+    assert "Invoke-TsMux" not in PROFILE.read_text(encoding="utf-8")
 
 
 def test_wso_help_is_byte_identical_between_the_twins():
