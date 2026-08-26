@@ -180,11 +180,28 @@ if ($PSCmdlet.ShouldProcess('terminal-stack config.json', 'save config')) {
     }
 }
 
+# The interpreter tstack runs on. Same probe shape as
+# bootstrap/tts-daemon/build.ps1 rather than a third spelling of it.
+function Find-Python {
+    foreach ($name in @('python', 'python3')) {
+        $found = Get-Command $name -ErrorAction SilentlyContinue
+        if ($found) { return $found.Source }
+    }
+    return $null
+}
+
 if (-not $WhatIfPreference) {
-    $agentsInstaller = Join-Path $PSScriptRoot 'ts-agents.ps1'
-    if ($wizard.Headroom -eq 'on') { & $agentsInstaller -Tool headroom -Action on -CursorMode $wizard.HeadroomCursor | Out-Host }
-    if ($wizard.Caveman -eq 'on') { & $agentsInstaller -Tool caveman -Action on | Out-Host }
-    if ($wizard.Agentmemory -eq 'on') { & $agentsInstaller -Tool agentmemory -Action on | Out-Host }
+    # One implementation on every platform: tstack/commands/agents.py, run
+    # through the same entry point the `tstack agents` shim uses.
+    $agentsEntry = Join-Path (Split-Path -Parent $PSScriptRoot) 'tstack\main.py'
+    $agentsPython = Find-Python
+    if ($agentsPython -and (Test-Path -LiteralPath $agentsEntry)) {
+        if ($wizard.Headroom -eq 'on') { & $agentsPython $agentsEntry agents headroom on $wizard.HeadroomCursor | Out-Host }
+        if ($wizard.Caveman -eq 'on') { & $agentsPython $agentsEntry agents caveman on | Out-Host }
+        if ($wizard.Agentmemory -eq 'on') { & $agentsPython $agentsEntry agents agentmemory on | Out-Host }
+    } else {
+        Write-Warning 'python3 not found; skipped the coding-agent wiring. Re-run: tstack config agents <tool> repair'
+    }
 }
 
 # Git include — stack aliases + delta config. The included file lands at

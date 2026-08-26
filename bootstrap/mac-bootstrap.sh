@@ -175,10 +175,10 @@ else
 fi
 
 # 6. Agent wiring. The SETTINGS were already saved before any install ran (§2e);
-# this is the half that shells out to ts-agents.sh, which needs the claude/codex
+# this is the half that shells out to `tstack agents`, which needs the claude/codex
 # CLIs to exist — so it has to stay after the app install, unlike the settings.
 if [ -f "$TOML" ]; then
-    ts_agents_apply_wizard "$SOURCE_DIR/bootstrap/ts-agents.sh"
+    ts_agents_apply_wizard "$SOURCE_DIR"
 fi
 
 # 7. Git include — stack aliases + delta config (file lands via chezmoi apply;

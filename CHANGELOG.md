@@ -6,6 +6,15 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Added
 
+- **Every caller of the deleted twins repointed (08/26/2026).**
+  Four executable call sites still ran `bootstrap/ts-agents.ps1` after it was
+  deleted: `windows-bootstrap.ps1`'s post-wizard wiring, `sync-windows.ps1`'s and
+  `run_after_90-sync-windows.sh`'s reconciliation on every update, and `$PROFILE`'s
+  `tstack config agents`. All four now run `tstack agents` through the same Python
+  entry point, and the WSL one still crosses to the WINDOWS side deliberately -
+  that is where the GUI agents and their configuration live, so a Linux
+  interpreter would edit files in the WSL home that nothing reads.
+
 - **`tstack agents` is Python (08/26/2026).**
   `bootstrap/ts-agents.sh` (359 lines) and `bootstrap/ts-agents.ps1` (431) are
   deleted; `tstack/commands/agents.py` is the one implementation. The merge takes

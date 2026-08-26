@@ -330,20 +330,30 @@ if (Test-Path -LiteralPath $mergeHelper) {
     Merge-TsCursorSettings
 }
 
+# The interpreter tstack runs on, for the agent wiring.
+function Get-TsSyncPython {
+    foreach ($name in @('python', 'python3')) {
+        $found = Get-Command $name -ErrorAction SilentlyContinue
+        if ($found) { return $found.Source }
+    }
+    return $null
+}
+
 # Enabled user-global coding-agent integrations are reconciled on update. Disabled
 # tools are not installed or contacted, which is what lets each computer differ.
-$agentsScript = Join-Path $SourceDir 'bootstrap/ts-agents.ps1'
+$agentsScript = Join-Path $SourceDir 'tstack/main.py'
 $headroomEnabled = if (Get-Command Get-TsAgentSetting -ErrorAction SilentlyContinue) { (Get-TsAgentSetting headroomEnabled) -eq 'on' } else { $false }
 $cavemanEnabled = if (Get-Command Get-TsAgentSetting -ErrorAction SilentlyContinue) { (Get-TsAgentSetting cavemanEnabled) -eq 'on' } else { $false }
 $agentmemoryEnabled = if (Get-Command Get-TsAgentSetting -ErrorAction SilentlyContinue) { (Get-TsAgentSetting agentmemoryEnabled) -eq 'on' } else { $false }
-if (Test-Path -LiteralPath $agentsScript) {
+$agentsPython = Get-TsSyncPython
+if ($agentsPython -and (Test-Path -LiteralPath $agentsScript)) {
     if ($headroomEnabled) {
-        & $agentsScript -Tool headroom -Action status -CursorMode (Get-TsAgentSetting headroomCursorMode) *> $null
-        if ($LASTEXITCODE -ne 0) { & $agentsScript -Tool headroom -Action repair -CursorMode (Get-TsAgentSetting headroomCursorMode) | Out-Host }
+        & $agentsPython $agentsScript agents headroom status (Get-TsAgentSetting headroomCursorMode) *> $null
+        if ($LASTEXITCODE -ne 0) { & $agentsPython $agentsScript agents headroom repair (Get-TsAgentSetting headroomCursorMode) | Out-Host }
     }
     if ($cavemanEnabled) {
-        & $agentsScript -Tool caveman -Action status *> $null
-        if ($LASTEXITCODE -ne 0) { & $agentsScript -Tool caveman -Action repair | Out-Host }
+        & $agentsPython $agentsScript agents caveman status *> $null
+        if ($LASTEXITCODE -ne 0) { & $agentsPython $agentsScript agents caveman repair | Out-Host }
     }
 }
 

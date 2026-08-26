@@ -89,7 +89,7 @@ common_install_all
 # The agent WIRING half: needs the claude/codex CLIs, so unlike the settings it
 # has to wait until after the app install.
 if [ -f "${TOML:-}" ]; then
-    ts_agents_apply_wizard "$SOURCE_DIR/bootstrap/ts-agents.sh"
+    ts_agents_apply_wizard "$SOURCE_DIR"
 fi
 
 echo ""

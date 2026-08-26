@@ -1148,9 +1148,7 @@ function Set-TerminalStackConfig {
     }
     $agentsRun = {
         param([string]$Tool, [string]$Verb, [string]$CursorMode = $headroomCursor)
-        $scriptPath = Join-Path $src 'bootstrap\ts-agents.ps1'
-        & pwsh -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $scriptPath `
-            -Tool $Tool -Action $Verb -CursorMode $CursorMode | Out-Host
+        Invoke-TstackSub -Name 'agents' -Forwarded @($Tool, $Verb, $CursorMode) | Out-Host
         return ($LASTEXITCODE -eq 0)
     }
 
