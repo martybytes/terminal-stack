@@ -119,7 +119,7 @@ repair offers the same canonical move and re-syncs (a pin is written to
 Every saved setting — leader, theme, tmux prefix, apps, atuin, Ghostty, voice,
 WezTerm channel, the agent tools — plus `tstack config wizard` to re-ask the lot.
 
-**Full command table: `doc tstack`.**
+**Full command table: `doc tstack`.** `tstack doctor` also takes `--quiet` and `--json`.
 
 ## `tstack wezterm`
 

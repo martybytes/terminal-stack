@@ -6,7 +6,7 @@ commands any more, and no aliases for them.
 | Command | What it does |
 |---|---|
 | `tstack config` | view and change saved settings (the table below) |
-| `tstack doctor` | diagnose the install; `--repair` fixes what it can |
+| `tstack doctor` | diagnose the install; `--quiet`, `--json`, `--repair` (see below) |
 | `tstack update` | pull the latest stack and re-apply |
 | `tstack rollback` | undo the last update |
 | `tstack services` | the Docker service stacks - see `doc services` |
@@ -21,6 +21,47 @@ commands any more, and no aliases for them.
 
 A subcommand reported as "not available on <platform>" is deliberate, not a
 broken install: `smb` and `wezterm` have no PowerShell implementation.
+
+## `tstack doctor`
+
+The health check. Read-only by default; exit status is the answer, so it is safe
+in a script: **0 healthy, 1 issues found**.
+
+| | |
+|---|---|
+| `tstack doctor` | every check, with an `ok` line each |
+| `tstack doctor --quiet` | only what is wrong. Prints nothing at all on a healthy machine |
+| `tstack doctor --json` | one record per check: `check`, `status`, `message`, optional `hint` |
+| `tstack doctor --repair` | fix what is fixable, confirming each step |
+
+Three severities. `ok` is suppressed by `--quiet`. `!!` is a problem and counts
+toward the exit status. `note:` is worth telling you and never counts - a leftover
+clone, a legacy clone location, a dev-clone pin. Folding notes into failures would
+train you to ignore the exit code.
+
+`--json` is a read model, not the prose reformatted: `check` is a stable id safe
+to match on, while the message wording is free to improve. That is what the
+dashboard will consume.
+
+```sh
+tstack doctor --json | python3 -c 'import json,sys
+for c in json.load(sys.stdin)["checks"]:
+    if c["status"] != "ok": print(c["check"], "-", c["message"])'
+```
+
+One implementation runs on every platform. Before this was ported, the bash side
+ran about twenty checks and the PowerShell side about eight, so Windows never
+checked config-store divergence, the memory-backend derivation, SMB mount records
+or the agentmemory hook wiring at all.
+
+What it looks at: the chezmoi binary and where it applies from (POSIX only - on
+Windows the apply path is `sync-windows.ps1`), the clone and whether other clones
+exist, `~/.zshrc` or `$PROFILE` carrying the stack block, `zsh` and `starship` on
+PATH, the two config stores agreeing, `memoryBackend` matching its derived
+`agentmemoryEnabled`, the TTS engine and daemon when TTS is on, a `local.json`
+override silently forcing it off, the agentmemory hook wiring a plugin upgrade
+reverts, SMB mount records, and - in a dev clone - whether the commit gate is
+actually installed.
 
 ## Configuration
 
