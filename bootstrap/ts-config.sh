@@ -346,10 +346,10 @@ run_mux() {
 }
 
 # WezTerm build info / channel switching. Hand-off like run_mux: the logic lives
-# in bootstrap/ts-wezterm.sh so `tstack wezterm` works standalone too.
+# in tstack/commands/wezterm.py so `tstack wezterm` works standalone too.
 run_wezterm() {
     TERMINAL_STACK_DIR="$SRC" TERMINAL_STACK_CHEZMOI="$CZ" \
-        bash "$SRC/bootstrap/ts-wezterm.sh" "$@"
+        "$(ts_python)" "$SRC/tstack/main.py" wezterm "$@"
 }
 
 # ── memory backend ───────────────────────────────────────────────────────────

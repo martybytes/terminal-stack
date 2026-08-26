@@ -6,6 +6,28 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Added
 
+- **`tstack wezterm` is Python (08/26/2026).**
+  `bootstrap/ts-wezterm.sh` (90 lines) is deleted and `bootstrap/_wezterm.sh` drops
+  from 446 lines to 66 shims. That file was already half Python: five of its
+  functions existed only to pipe JSON into an embedded `python3 -c` heredoc, with
+  `PYTHONIOENCODING=utf-8` forced because WezTerm's changelog is full of
+  box-drawing characters and Windows defaults stdout to cp1252. All of it now
+  lives in `tstack/commands/wezterm.py`, once.
+
+  The shims stay because the installers (`_wizard.sh`, `mac-bootstrap.sh`,
+  `_common-debian.sh`) source that file before the package is on any path they
+  know about. They hold no logic: each is a wrapper over a machine-readable verb
+  (`channel`, `installed`, `update-available`, `intro`, `terminals-channel`) that
+  is deliberately silent when there is no answer, because every caller treats
+  empty as "nothing to say" and none of them may fail a shell mid-install.
+
+  Every rule the four shell tests enforced is kept and now driven rather than
+  grepped: the build date comes out of the release name with no network call, the
+  changelog slice is counted against the saved fixture, no network degrades to
+  version-and-date, and a channel switch removes the other package in BOTH
+  directions - plus the one that was only a comment, that a hand-placed binary
+  (channel `unknown`) is never replaced or upgraded.
+
 - **`tstack mux` is Python (08/25/2026).**
   `bootstrap/ts-mux.sh` (301 lines) and `Invoke-TsMux` in `$PROFILE` (197) are
   deleted; `tstack/commands/mux.py` is the one implementation. The WSL interop

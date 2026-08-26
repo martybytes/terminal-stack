@@ -803,8 +803,8 @@ _tstack_update() {
   # own. Silent unless there is genuinely something newer on the channel you are
   # already on; silent too when WezTerm is absent, hand-installed, or offline.
   local _wez_new
-  _wez_new="$(TERMINAL_STACK_CHEZMOI="$cz" bash -c \
-    'source "$1/bootstrap/_wezterm.sh" >/dev/null 2>&1 && ts_wezterm_update_available' _ "$src" 2>/dev/null)"
+  _wez_new="$(TERMINAL_STACK_DIR="$src" TERMINAL_STACK_CHEZMOI="$cz" \
+    "$(_tstack_python)" "$src/tstack/main.py" wezterm update-available 2>/dev/null)"
   if [[ -n "$_wez_new" ]]; then
     echo "==> WezTerm: $_wez_new"
     if [[ -t 0 ]]; then
@@ -813,7 +813,7 @@ _tstack_update() {
       case "$wans" in
         y|Y|yes|YES)
           TERMINAL_STACK_DIR="$src" TERMINAL_STACK_CHEZMOI="$cz" \
-            bash "$src/bootstrap/ts-wezterm.sh" upgrade ;;
+            "$(_tstack_python)" "$src/tstack/main.py" wezterm upgrade ;;
         *) echo "    Skipped. 'tstack config wezterm' for the details, 'tstack config wezterm upgrade' to do it." ;;
       esac
     else

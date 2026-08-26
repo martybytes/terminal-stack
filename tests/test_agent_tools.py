@@ -446,7 +446,6 @@ def test_shell_entrypoints_parse():
         "run_after_90-sync-windows.sh",
         # These were never covered by the gate; a syntax error in any of them
         # only showed up when someone ran the command.
-        "bootstrap/ts-wezterm.sh",
         "bootstrap/wso.sh",
         "bootstrap/_workspace.sh",
         "bootstrap/_common-debian.sh",
@@ -825,115 +824,112 @@ def test_wezterm_env_var_channel_mapping_is_exact():
         assert chan.strip() == want_chan, f"{env}: got channel {chan!r}"
 
 
-@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_wezterm_version_string_parses_to_a_date():
     """The build date is IN the release name, so it needs no network call."""
-    r = subprocess.run(
-        [
-            BASH,
-            "-c",
-            '. bootstrap/_wezterm.sh; ts_wez_version_parse "wezterm 20240203-110809-5046fc22"; '
-            'ts_wez_version_parse "20260331-040028-577474d8"; ts_wez_version_parse "not a version"',
-        ],
-        cwd=ROOT,
-        text=True,
-        capture_output=True,
-        check=False,
-        timeout=300,
-        start_new_session=True,
+    from tstack.commands import wezterm
+
+    assert wezterm.version_parse("wezterm 20240203-110809-5046fc22") == (
+        "20240203-110809-5046fc22",
+        "20240203",
+        "5046fc22",
     )
-    assert r.returncode == 0, r.stderr
-    lines = [l for l in r.stdout.splitlines() if l.strip()]
-    assert lines[0] == "20240203-110809-5046fc22|20240203|5046fc22"
-    assert lines[1] == "20260331-040028-577474d8|20260331|577474d8"
-    assert len(lines) == 2, "unparseable input must produce nothing, not a bad guess"
+    assert wezterm.version_parse("20260331-040028-577474d8") == (
+        "20260331-040028-577474d8",
+        "20260331",
+        "577474d8",
+    )
+    assert wezterm.version_parse("not a version") is None, (
+        "unparseable input must produce nothing, not a bad guess"
+    )
+    assert wezterm.fmt_date("20240203") == "2024-02-03"
+    assert wezterm.fmt_date("whatever") == "whatever"
 
 
-@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
-def test_changelog_slicer_counts_against_a_fixture():
+def test_changelog_slicer_counts_against_a_fixture(monkeypatch):
     """Pinned to a saved copy of upstream's changelog, so the assertion does not
     drift as upstream adds bullets."""
+    from tstack.commands import wezterm
+
     fixture = ROOT / "tests/fixtures/wezterm-changelog.md"
     assert fixture.exists()
-    r = subprocess.run(
-        [
-            BASH,
-            "-c",
-            f'. bootstrap/_wezterm.sh; ts_wez_changelog_fetch() {{ printf "%s\n" "{fixture}"; }}; '
-            "ts_wez_changes_tally 20240203-110809-5046fc22",
-        ],
-        cwd=ROOT,
-        text=True,
-        capture_output=True,
-        check=False,
-        timeout=300,
-        start_new_session=True,
-    )
-    assert r.returncode == 0, r.stderr
-    tally = r.stdout.strip()
+    monkeypatch.setattr(wezterm, "changelog_fetch", lambda: fixture)
+
+    tally = wezterm.changes_tally("20240203-110809-5046fc22")
+    counts = dict(zip(tally.split()[::2], (int(n) for n in tally.split()[1::2]), strict=False))
     # Hand-counted from the fixture: the Continuous/Nightly section only, since
     # 20240203 is where the slice stops.
-    counts = dict(zip(tally.split()[::2], (int(n) for n in tally.split()[1::2]), strict=False))
     assert counts == {"Changed": 20, "New": 32, "Fixed": 74, "Updated": 9}, tally
     assert sum(counts.values()) == 135
 
-    # A version that is not in the changelog slices nothing away — everything is
-    # newer than it — so the count must be strictly larger.
-    r2 = subprocess.run(
-        [
-            BASH,
-            "-c",
-            f'. bootstrap/_wezterm.sh; ts_wez_changelog_fetch() {{ printf "%s\n" "{fixture}"; }}; '
-            "ts_wez_changes_tally 19700101-000000-00000000",
-        ],
-        cwd=ROOT,
-        text=True,
-        capture_output=True,
-        check=False,
-        timeout=300,
-        start_new_session=True,
-    )
+    # A version that is not in the changelog slices nothing away - everything is
+    # newer than it - so the count must be strictly larger.
+    older_tally = wezterm.changes_tally("19700101-000000-00000000")
     older = dict(
-        zip(r2.stdout.split()[::2], (int(n) for n in r2.stdout.split()[1::2]), strict=False)
+        zip(older_tally.split()[::2], (int(n) for n in older_tally.split()[1::2]), strict=False)
     )
     assert sum(older.values()) > sum(counts.values())
 
 
-@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
-def test_wezterm_queries_fail_open_when_offline():
+def test_wezterm_queries_fail_open_when_offline(monkeypatch, capsys):
     """No network must degrade to version-and-date, never block or error."""
-    r = subprocess.run(
-        [
-            BASH,
-            "-c",
-            ". bootstrap/_wezterm.sh; gh() { return 1; }; curl() { return 1; }; "
-            'ts_wezterm_status; echo "RC=$?"',
-        ],
-        cwd=ROOT,
-        text=True,
-        capture_output=True,
-        check=False,
-        timeout=300,
-        start_new_session=True,
+    from tstack.commands import wezterm
+
+    monkeypatch.setattr(wezterm, "_gh_api", lambda path: None)
+    monkeypatch.setattr(wezterm, "changelog_fetch", lambda: None)
+    monkeypatch.setattr(
+        wezterm, "installed", lambda: ("20240203-110809-5046fc22", "20240203", "5046fc22")
     )
-    assert r.returncode == 0, r.stderr
-    assert "RC=0" in r.stdout
-    assert "offline" in r.stdout
-    # Every network call is bounded.
-    body = (ROOT / "bootstrap/_wezterm.sh").read_text(encoding="utf-8")
-    for line in body.splitlines():
-        if "curl " in line and "--max-time" not in line and not line.strip().startswith("#"):
-            assert "gpg.key" in line, f"unbounded curl: {line.strip()}"
+    monkeypatch.setattr(wezterm, "channel", lambda: "stable")
+    assert wezterm.status() == 0
+    out = capsys.readouterr().out
+    assert "offline" in out
+    assert "20240203-110809-5046fc22" in out, "the part that always works must still print"
+
+    # And an offline probe reports "nothing to offer", not an error.
+    assert wezterm.update_available() == ""
 
 
-def test_wezterm_channel_switch_removes_the_other_one_both_ways():
+def test_every_wezterm_network_call_is_bounded():
+    """An unbounded fetch in a status command hangs a shell, which is how this
+    stack learned to bound them."""
+    body = (ROOT / "tstack/commands/wezterm.py").read_text(encoding="utf-8")
+    for i, line in enumerate(body.splitlines(), 1):
+        if "urlopen(" in line:
+            assert "timeout=" in line, f"tstack/commands/wezterm.py:{i}: unbounded urlopen"
+    # The one shell pipeline left is the apt keyring import, which is not a fetch
+    # in a status path and is bounded by apt itself.
+    assert body.count("shell=True") == 1
+
+
+def test_wezterm_channel_switch_removes_the_other_one_both_ways(monkeypatch):
     """The two packages install to the same place, so a switch must uninstall
-    first — and that must work in BOTH directions, not just nightly->stable."""
-    sh = (ROOT / "bootstrap/_wezterm.sh").read_text(encoding="utf-8")
-    assert "_ts_wez_brew_install wezterm@nightly wezterm" in sh
-    assert "_ts_wez_brew_install wezterm         wezterm@nightly" in sh
-    assert "_ts_wez_apt_install wezterm-nightly wezterm" in sh
-    assert "_ts_wez_apt_install wezterm         wezterm-nightly" in sh
+    first - and that must work in BOTH directions, not just nightly->stable."""
+    from tstack import platform as _plat
+    from tstack.commands import wezterm
+
+    calls = []
+    monkeypatch.setattr(wezterm, "channel", lambda: "stable")
+    monkeypatch.setattr(wezterm, "_brew_install", lambda w, o, label: calls.append((w, o)))
+    monkeypatch.setattr(wezterm, "_apt_install", lambda w, o: calls.append((w, o)))
+
+    monkeypatch.setattr(_plat, "kind", lambda: _plat.MACOS)
+    monkeypatch.setattr(wezterm.shutil, "which", lambda name: "/opt/homebrew/bin/brew")
+    wezterm.install("nightly")
+    wezterm.install("stable")
+    assert calls == [("wezterm@nightly", "wezterm"), ("wezterm", "wezterm@nightly")]
+
+    calls.clear()
+    monkeypatch.setattr(_plat, "kind", lambda: _plat.LINUX)
+    wezterm.install("nightly")
+    wezterm.install("stable")
+    assert calls == [("wezterm-nightly", "wezterm"), ("wezterm", "wezterm-nightly")]
+
+    # A hand-placed binary is not ours to replace, in either direction.
+    calls.clear()
+    monkeypatch.setattr(wezterm, "channel", lambda: "unknown")
+    wezterm.install("nightly")
+    assert calls == []
+
     ps = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
     assert (
         "$other = if ($Channel -eq 'nightly') { 'wez.wezterm' } else { 'wez.wezterm.nightly' }"
@@ -941,6 +937,7 @@ def test_wezterm_channel_switch_removes_the_other_one_both_ways():
     )
     # The removal must be conditional on switching, never unconditional: a machine
     # that declines WezTerm entirely must keep whatever it already had.
+    sh = (ROOT / "bootstrap/_wezterm.sh").read_text(encoding="utf-8")
     assert "stable-only policy" not in sh and "stable-only policy" not in ps
 
 
@@ -949,9 +946,9 @@ def test_nothing_installs_or_upgrades_wezterm_automatically():
     zsh = (ROOT / "dot_zshrc").read_text(encoding="utf-8")
     upd = zsh[zsh.index("_tstack_update() {") :]
     upd = upd[: upd.index("\n}\n")]
-    assert "ts_wezterm_update_available" in upd
+    assert "wezterm update-available" in upd
     assert "Upgrade WezTerm now? [y/N]" in upd
-    assert 'ts-wezterm.sh" upgrade' in upd
+    assert "wezterm upgrade" in upd
     # Non-interactive must print the command, never run it.
     assert "Upgrade it with: tstack config wezterm upgrade" in upd
     ps = (ROOT / "windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1").read_text(
