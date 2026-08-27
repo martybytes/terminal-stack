@@ -381,7 +381,57 @@ function Initialize-TsStackEnv([string]$Name) {
     if (-not $DryRun) {
         Copy-Item -LiteralPath $ex -Destination $env_
         Note 'seeded with the default profile — review it before starting the stack'
+        # kokoro is the one stack whose shipped default is wrong on most machines:
+        # .env.example carries Profile A (Blackwell, CUDA 12.8) uncommented, and a
+        # blind copy hands a cu128 image to a box with a 40-series card or no card
+        # at all. Twin of tss_seed_kokoro_profile.
+        if ($Name -eq 'kokoro') { Set-TsKokoroProfile $env_ }
     }
+}
+
+# Rewrite a freshly seeded kokoro .env for THIS machine's hardware. Only ever
+# called on a file this run just created, so it cannot overwrite a chosen profile.
+# Twin of tss_seed_kokoro_profile / tss_gpu_profile. The bash side also has a
+# darwin branch; there is no Windows analogue of it, because this script only
+# ever runs on Windows.
+function Set-TsKokoroProfile([string]$File) {
+    $profile_ = 'C'
+    $reason = 'no nvidia-smi on PATH — treating this as a CPU-only machine'
+    $smi = Get-Command nvidia-smi -ErrorAction SilentlyContinue
+    if ($smi) {
+        $gpuName = (& nvidia-smi --query-gpu=name --format=csv,noheader 2>$null | Select-Object -First 1)
+        if (-not $gpuName) {
+            $reason = 'nvidia-smi present but reported no GPU — treating this as a CPU-only machine'
+        } elseif ($gpuName -match 'RTX\s*50\d{2}') {
+            # The cu126 build starts fine on Blackwell then crash-loops on the
+            # first synthesis with "no kernel image is available".
+            $profile_ = 'A'; $reason = "$gpuName is Blackwell (RTX 50-series) — Profile A (cu128)"
+        } else {
+            $profile_ = 'B'; $reason = "$gpuName is pre-Blackwell — Profile B (cu126) is the narrower match"
+        }
+    }
+    switch ($profile_) {
+        'A' { $spec = 'docker-compose.yml:docker-compose.gpu.yml'; $image = 'ghcr.io/remsky/kokoro-fastapi-gpu:v0.8.0-cu128' }
+        'B' { $spec = 'docker-compose.yml:docker-compose.gpu.yml'; $image = 'ghcr.io/remsky/kokoro-fastapi-gpu:v0.8.0-cu126' }
+        default { $spec = 'docker-compose.yml'; $image = 'ghcr.io/remsky/kokoro-fastapi-cpu:v0.8.0' }
+    }
+    Note "kokoro profile $profile_ — $reason"
+    $lines = Get-Content -LiteralPath $File
+    $seenFile = $false; $seenImage = $false
+    # Collect into an array and pass -Value: a pipeline straight into Set-Content
+    # writes nothing at all when it goes empty.
+    $out = @($lines | ForEach-Object {
+        if ($_ -match '^COMPOSE_FILE=')      { $seenFile = $true;  "COMPOSE_FILE=$spec" }
+        elseif ($_ -match '^KOKORO_IMAGE=')  { $seenImage = $true; "KOKORO_IMAGE=$image" }
+        else { $_ }
+    })
+    if (-not ($seenFile -and $seenImage)) {
+        # A file we just copied from the tracked example should always have both.
+        # Saying so beats a silent no-op that ships the GPU default anyway.
+        Bad "$File`: COMPOSE_FILE/KOKORO_IMAGE not both found — set the profile by hand"
+        return
+    }
+    Set-Content -LiteralPath $File -Value $out
 }
 
 # Replace a still-placeholder value with real random bytes. Never rotates a value

@@ -40,29 +40,11 @@ ts_smb_os() {
     esac
 }
 
-# macOS has no timeout(1); brew coreutils supplies gtimeout, and neither is
-# guaranteed. Fall back to a background watchdog so callers can always bound a
-# command that might never return (dns-sd, a wedged mount probe).
+# Bound a command that might never return (dns-sd, a wedged mount probe). The
+# portable implementation is ts_timeout in _config.sh, which ts-smb.sh sources
+# before this file; the name is kept because every call site here uses it.
 # usage: ts_smb_timeout <seconds> <cmd> [args...]
-ts_smb_timeout() {
-    local secs="$1"; shift
-    if command -v timeout >/dev/null 2>&1; then
-        timeout "$secs" "$@"
-        return $?
-    fi
-    if command -v gtimeout >/dev/null 2>&1; then
-        gtimeout "$secs" "$@"
-        return $?
-    fi
-    "$@" &
-    local pid=$! rc=0
-    ( sleep "$secs"; kill -TERM "$pid" 2>/dev/null || true ) 2>/dev/null &
-    local watchdog=$!
-    wait "$pid" 2>/dev/null || rc=$?
-    kill -TERM "$watchdog" 2>/dev/null || true
-    wait "$watchdog" 2>/dev/null || true
-    return "$rc"
-}
+ts_smb_timeout() { ts_timeout "$@"; }
 
 # ---------------------------------------------------------------- config ----
 

@@ -998,6 +998,40 @@ tss_seed_env() {                           # <stack-dir>
     [ "$TSS_APPLY" = 1 ] || return 0
     cp "$ex" "$env" || return 1
     info 'seeded with the default profile — review it before starting the stack'
+    # kokoro is the one stack whose default profile is WRONG on most machines:
+    # its .env.example ships Profile A (Blackwell, CUDA 12.8) uncommented, which
+    # a blind copy then hands to a Mac. `ts-stack up kokoro` merges the NVIDIA
+    # device reservation and fails on "could not select device driver", after
+    # pulling several GB of amd64 CUDA image. setup-kokoro-docker.sh already
+    # refuses GPU on darwin; this is the same knowledge, applied to the file that
+    # compose actually reads.
+    case "$(basename "$1")" in kokoro) tss_seed_kokoro_profile "$env" || return 1 ;; esac
+}
+
+# Rewrite a freshly seeded kokoro .env for THIS machine's hardware. Only ever
+# called on a file this run just created, so it cannot overwrite a profile
+# somebody chose. Profiles are the three in kokoro/.env.example; tss_gpu_profile
+# already encodes which one a machine needs and why.
+tss_seed_kokoro_profile() {                # <env-file>
+    local env="$1" spec image
+    tss_gpu_profile
+    case "$TSS_GPU_PROFILE" in
+        A) spec='docker-compose.yml:docker-compose.gpu.yml'
+           image='ghcr.io/remsky/kokoro-fastapi-gpu:v0.8.0-cu128' ;;
+        B) spec='docker-compose.yml:docker-compose.gpu.yml'
+           image='ghcr.io/remsky/kokoro-fastapi-gpu:v0.8.0-cu126' ;;
+        *) spec='docker-compose.yml'
+           image='ghcr.io/remsky/kokoro-fastapi-cpu:v0.8.0' ;;
+    esac
+    info "kokoro profile $TSS_GPU_PROFILE — $TSS_GPU_REASON"
+    # Status 3 means the pattern matched nothing, which for a file we just copied
+    # from the tracked example means the example changed shape. Say so; a silent
+    # no-op here is how the GPU default gets shipped to a Mac all over again.
+    tss_replace_in_file "$env" '^COMPOSE_FILE=.*$' "COMPOSE_FILE=$spec" \
+        || { warn "$env: no COMPOSE_FILE line to set — check it by hand"; return 1; }
+    tss_replace_in_file "$env" '^KOKORO_IMAGE=.*$' "KOKORO_IMAGE=$image" \
+        || { warn "$env: no KOKORO_IMAGE line to set — check it by hand"; return 1; }
+    return 0
 }
 
 # Replace a still-placeholder value with real random bytes. Never rotates a value
