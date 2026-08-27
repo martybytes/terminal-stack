@@ -127,6 +127,11 @@ run_wizard() {
     # answers they just gave — the same ordering the bootstraps now use.
     ts_save_config "${TS_WIZ_LEADER:-ctrl-space}" "${TS_WIZ_THEME:-dark}" "${TS_WIZ_TMUX:-ctrl-b}" ${TS_WIZ_APPS:-}
     ts_agents_save_config "${TS_WIZ_HEADROOM:-off}" "${TS_WIZ_HEADROOM_CURSOR:-mcp}" "${TS_WIZ_CAVEMAN:-off}" "${TS_WIZ_AGENTMEMORY:-off}"
+    # The memory answer itself. Stored through ts_memory_apply, not through
+    # ts_agents_save_config, because that helper writes only independent toggles
+    # and this one also DERIVES agentmemoryEnabled. Without this line the wizard
+    # asked the question and threw the answer away.
+    ts_memory_apply "${TS_WIZ_MEMORY_BACKEND:-agentmemory}"
     ts_wez_mux_set "${TS_WIZ_WEZ_MUX:-off}"
     ts_wez_restore_set "${TS_WIZ_WEZ_RESTORE:-off}"
     ts_atuin_set "${TS_WIZ_ATUIN:-off}"

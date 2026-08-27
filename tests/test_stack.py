@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.shell_support import BASH
+from tests.shell_support import BASH, bash_path
 
 ROOT = Path(__file__).resolve().parents[1]
 SH = ROOT / "bootstrap/ts-stack.sh"
@@ -605,3 +605,154 @@ def test_overlay_checks_are_paired_with_their_overlay():
     base = (stacks / "headroom" / "ts-checks.conf").read_text(encoding="utf-8")
     assert "ts-headroom-qdrant" not in base and "ts-headroom-neo4j" not in base
     assert "sh" in "sh"  # keep the module import-light; no docker needed anywhere above
+
+
+# ── the macOS/Linux regressions that ran on every non-Windows host ────────────
+# All four were found by reading the code against one Mac that had never run the
+# absorbed service tree. Three of them fail identically on native Linux.
+
+def _sh_function(text, name):
+    """One shell function's body. Ends at a line that is exactly `}`, not at the
+    first `\n}`: ts_prompt_apps embeds a line STARTING with `}` inside a quoted
+    string, and slicing on that returns three lines of a twenty-line function."""
+    import re as _re
+    start = text.index(f"{name}() {{")
+    m = _re.search(r"^\}$", text[start:], _re.M)
+    assert m, f"{name} has no closing brace on its own line"
+    return text[start:start + m.end()]
+
+
+def test_the_agentmemory_secret_check_cannot_abort_the_doctor():
+    """ts-doctor runs under `set -euo pipefail`, so an unguarded substitution in
+    this block ended the WHOLE report -- no summary, no ts-smb checks, no clone
+    advisories. Three lines did it: `docker ps | grep -v console` exits 1 when
+    nothing matches, `docker exec` exits non-zero when it fails, and `cmd.exe`
+    exits 127 on every host that is not Windows. Only ts_repair survived, and
+    only because it wraps ts_doctor in `|| true`."""
+    sh = (ROOT / "bootstrap" / "_doctor.sh").read_text(encoding="utf-8")
+    block = sh[sh.index("local _am_cid"):sh.index("ts-smb (SMB shares over rclone)")]
+
+    # Join backslash continuations first, so each substitution is one line.
+    for line in block.replace("\\\n", " ").splitlines():
+        if '="$(' not in line:
+            continue
+        assert "|| true" in line, f"unguarded substitution under set -e: {line.strip()}"
+
+    assert "[ -d /mnt/c/Users ]" in block, \
+        "the cmd.exe read must be gated on WSL; it is 127 everywhere else"
+    assert "cmd.exe" in block and block.index("[ -d /mnt/c/Users ]") < block.index("cmd.exe"), \
+        "the gate must precede the cmd.exe call, not follow it"
+    # timeout(1) is GNU coreutils and absent from a stock macOS, which is the
+    # same 127 one line earlier.
+    import re as _re
+    assert not _re.search(r"(?<![\w])timeout 5 ", block), \
+        "use ts_timeout; bare timeout(1) is GNU coreutils and absent from a stock Mac"
+    assert "ts_timeout 5 docker" in block
+
+
+def test_a_missing_agentmemory_plugin_is_not_reported_as_intact_wiring():
+    """--check gates every host on its plugin cache and returns 0 when there is
+    none, so a machine with no agentmemory plugin at all reported `ok wiring
+    intact` while capturing nothing."""
+    sh = (ROOT / "bootstrap" / "_doctor.sh").read_text(encoding="utf-8")
+    assert "plugins/cache/agentmemory/agentmemory" in sh, \
+        "the doctor must look for the cache itself before believing --check"
+    assert "its plugin is not installed for any agent" in sh
+
+
+def test_every_bootstrap_persists_the_memory_backend():
+    """The wizard asked the question and threw the answer away: TS_WIZ_MEMORY_BACKEND
+    was collected and exported, but ts_agents_save_config writes only the derived
+    agentmemoryEnabled. Answering 'headroom' or 'none' therefore produced
+    memoryBackend=agentmemory next to agentmemoryEnabled=off -- a pair the wizard
+    cannot offer and both doctors report as drift."""
+    for name in ("mac-bootstrap.sh", "linux-bootstrap.sh", "wsl-bootstrap.sh", "ts-config.sh"):
+        body = (ROOT / "bootstrap" / name).read_text(encoding="utf-8")
+        if "ts_agents_save_config" not in body:
+            continue
+        assert "ts_memory_apply" in body, f"{name} saves the agent toggles but not the backend"
+        assert body.index("ts_agents_save_config") < body.index("ts_memory_apply"), \
+            f"{name}: ts_memory_apply must run last so it owns the derived key"
+
+    # ts_memory_apply is documented as the ONLY writer of agentmemoryEnabled;
+    # ts_agents_save_config used to write it too, which is what made the drift
+    # representable in the first place.
+    cfg = (ROOT / "bootstrap" / "_config.sh").read_text(encoding="utf-8")
+    helper = _sh_function(cfg, "ts_agents_save_config")
+    assert "agentmemoryEnabled" not in helper, \
+        "ts_agents_save_config must not write the key ts_memory_apply derives"
+
+    # The pwsh bootstrap carried the OLD value forward instead of recording the
+    # new one, which is the same bug with a quieter failure.
+    ps = (ROOT / "bootstrap" / "windows-bootstrap.ps1").read_text(encoding="utf-8")
+    for line in ps.splitlines():
+        if "Save-TsConfig" in line and "-AgentmemoryEnabled" in line:
+            assert "-MemoryBackend" in line, "Save-TsConfig call records the derived key but not the backend"
+
+
+def test_the_wizard_does_not_reset_saved_choices_on_a_re_run():
+    """This wizard is also what `ts-config reconfigure` and a repeat bootstrap
+    run. Defaulting to `recommended` shrank a larger saved app list, and the tmux
+    prefix was forced back to ctrl-b unconditionally -- both silently, on Enter."""
+    wiz = (ROOT / "bootstrap" / "_wizard.sh").read_text(encoding="utf-8")
+
+    apps = _sh_function(wiz, "ts_prompt_apps")
+    assert "ts_data_get_apps" in apps, "the app prompt must know what is already saved"
+    assert "keep|" in apps and "def=keep" in apps, \
+        "an existing selection must be offered, and be the default"
+
+    assert 'TS_WIZ_TMUX="${TS_TMUX:-ctrl-b}"' not in wiz, \
+        "a bare default resets a prefix the machine already had"
+    assert 'ts_data_get tmuxPrefix' in wiz
+
+    # bash 3.2 -- the only bash on macOS -- treats an EMPTY array as unbound
+    # under `set -u`, and every bootstrap runs `set -euo pipefail`. The empty
+    # case is a machine with nothing saved, so the bare form breaks the FIRST
+    # install and nothing else, which is the hardest kind to notice.
+    assert 'opts=(${opts[@]+"${opts[@]}"}' in apps, \
+        'expand a possibly-empty array as ${opts[@]+"${opts[@]}"}, not "${opts[@]}"'
+
+
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+def test_the_app_prompt_runs_on_a_fresh_machine_under_set_u():
+    """The static check above, actually executed: source the wizard under the
+    same flags a bootstrap uses and take the default on an empty selection."""
+    script = (
+        "set -euo pipefail\n"
+        f"cd {bash_path(ROOT)}\n"
+        "source bootstrap/_config.sh >/dev/null 2>&1\n"
+        "source bootstrap/_wizard.sh >/dev/null 2>&1\n"
+        'ts_data_get_apps() { printf ""; }\n'
+        'printf "\\n" | ts_prompt_apps 2>/dev/null\n'
+    )
+    r = subprocess.run([BASH, "-c", script], capture_output=True, text=True,
+                       encoding="utf-8", timeout=60)
+    assert r.returncode == 0, f"fresh-machine app prompt failed: {r.stderr}"
+    assert len(r.stdout.split()) > 0, "the default produced no apps at all"
+
+
+def test_kokoro_is_seeded_for_this_machine_not_for_a_blackwell_box():
+    """kokoro's .env.example ships Profile A (CUDA 12.8) uncommented, and
+    tss_seed_env was a blind copy -- so a Mac got a cu128 image and the NVIDIA
+    device reservation, and `up` failed on `could not select device driver`
+    after pulling several GB. setup-kokoro-docker.sh already refused GPU on
+    darwin; the file compose actually reads did not."""
+    lib = (ROOT / "services" / "_stack.sh").read_text(encoding="utf-8")
+    assert "tss_seed_kokoro_profile" in lib
+    seed = _sh_function(lib, "tss_seed_env")
+    assert "tss_seed_kokoro_profile" in seed, "seeding must select the profile, not just copy"
+
+    prof = _sh_function(lib, "tss_seed_kokoro_profile")
+    assert "tss_gpu_profile" in prof, "reuse the existing detection, do not fork a second one"
+    for tag in ("kokoro-fastapi-gpu:v0.8.0-cu128",
+                "kokoro-fastapi-gpu:v0.8.0-cu126",
+                "kokoro-fastapi-cpu:v0.8.0"):
+        assert tag in prof, f"profile image {tag} is missing"
+
+    # The example must keep shipping the lines the rewrite anchors on.
+    ex = (ROOT / "services/stacks/kokoro/.env.example").read_text(encoding="utf-8")
+    assert any(l.startswith("COMPOSE_FILE=") for l in ex.splitlines())
+    assert any(l.startswith("KOKORO_IMAGE=") for l in ex.splitlines())
+
+    ps = (ROOT / "bootstrap" / "ts-stack.ps1").read_text(encoding="utf-8")
+    assert "Set-TsKokoroProfile" in ps, "the pwsh twin must select a profile too"
