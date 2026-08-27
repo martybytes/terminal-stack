@@ -98,7 +98,7 @@ if [ -f "$TOML" ]; then
     # asked the question and threw the answer away.
     ts_memory_apply "${TS_WIZ_MEMORY_BACKEND:-agentmemory}"
     # Stored on its own, not through ts_save_config: the mux key is positional-
-    # argument-free by design so ts-mux can flip it without re-stating the rest.
+    # argument-free by design so tstack mux can flip it without re-stating the rest.
     ts_wez_mux_set "${TS_WIZ_WEZ_MUX:-off}"
     ts_wez_restore_set "${TS_WIZ_WEZ_RESTORE:-off}"
     ts_atuin_set "${TS_WIZ_ATUIN:-off}"
@@ -107,7 +107,7 @@ if [ -f "$TOML" ]; then
     echo "$INFO Saved terminal-stack config to $TOML [data]"
 fi
 
-ts_brew_install_apps "$TS_WIZ_APPS" || ts_note_failure "optional apps" "retry: ts-config apps"
+ts_brew_install_apps "$TS_WIZ_APPS" || ts_note_failure "optional apps" "retry: tstack config apps"
 
 # 3. Terminal emulators + Nerd Font (casks) — GUI only. Skip on a headless Mac
 # (e.g. a CI runner or a Mac server reached over ssh): no window server to render
@@ -180,15 +180,17 @@ else
 fi
 
 # 6. Agent wiring. The SETTINGS were already saved before any install ran (§2e);
-# this is the half that shells out to ts-agents.sh, which needs the claude/codex
+# this is the half that shells out to `tstack agents`, which needs the claude/codex
 # CLIs to exist — so it has to stay after the app install, unlike the settings.
 if [ -f "$TOML" ]; then
-    ts_agents_apply_wizard "$SOURCE_DIR/bootstrap/ts-agents.sh"
+    ts_agents_apply_wizard "$SOURCE_DIR"
 fi
 
 # 7. Git include — stack aliases + delta config (file lands via chezmoi apply;
 # git silently skips missing include files, so ordering is safe).
 GIT_INC="$HOME/.config/git/terminal-stack.gitconfig"
+ts_install_git_hooks "$SOURCE_DIR"
+
 if git config --global --get-all include.path 2>/dev/null | grep -qF "terminal-stack.gitconfig"; then
     echo "$INFO git include.path already set"
 else

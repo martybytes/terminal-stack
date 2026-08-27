@@ -18,7 +18,7 @@ menu writes them for you.
 
 **On Windows the command is `btop4win`, not `btop`.** winget's
 `aristocratos.btop4win` is a separate port with its own executable name; there is
-no `btop.exe`. `ts-update` probed for `btop` and so offered to install it on
+no `btop.exe`. `tstack update` probed for `btop` and so offered to install it on
 every run even though it was already there.
 
 `bottom` (`btm`) is the leaner alternative; `glances` adds a web UI and remote

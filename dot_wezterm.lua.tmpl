@@ -9,7 +9,7 @@
 -- Keep in sync with windows/.wezterm.lua.tmpl.
 --
 -- This file is a chezmoi template: leader chord + theme mode are injected from
--- the saved config in chezmoi [data]. Change them with `ts-config`.
+-- the saved config in chezmoi [data]. Change them with `tstack config`.
 
 local wezterm = require 'wezterm'
 local act = wezterm.action
@@ -28,7 +28,7 @@ end
 -- reattaches. OFF by default — the mux server loads its OWN copy of this file, so
 -- config that affects pane spawning needs a mux restart (which kills every pane)
 -- and not just a GUI reload, and pane:inject_output (the Claude pane tint below)
--- is local-pane-only. Toggle with `ts-mux on` / `ts-mux off`; `ts-mux -h` also has
+-- is local-pane-only. Toggle with `tstack mux on` / `tstack mux off`; `tstack mux -h` also has
 -- status / kill / restart / reset. Keep in sync with windows/.wezterm.lua.tmpl.
 local MUX_ENABLED = '{{ if hasKey . "weztermMux" }}{{ .weztermMux }}{{ else }}off{{ end }}' == 'on'
 if MUX_ENABLED then
@@ -40,7 +40,7 @@ end
 -- scrollback you had when you last closed WezTerm. OFF by default: a terminal
 -- that silently reopens yesterday's shells is a surprise rather than a feature,
 -- and the autosave below keeps Leader+L available whenever you do want it back.
--- Toggle with `ts-config restore on` / `off`.
+-- Toggle with `tstack config restore on` / `off`.
 local RESTORE_ENABLED = '{{ if hasKey . "weztermRestore" }}{{ .weztermRestore }}{{ else }}off{{ end }}' == 'on'
 
 -- ── Theme palette (light / dark, optional follow-OS) ──────────────────────────

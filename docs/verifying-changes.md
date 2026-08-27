@@ -1,12 +1,54 @@
 # Verifying a change before you commit
 
-There is no CI, so validation happens locally before every push. This checklist
-combines the automated suites with the manual gates they cannot cover. `INSTALL.md` § Phase 9 is
+CI runs on every push (`.github/workflows/ci.yml`: ubuntu, macos, windows and a
+WSL job) and is the only coverage macOS and native Debian/Ubuntu get, since
+neither can be run from a Windows development machine. It does not replace this
+page: what follows is the set of gates a runner cannot perform - loading a
+WezTerm config without a GUI, proving a Nerd Font glyph actually renders, driving
+an interactive prompt through a pty, exercising a real config store.
+
+Run the automated gates first (`ruff check`, `ruff format --check`, `mypy`,
+`pytest tests/ --cov`); `.githooks/pre-commit` and `pre-push` do it for you once
+`core.hooksPath=.githooks` is set. `INSTALL.md` § Phase 9 is
 the *post-install* smoke test for a fresh machine; this is the *pre-commit* pass for
 a change you just made.
 
 Every technique below was worked out the hard way. None of it needs a GUI, a second
 machine, or a real `chezmoi apply`.
+
+## 0. Parity: run it on a real Linux, in two seconds
+
+```sh
+tests/parity/run.sh                  # debian13, ubuntu2404, ubuntu2204, bash32
+tests/parity/run.sh ubuntu2204       # one target
+tests/parity/run.sh --shell debian13 # a shell inside it, to poke about
+```
+
+**WSL is not native Linux here.** `/mnt/c` exists, interop exists, and
+`tstack/platform.py` reports `wsl` rather than `linux` deliberately - so every
+native-Linux branch was only ever exercised by CI. That is a slow loop and one
+nobody watches while writing the code. The containers run the whole suite in
+about two seconds, against each distro's *own* Python, bash and zsh.
+
+The container is a CLEAN CHECKOUT, not a copy of your tree: everything git
+ignores is deleted after the copy, so `services/stacks/*/.env` and friends are
+absent exactly as they are on a runner. Uncommitted *tracked* changes are still
+what gets tested. Copying verbatim let a test that only passes on an installed
+machine go green here and red in CI.
+
+That last part is the point. The runner-provided Python hides a class of problem:
+CI uses 3.12, this machine has 3.14, and Ubuntu 22.04 - an LTS still in support -
+ships 3.10. A test importing `tomllib` (3.11+) broke collection of the entire
+suite there, invisibly to every other gate.
+
+**macOS cannot be added.** Containers share the host kernel, so Darwin cannot be
+containerised, and macOS VMs are restricted to Apple hardware. The `bash32` target
+covers the part of macOS that actually bites this repo - `/bin/bash` is 3.2 there
+and `services/**/*.sh` must be clean under it - but only for *syntax*. It does
+**not** reproduce the locale-dependent multibyte trap (`"$var<non-ascii>"` under
+`set -u`), because musl handles locales differently from Darwin; verified, not
+assumed. That trap stays covered by the test that greps for `$var` followed by a
+non-ASCII byte, which works everywhere. Real macOS remains CI's job.
 
 ## 1. Syntax gates (always, every touched file)
 
@@ -167,7 +209,7 @@ is what identified `resurrect: restoring workspace '…' on gui-startup`.
 ## 3. Parallel implementations must render identically
 
 `ts_prompt_choice` (bash) and `Read-TsChoice` (pwsh) are required to produce
-byte-identical menus, as are the `wso` and `ts-mux` `-h` texts. Eyeballing them
+byte-identical menus, as are the `wso` and `tstack mux` `-h` texts. Eyeballing them
 misses a single space or an em dash. Diff the bytes.
 
 The bash side needs a pty — `ts_prompt_choice` writes the menu to `/dev/tty` and it
@@ -209,7 +251,7 @@ Then strip ANSI and blank lines, drop the trailing `Choose …` line (it differs
 legitimately: a live prompt vs `(non-interactive — taking the default)`), and
 `Compare-Object`.
 
-A pwsh prompt must also be **reachable from the `ts-config wizard` path**, which
+A pwsh prompt must also be **reachable from the `tstack config wizard` path**, which
 dot-sources `bootstrap/_config.ps1` and nothing else. A prompt that lives in
 `windows-bootstrap.ps1` works during install and dies mid-questionnaire on a
 re-run, discarding every answer already given. Resolve the whole callee list from
@@ -227,7 +269,7 @@ $b = $b.Substring(0, $b.IndexOf("`nfunction ", 1))
 '@
 ```
 
-Anything it prints is a prompt `ts-config wizard` cannot see.
+Anything it prints is a prompt `tstack config wizard` cannot see.
 `test_wizard_callees_are_all_defined_in_config_ps1` pins the same rule.
 
 ## 4. Config-store changes — use a throwaway store
@@ -253,9 +295,9 @@ $env:LOCALAPPDATA = (New-Item -ItemType Directory -Force "$env:TEMP\ts-test").Fu
 ```
 
 **Always regression-test the carry-forward guard.** Several `Save-TsConfig` callers
-pass no value for a given key — `Update-TsResolvedTheme`, and `ts-update`'s
+pass no value for a given key — `Update-TsResolvedTheme`, and `tstack update`'s
 app-backfill. Without `$PSBoundParameters.ContainsKey(...)` handling, every
-`ts-update` silently resets the user's choice:
+`tstack update` silently resets the user's choice:
 
 ```powershell
 Save-TsConfig -<Key> 'on' | Out-Null
@@ -397,20 +439,20 @@ The invariants to drill after touching the hook senders:
   on an unchanged config must produce **zero** `updated` lines for
   `settings.json` / `hooks.json`, and the hooks must not POST anywhere
   (`cc_tts_daemon_ready` gates on `.daemon.enabled`).
-- **Both entry shells:** drill the pwsh verbs (`ts-config tts daemon on` in
+- **Both entry shells:** drill the pwsh verbs (`tstack config tts daemon on` in
   pwsh, `Update-TerminalStack`) as well as the bash ones — day-to-day driving
   happens from PowerShell, and the daemon's first activation failed only on
   that path (`& pwsh` output capture; see `powershell-quirks.md`). Remember
-  pwsh `ts-config tts` saves don't survive a WSL apply — persistence checks
+  pwsh `tstack config tts` saves don't survive a WSL apply — persistence checks
   belong on the WSL side.
 
 Duck-restore drill (music playing): trigger speech, kill the daemon mid-duck
 (`taskkill /f /im terminal-stack-tts.exe`), confirm music is stuck quiet, then
-`ts-doctor --repair` (or restart the daemon) — volumes must come back and
+`tstack doctor --repair` (or restart the daemon) — volumes must come back and
 `state\duck-snapshot.json` must be gone.
 
 New wizard/menu text (`ts_prompt_cc_tts_daemon` ↔ `Read-TsCcTtsDaemon`,
-`ts-config tts -h` both shells, both TTS submenus) goes through the §3
+`tstack config tts -h` both shells, both TTS submenus) goes through the §3
 byte-diff like everything else.
 
 ## 4c. Sync changes — run the whole sync against a throwaway profile
@@ -447,7 +489,7 @@ For the per-entry merges, TTS off is a distinct case, not a weaker version of TT
 off must remove every one of ours and keep every one of theirs, and turning it back on must
 return to exactly the starting counts with no duplicates.
 
-## 4d. `ts-smb` changes (`bootstrap/ts-smb.sh`, `bootstrap/_smb.sh`)
+## 4d. `tstack smb` changes (`bootstrap/ts-smb.sh`, `bootstrap/_smb.sh`)
 
 The store parser, the engine probe and the mount lifecycle are all testable without
 an SMB server; only the last two steps need one.
@@ -475,7 +517,7 @@ TERMINAL_STACK_DIR="$PWD" bash bootstrap/ts-smb.sh mount NAME -n
 
 Mount-record states are testable with synthetic records — no mount required. Write a
 `<name>.mnt` into the state dir with a live pid and a mountpoint that is not mounted
-and `ts-smb list` must report `zombie`; a dead pid and no mount must report `gone`
+and `tstack smb list` must report `zombie`; a dead pid and no mount must report `gone`
 and be pruned on sight.
 
 For the real thing, a container is enough:
@@ -494,13 +536,13 @@ Two things to check every time you touch the credential path:
   `ps auxww | grep '[r]clone'` must show the connection string and flags and no
   password. It travels in `RCLONE_SMB_PASS`, and it must be **obscured** there —
   rclone rejects plaintext with "input too short when revealing password".
-- **`--password-stdin` is consumed exactly once.** `ts-smb probe` tries several
+- **`--password-stdin` is consumed exactly once.** `tstack smb probe` tries several
   credential candidates; re-reading an exhausted stdin used to leave rclone
   retrying against an empty password until it timed out.
 
 And two platform traps worth re-confirming rather than assuming, because both fail
 *silently*: Homebrew's macOS rclone refuses to mount at all (a build-time guard, so
-`ts-smb doctor` should say so), and `-o backend=fskit` must never be passed
+`tstack smb doctor` should say so), and `-o backend=fskit` must never be passed
 automatically — a test pins that, because it fails on macOS 26.6 where fuse-t's
 default NFS backend does not.
 
@@ -551,7 +593,7 @@ bash -uc 'desired=/tmp; echo "$desired…"'    # bash: desired?: unbound variabl
 **A catalog entry is a claim about a package manager — check it.** A winget id
 that does not resolve costs nothing at parse time and never stops failing:
 `pypa.pipx` sat in `$TsWingetIds` while `pipx` was in the *recommended* set, so
-every Windows machine was offered it on every `ts-update`, accepted, and watched
+every Windows machine was offered it on every `tstack update`, accepted, and watched
 winget answer "No package found matching input criteria". Two of the other three
 Python entries were dead the same way. Sweep the whole table after touching it:
 
@@ -600,7 +642,7 @@ deliberately invisible to resolution. So `chezmoi apply` run while working in a 
 tree deploys the *old* code and proves nothing about your change.
 
 Do not apply from the dev tree to "test" something. Verify with §§1–4, commit, then
-`ts-update` on the target machine and check there.
+`tstack update` on the target machine and check there.
 
 A newly added `[data]` key is safe in that gap: every consumer defaults it (`hasKey`
 guards in chezmoi templates, `cfg <key> <default>` in the sync hook, `else` fallbacks

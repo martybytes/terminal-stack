@@ -28,7 +28,7 @@ Sessions autosave every 15 min, on window focus loss, and whenever you add or
 close a pane or tab.
 
 **Launching WezTerm starts clean by default** — it does not reopen what you had
-last time. `ts-config restore on` changes that: every launch then replays the
+last time. `tstack config restore on` changes that: every launch then replays the
 last autosaved workspace, panes, layout, scrollback and all. Either way the
 autosave keeps running, so `Ctrl+Space` `L` restores a session by hand whenever
 you want one, and turning the setting on later gives you the session you had —

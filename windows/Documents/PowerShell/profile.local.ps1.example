@@ -29,14 +29,14 @@
 # $env:DROPBOX_DIR = 'D:\Dropbox'
 
 # ── Runtime clone location (rarely needed) ────────────────────────────────────
-# ts-update / ts-config / wso / doc find the clone on their own: the canonical
+# tstack update / tstack config / wso / doc find the clone on their own: the canonical
 # location %LOCALAPPDATA%\terminal-stack\stack first, then the legacy defaults.
 # A pin is ONLY for a clone kept somewhere unusual — a canonical install needs
 # none, and a pin there would shadow a future relocation.
 #
 # If you see "stale $env:TERMINAL_STACK_DIR pin", the line below points at a
 # path with no clone (it moved, or you deleted it). Delete the line, or run
-# 'ts-doctor -Repair' to clear it. The installer removes it for you when the
+# 'tstack doctor -Repair' to clear it. The installer removes it for you when the
 # clone lands at the canonical path.
 #
 # $env:TERMINAL_STACK_DIR = 'D:\dotfiles\terminal-stack'

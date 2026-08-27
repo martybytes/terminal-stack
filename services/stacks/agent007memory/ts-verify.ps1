@@ -1,5 +1,5 @@
 ﻿# ts-verify.ps1 - agent007memory: prove the console proxies to AgentMemory and
-# serves its own UI. Run by `ts-stack test`; safe to run by hand. Exit 0 = pass.
+# serves its own UI. Run by `tstack services test`; safe to run by hand. Exit 0 = pass.
 #
 # POSIX twin: ts-verify.sh. Change one, change the other.
 #
@@ -39,7 +39,7 @@ if (Get2xx "$proxy/agentmemory/livez") {
 } elseif (Get2xx "$bypass/agentmemory/livez" 2) {
     Fail 'the proxy on 3111 is not forwarding, though the server behind it is healthy - is this container on ts-agentmemory-net?'
 } else {
-    Fail 'the agentmemory server itself is down, so the proxy has nothing to forward to (start it: ts-stack up agentmemory)'
+    Fail 'the agentmemory server itself is down, so the proxy has nothing to forward to (start it: tstack services up agentmemory)'
 }
 
 # The UI is a single-page app, so an empty 200 is a failed build, not a pass.

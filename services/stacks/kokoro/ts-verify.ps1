@@ -2,7 +2,7 @@
 .NAME     ts-verify.ps1
 .SYNOPSIS kokoro: prove it actually synthesises audio.
 .PLATFORM Windows (pwsh 7). Twin of ts-verify.sh -- change one, change the other.
-.USAGE    ts-verify.ps1            (run by `ts-stack test`; safe by hand)
+.USAGE    ts-verify.ps1            (run by `tstack services test`; safe by hand)
 .NOTE     This stack's documented failure is a CUDA build that does not match the
           card: the container reports Up and then crash-loops, so "Up (healthy)"
           proves nothing. RestartCount and a real synthesis are what prove it.

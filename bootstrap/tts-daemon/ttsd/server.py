@@ -239,7 +239,7 @@ class _Handler(BaseHTTPRequestHandler):
     # unauthenticated, and the Host allowlist does not help here: a cross-site form POST
     # carries the *target* Host, so any page you visit could otherwise mute your machine or
     # write your config. Left deliberately open: /v1/event (every hook posts it and none
-    # carries a token), /v1/config/reload (ts-config from pwsh has no token to hand), and
+    # carries a token), /v1/config/reload (tstack config from pwsh has no token to hand), and
     # /v1/duck/release and /v1/shutdown (the installer calls them, and both are nuisances
     # rather than compromises now that a dead daemon restarts itself on the next hook).
     _TOKEN_ROUTES = frozenset({

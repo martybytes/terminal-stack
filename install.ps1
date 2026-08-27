@@ -188,8 +188,8 @@ if (Test-Path (Join-Path $targetDir '.git')) {
 }
 
 # 3b. Offer to clean up old clones + retired leftover files (pre-ticked checklist;
-# confirms before removing). Also persist a non-default clone path so ts-update /
-# ts-config can find it later.
+# confirms before removing). Also persist a non-default clone path so tstack update /
+# tstack config can find it later.
 $cleanup = Join-Path $targetDir 'bootstrap\_cleanup.ps1'
 if (Test-Path $cleanup) {
     . $cleanup
@@ -241,7 +241,7 @@ if (Test-Path $cleanup) {
 Write-Host ''
 Write-Host '==> Windows install done.'
 Write-Host "    Clone: $targetDir"
-Write-Host '    Update later from any pwsh window:  ts-update'
+Write-Host '    Update later from any pwsh window:  tstack update'
 Write-Host ''
 Write-Host '    If you also use WSL Ubuntu, apply the WSL-side dotfiles too:'
 Write-Host '        curl -fsSL https://raw.githubusercontent.com/martybytes/terminal-stack/main/install-wsl.sh | bash'

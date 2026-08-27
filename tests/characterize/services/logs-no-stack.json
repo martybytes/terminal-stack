@@ -1,0 +1,21 @@
+{
+  "subsystem": "services",
+  "case": "logs-no-stack",
+  "platform": "wsl",
+  "sandbox": "throwaway-store",
+  "argv": [
+    "logs"
+  ],
+  "recorded_from": "bootstrap/ts-stack.sh",
+  "exit_code": 1,
+  "stdout_lines": [
+    "tstack services: no Linux Docker CLI in this WSL distro - re-running the Windows twin."
+  ],
+  "stderr_lines": [
+    "Write-Error: C:\\DATA\\Workspace\\src\\github.com\\martybytes\\terminal-stack\\bootstrap\\ts-stack.ps1:587",
+    "Line |",
+    " 587 |  . t $Stack) { Write-Error 'tstack services: logs needs a stack name'; e .",
+    "     |                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+    "     | tstack services: logs needs a stack name"
+  ]
+}

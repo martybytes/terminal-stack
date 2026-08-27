@@ -152,7 +152,7 @@ anything not here is drift.
 |---|---|---|
 | `[DO]   ` is three spaces, not two | `_common.sh` | Makes `[DO]   ` and `[would]` both 7 chars, so a message lands in the same column with or without `--apply`. The 2-space form was copied into seven `.ps1` and is the bug. |
 | Missing Chrome warns in preview, refuses only under `--apply` | `setup-playwright-agents.sh` | Matches the MCP check six lines earlier. In the `.ps1` `$chromePath` is discovered, printed, and never used again — the MCP browser is headless Chromium *inside* the container. |
-| Exits non-zero when problems were found | `check-capture.sh` | The `ts-doctor.sh` house rule, so it can be used in a pipeline or a hook. The `.ps1` always exits 0. |
+| Exits non-zero when problems were found | `check-capture.sh` | The house rule for anything usable in a pipeline or a hook. The `.ps1` always exits 0. |
 | Probe sessions tracked and cleaned from an `EXIT` trap | `check-capture.sh` | Fixes a real bug: the `.ps1`'s `$probeSessions` is never initialised and section D's probe is never added to it. |
 | Backup root defaults under `$HOME` XDG state | `reconcile-llm-queue.sh`, `migrate-durable-llm.sh` | There is no Unix `C:\DATA`, and Docker Desktop for Mac only bind-mounts from `$HOME`, `/tmp`, `/private`, `/Volumes`. |
 

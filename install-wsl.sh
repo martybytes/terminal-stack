@@ -143,10 +143,10 @@ if [ ! -d "$TARGET_DIR/.git" ]; then
             f|F*) : ;;
             *)
                 git -C "$LEGACY" pull --ff-only >/dev/null 2>&1 || true
-                if [ -f "$LEGACY/bootstrap/_doctor.sh" ]; then
+                if [ -f "$LEGACY/bootstrap/_cleanup.sh" ]; then
                     set +e
                     # shellcheck source=/dev/null
-                    . "$LEGACY/bootstrap/_doctor.sh"
+                    . "$LEGACY/bootstrap/_cleanup.sh"
                     if command -v ts_relocate_clone >/dev/null 2>&1; then
                         ts_relocate_clone "$LEGACY" "$TARGET_DIR" \
                             || echo "$WARN Move failed; cloning fresh instead."
@@ -199,9 +199,9 @@ echo "$INFO Running chezmoi apply -v"
 "$HOME/.local/bin/chezmoi" apply -v </dev/null
 
 # 6. Health check (non-fatal): sourceDir + zshrc + tools; flags leftover clones.
-if [ -f "$TARGET_DIR/bootstrap/ts-doctor.sh" ]; then
-    TERMINAL_STACK_DIR="$TARGET_DIR" bash "$TARGET_DIR/bootstrap/ts-doctor.sh" --quiet </dev/null \
-        || echo "$INFO Run 'ts-doctor --repair' to resolve the items above."
+if command -v python3 >/dev/null 2>&1 && [ -f "$TARGET_DIR/tstack/main.py" ]; then
+    TERMINAL_STACK_DIR="$TARGET_DIR" python3 "$TARGET_DIR/tstack/main.py" doctor --quiet </dev/null \
+        || echo "$INFO Run 'tstack doctor --repair' to resolve the items above."
 fi
 
 echo ""

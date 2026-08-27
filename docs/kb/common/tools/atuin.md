@@ -5,7 +5,7 @@ ceiling, and every shell shares one database. Replaces `Ctrl+R`.
 
 ## How this stack wires it
 
-- **Opt-in, and asked.** The install questionnaire asks; `ts-config atuin on|off`
+- **Opt-in, and asked.** The install questionnaire asks; `tstack config atuin on|off`
   changes it later. Default **off**.
 - **It is a saved setting, not a presence check.** The atuin binary is often
   already installed and completely dormant — pulled in as a Homebrew dependency,
@@ -57,6 +57,6 @@ Everything stays on this machine.
 | `atuin search <text>` | search history from the command line |
 | `atuin stats` | most-used commands |
 | `atuin history list` | dump what is stored |
-| `ts-config atuin on` / `off` | enable/disable the `Ctrl+R` integration |
+| `tstack config atuin on` / `off` | enable/disable the `Ctrl+R` integration |
 
 See also `doc common/search-history`, `doc common/tools/fzf`.

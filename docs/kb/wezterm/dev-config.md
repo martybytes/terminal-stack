@@ -29,15 +29,15 @@ Long-form write-up: `docs/developing-wezterm.md` in the clone.
 Renders `.tmpl` tokens (leader, theme, username) and copies only changed files.
 Also mirrors `docs/kb/**` to `%LOCALAPPDATA%\terminal-stack\docs\kb\` so `doc`
 picks up kb updates after sync (clone paths still win for `doc edit` / `doc sync`).
-Same script `install.ps1` runs at install time; `ts-update` runs it after a pull.
+Same script `install.ps1` runs at install time; `tstack update` runs it after a pull.
 
-A dev clone at a workspace tier path is **invisible** to `ts-update` and the
+A dev clone at a workspace tier path is **invisible** to `tstack update` and the
 resolvers — pinning `$env:TERMINAL_STACK_DIR` at it is exactly how you develop
 against it (the canonical install at `%LOCALAPPDATA%\terminal-stack\stack` needs
 no pin), and a tier path is exempt from the installers' refusal to put the runtime
 clone inside a workspace root. If you later move or delete the dev clone, the pin
 goes stale: the resolvers warn and fall back to the canonical install rather than
-breaking, and `ts-doctor -Repair` removes the dead line. Set once in
+breaking, and `tstack doctor -Repair` removes the dead line. Set once in
 `Documents\PowerShell\profile.local.ps1`:
 
 ```powershell
@@ -58,20 +58,20 @@ Then:
 | `pane_nav.lua` | **`Ctrl+Space` `r`** (`ReloadConfiguration`) |
 
 No need to quit WezTerm — but see the mux-server caveat below if you turned
-the mux on (`ts-mux`).
+the mux on (`tstack mux`).
 
 ## Mux server (opt-in)
 
 The multiplexer domain is **off by default** — panes are spawned by the GUI. Turn
-it on with `ts-mux on` and they move into `wezterm-mux-server` instead, where a GUI
-crash can't take them with it. `ts-mux -h` has the full story; `ts-mux status`
+it on with `tstack mux on` and they move into `wezterm-mux-server` instead, where a GUI
+crash can't take them with it. `tstack mux -h` has the full story; `tstack mux status`
 tells you which mode you're actually in.
 
 While it is on, the mux server loads its **own** copy of `.wezterm.lua`, so a GUI
 reload does not update the config it uses for spawning panes. Both sync scripts
 print a reminder when a WezTerm file changed and the mux is on. Nothing restarts it
 automatically — that would kill every live pane. When convenient (closes all
-panes!): `ts-mux restart`.
+panes!): `tstack mux restart`.
 
 ## Plugins
 
@@ -126,7 +126,7 @@ WezTerm loads only `.wezterm.lua` and `require 'pane_nav'` — both are under
 | Gap | Fix |
 |---|---|
 | **WSL zsh panes** (launch menu → WSL zsh) | `chezmoi apply -v` from WSL — edits live in `dot_zshrc`, `dot_claude`, … |
-| **Leader / theme tokens** in rendered `.tmpl` | Run `ts-config` (or ensure `%LOCALAPPDATA%\terminal-stack\config.json` is current) **before** sync |
+| **Leader / theme tokens** in rendered `.tmpl` | Run `tstack config` (or ensure `%LOCALAPPDATA%\terminal-stack\config.json` is current) **before** sync |
 | **WezTerm binary / Nerd Font** | winget — not in the repo |
 | **`profile.local.ps1`**, `~/.doc.local/` | Intentionally never synced |
 

@@ -117,7 +117,7 @@ if ($PSCmdlet.ParameterSetName -eq 'RefreshHints') {
     Write-BillingEnv $outputPath $existingId $existingName $adminHostPath $adminHint $inferenceHint
     Write-Host "Refreshed key fingerprints in $outputPath." -ForegroundColor Green
     Write-Host 'Recreate the console to pick them up:' -ForegroundColor Green
-    Write-Host 'ts-stack up agent007memory' -ForegroundColor Cyan
+    Write-Host 'tstack services up agent007memory' -ForegroundColor Cyan
     exit 0
 }
 
@@ -160,4 +160,4 @@ $projectNameValue = ConvertTo-Json $projectName -Compress
 Write-BillingEnv $outputPath $ProjectId $projectNameValue $admin.Path.Replace('\','/') $adminHint $inferenceHint
 Write-Host 'Wrote non-secret project billing settings. Organization Administration may now return to None.' -ForegroundColor Green
 Write-Host 'Deploy with:' -ForegroundColor Green
-Write-Host 'ts-stack up agent007memory' -ForegroundColor Cyan
+Write-Host 'tstack services up agent007memory' -ForegroundColor Cyan

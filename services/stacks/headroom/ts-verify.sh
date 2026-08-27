@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ts-verify.sh — headroom: prove the proxy is not just up, but enforcing.
-# Run by `ts-stack test`; safe to run by hand. Exit 0 = pass.
+# Run by `tstack services test`; safe to run by hand. Exit 0 = pass.
 #
 # Windows twin: ts-verify.ps1. Change one, change the other.
 #

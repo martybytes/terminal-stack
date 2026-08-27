@@ -209,7 +209,7 @@ function Sync-MirrorTree {
 
             # ghosttyConfig=off: skip the subtree, never delete it. Twin of the
             # same guard in run_after_90-sync-windows.sh; removing what is already
-            # there is ts-config's job, so a hand-written config on a box that
+            # there is tstack config's job, so a hand-written config on a box that
             # never opted in is untouched by a sync.
             if ($script:tsGhosttyOn -ne 'on' -and
                 ($rel -replace '\\', '/') -like 'AppData/Local/ghostty/*') { return }
@@ -330,20 +330,30 @@ if (Test-Path -LiteralPath $mergeHelper) {
     Merge-TsCursorSettings
 }
 
+# The interpreter tstack runs on, for the agent wiring.
+function Get-TsSyncPython {
+    foreach ($name in @('python', 'python3')) {
+        $found = Get-Command $name -ErrorAction SilentlyContinue
+        if ($found) { return $found.Source }
+    }
+    return $null
+}
+
 # Enabled user-global coding-agent integrations are reconciled on update. Disabled
 # tools are not installed or contacted, which is what lets each computer differ.
-$agentsScript = Join-Path $SourceDir 'bootstrap/ts-agents.ps1'
+$agentsScript = Join-Path $SourceDir 'tstack/main.py'
 $headroomEnabled = if (Get-Command Get-TsAgentSetting -ErrorAction SilentlyContinue) { (Get-TsAgentSetting headroomEnabled) -eq 'on' } else { $false }
 $cavemanEnabled = if (Get-Command Get-TsAgentSetting -ErrorAction SilentlyContinue) { (Get-TsAgentSetting cavemanEnabled) -eq 'on' } else { $false }
 $agentmemoryEnabled = if (Get-Command Get-TsAgentSetting -ErrorAction SilentlyContinue) { (Get-TsAgentSetting agentmemoryEnabled) -eq 'on' } else { $false }
-if (Test-Path -LiteralPath $agentsScript) {
+$agentsPython = Get-TsSyncPython
+if ($agentsPython -and (Test-Path -LiteralPath $agentsScript)) {
     if ($headroomEnabled) {
-        & $agentsScript -Tool headroom -Action status -CursorMode (Get-TsAgentSetting headroomCursorMode) *> $null
-        if ($LASTEXITCODE -ne 0) { & $agentsScript -Tool headroom -Action repair -CursorMode (Get-TsAgentSetting headroomCursorMode) | Out-Host }
+        & $agentsPython $agentsScript agents headroom status (Get-TsAgentSetting headroomCursorMode) *> $null
+        if ($LASTEXITCODE -ne 0) { & $agentsPython $agentsScript agents headroom repair (Get-TsAgentSetting headroomCursorMode) | Out-Host }
     }
     if ($cavemanEnabled) {
-        & $agentsScript -Tool caveman -Action status *> $null
-        if ($LASTEXITCODE -ne 0) { & $agentsScript -Tool caveman -Action repair | Out-Host }
+        & $agentsPython $agentsScript agents caveman status *> $null
+        if ($LASTEXITCODE -ne 0) { & $agentsPython $agentsScript agents caveman repair | Out-Host }
     }
 }
 
@@ -370,9 +380,9 @@ Write-Host "sync-windows: user=$WinUser, $created created, $updated updated, $un
 # and only when the mux is actually the thing hosting panes.
 if ($weztermChanged -and $tok['__WEZ_MUX__'] -eq 'on') {
     Write-Warning 'WezTerm config changed. The GUI reloads live, but wezterm-mux-server keeps the old config for spawning panes.'
-    Write-Warning "When convenient (closes all panes!): 'ts-mux restart'."
+    Write-Warning "When convenient (closes all panes!): 'tstack mux restart'."
 }
 
 # A failed -Check followed by a successful repair leaves PowerShell's process-wide
-# LASTEXITCODE at 1. The sync itself succeeded; do not make ts-update report failure.
+# LASTEXITCODE at 1. The sync itself succeeded; do not make tstack update report failure.
 $global:LASTEXITCODE = 0

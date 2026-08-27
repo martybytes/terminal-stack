@@ -1,0 +1,21 @@
+{
+  "subsystem": "services",
+  "case": "no-clone",
+  "platform": "wsl",
+  "sandbox": "empty-home",
+  "argv": [
+    "status"
+  ],
+  "recorded_from": "bootstrap/ts-stack.sh",
+  "exit_code": 0,
+  "stdout_lines": [
+    "  !    container engine unreachable - reporting the settings only",
+    "      agentmemory     enabled (engine unreachable, state unknown)",
+    "      agent007memory  enabled (engine unreachable, state unknown)",
+    "  --  headroom        headroomEnabled=off",
+    "  --  playwright      playwrightEnabled=off",
+    "",
+    "tstack services status: all checks passed"
+  ],
+  "stderr_lines": []
+}

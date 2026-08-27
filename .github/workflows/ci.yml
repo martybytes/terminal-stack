@@ -1,0 +1,217 @@
+# The four targets, two of which cannot be tested on the development machine.
+#
+# This repo had no CI at all. docs/verifying-changes.md opens "There is no CI, no
+# test suite and no lint here" and was half wrong even then: .githooks/pre-commit
+# has run pytest for a long time. What was genuinely missing is macOS and native
+# Debian/Ubuntu, which no local run can cover.
+#
+# The WSL job matters separately from the Ubuntu one: tstack/platform.py reports
+# `wsl` rather than `linux` there, and it is the only environment where both
+# halves of the config store are reachable in one process.
+
+name: CI
+
+on:
+  push:
+    branches: ["main", "feat/**", "fix/**", "docs/**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONIOENCODING: utf-8
+
+jobs:
+  gates:
+    name: lint / format / types
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip ruff mypy
+      - run: ruff check tstack tests
+      - run: ruff format --check tstack
+      - run: mypy
+
+  suite:
+    name: pytest (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test dependencies
+        run: python -m pip install --upgrade pip pytest pytest-cov hypothesis
+      # zsh is not present on the GitHub runners by default, and dot_zshrc is
+      # zsh-only syntax that `bash -n` cannot check. Without this the zsh gate
+      # skips silently, which is the failure mode this whole change set is about.
+      - name: Install zsh
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y zsh
+      - name: Install zsh (macOS ships it)
+        if: runner.os == 'macOS'
+        run: zsh --version
+      - name: Syntax gates
+        if: runner.os != 'Windows'
+        run: |
+          set -e
+          for f in bootstrap/*.sh services/*.sh services/stacks/*/*.sh \
+                   install-*.sh run_after_90-sync-windows.sh run_before_*.sh; do
+            [ -e "$f" ] || continue
+            case "$f" in *.tmpl) continue ;; esac
+            bash -n "$f"
+          done
+          zsh -n dot_zshrc
+      - name: pytest
+        run: python -m pytest tests/ --cov --cov-report=term-missing
+
+  wsl:
+    name: pytest (wsl)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Vampire/setup-wsl@v3
+        with:
+          distribution: Ubuntu-24.04
+          additional-packages: python3 python3-pip zsh git
+      - name: pytest under WSL
+        shell: wsl-bash {0}
+        run: |
+          cd "$(wslpath '${{ github.workspace }}')"
+          python3 -m pip install --break-system-packages pytest pytest-cov hypothesis
+          zsh -n dot_zshrc
+          python3 -m pytest tests/ -q
+      - name: Confirm the platform probe reports wsl, not linux
+        shell: wsl-bash {0}
+        run: |
+          cd "$(wslpath '${{ github.workspace }}')"
+          got="$(python3 -c 'import sys; sys.path.insert(0, "."); from tstack import platform as p; print(p.kind())')"
+          [ "$got" = "wsl" ] || { echo "platform.kind() reported '$got', expected 'wsl'"; exit 1; }
+
+  parity:
+    # The runner-provided Python hides a whole class of problem. ubuntu-latest
+    # gives 3.12; this repo's floor is 3.10, which is what Ubuntu 22.04 ships --
+    # an LTS still in support. A test importing tomllib (3.11+) broke collection
+    # of the ENTIRE suite there, and nothing else in this workflow could see it.
+    #
+    # Debian is here because it is a first-class target of the stack and was
+    # never actually tested, only assumed to behave like Ubuntu.
+    name: parity (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    container: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["debian:13-slim", "ubuntu:24.04", "ubuntu:22.04"]
+    steps:
+      - name: Install the suite's dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            python3 python3-pip python3-venv bash zsh git ca-certificates
+          python3 -m venv /opt/venv
+          /opt/venv/bin/pip install --no-cache-dir pytest pytest-cov hypothesis
+      - uses: actions/checkout@v4
+      - name: Syntax gates with this distro's own bash and zsh
+        run: |
+          set -e
+          git config --global --add safe.directory "$PWD"
+          zsh -n dot_zshrc
+          for f in bootstrap/*.sh services/*.sh services/stacks/*/*.sh \
+                   install-*.sh run_after_90-sync-windows.sh run_before_*.sh; do
+            [ -e "$f" ] || continue
+            case "$f" in *.tmpl) continue ;; esac
+            bash -n "$f"
+          done
+      - name: pytest on this distro's own Python
+        run: |
+          /opt/venv/bin/python -V
+          /opt/venv/bin/python -m pytest tests/ -o addopts= -q
+
+  bash32:
+    # /bin/bash on macOS is 3.2, and services/**/*.sh are required to be clean
+    # under it. Catches bash-4-only syntax; does NOT reproduce the locale
+    # multibyte trap, which musl handles differently from Darwin -- see the note
+    # in tests/parity/run.sh.
+    name: bash 3.2 (macOS shell proxy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          docker run --rm -v "$PWD:/repo:ro" bash:3.2 bash -c '
+            rc=0
+            for f in /repo/services/*.sh /repo/services/stacks/*/*.sh; do
+              [ -e "$f" ] || continue
+              bash -n "$f" || rc=1
+            done
+            exit $rc'
+
+  docs:
+    # Every ts-* name died in one change set, across ~650 occurrences in prose.
+    # A link checker is the only thing that catches the ones that pointed at a
+    # file which moved with them - docs/kb/common/ts-config.md became tstack.md,
+    # and a kb topic label IS its filename.
+    name: docs links
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check relative links in tracked markdown
+        run: |
+          python3 - <<'PY'
+          import pathlib, re, subprocess, sys
+          files = subprocess.run(["git", "ls-files", "*.md"],
+                                 capture_output=True, text=True, check=True).stdout.split()
+          # tests/fixtures/ holds vendored upstream text (WezTerm's changelog);
+          # its links point at that project's doc site, not ours.
+          files = [f for f in files if not f.startswith("tests/fixtures/")]
+          link = re.compile(r"\[[^\]]*\]\(([^)#]+?)(?:#[^)]*)?\)")
+          bad = []
+          for rel in files:
+              src = pathlib.Path(rel)
+              for n, line in enumerate(src.read_text(encoding="utf-8").splitlines(), 1):
+                  for target in link.findall(line):
+                      # Absolute URLs, and shell/template expressions that only
+                      # look like paths ($style, ${VAR}, <placeholder>).
+                      if target.startswith(("http://", "https://", "mailto:", "<")):
+                          continue
+                      if "$" in target or target.startswith("%"):
+                          continue
+                      if not (src.parent / target).exists():
+                          bad.append(f"{rel}:{n} -> {target}")
+          for b in bad:
+              print(b)
+          print(f"{len(files)} markdown files checked, {len(bad)} broken link(s)")
+          sys.exit(1 if bad else 0)
+          PY
+
+  console:
+    # The services/console suite has been red since it was merged and nothing in
+    # the repo ran it. Wiring it up here is the only way that stays visible.
+    name: services/console
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: services/console/package-lock.json
+      - run: npm ci
+        working-directory: services/console
+      - run: npm run typecheck
+        working-directory: services/console
+      - run: npm test
+        working-directory: services/console

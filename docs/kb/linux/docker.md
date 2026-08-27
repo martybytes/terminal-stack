@@ -47,7 +47,7 @@ sudo usermod -aG docker "$USER"
 **The group change does not affect the shell that ran it.** Log out and back in
 (or `newgrp docker` for one shell). Until then every docker command fails with
 `permission denied while trying to connect`, which is not a stopped daemon and
-`ts-stack doctor` says so.
+`tstack services doctor` says so.
 
 ```sh
 systemctl is-active docker         # rootful

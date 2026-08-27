@@ -1,5 +1,5 @@
 # _config.ps1 — terminal-stack configuration store (Windows side).
-# Dot-sourced by windows-bootstrap.ps1, sync-windows.ps1, and the pwsh ts-config.
+# Dot-sourced by windows-bootstrap.ps1, sync-windows.ps1, and the pwsh tstack config.
 #
 # Windows has no chezmoi.toml, so the store is a JSON mirror at
 # %LOCALAPPDATA%\terminal-stack\config.json (next to rollback-sha). In a combined
@@ -115,7 +115,7 @@ function Get-TsAppBin([string]$id) {
         # The Windows port is a different program with a different name: winget's
         # aristocratos.btop4win installs btop4win.exe, never btop.exe. Probing for
         # `btop` therefore never found it, so Get-TsAppsPending offered it on every
-        # single ts-update and winget answered "No available upgrade found" every
+        # single tstack update and winget answered "No available upgrade found" every
         # time. Deliberately NOT mirrored into ts_app_bin in bootstrap/_config.sh —
         # apt and brew both install it as plain `btop`.
         'btop'    { 'btop4win' }
@@ -141,7 +141,7 @@ function Test-TsAppInstalled([string]$id) {
 # the saved selection (an install that failed or a tool later removed), AND
 # anything since added to the recommended set. The second half is the point — a
 # machine configured before a tool joined the catalog would otherwise never get
-# it however many times ts-update ran, which is exactly how gh/ghq/lazygit would
+# it however many times tstack update ran, which is exactly how gh/ghq/lazygit would
 # have missed every existing install.
 function Get-TsAppsPending {
     # Refresh PATH from the persisted Machine+User values FIRST, the way the
@@ -149,7 +149,7 @@ function Get-TsAppsPending {
     # process started with, so anything installed since — by an installer that
     # edited the User PATH, or by fnm, whose entry is per-shell — reads as
     # missing. Measured: grok, gemini and pi were all installed and all three
-    # were offered again on every single ts-update.
+    # were offered again on every single tstack update.
     Update-TsSessionPath
     $saved = @()
     try { $saved = @((Get-TsConfig).apps) } catch {}
@@ -259,6 +259,21 @@ function Get-TsProp($Object, [string]$Name, $Default = $null) {
     return $value
 }
 
+# Point a clone's git hooks at .githooks so the pre-commit and pre-push gates run
+# in it. See ts_install_git_hooks in bootstrap/_config.sh for why this exists: the
+# hook file claimed a bootstrap installed it, nothing ever did, core.hooksPath was
+# unset in every clone, and the only automated gate in the repo had never run.
+function Install-TsGitHooks {
+    param([string]$CloneDir)
+    if (-not $CloneDir) { return }
+    if (-not (Test-Path -LiteralPath (Join-Path $CloneDir '.git'))) { return }
+    if (-not (Test-Path -LiteralPath (Join-Path $CloneDir '.githooks'))) { return }
+    $have = & git -C $CloneDir config --local --get core.hooksPath 2>$null
+    if ($have -eq '.githooks') { return }
+    & git -C $CloneDir config --local core.hooksPath '.githooks' 2>$null
+    Write-Host '  git hooks: core.hooksPath -> .githooks (pre-commit and pre-push gates active)'
+}
+
 function Get-TsConfigPath { Join-Path $env:LOCALAPPDATA 'terminal-stack\config.json' }
 
 function Get-TsConfig {
@@ -309,7 +324,7 @@ function Get-TsAgentSetting([string]$Name) {
 }
 
 # WezTerm multiplexer domain: 'on' hosts panes in wezterm-mux-server (they survive
-# a GUI crash), 'off' spawns them locally. Default off — see `ts-mux -h`.
+# a GUI crash), 'off' spawns them locally. Default off — see `tstack mux -h`.
 # POSIX twin: bootstrap/_config.sh ts_wez_mux_get.
 function Get-TsWeztermMux {
     $v = (Get-TsConfig).weztermMux
@@ -361,7 +376,7 @@ function Save-TsConfig {
     if (-not $PSBoundParameters.ContainsKey('TmuxPrefix') -and $existing.tmuxPrefix) {
         $TmuxPrefix = $existing.tmuxPrefix
     }
-    # Same for the mux setting: only ts-mux passes it, so every other save must
+    # Same for the mux setting: only tstack mux passes it, so every other save must
     # carry the stored value forward rather than resetting it to the default.
     if (-not $PSBoundParameters.ContainsKey('WeztermMux') -and $existing.weztermMux) {
         $WeztermMux = $existing.weztermMux
@@ -681,7 +696,7 @@ function Read-TsTheme {
 # ── WezTerm channel facts ───────────────────────────────────────────────────────
 # POSIX twin: bootstrap/_wezterm.sh — keep the reported facts and the switching
 # rules identical. Neither channel is ever installed automatically: the wizard
-# asks, ts-update offers, ts-config wezterm changes it. Upstream's newest stable
+# asks, tstack update offers, tstack config wezterm changes it. Upstream's newest stable
 # is 20240203 (February 2024, no cut since), which is why nightly is the
 # pre-selected answer rather than the forced one.
 #
@@ -834,13 +849,13 @@ function Show-TsWezStatus {
             if ($commits -and $tally) { $line += ' —' }
             if ($tally) { $line += " $tally" }
             Write-Host $line
-            if ($tally) { Write-Host '    Full notes: ts-config wezterm changes' }
+            if ($tally) { Write-Host '    Full notes: tstack config wezterm changes' }
         }
     }
 }
 
 # A newer build on the channel you are already on? One line when yes, nothing
-# otherwise — ts-update gates its offer on this, so silence is the common case.
+# otherwise — tstack update gates its offer on this, so silence is the common case.
 function Get-TsWezUpdateAvailable {
     $inst = Get-TsWezInstalled
     if (-not $inst) { return '' }
@@ -890,7 +905,7 @@ function Update-TsWezterm {
         'stable'  { Install-TsWezterm 'stable' }
         'nightly' { Install-TsWezterm 'nightly' }
         'unknown' { Write-Host '==> WezTerm: installed outside winget; upgrade it the way you installed it.' }
-        default   { Write-Host "==> WezTerm: not installed. 'ts-config wezterm install nightly' to add it." }
+        default   { Write-Host "==> WezTerm: not installed. 'tstack config wezterm install nightly' to add it." }
     }
 }
 
@@ -1013,7 +1028,7 @@ function Read-TsTerminals {
     return $chosen
 }
 
-# The multiplexer domain (ts-mux). Default off: it changes how every pane is
+# The multiplexer domain (tstack mux). Default off: it changes how every pane is
 # hosted and how a config reload behaves, which is a decision to make once at
 # install rather than inherit.
 # Twin of bootstrap/_wizard.sh ts_prompt_wezterm_mux — keep the rendering identical.
@@ -1022,7 +1037,7 @@ function Read-TsWeztermMux {
     Read-TsChoice -Title 'WezTerm multiplexer (keeps panes alive when the GUI dies):' -Default 'off' -Intro @(
         '  On: your shells run in wezterm-mux-server, so a GUI crash leaves every',
         '  pane alive and relaunching WezTerm reattaches. Cost: config changes then',
-        '  need "ts-mux restart" (kills every pane) and mux panes lose the Claude tint.'
+        '  need "tstack mux restart" (kills every pane) and mux panes lose the Claude tint.'
     ) -Options @(
         @{ Key = 'off'; Label = 'off'; Note = 'panes are spawned by the GUI' },
         @{ Key = 'on';  Label = 'on';  Note = 'panes survive a GUI crash' }
@@ -1049,7 +1064,7 @@ function Read-TsAgentToggle([string]$EnvName, [string]$Title, [string[]]$Intro) 
     $override = [Environment]::GetEnvironmentVariable($EnvName, 'Process')
     if ($override) { return $(if ($override -eq 'on') { 'on' } else { 'off' }) }
     Read-TsChoice -Title $Title -Default 'off' -Intro $Intro -Options @(
-        @{ Key = 'off'; Label = 'off'; Note = 'configure later with ts-config agents' },
+        @{ Key = 'off'; Label = 'off'; Note = 'configure later with tstack config agents' },
         @{ Key = 'on'; Label = 'on'; Note = 'user-global on this computer' }
     )
 }
@@ -1203,7 +1218,7 @@ function Read-TsWorkspaceDir {
 }
 
 # Persist a workspace answer that differs from the autodetect. Lives here, not in
-# windows-bootstrap.ps1, so `ts-config wizard` does not silently drop the answer
+# windows-bootstrap.ps1, so `tstack config wizard` does not silently drop the answer
 # it just asked for. The caller owns any -WhatIf/ShouldProcess gate.
 function Save-TsWorkspaceOverride {
     param([string]$Choice)
@@ -1234,7 +1249,7 @@ function Save-TsWorkspaceOverride {
 }
 
 # The whole install questionnaire, in one place so both the bootstrap and
-# `ts-config wizard` ask exactly the same questions in the same order. POSIX
+# `tstack config wizard` ask exactly the same questions in the same order. POSIX
 # twin: ts_wizard_ask / ts_wizard_collect in bootstrap/_wizard.sh.
 function Read-TsWizard {
     $w = [ordered]@{
@@ -1426,7 +1441,7 @@ function Install-TsAiCli([string]$id) {
                 if ($LASTEXITCODE -ne 0) { Write-Warning "$id install failed." }
             } else {
                 Write-Warning "$id needs Node $want+ to install from npm (found: $(if ($major) { $major } else { 'none' }))."
-                Write-Host '   Install the runtime first: ts-config apps fnm   (then: fnm install --lts)'
+                Write-Host '   Install the runtime first: tstack config apps fnm   (then: fnm install --lts)'
             }
         }
         'cursor-agent' {
@@ -1480,7 +1495,7 @@ function Show-TsInstalledApps([string[]]$Apps) {
     }
 }
 
-# Refresh only resolvedTheme from the live OS theme (used by ts-update for follow).
+# Refresh only resolvedTheme from the live OS theme (used by tstack update for follow).
 function Update-TsResolvedTheme {
     $c = Get-TsConfig
     Save-TsConfig -LeaderChord $c.leaderChord -ThemeMode $c.themeMode `
@@ -1707,12 +1722,12 @@ function Show-CcTtsDaemonStatus {
         Write-Host "tts daemon: $($r.Content)"
         $sha = & git -C (Split-Path -Parent $PSScriptRoot) rev-parse HEAD 2>$null
         if ($sha -and ($r.Content -notmatch [regex]::Escape($sha))) {
-            Write-Host 'tts daemon: running an older build than this clone — ts-config tts daemon restart'
+            Write-Host 'tts daemon: running an older build than this clone — tstack config tts daemon restart'
         }
     } catch {
         Write-Host "tts daemon: not reachable on port $port (hooks fall back to direct playback)"
         $enabled = if ($tts.daemon) { [bool]$tts.daemon.enabled } else { $false }
-        Write-Host "  saved setting daemon.enabled=$enabled  —  start: ts-config tts daemon on"
+        Write-Host "  saved setting daemon.enabled=$enabled  —  start: tstack config tts daemon on"
     }
 }
 
@@ -1730,7 +1745,7 @@ function Get-CcTtsDuckSnapshotPath {
 }
 
 function Repair-CcTtsDuckSnapshot {
-    # ts-doctor --repair: a snapshot left by a daemon that died mid-duck means
+    # tstack doctor --repair: a snapshot left by a daemon that died mid-duck means
     # per-app volumes are still lowered (Windows persists them). The daemon's
     # own oneshot restores them; a live daemon owns its snapshot — leave it.
     $snap = Get-CcTtsDuckSnapshotPath
@@ -1738,7 +1753,7 @@ function Repair-CcTtsDuckSnapshot {
     if (Test-CcTtsDaemonHealthy) { return }
     $ttsExe = Join-Path $env:LOCALAPPDATA 'terminal-stack\tts-daemon\terminal-stack-tts.exe'
     if (-not (Test-Path -LiteralPath $ttsExe)) {
-        Write-Warning "stale duck snapshot at $snap but no TTS executable — reinstall with ts-config tts daemon install"
+        Write-Warning "stale duck snapshot at $snap but no TTS executable — reinstall with tstack config tts daemon install"
         return
     }
     & $ttsExe restore-volumes
@@ -1794,7 +1809,7 @@ function Install-CcTtsSelfBlockAtPath {
     param([string]$Target, [string]$Agent)
     $asset = Join-Path $PSScriptRoot 'tts-daemon\assets\speak-summary.md'
     if (-not (Test-Path -LiteralPath $asset)) {
-        Write-Warning 'tts: speak-summary.md asset not found (run ts-update?)'
+        Write-Warning 'tts: speak-summary.md asset not found (run tstack update?)'
         return $false
     }
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Target) | Out-Null
@@ -1871,33 +1886,33 @@ function Invoke-TsConfigTts {
         }
         'off'  { $tts.enabled = $false }
         'engine' {
-            if (-not $Arg) { Write-Warning 'usage: ts-config tts engine kokoro|chatterbox|auto'; return }
+            if (-not $Arg) { Write-Warning 'usage: tstack config tts engine kokoro|chatterbox|auto'; return }
             $tts.engine = $Arg
         }
         'message' {
-            if (-not $Arg) { Write-Warning 'usage: ts-config tts message template|hook'; return }
+            if (-not $Arg) { Write-Warning 'usage: tstack config tts message template|hook'; return }
             $tts.messageMode = $Arg
         }
         'voice' {
-            if (-not $Arg) { Write-Warning 'usage: ts-config tts voice <kokoro-voice>'; return }
+            if (-not $Arg) { Write-Warning 'usage: tstack config tts voice <kokoro-voice>'; return }
             $tts.kokoro.voice = $Arg
         }
         'voice-chatter' {
-            if (-not $Arg) { Write-Warning 'usage: ts-config tts voice-chatter <name>'; return }
+            if (-not $Arg) { Write-Warning 'usage: tstack config tts voice-chatter <name>'; return }
             $tts.chatterbox.voice = $Arg
         }
         'energy' {
-            if (-not $Arg) { Write-Warning 'usage: ts-config tts energy <0-1>'; return }
+            if (-not $Arg) { Write-Warning 'usage: tstack config tts energy <0-1>'; return }
             $tts.chatterbox.energy = [double]$Arg
             $tts.excitement = [double]$Arg
         }
         'excitement' {
-            if (-not $Arg) { Write-Warning 'usage: ts-config tts excitement <0-1>'; return }
+            if (-not $Arg) { Write-Warning 'usage: tstack config tts excitement <0-1>'; return }
             $tts.excitement = [double]$Arg
             $tts.chatterbox.energy = [double]$Arg
         }
         'prefix' {
-            if (-not $Arg -or -not $Arg2) { Write-Warning 'usage: ts-config tts prefix claude|cursor|codex on|off|<label>'; return }
+            if (-not $Arg -or -not $Arg2) { Write-Warning 'usage: tstack config tts prefix claude|cursor|codex on|off|<label>'; return }
             switch ($Arg) {
                 'claude' {
                     switch ($Arg2) {
@@ -1924,11 +1939,11 @@ function Invoke-TsConfigTts {
             }
         }
         'project' {
-            if (-not $Arg) { Write-Warning 'usage: ts-config tts project on|off'; return }
+            if (-not $Arg) { Write-Warning 'usage: tstack config tts project on|off'; return }
             $tts.includeProject = ($Arg -eq 'on')
         }
         'template' {
-            if (-not $Arg -or -not $Arg2) { Write-Warning 'usage: ts-config tts template waiting|error|question|permission "…"'; return }
+            if (-not $Arg -or -not $Arg2) { Write-Warning 'usage: tstack config tts template waiting|error|question|permission "…"'; return }
             if (-not $tts.templates) { $tts.templates = @{} }
             switch ($Arg) {
                 'waiting'    { $tts.templates.waiting = $Arg2 }
@@ -1939,7 +1954,7 @@ function Invoke-TsConfigTts {
             }
         }
         'url' {
-            if (-not $Arg -or -not $Arg2) { Write-Warning 'usage: ts-config tts url kokoro|chatterbox <url>'; return }
+            if (-not $Arg -or -not $Arg2) { Write-Warning 'usage: tstack config tts url kokoro|chatterbox <url>'; return }
             switch ($Arg) {
                 'kokoro'     { $tts.kokoro.url = $Arg2 }
                 'chatterbox' { $tts.chatterbox.url = $Arg2 }
@@ -1947,7 +1962,7 @@ function Invoke-TsConfigTts {
             }
         }
         'events' {
-            if (-not $Arg) { Write-Warning 'usage: ts-config tts events waiting,error,question,permission'; return }
+            if (-not $Arg) { Write-Warning 'usage: tstack config tts events waiting,error,question,permission'; return }
             $tts.events = @($Arg -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
         }
         'daemon' {
@@ -1955,7 +1970,7 @@ function Invoke-TsConfigTts {
                 'on' {
                     if (-not (Invoke-TsCcTtsDaemonInstaller)) { return }
                     $tts.daemon.enabled = $true
-                    Write-Host "note: this enables the daemon for Windows-side hooks; if you also run Claude in WSL, run 'ts-config tts daemon on' from WSL so those hooks route to it too."
+                    Write-Host "note: this enables the daemon for Windows-side hooks; if you also run Claude in WSL, run 'tstack config tts daemon on' from WSL so those hooks route to it too."
                 }
                 'off' {
                     Invoke-TsCcTtsDaemonInstaller @('-Uninstall') | Out-Null
@@ -1972,29 +1987,29 @@ function Invoke-TsConfigTts {
         }
         'summarizer' {
             if ($Arg -notin 'template', 'self', 'haiku', 'ollama') {
-                Write-Warning 'usage: ts-config tts summarizer template|self|haiku|ollama'; return
+                Write-Warning 'usage: tstack config tts summarizer template|self|haiku|ollama'; return
             }
             $tts.summarize.mode = $Arg
             if ($Arg -eq 'self') { Install-CcTtsSelfBlock } else { Remove-CcTtsSelfBlock }
         }
         'haiku-model' {
-            if (-not $Arg) { Write-Warning 'usage: ts-config tts haiku-model <model>'; return }
+            if (-not $Arg) { Write-Warning 'usage: tstack config tts haiku-model <model>'; return }
             $tts.summarize.haikuModel = $Arg
         }
         'ollama' {
-            if (-not $Arg) { Write-Warning 'usage: ts-config tts ollama <url> [<model>]'; return }
+            if (-not $Arg) { Write-Warning 'usage: tstack config tts ollama <url> [<model>]'; return }
             $tts.summarize.ollamaUrl = $Arg
             if ($Arg2) { $tts.summarize.ollamaModel = $Arg2 }
         }
         'music' {
             if ($Arg -notin 'duck', 'smart', 'pause', 'off') {
-                Write-Warning 'usage: ts-config tts music duck|smart|pause|off'; return
+                Write-Warning 'usage: tstack config tts music duck|smart|pause|off'; return
             }
             $tts.music.mode = $Arg
         }
         'duck-level' {
             if ($Arg -notmatch '^\d+$' -or [int]$Arg -gt 100) {
-                Write-Warning 'usage: ts-config tts duck-level <0-100>'; return
+                Write-Warning 'usage: tstack config tts duck-level <0-100>'; return
             }
             $tts.music.duckPercent = [int]$Arg
         }
@@ -2006,7 +2021,7 @@ function Invoke-TsConfigTts {
             $tts.voicePool = @($Arg -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
         }
         'port' {
-            if ($Arg -notmatch '^\d+$') { Write-Warning 'usage: ts-config tts port <n>'; return }
+            if ($Arg -notmatch '^\d+$') { Write-Warning 'usage: tstack config tts port <n>'; return }
             $tts.daemon.port = [int]$Arg
         }
         'test' {
@@ -2015,7 +2030,7 @@ function Invoke-TsConfigTts {
                 $source = if ($Arg -eq '--source' -and $Arg2) { $Arg2 } else { 'test' }
                 & $test test --source $source
             } else {
-                Write-Warning "terminal-stack-tts.exe not found at $test (run ts-config tts on)"
+                Write-Warning "terminal-stack-tts.exe not found at $test (run tstack config tts on)"
             }
             return
         }
@@ -2024,7 +2039,7 @@ function Invoke-TsConfigTts {
             # daemon is still able to explain itself.
             $exe = Join-Path $env:LOCALAPPDATA 'terminal-stack\tts-daemon\terminal-stack-tts.exe'
             if (-not (Test-Path -LiteralPath $exe)) {
-                Write-Warning "terminal-stack-tts.exe not found at $exe (run ts-config tts daemon install)"
+                Write-Warning "terminal-stack-tts.exe not found at $exe (run tstack config tts daemon install)"
                 return
             }
             $hargs = @('history')
@@ -2039,7 +2054,7 @@ function Invoke-TsConfigTts {
         }
         'reset' { $tts = Get-CcTtsDefaults }
         default {
-            Write-Warning "ts-config tts: unknown subcommand '$Sub' (show, on, off, test, reset, ...)"
+            Write-Warning "tstack config tts: unknown subcommand '$Sub' (show, on, off, test, reset, ...)"
             return
         }
     }

@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # ts-smb.sh — find, interrogate and mount SMB/CIFS shares, all through rclone.
-# Driven by the `ts-smb` shell wrapper (zsh) and runnable standalone.
+# Driven by the `tstack smb` shell wrapper (zsh) and runnable standalone.
 #
 # THERE IS NO pwsh TWIN YET. Every other dual-shell command in this stack keeps
 # a parallel PowerShell implementation with byte-identical -h output; this one
 # is macOS/Linux only for now, deliberately and on the record (docs/decisions.md
-# "Why ts-smb ships without a PowerShell twin"). HELP below is written as if it
+# "Why tstack smb ships without a PowerShell twin"). HELP below is written as if it
 # will be copied, because it will be. On Windows the engine layer is mostly moot
 # anyway — Explorer and `net use` already do this natively.
 #
@@ -20,33 +20,33 @@
 # glob a mountpoint (a dead FUSE mount blocks forever and takes the shell).
 set -euo pipefail
 
-HELP='ts-smb — SMB/CIFS shares over rclone: find them, look inside, mount them.
+HELP='tstack smb — SMB/CIFS shares over rclone: find them, look inside, mount them.
 
 Usage:
-  ts-smb [list]      live mounts: name, state, engine, mountpoint
-  ts-smb hosts       SMB servers on this LAN (mDNS; --sweep adds a port-445 scan)
-  ts-smb shares HOST the shares HOST offers
-  ts-smb probe HOST  auth + capability: which credentials work, and what they get
-  ts-smb ls SPEC     one directory listing, no mount
-  ts-smb tree SPEC   the tree, depth-limited (--depth N, default 2)
-  ts-smb du SPEC     what it holds (rclone size)
-  ts-smb get SRC DST copy out of a share without mounting it
-  ts-smb setup       guided Windows/NAS share setup (Tailscale-aware)
-  ts-smb mount NAME  mount it
-  ts-smb umount NAME unmount it
-  ts-smb add NAME    add a share to the store, asking for whatever you left out
-  ts-smb config      edit shares.local.conf in $EDITOR; validated before it saves
-  ts-smb creds NAME  set, show or forget the password for a share
-  ts-smb engine      which mount engine auto picks here, and why the others lost
-  ts-smb doctor      rclone, the FUSE engines, stale mounts, the store
-  ts-smb -h          this help
+  tstack smb [list]      live mounts: name, state, engine, mountpoint
+  tstack smb hosts       SMB servers on this LAN (mDNS; --sweep adds a port-445 scan)
+  tstack smb shares HOST the shares HOST offers
+  tstack smb probe HOST  auth + capability: which credentials work, and what they get
+  tstack smb ls SPEC     one directory listing, no mount
+  tstack smb tree SPEC   the tree, depth-limited (--depth N, default 2)
+  tstack smb du SPEC     what it holds (rclone size)
+  tstack smb get SRC DST copy out of a share without mounting it
+  tstack smb setup       guided Windows/NAS share setup (Tailscale-aware)
+  tstack smb mount NAME  mount it
+  tstack smb umount NAME unmount it
+  tstack smb add NAME    add a share to the store, asking for whatever you left out
+  tstack smb config      edit shares.local.conf in $EDITOR; validated before it saves
+  tstack smb creds NAME  set, show or forget the password for a share
+  tstack smb engine      which mount engine auto picks here, and why the others lost
+  tstack smb doctor      rclone, the FUSE engines, stale mounts, the store
+  tstack smb -h          this help
 
   -y, --yes          skip confirmations
   -n, --dry-run      print the rclone command instead of running it
   --engine E         auto | fuse | nfs        (mount)
   --at DIR           mount somewhere other than the configured mountpoint
   --rw               mount read-write (turns on the VFS write cache)
-  --all              every ts-smb mount        (list, umount)
+  --all              every tstack smb mount        (list, umount)
   --force            unmount harder, and unmount before mounting over
   --depth N          how deep tree goes        (tree)
   --sweep            add a port-445 subnet scan to discovery   (hosts)
@@ -63,15 +63,15 @@ mode, and user "guest" with an empty password is the documented substitute.
 
 Passwords never appear in the command line — there is no --password VALUE flag,
 because /proc/PID/cmdline is world-readable and a mount is long-lived. They are
-obscured once by "ts-smb creds" and stored in the OS keychain; at runtime they
+obscured once by "tstack smb creds" and stored in the OS keychain; at runtime they
 reach rclone through RCLONE_SMB_PASS.
 
 Your shares live in ~/.config/terminal-stack/shares.local.conf, which is never
 tracked and never synced anywhere. Defaults come from bootstrap/shares.conf in
-the clone. Mounts default to read-only at ~/mnt/<name>; run "ts-smb doctor" if
+the clone. Mounts default to read-only at ~/mnt/<name>; run "tstack smb doctor" if
 one will not mount. Windows is not supported yet.'
 
-# Help before anything else: `ts-smb -h` must work on a box where the clone or
+# Help before anything else: `tstack smb -h` must work on a box where the clone or
 # chezmoi is the very thing that is broken.
 case "${1:-}" in -h|--help|help) printf '%s\n' "$HELP"; exit 0 ;; esac
 
@@ -79,11 +79,11 @@ CZ="${TERMINAL_STACK_CHEZMOI:-}"
 if [ -z "$CZ" ]; then
     if [ -x "$HOME/.local/bin/chezmoi" ]; then CZ="$HOME/.local/bin/chezmoi"
     elif command -v chezmoi >/dev/null 2>&1; then CZ="$(command -v chezmoi)"
-    else echo "ts-smb: chezmoi not found on PATH." >&2; exit 1; fi
+    else echo "tstack smb: chezmoi not found on PATH." >&2; exit 1; fi
 fi
 SRC="${TERMINAL_STACK_DIR:-$("$CZ" source-path 2>/dev/null || true)}"
 if [ ! -d "$SRC/bootstrap" ]; then
-    echo "ts-smb: cannot locate the terminal-stack clone (set TERMINAL_STACK_DIR)." >&2
+    echo "tstack smb: cannot locate the terminal-stack clone (set TERMINAL_STACK_DIR)." >&2
     exit 1
 fi
 # shellcheck source=_config.sh
@@ -103,7 +103,7 @@ OPT_CANARY=0; OPT_REPAIR=0; OPT_CREDCHECK=0; OPT_VOLUME=0
 confirm() {  # confirm <prompt>
     [ "$ASSUME_YES" = 1 ] && return 0
     if ! { true > /dev/tty; } 2>/dev/null; then
-        echo "ts-smb: no terminal to confirm on — re-run with -y if you mean it." >&2
+        echo "tstack smb: no terminal to confirm on — re-run with -y if you mean it." >&2
         return 1
     fi
     local a; a="$(ts_tty_prompt "$1 [y/N]: ")"
@@ -112,7 +112,7 @@ confirm() {  # confirm <prompt>
 
 need_rclone() {
     if ! ts_smb_have_rclone; then
-        echo "ts-smb: rclone not found on PATH — install it with 'ts-config apps rclone'." >&2
+        echo "tstack smb: rclone not found on PATH — install it with 'tstack config apps rclone'." >&2
         return 1
     fi
     return 0
@@ -126,7 +126,7 @@ R_NAME=""; R_HOST=""; R_PATH=""; R_USER=""; R_DOMAIN=""; R_PORT=""; R_CRED=""; R
 resolve_spec() {
     local spec="$1"
     R_NAME=""; R_HOST=""; R_PATH=""; R_USER=""; R_DOMAIN=""; R_PORT=""; R_CRED=""; R_REMOTE=""
-    if [ -z "$spec" ]; then echo "ts-smb: a share name or HOST/SHARE is required." >&2; return 2; fi
+    if [ -z "$spec" ]; then echo "tstack smb: a share name or HOST/SHARE is required." >&2; return 2; fi
 
     local head="${spec%%/*}" tail=""
     case "$spec" in */*) tail="${spec#*/}" ;; esac
@@ -156,10 +156,10 @@ resolve_spec() {
     [ -n "$OPT_CRED" ]   && R_CRED="$OPT_CRED"
 
     if ! ts_smb_valid_token "$R_HOST"; then
-        echo "ts-smb: '$R_HOST' is not a usable host (no commas or colons)." >&2; return 2
+        echo "tstack smb: '$R_HOST' is not a usable host (no commas or colons)." >&2; return 2
     fi
     if [ -n "$R_USER" ] && ! ts_smb_valid_token "$R_USER"; then
-        echo "ts-smb: '$R_USER' is not a usable user name (no commas or colons)." >&2; return 2
+        echo "tstack smb: '$R_USER' is not a usable user name (no commas or colons)." >&2; return 2
     fi
     return 0
 }
@@ -182,7 +182,7 @@ spec_remote() {
 
 # Put the obscured password in RCLONE_SMB_PASS for the child only. It MUST be
 # obscured — rclone rejects plaintext here with "input too short when revealing
-# password". `ts-smb creds` obscures once at set time, so this is a plain read.
+# password". `tstack smb creds` obscures once at set time, so this is a plain read.
 export_password() {
     RCLONE_SMB_PASS=""
     # An explicit flag always wins over the share's configured backend —
@@ -216,7 +216,7 @@ export_password() {
 
 read_password_interactive() {
     if ! { true > /dev/tty; } 2>/dev/null; then
-        echo "ts-smb: no terminal to read a password from; use --password-stdin." >&2
+        echo "tstack smb: no terminal to read a password from; use --password-stdin." >&2
         return 1
     fi
     local p=""
@@ -245,7 +245,7 @@ run_rclone() {
 cmd_shares() {
     need_rclone || return 1
     local spec="${1:-}"
-    [ -n "$spec" ] || { echo "ts-smb shares: a host is required." >&2; return 2; }
+    [ -n "$spec" ] || { echo "tstack smb shares: a host is required." >&2; return 2; }
     resolve_spec "$spec" || return $?
     R_PATH=""
     export_password || return 1
@@ -277,7 +277,7 @@ cmd_du() {
 cmd_get() {
     need_rclone || return 1
     local src="${1:-}" dst="${2:-}"
-    [ -n "$src" ] && [ -n "$dst" ] || { echo "ts-smb get: SRC and DST are required." >&2; return 2; }
+    [ -n "$src" ] && [ -n "$dst" ] || { echo "tstack smb get: SRC and DST are required." >&2; return 2; }
     resolve_spec "$src" || return $?
     export_password || return 1
     run_rclone copy "$(spec_remote)" "$dst" --progress --smb-idle-timeout 10s
@@ -288,7 +288,7 @@ cmd_get() {
 cmd_probe() {
     need_rclone || return 1
     local spec="${1:-}"
-    [ -n "$spec" ] || { echo "ts-smb probe: a host or share is required." >&2; return 2; }
+    [ -n "$spec" ] || { echo "tstack smb probe: a host or share is required." >&2; return 2; }
     resolve_spec "$spec" || return $?
     local want_path="$R_PATH"
     echo "$INFO probing $R_HOST${want_path:+/$want_path}"
@@ -343,8 +343,8 @@ cmd_probe() {
             # Samba responding "The request is not supported"), which leaves a
             # file behind on someone else's share.
             local probe=".ts-smb-write-probe.$$"
-            if confirm "ts-smb: create $probe on $R_HOST/$want_path to test writability? (it may not be removable again)"; then
-                if printf 'ts-smb probe\n' | ts_smb_timeout 20 rclone rcat "$(spec_remote "$probe")" \
+            if confirm "tstack smb: create $probe on $R_HOST/$want_path to test writability? (it may not be removable again)"; then
+                if printf 'tstack smb probe\n' | ts_smb_timeout 20 rclone rcat "$(spec_remote "$probe")" \
                         --smb-idle-timeout 5s --contimeout 5s --timeout 10s >/dev/null 2>&1; then
                     echo "  ok         $want_path is writable"
                     if ts_smb_timeout 20 rclone deletefile "$(spec_remote "$probe")" --smb-idle-timeout 5s >/dev/null 2>&1 ||
@@ -442,7 +442,7 @@ sweep_subnet() {
     base="${ip%.*}"
     echo
     echo "$INFO sweep would scan $base.1-254 on port 445"
-    confirm "ts-smb: port-scan $base.0/24?" || return 0
+    confirm "tstack smb: port-scan $base.0/24?" || return 0
     local i pids=0
     for i in $(seq 1 254); do
         ( nc -z -w 1 "$base.$i" 445 >/dev/null 2>&1 && printf '  %s\n' "$base.$i" ) &
@@ -459,7 +459,7 @@ cmd_list() {
     local names n state pid mp eng
     names="$(ts_smb_record_names)"
     if [ -z "$names" ]; then
-        echo "ts-smb: no mounts recorded."
+        echo "tstack smb: no mounts recorded."
     else
         printf '%-14s %-8s %-6s %-8s %s\n' NAME STATE ENGINE PID MOUNTPOINT
         for n in $names; do
@@ -492,7 +492,7 @@ $(ts_smb_rclone_mounts)
 EOF2
     if [ -n "$strays" ]; then
         echo
-        echo "$WARN rclone mounts not managed by ts-smb:"
+        echo "$WARN rclone mounts not managed by tstack smb:"
         printf '%s' "$strays" | sed 's/^/  /'
     fi
     return 0
@@ -505,7 +505,7 @@ mount_preflight() {
         [ "$n" = "$name" ] && continue
         other="$(ts_smb_record_get "$n" mountpoint '')"
         if [ "$other" = "$mp" ]; then
-            echo "ts-smb: $mp is already claimed by '$n' — 'ts-smb umount $n' first." >&2
+            echo "tstack smb: $mp is already claimed by '$n' — 'tstack smb umount $n' first." >&2
             return 1
         fi
     done
@@ -514,28 +514,28 @@ mount_preflight() {
             echo "$INFO $mp is mounted; unmounting first (--force)"
             do_unmount_path "$mp" "$(ts_smb_record_get "$name" engine fuse)" "$(ts_smb_record_get "$name" sudo 0)"
         else
-            echo "ts-smb: $mp is already mounted — pass --force to unmount it first." >&2
+            echo "tstack smb: $mp is already mounted — pass --force to unmount it first." >&2
             return 1
         fi
     fi
     # Safe now: the mount table says nothing is mounted here, so touching the
     # path cannot hit a wedged FUSE mount.
     if [ -L "$mp" ]; then
-        echo "ts-smb: $mp is a symlink; refusing (rclone follows it and unmount gets confusing)." >&2
+        echo "tstack smb: $mp is a symlink; refusing (rclone follows it and unmount gets confusing)." >&2
         return 1
     fi
     if [ ! -e "$mp" ]; then
-        mkdir -p "$mp" || { echo "ts-smb: cannot create $mp" >&2; return 1; }
+        mkdir -p "$mp" || { echo "tstack smb: cannot create $mp" >&2; return 1; }
         return 0
     fi
     if [ ! -d "$mp" ]; then
-        echo "ts-smb: $mp exists and is not a directory." >&2
+        echo "tstack smb: $mp exists and is not a directory." >&2
         return 1
     fi
     local count
     count="$(ls -A "$mp" 2>/dev/null | grep -c . || true)"
     if [ "${count:-0}" -gt 0 ] && [ "$OPT_NONEMPTY" != 1 ]; then
-        echo "ts-smb: $mp is not empty ($count entries); mounting over it would hide them." >&2
+        echo "tstack smb: $mp is not empty ($count entries); mounting over it would hide them." >&2
         ls -A "$mp" 2>/dev/null | head -3 | sed 's/^/    /' >&2
         echo "        pass --allow-nonempty if you really mean it (--force does not cover this)." >&2
         return 1
@@ -546,9 +546,9 @@ mount_preflight() {
 cmd_mount() {
     need_rclone || return 1
     local name="${1:-}"
-    [ -n "$name" ] || { echo "ts-smb mount: a share name is required." >&2; return 2; }
+    [ -n "$name" ] || { echo "tstack smb mount: a share name is required." >&2; return 2; }
     resolve_spec "$name" || return $?
-    [ -n "$R_PATH" ] || { echo "ts-smb: '$name' has no path (the SMB share name)." >&2; return 2; }
+    [ -n "$R_PATH" ] || { echo "tstack smb: '$name' has no path (the SMB share name)." >&2; return 2; }
 
     local eline engine fuselib why
     eline="$(ts_smb_engine_resolve "${OPT_ENGINE:-$(ts_smb_get "$name" engine auto)}")"
@@ -589,7 +589,7 @@ cmd_mount() {
     fi
 
     if [ "$engine" = fuse ] && ! ts_smb_fuse_mount_capable; then
-        echo "ts-smb: this rclone cannot mount (run 'ts-smb doctor')." >&2
+        echo "tstack smb: this rclone cannot mount (run 'tstack smb doctor')." >&2
         return 1
     fi
     export_password || return 1
@@ -611,10 +611,10 @@ cmd_mount() {
     # dlopen order. A stale macFUSE would win it and the mount would HANG.
     if [ "$engine" = fuse ] && [ -n "$fuselib" ]; then
         CGOFUSE_LIBFUSE_PATH="$fuselib" rclone "$@" || {
-            echo "ts-smb: mount failed; see $logf (and try 'ts-smb doctor')." >&2; return 1; }
+            echo "tstack smb: mount failed; see $logf (and try 'tstack smb doctor')." >&2; return 1; }
     else
         rclone "$@" || {
-            echo "ts-smb: mount failed; see $logf (and try 'ts-smb doctor')." >&2; return 1; }
+            echo "tstack smb: mount failed; see $logf (and try 'tstack smb doctor')." >&2; return 1; }
     fi
 
     # --daemon makes the parent exit, so $! is the wrapper, not the mount.
@@ -628,7 +628,7 @@ cmd_mount() {
         sleep 0.2; i=$((i + 1))
     done
     if ! ts_smb_is_mounted "$mp"; then
-        echo "ts-smb: rclone started but $mp never appeared in the mount table; see $logf" >&2
+        echo "tstack smb: rclone started but $mp never appeared in the mount table; see $logf" >&2
         return 1
     fi
 
@@ -690,7 +690,7 @@ cmd_umount() {
         for n in $(ts_smb_record_names); do umount_one "$n" || rc=1; done
         return "$rc"
     fi
-    [ -n "$name" ] || { echo "ts-smb umount: a share name is required (or --all)." >&2; return 2; }
+    [ -n "$name" ] || { echo "tstack smb umount: a share name is required (or --all)." >&2; return 2; }
     umount_one "$(ts_smb_lower "$name")"
 }
 
@@ -698,7 +698,7 @@ umount_one() {
     local name="$1" mp pid engine usesudo state
     mp="$(ts_smb_record_get "$name" mountpoint '')"
     if [ -z "$mp" ]; then
-        echo "ts-smb: no mount recorded for '$name'." >&2
+        echo "tstack smb: no mount recorded for '$name'." >&2
         return 1
     fi
     pid="$(ts_smb_record_get "$name" pid '')"
@@ -713,7 +713,7 @@ umount_one() {
 
     if ts_smb_is_mounted "$mp"; then
         if ! do_unmount_path "$mp" "$engine" "$usesudo"; then
-            echo "ts-smb: could not unmount $mp — try 'ts-smb umount $name --force'." >&2
+            echo "tstack smb: could not unmount $mp — try 'tstack smb umount $name --force'." >&2
             return 1
         fi
     fi
@@ -732,7 +732,7 @@ umount_one() {
     # Never drop the record while the mountpoint is still mounted — that is how
     # you lose the ability to clean it up.
     if ts_smb_is_mounted "$mp"; then
-        echo "ts-smb: $mp is still mounted; keeping the record so it can be retried." >&2
+        echo "tstack smb: $mp is still mounted; keeping the record so it can be retried." >&2
         return 1
     fi
     ts_smb_record_rm "$name"
@@ -747,19 +747,19 @@ cmd_setup() { ts_smb_setup_run "$@"; }
 
 cmd_add() {
     local name="${1:-}"
-    [ -n "$name" ] || { echo "ts-smb add: a name is required." >&2; return 2; }
+    [ -n "$name" ] || { echo "tstack smb add: a name is required." >&2; return 2; }
     name="$(ts_smb_lower "$name")"
     if ts_smb_has "$name"; then
-        echo "ts-smb: '$name' already exists; edit it with 'ts-smb config'." >&2
+        echo "tstack smb: '$name' already exists; edit it with 'tstack smb config'." >&2
         return 1
     fi
     local host path user cred
     host="${OPT_HOSTARG:-}"
     [ -n "$host" ] || host="$(ts_tty_prompt 'SMB host (name or IP): ')"
-    [ -n "$host" ] || { echo "ts-smb: a host is required." >&2; return 2; }
+    [ -n "$host" ] || { echo "tstack smb: a host is required." >&2; return 2; }
     path="${OPT_PATHARG:-}"
     [ -n "$path" ] || path="$(ts_tty_prompt 'Share name on that host (the part after the host): ')"
-    [ -n "$path" ] || { echo "ts-smb: a share name is required." >&2; return 2; }
+    [ -n "$path" ] || { echo "tstack smb: a share name is required." >&2; return 2; }
     user="$OPT_USER"
     [ -n "$user" ] || user="$(ts_tty_prompt "SMB user [$(ts_smb_setting default_user guest)]: ")"
     [ -n "$user" ] || user="$(ts_smb_setting default_user guest)"
@@ -790,9 +790,9 @@ cmd_add() {
     TS_SMB_RELOAD=1 ts_smb_load_config
     unset TS_SMB_RELOAD
     case "$cred" in
-        keychain|file) echo "$INFO set the password with: ts-smb creds $name set" ;;
+        keychain|file) echo "$INFO set the password with: tstack smb creds $name set" ;;
     esac
-    echo "$INFO check it with: ts-smb shares $host"
+    echo "$INFO check it with: tstack smb shares $host"
     return 0
 }
 
@@ -817,36 +817,36 @@ cmd_config() {
 
 cmd_creds() {
     local name="${1:-}" action="${2:-show}"
-    [ -n "$name" ] || { echo "ts-smb creds: a share name is required." >&2; return 2; }
+    [ -n "$name" ] || { echo "tstack smb creds: a share name is required." >&2; return 2; }
     resolve_spec "$name" || return $?
     local backend="$R_CRED"
     case "$backend" in
-        none) echo "ts-smb: '$name' uses cred none (guest, no password)."; return 0 ;;
-        rclone) echo "ts-smb: '$name' uses an rclone.conf remote; manage it with 'rclone config'."; return 0 ;;
+        none) echo "tstack smb: '$name' uses cred none (guest, no password)."; return 0 ;;
+        rclone) echo "tstack smb: '$name' uses an rclone.conf remote; manage it with 'rclone config'."; return 0 ;;
     esac
     case "$action" in
         set)
             local p
             if [ "$OPT_PASSWORD_STDIN" = 1 ]; then p="$(cat)"
             else p="$(read_password_interactive)" || return 1; fi
-            [ -n "$p" ] || { echo "ts-smb: empty password; nothing stored." >&2; return 1; }
+            [ -n "$p" ] || { echo "tstack smb: empty password; nothing stored." >&2; return 1; }
             need_rclone || return 1
             local blob; blob="$(printf '%s' "$p" | ts_smb_obscure)"
-            [ -n "$blob" ] || { echo "ts-smb: could not obscure the password." >&2; return 1; }
+            [ -n "$blob" ] || { echo "tstack smb: could not obscure the password." >&2; return 1; }
             local rc=0
             printf '%s' "$blob" | ts_smb_cred_set "$backend" "$R_USER" "$R_HOST" || rc=$?
             if [ "$rc" = 2 ]; then
                 echo "$WARN secret-tool not found; falling back to a 0600 file (not a secret store, just not on the command line)"
                 printf '%s' "$blob" | ts_smb_cred_set file "$R_USER" "$R_HOST" || {
-                    echo "ts-smb: could not store the password." >&2; return 1; }
+                    echo "tstack smb: could not store the password." >&2; return 1; }
             elif [ "$rc" != 0 ]; then
-                echo "ts-smb: could not store the password." >&2; return 1
+                echo "tstack smb: could not store the password." >&2; return 1
             fi
             echo "$INFO stored the password for $R_USER@$R_HOST ($backend), obscured."
             ;;
         show)
             if ts_smb_cred_present "$backend" "$R_USER" "$R_HOST"; then
-                echo "ts-smb: $R_USER@$R_HOST — a password is stored in $backend."
+                echo "tstack smb: $R_USER@$R_HOST — a password is stored in $backend."
                 if [ "$OPT_REVEAL" = 1 ]; then
                     need_rclone || return 1
                     # `rclone reveal` takes its argument on the command line only
@@ -858,15 +858,15 @@ cmd_creds() {
                     rclone reveal "$(ts_smb_cred_get "$backend" "$R_USER" "$R_HOST")"
                 fi
             else
-                echo "ts-smb: $R_USER@$R_HOST — no password stored ($backend). Set one with 'ts-smb creds $name set'."
+                echo "tstack smb: $R_USER@$R_HOST — no password stored ($backend). Set one with 'tstack smb creds $name set'."
             fi
             ;;
         rm|forget|delete)
-            confirm "ts-smb: forget the password for $R_USER@$R_HOST?" || return 1
+            confirm "tstack smb: forget the password for $R_USER@$R_HOST?" || return 1
             ts_smb_cred_rm "$backend" "$R_USER" "$R_HOST"
             echo "$INFO forgotten."
             ;;
-        *) echo "ts-smb creds: unknown action '$action' (set, show, rm)." >&2; return 2 ;;
+        *) echo "tstack smb creds: unknown action '$action' (set, show, rm)." >&2; return 2 ;;
     esac
     return 0
 }
@@ -879,7 +879,7 @@ cmd_engine() {
     engine="$(printf '%s' "$eline" | cut -f1)"
     fuselib="$(printf '%s' "$eline" | cut -f2)"
     why="$(printf '%s' "$eline" | cut -f3)"
-    echo "ts-smb engine:"
+    echo "tstack smb engine:"
     echo "  resolved : $engine"
     [ -n "$fuselib" ] && echo "  libfuse  : $fuselib"
     echo "  because  : $why"
@@ -907,7 +907,7 @@ cmd_engine() {
             esac
             echo
             echo "  On macOS rclone picks its FUSE library by dlopen order — macFUSE first,"
-            echo "  fuse-t last — and there is no flag to change that, so ts-smb always pins"
+            echo "  fuse-t last — and there is no flag to change that, so tstack smb always pins"
             echo "  CGOFUSE_LIBFUSE_PATH. Without it a stale macFUSE wins and the mount hangs."
             ;;
         linux)
@@ -926,12 +926,12 @@ cmd_doctor() {
     local issues=0
     _ok()  { echo "  ok  $1"; }
     _bad() { echo "  $WARN $1"; issues=$((issues + 1)); }
-    echo "ts-smb doctor:"
+    echo "tstack smb doctor:"
 
     if ts_smb_have_rclone; then
         _ok "rclone $(rclone version 2>/dev/null | head -1 | awk '{print $2}') at $(command -v rclone)"
     else
-        _bad "rclone not found; repair: ts-config apps rclone"
+        _bad "rclone not found; repair: tstack config apps rclone"
     fi
 
     local eline engine fuselib why
@@ -950,13 +950,13 @@ cmd_doctor() {
             local st; st="$(ts_smb_macfuse_state)"
             case "$st" in
                 stale)
-                    _bad "macFUSE $(ts_smb_macfuse_version) (built for macOS $(ts_smb_macfuse_built_for)) is stale for macOS $(ts_smb_macos_major), its kext is not loaded, and it wins rclone's dlopen order; ts-smb pins CGOFUSE_LIBFUSE_PATH so it cannot bite here; repair: run the macFUSE uninstaller to remove it entirely"
+                    _bad "macFUSE $(ts_smb_macfuse_version) (built for macOS $(ts_smb_macfuse_built_for)) is stale for macOS $(ts_smb_macos_major), its kext is not loaded, and it wins rclone's dlopen order; tstack smb pins CGOFUSE_LIBFUSE_PATH so it cannot bite here; repair: run the macFUSE uninstaller to remove it entirely"
                     ;;
                 orphan-dylib)
                     _bad "a stray /usr/local/lib/libfuse.2.dylib has no macfuse.fs bundle behind it; repair: rm /usr/local/lib/libfuse.2.dylib (and the libosxfuse* symlinks beside it)"
                     ;;
                 plausible)
-                    _ok "macFUSE $(ts_smb_macfuse_version) present, kext not loaded — auto will not pick it; force it with: ts-smb mount NAME --engine fuse"
+                    _ok "macFUSE $(ts_smb_macfuse_version) present, kext not loaded — auto will not pick it; force it with: tstack smb mount NAME --engine fuse"
                     ;;
                 loaded) _ok "macFUSE $(ts_smb_macfuse_version), kext loaded" ;;
             esac
@@ -992,14 +992,14 @@ cmd_doctor() {
         esac
     done
     if [ "$stale" -gt 0 ]; then
-        _bad "$stale stale mount record(s); repair: ts-smb umount --all --force"
+        _bad "$stale stale mount record(s); repair: tstack smb umount --all --force"
     else
         _ok "$live live mount(s), no stale records"
     fi
 
     local problems; problems="$(ts_smb_validate || true)"
     if [ -n "$problems" ]; then
-        _bad "the share store has problems; repair: ts-smb config"
+        _bad "the share store has problems; repair: tstack smb config"
         printf '%s\n' "$problems" | sed 's/^/      /'
     else
         local count; count="$(ts_smb_names | wc -w | tr -d ' ')"
@@ -1013,7 +1013,7 @@ cmd_doctor() {
             if ts_smb_cred_present "$R_CRED" "$R_USER" "$R_HOST"; then
                 _ok "$n: password stored in $R_CRED"
             else
-                _bad "$n: no password stored; repair: ts-smb creds $n set"
+                _bad "$n: no password stored; repair: tstack smb creds $n set"
             fi
         done
     else
@@ -1065,17 +1065,17 @@ doctor_repair() {
         state="$(ts_smb_mount_state "$n")"
         [ "$state" = live ] && continue
         mp="$(ts_smb_record_get "$n" mountpoint '')"
-        if confirm "ts-smb: clear the $state record for '$n' ($mp)?"; then
+        if confirm "tstack smb: clear the $state record for '$n' ($mp)?"; then
             OPT_FORCE=1 umount_one "$n" || ts_smb_record_rm "$n"
         fi
     done
     local f; f="$(ts_smb_local_conf)"
-    if [ ! -f "$f" ] && confirm "ts-smb: seed $f from the example?"; then
+    if [ ! -f "$f" ] && confirm "tstack smb: seed $f from the example?"; then
         mkdir -p "$(dirname "$f")" 2>/dev/null || true
         cp "$SRC/bootstrap/shares.local.conf.example" "$f" && echo "$INFO seeded $f"
     fi
     if ! ts_smb_have_rclone; then
-        if confirm "ts-smb: install rclone now?"; then
+        if confirm "tstack smb: install rclone now?"; then
             if command -v brew >/dev/null 2>&1; then brew install rclone
             elif command -v apt-get >/dev/null 2>&1; then sudo apt-get install -y rclone
             else echo "$WARN no brew or apt here; install rclone by hand."; fi
@@ -1120,7 +1120,7 @@ while [ "$#" -gt 0 ]; do
         --repair)          OPT_REPAIR=1 ;;
         -h|--help|help)    printf '%s\n' "$HELP"; exit 0 ;;
         --) shift; while [ "$#" -gt 0 ]; do POS+=("$1"); shift; done; break ;;
-        -*) echo "ts-smb: unknown flag '$1' (try: ts-smb -h)" >&2; exit 2 ;;
+        -*) echo "tstack smb: unknown flag '$1' (try: tstack smb -h)" >&2; exit 2 ;;
         *)  POS+=("$1") ;;
     esac
     shift
@@ -1146,5 +1146,5 @@ case "$CMD" in
     creds)          cmd_creds "$@" ;;
     engine)         cmd_engine "$@" ;;
     doctor)         cmd_doctor "$@" ;;
-    *) echo "ts-smb: unknown command '$CMD' (list, hosts, shares, probe, ls, tree, du, get, setup, mount, umount, add, config, creds, engine, doctor)" >&2; exit 2 ;;
+    *) echo "tstack smb: unknown command '$CMD' (list, hosts, shares, probe, ls, tree, du, get, setup, mount, umount, add, config, creds, engine, doctor)" >&2; exit 2 ;;
 esac

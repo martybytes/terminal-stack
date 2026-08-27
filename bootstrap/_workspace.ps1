@@ -102,9 +102,9 @@ function Get-TsWsRoot {
 
 function Get-TsWsStateDir { Join-Path $env:LOCALAPPDATA 'terminal-stack' }
 
-# The ACTIVE terminal-stack runtime clone (the one ts-update updates), resolved.
+# The ACTIVE terminal-stack runtime clone (the one tstack update updates), resolved.
 # wso must never migrate it: relocating the runtime clone breaks the install
-# (that's ts-doctor's job).
+# (that's tstack doctor's job).
 #
 # Reuses the profile's Resolve-TsSourceDir when it is loaded — the same
 # delegation Get-TsWsRoot does for Get-TsWorkspace. A narrower resolver here is

@@ -2,11 +2,349 @@
 
 All notable changes captured here. Format loosely follows [Keep a Changelog](https://keepachangelog.com/). Dates are MM/DD/YYYY for display, `git log` is authoritative.
 
-- **Codex now speaks clarifying questions (08/25/2026).** Enhanced Codex profiles register an asynchronous `PreToolUse` matcher for `request_user_input`, dispatching existing `question/question` TTS events before the agent blocks on user input. Question text, session identity, project name, mute rules, event filters, daemon history, and direct fallback all reuse the established pipeline. Windows, WSL, macOS, and Linux input helpers now preserve the `codex` source instead of relabeling fallback speech as Claude. `Stop` completion speech remains unchanged; unrelated tools and `codex-stock` remain silent. New sessions must review and trust the added hook through `/hooks`.
-
 ## [Unreleased]
 
+### Added
+
+- **The macOS regression fixes, carried forward into the Python (08/27/2026).**
+  `e969c30f` landed on `main` while the `tstack` port was in flight, fixing four
+  regressions that ran on every non-Windows host - and three of the files it fixed
+  are files the port had deleted. Resolving the merge as "deleted wins" would have
+  dropped those fixes silently, so the *rules* moved instead:
+
+  - **The doctor no longer believes `--check`'s exit code.** Every host gates on
+    its agentmemory plugin cache and returns 0 when there is none, so a machine
+    with no plugin at all reported `ok wiring intact` while capturing nothing.
+    `tstack doctor` now asks that question first and reports the third outcome:
+    *enabled but not installed for any agent - nothing captures*.
+  - **`tstack services bootstrap` seeds kokoro for THIS machine.** kokoro's
+    `.env.example` ships Profile A (Blackwell, CUDA 12.8) uncommented, and seeding
+    was a blind copy - so a Mac or a 40-series box got a cu128 image and the NVIDIA
+    device reservation, and `up` failed on "could not select device driver" after
+    pulling several GB. `stacks.gpu_profile()` is the one implementation of the
+    detection, keeping the darwin branch the pwsh twin never had: Docker Desktop
+    for Mac has no passthrough of any kind, so C is the only profile that can run
+    there and `nvidia-smi` is never probed.
+
+  Every upstream change to a file that still exists was taken as-is: `ts_timeout`,
+  the 0600 secret-cache reader, `ts_smb_timeout` delegating, the wizard keeping a
+  saved app selection and no longer resetting `tmuxPrefix`, `ts_memory_apply` in
+  all four save paths, and `-MemoryBackend` on the Windows `Save-TsConfig` calls.
+
+- **Every caller of the deleted twins repointed (08/26/2026).**
+  Four executable call sites still ran `bootstrap/ts-agents.ps1` after it was
+  deleted: `windows-bootstrap.ps1`'s post-wizard wiring, `sync-windows.ps1`'s and
+  `run_after_90-sync-windows.sh`'s reconciliation on every update, and `$PROFILE`'s
+  `tstack config agents`. All four now run `tstack agents` through the same Python
+  entry point, and the WSL one still crosses to the WINDOWS side deliberately -
+  that is where the GUI agents and their configuration live, so a Linux
+  interpreter would edit files in the WSL home that nothing reads.
+
+- **`tstack agents` is Python (08/26/2026).**
+  `bootstrap/ts-agents.sh` (359 lines) and `bootstrap/ts-agents.ps1` (431) are
+  deleted; `tstack/commands/agents.py` is the one implementation. The merge takes
+  the **union**, because the two had drifted: the pwsh status checked the Claude
+  plugin list, the global skill file, the AgentMemory viewer and a TCP fallback,
+  and the bash status checked none of them, while the bash status was the one that
+  probed AgentMemory with a plain request rather than `curl -fsS` - that service
+  answers 404 on `/` and 401 on `/health`, so the strict form reported it down
+  while it was up. Both behaviours now apply everywhere.
+
+  **The WSL handoff is now a re-exec of the same program.** On a combined install
+  the GUI agents and their configuration are Windows-side: `~/.claude.json`,
+  `~/.cursor/mcp.json` and the Codex home belong to Windows processes. The bash
+  twin handled that by re-exec'ing the pwsh twin, which is exactly where the two
+  were free to drift; it now re-execs itself under the Windows Python, and
+  `user_root()` names the boundary explicitly so a registration cannot land in the
+  WSL home where nothing reads it.
+
+  Rules that were comments are tests now: a failed MCP `initialize` handshake
+  REMOVES stale registrations rather than leaving a command no client can run; a
+  Cursor `mcp.json` that will not parse is never overwritten; every rewrite takes a
+  dated backup that never clobbers a same-day one; the proxy token is never
+  printed; and `uninstall` always passes `--keep-data`.
+
+- **Parity containers now mirror a clean checkout (08/26/2026).**
+  `tests/parity/run.sh` copied the working tree verbatim, which inherited the
+  developer's *untracked* files - `services/stacks/*/.env` among them. A test that
+  read the live tree therefore passed in the container and failed on every CI
+  runner, which is exactly the "only green on an already-installed machine" class
+  the harness exists to catch. The copy now deletes everything git ignores, so
+  uncommitted *tracked* changes are still what gets tested and nothing else is.
+
+  Found by CI on the first commit after the harness landed: 4 stack `.env` files
+  before, 0 after.
+
+- **`tstack wezterm` is Python (08/26/2026).**
+  `bootstrap/ts-wezterm.sh` (90 lines) is deleted and `bootstrap/_wezterm.sh` drops
+  from 446 lines to 66 shims. That file was already half Python: five of its
+  functions existed only to pipe JSON into an embedded `python3 -c` heredoc, with
+  `PYTHONIOENCODING=utf-8` forced because WezTerm's changelog is full of
+  box-drawing characters and Windows defaults stdout to cp1252. All of it now
+  lives in `tstack/commands/wezterm.py`, once.
+
+  The shims stay because the installers (`_wizard.sh`, `mac-bootstrap.sh`,
+  `_common-debian.sh`) source that file before the package is on any path they
+  know about. They hold no logic: each is a wrapper over a machine-readable verb
+  (`channel`, `installed`, `update-available`, `intro`, `terminals-channel`) that
+  is deliberately silent when there is no answer, because every caller treats
+  empty as "nothing to say" and none of them may fail a shell mid-install.
+
+  Every rule the four shell tests enforced is kept and now driven rather than
+  grepped: the build date comes out of the release name with no network call, the
+  changelog slice is counted against the saved fixture, no network degrades to
+  version-and-date, and a channel switch removes the other package in BOTH
+  directions - plus the one that was only a comment, that a hand-placed binary
+  (channel `unknown`) is never replaced or upgraded.
+
+- **`tstack mux` is Python (08/25/2026).**
+  `bootstrap/ts-mux.sh` (301 lines) and `Invoke-TsMux` in `$PROFILE` (197) are
+  deleted; `tstack/commands/mux.py` is the one implementation. The WSL interop
+  rule survives with a test rather than a comment: the mux server is a Windows
+  process, so pids come from `tasklist.exe` and not `pgrep`, which finds nothing
+  inside WSL while a healthy server runs on the same machine. So does the rule
+  that nothing here ever auto-restarts the server - a refused confirmation now
+  stops `restart` outright instead of killing and then starting.
+
+  `tstack config mux ...` on both sides hands off to it. On Windows that goes
+  through a new `Invoke-TstackSub`, which is how a `$PROFILE` function calls a
+  ported subcommand: the user-facing shim is for what someone types, and one
+  stack function calling another should not go through argument re-parsing.
+
+- **`tstack services` is one Python program (08/25/2026).**
+  `bootstrap/ts-stack.sh` (635 lines) and `bootstrap/ts-stack.ps1` (897) are
+  deleted, along with 508 lines of `services/_stack.sh` that only they called.
+  What replaces them is `tstack/commands/services.py`, `tstack/stacks.py` and
+  `tstack/engine.py` - one implementation of twelve verbs, on all four platforms.
+  `services/_stack.sh` keeps everything each stack's own `ts-verify.sh` uses; the
+  scripts *inside* the service tree still exist twice, deliberately.
+
+  Two bugs fall out of the merge rather than out of anyone noticing them.
+
+  **kokoro was never reported as off on macOS or Linux.** The bash twin asked for
+  `enabled` and `engine`, where the keys are `ccTtsEnabled` and `ccTtsEngine`, so
+  the lookup always missed, fell through to a default branch that runs the bare
+  word `1` as a command, and the `|| echo true` guard turned that failure into
+  "TTS is on with kokoro". The pwsh twin read the real values, so the two
+  disagreed on every machine with voice notifications off - and the parity test
+  passed throughout, because it checked that both files contained the string
+  `ccTts`.
+
+  **The WSL handoff is gone.** The bash twin re-exec'd the pwsh twin through
+  interop for five of the twelve verbs, gave up entirely on a machine with no
+  pwsh 7, and left the other seven running against Docker Desktop's stub. There
+  is nothing to hand off to now: the same process runs `docker.exe` through
+  interop. The path constraint that motivated the handoff is stated instead of
+  side-stepped - a stack tree a Windows engine cannot bind-mount is refused
+  *before* anything is torn down, naming the fix.
+
+  Exit codes are consistent for the first time: 0 healthy, 1 problems found, 2 the
+  command line was wrong. The same mistake used to exit 2 through Git Bash and 1
+  through the WSL handoff.
+
+- **Parity containers: the suite on a real Linux, in two seconds (08/25/2026).**
+  `tests/parity/run.sh` runs the whole suite inside Debian 13, Ubuntu 24.04 and
+  Ubuntu 22.04 containers, against each distro's *own* Python, bash and zsh, plus a
+  `bash32` target that syntax-checks `services/**` under the bash 3.2 that macOS
+  ships as `/bin/bash`. WSL is not native Linux for this repo: `/mnt/c` exists,
+  interop exists, and `tstack/platform.py` reports `wsl` rather than `linux` on
+  purpose, so every native-Linux branch was previously exercised only by CI - a
+  slow loop nobody watches while writing the code. These run in about two seconds.
+
+  It found a real break on its first run. Ubuntu 22.04 - an LTS still in support -
+  ships Python 3.10, where `tomllib` does not exist, and
+  `tests/test_codex_dashboard.py` imported it at module scope. That failed
+  *collection* of the entire suite, not one file. Nothing else could see it: CI
+  uses 3.12, WSL has 3.14 and Windows has 3.14. The file now skips itself rather
+  than raising the stack's floor to 3.11 and dropping a supported LTS.
+
+  macOS cannot be added and is not pretended at: containers share the host kernel,
+  so Darwin cannot be containerised. `bash32` covers the part of macOS that
+  actually bites here, and only for syntax - the locale-dependent multibyte
+  `set -u` trap does **not** reproduce under musl (verified, not assumed) and stays
+  covered by the test that greps for `$var` followed by a non-ASCII byte. The same
+  three distros plus `bash32` are now CI jobs.
+
+- **The settings schema, and one writer for the config store (08/26/2026).**
+  `tstack/schema.py` says what every saved setting *is* - kind, allowed values, default,
+  which group it belongs to, and **which layer supplied its current value**. That last
+  column is the point: a key can come from chezmoi `[data]`, from the Windows
+  `config.json` mirror, or from nothing, and those three look identical once the value is
+  printed. Modelled on `ttsd/settings_schema.py`, which already does this for the 43 TTS
+  keys and is the reason its dashboard can be trusted.
+
+  Derived keys are marked and refuse to be written. `leaderKey`, `leaderMods`,
+  `tmuxPrefixResolved` and `resolvedTheme` are regenerated by `chezmoi init` from the keys
+  actually chosen, so a direct write survives until the next save and then vanishes.
+  `agentmemoryEnabled` is derived from `memoryBackend` for the same reason.
+
+  `tstack/store.py` gains the write side, and it is the **only** writer. Writes are atomic
+  (temp file plus replace - a half-written `chezmoi.toml` stops chezmoi running at all,
+  which takes out every command including the doctor that would have explained it),
+  preserve unrelated content such as `sourceDir` and `[edit]`, invalidate the read cache,
+  and raise rather than report a success that changed nothing.
+
+  It also handles the platform the read side quietly ignored: a **Windows-standalone**
+  install has no chezmoi, `sync-windows.ps1` renders from `config.json`, and nothing ever
+  reads a `chezmoi.toml`. Writing `[data]` there would have created a file no code path
+  consults. Writes now route to the mirror on that platform, preserving unknown keys and
+  refusing to overwrite a mirror that will not parse.
+
+  No registry row flips: `tstack config` still routes to the shell, because a row is
+  per-subcommand and `config` also serves `leader`, `theme`, `apps`, `tts` and `wizard`.
+  See `REVAMP-PLAN.md` § Status for why the phase boundary sits here.
+
+  Coverage floor 78% -> 80%.
+
+- **`tstack doctor` is Python, and runs the same checks everywhere (08/25/2026).** The first
+  subsystem ported off the shell twins. `bootstrap/ts-doctor.sh` and `bootstrap/_doctor.sh`
+  are deleted, and `Invoke-TsDoctor` / `Test-TerminalStack` / `Repair-TerminalStack` are gone
+  from `$PROFILE`.
+
+  The two implementations had drifted a long way apart: bash ran about twenty checks, pwsh
+  about eight, and neither knew what the other looked at. Windows never checked the config
+  stores for divergence, the memory-backend derivation, SMB mount records, or the agentmemory
+  hook wiring. It does now, because there is one implementation.
+
+  `--json` emits one record per check (id, status, message, hint), so the checks are a read
+  model rather than prose to scrape. `--quiet` prints nothing at all on a healthy machine.
+  Exit status is unchanged: 0 healthy, 1 issues found.
+
+  Three bugs the characterization recording exposed, all fixed in the port:
+  - `ts_chezmoi_bin` returned `$TERMINAL_STACK_CHEZMOI` unchecked, so a pin at a path with no
+    binary was reported as `ok  chezmoi: <path>`.
+  - The bash doctor resolved the clone through `chezmoi source-path` **alone**, so a machine
+    with a valid `TERMINAL_STACK_DIR` pin and a broken chezmoi reported "no source dir" while
+    every other command in the stack honoured the pin.
+  - The daemon probe only tried `127.0.0.1`. On WSL the TTS daemon is a *Windows* process and
+    WSL2's loopback is the VM's, so a healthy daemon read as dead under NAT networking. The
+    port walks the same host ladder the hooks already used.
+
+  A false positive was removed too: the `chezmoi source-path` check is POSIX-only, because on
+  Windows the apply path is `scripts/sync-windows.ps1` and chezmoi is usually present only
+  because winget installed it, pointing somewhere unrelated.
+
+- **Failure-path tests for the doctor.** The branches that only run when something is
+  already wrong -- an unreachable service, a probe whose binary is missing, a subprocess
+  timeout, a stale pin, a clone that is not ours -- are exactly the ones a live run on a
+  healthy machine never reaches. Coverage floor 74% -> 78%.
+
+- **Characterization fixtures (`tests/characterize/`).** What the shell did, recorded before it
+  was replaced, replayed against the port. Deliberate divergences need a written reason, and a
+  test rejects a reason too thin to review. Fixtures carry the platform they represent and are
+  only replayed there; host-dependent lines are filtered, so nothing personal reaches a tracked
+  file and a fixture recorded on one machine still passes on another.
+
+- **One command: `tstack` (08/25/2026).** The eight `ts-*` commands are replaced by a
+  single entry point with subcommands: `tstack config`, `doctor`, `update`, `rollback`,
+  `mux`, `services`, `smb`, `wezterm`, `agents`, `agentmemory`, `doc`. **No `ts-*` name
+  survives and no alias is provided**, in either shell.
+
+  Routing lives in `tstack/commands.conf`, a whitespace-delimited table read by four
+  consumers: `tstack/registry.py`, the `tstack()` shim in `dot_zshrc`, `Invoke-Tstack` in
+  `$PROFILE`, and the completion providers (the first in this repo). Help is rendered by
+  `tstack/cli.py` and nowhere else, so the bash and pwsh help texts are identical by
+  construction rather than by the manual pty diff.
+
+  Nothing was reimplemented: every subcommand still routes to the shell that implements it
+  today. Flipping a row to `python` is what ports a subsystem, and that is the whole
+  mechanism for the rest of the work in `REVAMP-PLAN.md`.
+
+- **Python core, gates and CI.** New `tstack/` package (dispatcher, registry, clone
+  resolution, platform detection), `pyproject.toml` (ruff, mypy, pytest, branch coverage
+  with a ratcheted floor), `.github/workflows/ci.yml` covering ubuntu, macos, windows
+  **and WSL**, and a `.githooks/pre-push` full gate beside the existing pre-commit one.
+
+### Fixed
+
+- **The doctor's agentmemory secret check, which the port had dropped (08/27/2026).**
+  The shell doctor compared the container's `/data/.hmac` against the value a hook
+  would recover to; `tstack doctor` did not carry it over at all, so a stale secret
+  - which 401s every request while both capture and retrieval swallow the error -
+  had nothing watching for it. CLAUDE.md said the check existed. It does now.
+
+  In the hardened form upstream gave it: the `cmd.exe` read is gated on the
+  Windows side existing (it is 127 everywhere else), Unix reads the 0600 cache
+  instead because there is no `HKCU\Environment` there, a group-readable cache is
+  refused, every probe is bounded, a dead Docker is silence rather than a verdict,
+  and neither value is ever printed.
+
+- **`replace_in_file` called a correct file a broken one (08/27/2026).**
+  It reported "the pattern matched nothing" whenever the text came back unchanged,
+  so seeding kokoro on a Blackwell box - where the shipped example already carries
+  the profile that machine needs - warned *no COMPOSE_FILE line to set* about a
+  file that was perfectly correct. Both shell implementations had the same
+  conflation (node exits 3 for "unchanged"). It now distinguishes matched from
+  changed.
+
+- **The Windows mirror nests the TTS block, and the reader did not know (08/26/2026).**
+  chezmoi `[data]` is flat (`ccTtsEnabled`); `config.json` nests (`ccTts.enabled`),
+  because the TTS daemon reads that file too and wants it structured. `store.get`
+  looked the flat name up in the mirror, missed, and fell through to the default -
+  so on Windows `tstack services status` reported *"kokoro running, but voice
+  notifications are off"* on a machine with voice notifications very much on.
+
+  `store.mirror_key` now maps between the two shapes, using `DIVERGENCE_PAIRS` as
+  the explicit table so the reader and the divergence check cannot disagree about
+  where a value lives, plus a general `ccTts*` rule for the keys that table does
+  not name.
+
+  Found by running the commands through the **pwsh shim** rather than by a test:
+  every test in the suite injects a store, so none of them could see it. The new
+  test uses the real reader against a real mirror file.
+
+- **Two tests hung forever on Linux and nowhere else.** `ts_prompt_multi` reads from
+  `/dev/tty`, not stdin, so `stdin=DEVNULL` did nothing: wherever a controlling terminal
+  exists the prompt blocked without limit. It does under WSL and does not under Git Bash,
+  so the suite passed on Windows and stalled on Linux with no failure to read. Every test
+  subprocess is now detached with `start_new_session=True` and carries a `timeout=`, both
+  enforced by a lint. A hang is worse than a failure: locally it reads as slowness, and in
+  CI as an unattributed timeout.
+
+- **Two tests only passed on an already-installed machine.** The first CI run this repo
+  has ever had found both on all four targets: one required a gitignored `.env` that
+  `tstack services bootstrap` creates, the other assumed a clone is always resolvable
+  (a CI checkout lives at a path the candidate list deliberately excludes).
+
+- **`ts-stack` had been broken on Windows since `54da056`.** `$PROFILE:1705` held a literal
+  TAB byte where a backslash-t was intended, inside a single-quoted string, so `Join-Path` produced
+  `<src>\bootstrap\<TAB>s-stack.ps1`, `Test-Path` failed, and every invocation printed
+  "not found; run ts-update". A lint now fails on any literal TAB inside a single-quoted
+  PowerShell string.
+
+- **The only automated gate had never run.** `.githooks/pre-commit` said it was "installed
+  by `bootstrap.sh --apply` / `bootstrap.ps1 -Apply`". Neither file has ever existed here,
+  nothing set `core.hooksPath`, and it was unset in every clone. `ts_install_git_hooks` /
+  `Install-TsGitHooks` now set it, all three bash bootstraps call it, and a test asserts
+  both. This is why the TAB byte survived and why `services/console`'s suite stayed red.
+
+- **Argument splatting dropped the leading dash.** `tstack services -h` reached
+  `ts-stack.ps1` as two arguments, `-` and `h`, reporting "no stack named 'h'". An `if`
+  used as an expression unrolls a single-element array to a scalar, and splatting a scalar
+  string beginning with `-` re-parses it as a parameter token; with no tail it splatted one
+  empty string. Both parse cleanly and fail silently. Fixed with `@()`, pinned by a test.
+
+- **Claims that nothing enforced.** `ts-mux` and `wso` `-h` were documented as
+  byte-identical between their twins with nothing comparing them; `Test-TsAppInstallable`
+  was unpinned while its bash twin was pinned twice; "never pipe `Where-Object` into
+  `Set-Content`" was prose only. All four are now tests. `CLAUDE.md`'s opening claim that
+  there is "no build, no test suite, no lint" was false in three ways and contradicted
+  nineteen lines later. Full list in `docs/decisions.md` § "The claims audit".
+
+- **Tests that would have gone vacuous.** The chezmoi/Docker boundary test asserted that
+  `docker compose` appears nowhere in `bootstrap/ts-agents.{sh,ps1}` — an assertion that
+  passes forever once those files are deleted. It now resolves its targets through
+  `tstack/commands.conf`, and `repo_file()` makes any "string X must appear in file Y" test
+  fail loudly when Y is missing.
+
+- **`check-capture.sh` probed for a command that never existed.** `command -v
+  ts-agentmemory` led its candidate list; there has never been an executable by that name,
+  so it matched nothing on every host, silently. Its `fail` branch also claimed no `.sh`
+  twin exists, which stopped being true some time ago.
+
 ### Changed
+
+- **Codex now speaks clarifying questions (08/25/2026).** Enhanced Codex profiles register an asynchronous `PreToolUse` matcher for `request_user_input`, dispatching existing `question/question` TTS events before the agent blocks on user input. Question text, session identity, project name, mute rules, event filters, daemon history, and direct fallback all reuse the established pipeline. Windows, WSL, macOS, and Linux input helpers now preserve the `codex` source instead of relabeling fallback speech as Claude. `Stop` completion speech remains unchanged; unrelated tools and `codex-stock` remain silent. New sessions must review and trust the added hook through `/hooks`.
 
 - **The console zooms itself, and its grids follow the content (08/24/2026).** There was a UI scale already, but it was buried in the Customize drawer, capped at 80-125%, and stored **per page** — so it reset when you changed page, which is a per-page layout tweak rather than a zoom. People reach for the browser's zoom instead, and that shrinks the *viewport*: the app frame gets shorter and the SystemBar pinned at its bottom goes off the end of the window.
 

@@ -10,8 +10,8 @@ A Playwright MCP server on `127.0.0.1:8931`, pinned by digest, running
 between sessions. Output is capped and written inside the container.
 
 ```sh
-ts-stack up playwright
-ts-stack status
+tstack services up playwright
+tstack services status
 services/stacks/playwright/check-playwright.sh   # a real two-session probe
 ```
 

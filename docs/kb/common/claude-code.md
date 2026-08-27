@@ -43,7 +43,7 @@ Two things follow:
 
 ## agentmemory
 
-When `ts-config agents agentmemory on` is saved for this computer,
+When `tstack config agents agentmemory on` is saved for this computer,
 `bootstrap\ts-agentmemory.ps1` wires this agent to a local server:
 the tagged URL and `AGENTMEMORY_INJECT_CONTEXT` in `~/.claude/settings.json`'s `env`, plus edits
 to the plugin's own hook scripts. It runs from every sync, so nothing needs doing by hand.
@@ -51,36 +51,36 @@ to the plugin's own hook scripts. It runs from every sync, so nothing needs doin
 Two things worth knowing:
 
 - **A plugin upgrade reverts the hook-script edits** and retrieval silently stops (capture keeps
-  working, so nothing looks broken). The next `ts-update` repairs it; `ts-doctor` reports it.
+  working, so nothing looks broken). The next `tstack update` repairs it; `tstack doctor` reports it.
 - **Retrieval is on by default.** Set `AGENTMEMORY_INJECT_CONTEXT=false` to turn it off
-  deliberately. `ts-config agents agentmemory off` removes the active client wiring
+  deliberately. `tstack config agents agentmemory off` removes the active client wiring
   without touching the Docker service, secret, or data.
 
-Not retrieving? Check `ts-doctor` first, then that the agent was started *after* any environment
+Not retrieving? Check `tstack doctor` first, then that the agent was started *after* any environment
 change — hooks read their environment at process start.
 
 ## Headroom and Caveman
 
-`ts-config agents headroom on` registers the user-scope HTTP MCP server and makes
+`tstack config agents headroom on` registers the user-scope HTTP MCP server and makes
 the shell's `claude` wrapper use `http://127.0.0.1:8787` only when the proxy is
 authenticated and usable. Claude's provider OAuth stays in `Authorization`; the
 separate `X-Headroom-Proxy-Token` header authenticates to Headroom. A stopped,
 misconfigured, or unauthorized proxy produces one warning and a direct launch;
 `claude-stock` always bypasses Headroom. The monitor is
-`ts-config agents headroom dashboard`.
+`tstack config agents headroom dashboard`.
 
-Use `ts-config agents headroom off` for immediate direct mode without stopping
-Docker or deleting data. Use `ts-config agents headroom on` to return: it checks
+Use `tstack config agents headroom off` for immediate direct mode without stopping
+Docker or deleting data. Use `tstack config agents headroom on` to return: it checks
 authenticated `/stats` access before saving the enabled state. `repair` performs
 Headroom MCP is Docker stdio, not an HTTP sidecar on `8788` (that port is the
 dashboard gateway). Repair registers the stdio command only after a JSON-RPC
 initialize handshake; failure removes stale registrations without disabling the
 independent `8787` model proxy.
 
-`ts-config agents caveman on` installs the pinned user-scope Claude plugin. Its
+`tstack config agents caveman on` installs the pinned user-scope Claude plugin. Its
 hooks make terse output always-on without replacing this stack's status line.
-Confirm both layers with `ts-config agents headroom status` and
-`ts-config agents caveman status`. A Headroom dashboard row created by Claude is
+Confirm both layers with `tstack config agents headroom status` and
+`tstack config agents caveman status`. A Headroom dashboard row created by Claude is
 expected to identify itself as Claude/Anthropic; that label describes the client
 that sent the request, not the terminal where the command was launched.
 
@@ -119,13 +119,13 @@ Optional voice when an agent **finishes**, **errors**, **asks a question**, or *
 |---|---|
 | `cctts on` / `off` | Enable/disable TTS (re-applies; adds/removes hooks in Claude + Cursor) |
 | `cctts test` | Generic end-to-end synth + play test |
-| `ts-config tts test --source claude` | Test with Claude prefix + template |
-| `ts-config tts test --source cursor` | Test with Cursor prefix + template |
-| `ts-config tts test --source codex` | Test with Codex prefix + template |
-| `ts-config tts …` | Full control (prefix, project, excitement, templates, events) |
-| `ts-config tts daemon on` | Windows: session-aware announcements via the ttsd tray daemon (names the project, coalesces, ducks music) — `doc windows/tts-daemon` |
+| `tstack config tts test --source claude` | Test with Claude prefix + template |
+| `tstack config tts test --source cursor` | Test with Cursor prefix + template |
+| `tstack config tts test --source codex` | Test with Codex prefix + template |
+| `tstack config tts …` | Full control (prefix, project, excitement, templates, events) |
+| `tstack config tts daemon on` | Windows: session-aware announcements via the ttsd tray daemon (names the project, coalesces, ducks music) — `doc windows/tts-daemon` |
 | `/test-voice` | Slash command in Claude Code or Cursor (user home) |
-| `ts-config tts history [--dupes]` | Windows: what was spoken and what was suppressed — the answer to "why did it say that twice" (`doc windows/tts-daemon`) |
+| `tstack config tts history [--dupes]` | Windows: what was spoken and what was suppressed — the answer to "why did it say that twice" (`doc windows/tts-daemon`) |
 | `ccmute` (dashboard: tray, Open dashboard) | Silence it instantly for a call: sticky, absolute, works with the daemon stopped. Also the tray icon, `Ctrl+Alt+Shift+M`, or `Leader+m` |
 
 ### Config layout
@@ -136,7 +136,7 @@ Optional voice when an agent **finishes**, **errors**, **asks a question**, or *
 | `~/.claude/tts/local.json` | **no** | Per-machine overrides (copy from `local.json.example`) |
 | Legacy `~/.claude/tts.json` | migrated once | Auto-copied to `tts/config.json` on first hook run |
 
-`ts-config tts show` prints chezmoi `[data]`; after apply, hooks read **merged** `config.json` + `local.json`.
+`tstack config tts show` prints chezmoi `[data]`; after apply, hooks read **merged** `config.json` + `local.json`.
 
 Key knobs: `sources.claude|cursor|codex.prefix`, `announce.includeProject`, `announce.templates.{waiting,error,question,permission}`, `excitement` (0–1, drives Kokoro speed / Chatterbox energy).
 
@@ -147,7 +147,7 @@ Key knobs: `sources.claude|cursor|codex.prefix`, `announce.includeProject`, `ann
 | Claude Code | `Stop` / `StopFailure` | Agent finished / failed |
 | Claude Code | `Notification` / `PreToolUse` (`AskUserQuestion`) | Needs attention or permission / clarifying question |
 
-One `AskUserQuestion` trips **both** of those Claude hooks, ~2.5s apart. You hear it once: the daemon and every fallback worker check a shared utterance history before speaking, so the second is recorded as `deduped` rather than said. `ts-config tts history` shows both. (A third hook, `PermissionRequest`, was dropped — it echoed the tool name twice and `Notification` already covers permission prompts.)
+One `AskUserQuestion` trips **both** of those Claude hooks, ~2.5s apart. You hear it once: the daemon and every fallback worker check a shared utterance history before speaking, so the second is recorded as `deduped` rather than said. `tstack config tts history` shows both. (A third hook, `PermissionRequest`, was dropped — it echoed the tool name twice and `Notification` already covers permission prompts.)
 | Cursor Agent | `afterAgentResponse` | Agent final response completed |
 | Cursor Agent | `stop` | Agent loop failed (`completed` / `aborted` are silent) |
 | Cursor Agent | `postToolUse` (`AskQuestion`) | Plan-mode / clarifying question UI |
@@ -169,8 +169,8 @@ WSL invokes the Windows GUI-subsystem EXE, whose WinRT MediaPlayer uses the same
 
 ### Verification
 
-1. `ts-config tts on && chezmoi apply -v`
-2. `ts-config tts test` — generic phrase
+1. `tstack config tts on && chezmoi apply -v`
+2. `tstack config tts test` — generic phrase
 3. `/test-voice` in Claude Code or Cursor
 4. `/test-voice-question` in Cursor — question template
 5. Trigger AskQuestion in Cursor plan mode — hear **Cursor. I have a question for you.**

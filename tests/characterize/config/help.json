@@ -1,0 +1,15 @@
+{
+  "subsystem": "config",
+  "case": "help",
+  "platform": "wsl",
+  "sandbox": "empty-home",
+  "argv": [
+    "-h"
+  ],
+  "recorded_from": "bootstrap/ts-config.sh",
+  "exit_code": 1,
+  "stdout_lines": [],
+  "stderr_lines": [
+    "tstack config: cannot locate the terminal-stack clone (set TERMINAL_STACK_DIR)."
+  ]
+}

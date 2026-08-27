@@ -1,6 +1,6 @@
 # WezTerm — pane management
 
-Leader: **Ctrl+Space** (configurable via `ts-config leader`) — tap, release, then
+Leader: **Ctrl+Space** (configurable via `tstack config leader`) — tap, release, then
 press the next key. It **waits** (no timeout): the cursor turns peach and a
 `⌨ LEADER` badge shows; `Ctrl+Space` `Esc` cancels. "`Ctrl+Space` `h`" means
 leader **then** `h`.
@@ -71,9 +71,9 @@ grows the pane right 9 cells.
 ## Do panes survive a GUI crash?
 Only if the **multiplexer domain** is on. The installer asks and defaults to off,
 so unless you said yes, panes are spawned by the GUI and a GUI crash takes them
-with it. `ts-mux on` moves them into
-`wezterm-mux-server`, where they (and everything running in them) survive; `ts-mux`
+with it. `tstack mux on` moves them into
+`wezterm-mux-server`, where they (and everything running in them) survive; `tstack mux`
 alone reports which mode you're in. Trade-offs and the kill/restart/reset verbs:
-`ts-mux -h`, `doc common/stack`.
+`tstack mux -h`, `doc common/stack`.
 
 > macOS: free `Ctrl+Space` and the F-row from the OS first — see `doc macos/wezterm`.

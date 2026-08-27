@@ -36,9 +36,9 @@ Section 'A. Client wiring lives in terminal-stack'
 
 # Which hooks are registered, what they run, and what environment they carry moved to
 # terminal-stack (bootstrap/ts-agentmemory.ps1), which already manages ~/.claude,
-# ~/.cursor and ~/.codex. Checking it from here would duplicate ts-agentmemory -Check
+# ~/.cursor and ~/.codex. Checking it from here would duplicate `tstack agentmemory --check`
 # and drift from it, so this section only points at the right command.
-Info 'Harness wiring: run  ts-agentmemory -Check  (or ts-doctor) from the terminal-stack clone.'
+Info 'Harness wiring: run  tstack agentmemory --check  (or tstack doctor) from the terminal-stack clone.'
 Info 'It reports reverted hook-script edits, which is what a plugin upgrade silently causes.'
 Info 'What follows here is the server side: secret, capture, search, project scoping.'
 
@@ -380,7 +380,7 @@ if (-not $execute) {
             }
             if ($rows.Count -lt 2) { Info 'too few recent captures to scan for duplicates' }
             elseif ($pairs -eq 0) { Pass "no duplicate captures across the last $($rows.Count) stored in 10 min" }
-            else { Fail "$pairs duplicated captures in the last 10 min - run ts-agentmemory -Check in terminal-stack" }
+            else { Fail "$pairs duplicated captures in the last 10 min - run `tstack agentmemory --check` in terminal-stack" }
         } catch { Warn 'console feed unreadable; could not scan for duplicate pairs' }
     } catch {
         Fail "duplicate probe failed: $($_.Exception.Message)"

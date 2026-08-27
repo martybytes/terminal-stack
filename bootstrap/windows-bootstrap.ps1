@@ -43,7 +43,7 @@ function Install-WingetPackage {
 # choice". Nothing here installs nightly; a nightly a previous bootstrap left is
 # removed FIRST and unconditionally, whether or not WezTerm was selected this run.
 # Install-TsTerminals now lives in bootstrap/_config.ps1 (dot-sourced above) so
-# `ts-config wizard` can call it too; it uses Install-WingetPackage when that is
+# `tstack config wizard` can call it too; it uses Install-WingetPackage when that is
 # in scope, so this script keeps its end-of-run failure report.
 
 function Test-WingetAvailable {
@@ -75,7 +75,7 @@ Write-Host "PowerShell $($PSVersionTable.PSVersion); user $env:USERNAME"
 # TS_WEZ_RESTORE / TS_APPS / TS_CC_TTS / WORKSPACE_DIR) still skip their prompt
 # individually.
 # Read-TsWizard now lives in bootstrap/_config.ps1 (dot-sourced above) so that
-# `ts-config wizard` can replay the identical questionnaire.
+# `tstack config wizard` can replay the identical questionnaire.
 
 function Show-TsWizardReview($w) {
     $themeLabel = switch ($w.Theme) {
@@ -180,11 +180,28 @@ if ($PSCmdlet.ShouldProcess('terminal-stack config.json', 'save config')) {
     }
 }
 
+# The interpreter tstack runs on. Same probe shape as
+# bootstrap/tts-daemon/build.ps1 rather than a third spelling of it.
+function Find-Python {
+    foreach ($name in @('python', 'python3')) {
+        $found = Get-Command $name -ErrorAction SilentlyContinue
+        if ($found) { return $found.Source }
+    }
+    return $null
+}
+
 if (-not $WhatIfPreference) {
-    $agentsInstaller = Join-Path $PSScriptRoot 'ts-agents.ps1'
-    if ($wizard.Headroom -eq 'on') { & $agentsInstaller -Tool headroom -Action on -CursorMode $wizard.HeadroomCursor | Out-Host }
-    if ($wizard.Caveman -eq 'on') { & $agentsInstaller -Tool caveman -Action on | Out-Host }
-    if ($wizard.Agentmemory -eq 'on') { & $agentsInstaller -Tool agentmemory -Action on | Out-Host }
+    # One implementation on every platform: tstack/commands/agents.py, run
+    # through the same entry point the `tstack agents` shim uses.
+    $agentsEntry = Join-Path (Split-Path -Parent $PSScriptRoot) 'tstack\main.py'
+    $agentsPython = Find-Python
+    if ($agentsPython -and (Test-Path -LiteralPath $agentsEntry)) {
+        if ($wizard.Headroom -eq 'on') { & $agentsPython $agentsEntry agents headroom on $wizard.HeadroomCursor | Out-Host }
+        if ($wizard.Caveman -eq 'on') { & $agentsPython $agentsEntry agents caveman on | Out-Host }
+        if ($wizard.Agentmemory -eq 'on') { & $agentsPython $agentsEntry agents agentmemory on | Out-Host }
+    } else {
+        Write-Warning 'python3 not found; skipped the coding-agent wiring. Re-run: tstack config agents <tool> repair'
+    }
 }
 
 # Git include — stack aliases + delta config. The included file lands at
@@ -203,7 +220,7 @@ if ($existingIncludes -match 'terminal-stack\.gitconfig') {
 
 # Persist the workspace answer ONLY when it differs from the autodetect
 # (Get-TsWorkspace in $PROFILE covers the detected case). Save-TsWorkspaceOverride
-# lives in _config.ps1 so `ts-config wizard` persists the answer the same way.
+# lives in _config.ps1 so `tstack config wizard` persists the answer the same way.
 if ($PSCmdlet.ShouldProcess('Documents\PowerShell\profile.local.ps1', "persist WORKSPACE_DIR=$($wizard.Workspace)")) {
     Save-TsWorkspaceOverride $wizard.Workspace
 }

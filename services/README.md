@@ -15,7 +15,7 @@ UI in front of the memory server, built from this tree by the agentmemory stack.
 
 **Everything binds `127.0.0.1` only.** None of these services authenticate, so
 none of them is reachable from your network. That is deliberate and enforced:
-`ts-stack test` audits every published port and never skips that check.
+`tstack services test` audits every published port and never skips that check.
 
 ## What needs no configuration
 
@@ -43,30 +43,30 @@ had never once contacted either datastore. See `doc headroom`.
 ## Quick start
 
 ```sh
-ts-stack bootstrap     # seeds every .env, generates headroom's two secrets,
+tstack services bootstrap     # seeds every .env, generates headroom's two secrets,
                        # creates the external volumes
-ts-stack up            # start the stacks your settings enable
-ts-stack test          # take it all down, bring it back up, prove it works
+tstack services up            # start the stacks your settings enable
+tstack services test          # take it all down, bring it back up, prove it works
 ```
 
 You need a container engine first: `doc docker-desktop` on Windows or macOS,
-`doc docker` on Linux. `ts-stack doctor` tells you which one it found, whether it
+`doc docker` on Linux. `tstack services doctor` tells you which one it found, whether it
 is answering, and what to do when it is not.
 
 ## Day to day
 
 ```sh
-ts-stack                       # one line per stack: state, health, ports
-ts-stack up | down | restart   # optionally: ts-stack restart headroom
-ts-stack logs headroom -n 100 -f
-ts-stack config kokoro         # what compose actually resolves to here
-ts-stack doctor                # engine, .env files, health, ports, toggle drift
-ts-stack backup                # cold tar of every data volume, with a manifest
-ts-stack --dry-run up          # the exact docker argv, without running it
+tstack services                       # one line per stack: state, health, ports
+tstack services up | down | restart   # optionally: tstack services restart headroom
+tstack services logs headroom -n 100 -f
+tstack services config kokoro         # what compose actually resolves to here
+tstack services doctor                # engine, .env files, health, ports, toggle drift
+tstack services backup                # cold tar of every data volume, with a manifest
+tstack services --dry-run up          # the exact docker argv, without running it
 ```
 
 Nothing here wraps or hides Docker. The compose files are ordinary files you can
-run by hand from a stack directory; `ts-stack` exists so that the argv is
+run by hand from a stack directory; `tstack services` exists so that the argv is
 consistent, the env-file order is right, and `-v` can never reach a `down`.
 
 ## Which stacks run here
@@ -77,7 +77,7 @@ From the saved settings you already have — `agentmemoryEnabled`,
 skipped*, never as broken. One that is off but running gets a warning naming both
 ways out, because intent and reality disagreeing is exactly what a doctor is for.
 
-Naming a stack explicitly overrides its toggle: `ts-stack up headroom` works with
+Naming a stack explicitly overrides its toggle: `tstack services up headroom` works with
 the setting off, because asking by name is consent.
 
 ## Per-machine differences
@@ -94,13 +94,13 @@ tracked `.env.example`:
 
 A stack that ships a `.env.example` and has no `.env` is **mis**-configured, not
 unconfigured: compose falls back to the base file alone, which for kokoro means
-starting the GPU image with no GPU. `ts-stack doctor` reports it.
+starting the GPU image with no GPU. `tstack services doctor` reports it.
 
 ## Secrets
 
 There are no secrets in this repository, and there never will be. headroom's
 `HEADROOM_PROXY_TOKEN` and `NEO4J_PASSWORD` are generated on this machine by
-`ts-stack bootstrap` and written only to the gitignored `.env`; agentmemory
+`tstack services bootstrap` and written only to the gitignored `.env`; agentmemory
 generates its HMAC inside the container on first boot and every host reads it
 from there. Neither is ever printed — only a fingerprint, because a value echoed
 to a terminal lives in scrollback.
@@ -111,14 +111,14 @@ Everything this tree creates is prefixed `ts-`, so it is obvious in `docker ps`
 which containers belong to terminal-stack and which are your own work:
 
 ```
-ts-agentmemory     ts-agentmemory-server
+tstack agentmemory     ts-agentmemory-server
 ts-agent007memory  ts-agent007memory
 ts-headroom      ts-headroom-proxy, -dashboard, -qdrant, -neo4j
 ts-kokoro        ts-kokoro-tts
 ts-playwright    ts-playwright-mcp
 ```
 
-Volumes follow the same rule. If yours still carry the older names, `ts-stack up`
+Volumes follow the same rule. If yours still carry the older names, `tstack services up`
 will refuse to start and name the one command that fixes it — because compose
 would otherwise create an empty replacement and start the stack with no memories
 in it, reporting success.
@@ -126,6 +126,6 @@ in it, reporting success.
 ## Adding a stack
 
 Drop a directory under `stacks/` with a `docker-compose.yml`. There is nothing to
-register: `ts-stack` finds it, and adding `ts-checks.conf` and `ts-verify.sh`
-enrols it in `ts-stack test`. The rules and the checklist are in
+register: `tstack services` finds it, and adding `ts-checks.conf` and `ts-verify.sh`
+enrols it in `tstack services test`. The rules and the checklist are in
 `docs/service-conventions.md`.

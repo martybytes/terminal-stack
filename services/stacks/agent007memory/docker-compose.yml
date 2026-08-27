@@ -5,7 +5,7 @@
 # separate lifecycle -- a UI you rebuild while the memory server keeps running --
 # and as an overlay on the agentmemory project it showed up in Docker as a
 # second row under someone else's name. Now `docker ps`, Docker Desktop and
-# `ts-stack status` all name it for what it is.
+# `tstack services status` all name it for what it is.
 #
 # What it does: a transparent proxy on host 3111 in front of agentmemory (live
 # request feed, per-host /_agent/<name> attribution) and the console UI + /api +
@@ -15,7 +15,7 @@
 #
 # Two couplings to the agentmemory stack, both explicit below: it joins that
 # stack's network to reach the server by name, and it reads agentmemory's HMAC
-# secret from that stack's data volume, read-only. `ts-after` makes ts-stack
+# secret from that stack's data volume, read-only. `ts-after` makes tstack services
 # start agentmemory first, because an external network cannot be joined before
 # it exists.
 name: ts-agent007memory
@@ -26,7 +26,7 @@ services:
     image: ts-agent007memory:local
     # This image only ever exists locally, so compose must not try a registry
     # first: it printed "pull access denied for ts-agent007memory" on every up,
-    # built the image anyway, and still exited non-zero -- so `ts-stack up`
+    # built the image anyway, and still exited non-zero -- so `tstack services up`
     # reported a failure over a stack that had just started cleanly.
     pull_policy: build
     build:
@@ -35,12 +35,12 @@ services:
       # pinned commit SHA of a separate repo, which made every console change a
       # push -> re-pin the SHA here -> rebuild cycle (what update-console.* did).
       # The trade is that a dirty tree builds a dirty image; `git status` before
-      # `ts-stack up` is the whole discipline.
+      # `tstack services up` is the whole discipline.
       context: ../../console
       dockerfile: Dockerfile
     restart: unless-stopped
     # No depends_on: it cannot reach across compose projects. `ts-after` makes
-    # ts-stack start agentmemory first, and the proxy tolerates an upstream that
+    # tstack services start agentmemory first, and the proxy tolerates an upstream that
     # is not answering yet -- it returns errors until it is, and recovers on its
     # own, which is what `restart: unless-stopped` is for.
     ports:
@@ -74,7 +74,7 @@ services:
       # as the env_file: keys above: passing only `--env-file .billing.env`
       # replaces .env as the interpolation source and every mirror below
       # resolves to "". Always deploy with both, .env first:
-      # `ts-stack` assembles that list for you from `ts-envfiles` and any
+      # `tstack services` assembles that list for you from `ts-envfiles` and any
       # .billing.env present, always with the interpolation sources in order.
       #
       # The masked key fingerprints the console displays (LLM_API_KEY_HINT,
@@ -137,7 +137,7 @@ networks:
   # has to resolve ts-agentmemory-server by name. External means compose will
   # NOT create it -- if agentmemory has never been up, `up` fails here with a
   # clear "network not found" rather than starting a console that can reach
-  # nothing. ts-after handles the ordering for `ts-stack up`.
+  # nothing. ts-after handles the ordering for `tstack services up`.
   default:
     name: ts-agentmemory-net
     external: true

@@ -12,18 +12,18 @@ Upstream publishes a **stable** release and a **nightly** rolling build. Stable 
 version", and what this stack's Lua targets. Nightly is therefore the
 pre-selected answer at install.
 
-**Nothing is automatic.** The wizard asks, `ts-update` offers when something newer
-exists on the channel you are already on, and `ts-config wezterm` changes it on
+**Nothing is automatic.** The wizard asks, `tstack update` offers when something newer
+exists on the channel you are already on, and `tstack config wezterm` changes it on
 demand. No path installs, upgrades or switches without a yes.
 
 | Command | What it does |
 |---|---|
-| `ts-config wezterm` | your build + date, newest on each channel, what changed since |
-| `ts-wezterm` | the same, as a standalone command |
-| `ts-config wezterm changes` | the full upstream changelog since your build, paged |
-| `ts-config wezterm install nightly` | switch channel — removes the other package first |
-| `ts-config wezterm install stable` | the other direction |
-| `ts-config wezterm upgrade` | refresh the channel you are on; never switches |
+| `tstack config wezterm` | your build + date, newest on each channel, what changed since |
+| `tstack wezterm` | the same, as a standalone command |
+| `tstack config wezterm changes` | the full upstream changelog since your build, paged |
+| `tstack config wezterm install nightly` | switch channel — removes the other package first |
+| `tstack config wezterm install stable` | the other direction |
+| `tstack config wezterm upgrade` | refresh the channel you are on; never switches |
 | `wezterm --version` | the raw build string |
 
 Sample:
@@ -34,7 +34,7 @@ Sample:
     nightly   : built 2026-08-23
     stable    : 20240203-110809-5046fc22  (2024-02-03)  — you are on it
     Since your build: 909 commits — Changed 20  New 32  Fixed 74  Updated 9
-    Full notes: ts-config wezterm changes
+    Full notes: tstack config wezterm changes
 ```
 
 ## Where those numbers come from
@@ -75,5 +75,5 @@ macOS `brew install --cask wezterm@nightly`; Windows `winget install --id
 wez.wezterm.nightly`; Debian/Ubuntu via upstream's apt repo (`apt.fury.io/wez`),
 which carries both channels so `apt upgrade` keeps it current. WSL never installs
 one — the GUI lives on the Windows side. See `doc wezterm/panes`, `doc
-wezterm/tabs` and `doc wezterm/dev-config` for the config itself, and `ts-mux -h`
+wezterm/tabs` and `doc wezterm/dev-config` for the config itself, and `tstack mux -h`
 for the multiplexer domain.

@@ -11,8 +11,8 @@ choice is answered by a *page*.
 ## First two commands
 
 ```sh
-ts-doctor      # the install: clone, chezmoi, shells, hooks, config store
-ts-stack doctor # the services: engine, .env files, health, ports, toggle drift
+tstack doctor      # the install: clone, chezmoi, shells, hooks, config store
+tstack services doctor # the services: engine, .env files, health, ports, toggle drift
 ```
 
 Between them they cover everything below. If you only remember one thing,
@@ -22,12 +22,12 @@ remember these two.
 
 | check | what it means |
 |---|---|
-| `ts-config tts status` | is TTS on at all, and which engine is selected |
-| `ts-stack status` | is `kokoro` running (only matters when the engine is kokoro) |
-| `ts-config tts test` | end to end, right now |
+| `tstack config tts status` | is TTS on at all, and which engine is selected |
+| `tstack services status` | is `kokoro` running (only matters when the engine is kokoro) |
+| `tstack config tts test` | end to end, right now |
 
 The usual causes, in order: TTS is off; the engine is `kokoro` and the container
-is not running; the tray daemon is running an older build (`ts-config tts daemon
+is not running; the tray daemon is running an older build (`tstack config tts daemon
 restart`); or the notification was suppressed as a duplicate. Concepts:
 `doc tts`.
 
@@ -38,14 +38,14 @@ restart`); or the notification was suppressed as a duplicate. Concepts:
 that is refusing writes captures nothing and reports nothing.
 
 ```sh
-ts-stack test                              # writes a probe and reads it back
+tstack services test                              # writes a probe and reads it back
 services/stacks/agentmemory/ts-verify.sh   # the same round trip, on its own
-ts-agentmemory --check                     # is the host wiring still in place
+tstack agentmemory --check                     # is the host wiring still in place
 ```
 
 A plugin upgrade replaces the vendor cache and silently reverts the wiring; both
-sync paths repair it, and `ts-doctor` reports it. If the round trip returns 401,
-the cached secret is stale — `ts-stack doctor` compares the copies.
+sync paths repair it, and `tstack doctor` reports it. If the round trip returns 401,
+the cached secret is stale — `tstack services doctor` compares the copies.
 
 ## Memories are captured but never summarised, and the dead-letter count climbs
 
@@ -101,7 +101,7 @@ docker exec ts-agent007memory sh -c 'wget -qO- "$UPSTREAM_HTTP/agentmemory/livez
 
 If 3110 answers and the console cannot reach it, the two are not on the same
 network. If neither answers, the server is down or still starting. A brief flap
-during `ts-stack restart` is expected.
+during `tstack services restart` is expected.
 
 ## The LLM queue depth is large and the wait is minutes
 
@@ -121,7 +121,7 @@ however deep the queue is.
 ## Claude is not compressing prompts
 
 ```sh
-ts-config agents headroom status
+tstack config agents headroom status
 ```
 
 That runs the authenticated probe and says *why* it failed. The one confusion
@@ -141,12 +141,12 @@ Four ports, and which one answers tells you what is broken:
 | 3114 | the console UI |
 
 If 3110 answers and 3111 does not, the console is down, not agentmemory.
-`ts-stack status` shows all of them. Concepts: `doc agentmemory-console`.
+`tstack services status` shows all of them. Concepts: `doc agentmemory-console`.
 
 ## A port is already in use
 
 ```sh
-ts-stack status          # names the conflicting listener when it can
+tstack services status          # names the conflicting listener when it can
 ```
 
 On Linux/macOS `lsof -nP -iTCP:<port> -sTCP:LISTEN`; on Windows
@@ -157,7 +157,7 @@ Ports are overridable per machine in each stack's `.env`.
 ## The container engine is down
 
 ```sh
-ts-stack doctor
+tstack services doctor
 ```
 
 It names which runtime it looked for and how to start it, per platform. It never
@@ -170,15 +170,15 @@ off for this distro. It exits 1 for everything and prints its complaint on
 **stdout**, so `command -v docker` is true and useless. Two fixes, either works:
 
 - Docker Desktop → Settings → Resources → WSL Integration → enable this distro
-- run `ts-stack` from Windows PowerShell instead
+- run `tstack services` from Windows PowerShell instead
 
-`ts-stack` detects this and re-runs its Windows twin for you when it can.
+`tstack services` detects this and re-runs its Windows twin for you when it can.
 Details: `doc docker-desktop`.
 
 ## A secret was rotated
 
 ```sh
-ts-doctor        # compares the container's copy against the host's
+tstack doctor        # compares the container's copy against the host's
 ```
 
 The injected hook wrapper re-reads the authoritative value on a 401 and retries
@@ -187,10 +187,10 @@ consecutive captures with nothing in any log, which is why the recovery exists.
 
 ## Volumes still carry their old names
 
-`ts-stack up` refuses and names one command:
+`tstack services up` refuses and names one command:
 
 ```sh
-ts-stack migrate-volumes    # copies, verifies the count, keeps the old volume
+tstack services migrate-volumes    # copies, verifies the count, keeps the old volume
 ```
 
 The refusal is the point — compose would otherwise create an empty replacement

@@ -307,17 +307,17 @@ this repo, at `services/stacks/agent007memory/` — its own compose project, who
 this directory:
 
 ```sh
-ts-stack up agent007memory              # rebuild and deploy from this checkout
-ts-stack logs agent007memory -n 50      # what it did
+tstack services up agent007memory              # rebuild and deploy from this checkout
+tstack services logs agent007memory -n 50      # what it did
 ```
 
 `update-console.sh` / `.ps1` are gone. They existed to push this repo, re-pin a commit SHA in
 the compose file, rebuild and verify -- a loop that only made sense while the console was a
 separate repository built from a pin. The build context is now the in-tree `services/console/`,
-so what runs is what you have checked out, and the whole cycle is one `ts-stack up`.
+so what runs is what you have checked out, and the whole cycle is one `tstack services up`.
 
 There is no hot reload: the deployed console is an immutable compiled image, so re-run
-`ts-stack up agent007memory` after each change. It mounts AgentMemory's volume read-only
+`tstack services up agent007memory` after each change. It mounts AgentMemory's volume read-only
 for the HMAC secret and a separate external `ts-agentmemory-console-history` volume read/write at `/data`
 for aggregate reporting.
 

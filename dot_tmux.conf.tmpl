@@ -4,7 +4,7 @@
 {{- $bg := "#181825" -}}{{- $fg := "#cdd6f4" -}}{{- $accent := "#89dceb" -}}{{- $dim := "#6c7086" -}}
 {{- if eq $rt "light" -}}{{- $bg = "#e6e9ef" -}}{{- $fg = "#4c4f69" -}}{{- $accent = "#04a5e5" -}}{{- $dim = "#9ca0b0" -}}{{- end -}}
 # Prefix key: injected from the saved terminal-stack config (default C-b).
-# Change it with `ts-config tmux <chord>` (e.g. ctrl-a). Kept separate from the
+# Change it with `tstack config tmux <chord>` (e.g. ctrl-a). Kept separate from the
 # WezTerm leader so the two layers don't collide.
 set -g prefix {{ $tp }}
 unbind C-b

@@ -28,14 +28,20 @@ The two meet in exactly two places: a published loopback port, and
 `bootstrap/agent-tools.json`, the one file where a port, URL, image tag or
 version pin is written down.
 
-At the command level the same line is **`ts-stack` versus `ts-agents`**:
-`ts-stack` is the only thing in this repo that starts, stops or builds a
-container; `ts-agents` may only probe one. That is not a style preference —
+At the command level the same line is **`tstack services` versus `tstack agents`**:
+`tstack services` is the only thing in this repo that starts, stops or builds a
+container; `tstack agents` may only probe one. That is not a style preference —
 `tests/test_agent_tools.py` asserts that `docker compose`, `docker rm` and
-`restart: unless-stopped` appear nowhere in `bootstrap/ts-agents.{sh,ps1}`, as a
+`restart: unless-stopped` appear nowhere in `tstack/commands/agents.py`, as a
 case-insensitive match over the whole file, **so even a comment naming the
-compose command fails it**. When a probe fails, `ts-agents` prints the verb
-(`ts-stack up playwright`), never the command.
+compose command fails it**. When a probe fails, `tstack agents` prints the verb
+(`tstack services up playwright`), never the command.
+
+Every docker argv in the repo is built in one place, `tstack/stacks.py`'s
+`Compose.argv`, and a test asserts no second file builds one. That choke point is
+what makes the data-safety rules testable rather than merely intended: `down`
+never receives `-v`, and `--env-file .env` always precedes `--env-file
+.billing.env`.
 
 Three consequences. `bootstrap/ts-agentmemory.*` stays outside this tree although
 its whole subject is agentmemory, because it edits `~/.claude`, `~/.codex` and
@@ -48,7 +54,7 @@ server-side record is evidence, because the hook always exits 0.
 
 - **Host ports bind `127.0.0.1` explicitly.** `"127.0.0.1:8880:8880"`, never
   `"8880:8880"`. None of these services authenticate; the bare form puts them on
-  the LAN. `ts-stack test` audits this and never skips it.
+  the LAN. `tstack services test` audits this and never skips it.
 - **Never commit a `.env`.** `.env` is gitignored, `.env.example` is tracked and
   holds only non-sensitive defaults.
 - **Tracked files are identical on every machine.** Anything machine-specific —
@@ -69,21 +75,28 @@ server-side record is evidence, because the hook always exits 0.
 - **Only one memory backend runs.** AgentMemory or headroom's own store, decided
   by the `memoryBackend` setting outside this tree. Nothing here may make both
   reachable at once.
-- **Every script exists twice** (`foo.sh` + `foo.ps1`), flags mapping one to one.
-  `tests/test_service_script_parity.py` fails otherwise, and deliberate
-  differences go in the divergence register in `docs/service-conventions.md`,
-  which that test reads.
+- **Every script *in this tree* exists twice** (`foo.sh` + `foo.ps1`), flags
+  mapping one to one. `tests/test_service_script_parity.py` fails otherwise, and
+  deliberate differences go in the divergence register in
+  `docs/service-conventions.md`, which that test reads.
+
+  **The CLI that drives them no longer does.** `bootstrap/ts-stack.{sh,ps1}` were
+  a 1,532-line pair kept in agreement by hand; they are now one Python program
+  (`tstack/commands/services.py` + `tstack/stacks.py` + `tstack/engine.py`) and
+  the pair is deleted. The rule survives here because these scripts run *inside*
+  the service tree, are discovered by filename, and each is small enough that a
+  twin is cheaper than an interpreter dependency in a container context.
 
 ## Working here
 
 ```sh
-ts-stack                     # status: one line per stack
-ts-stack bootstrap           # first run: .env files, generated secrets, volumes
-ts-stack up | down | restart
-ts-stack logs <stack>
-ts-stack test                # down, up, and prove the whole chain works
-ts-stack doctor
-ts-stack --dry-run <verb>    # the exact docker argv, without running it
+tstack services                     # status: one line per stack
+tstack services bootstrap           # first run: .env files, generated secrets, volumes
+tstack services up | down | restart
+tstack services logs <stack>
+tstack services test                # down, up, and prove the whole chain works
+tstack services doctor
+tstack services --dry-run <verb>    # the exact docker argv, without running it
 ```
 
 A stack is any directory under `stacks/` holding a `docker-compose.yml` — there
@@ -93,12 +106,12 @@ comes from the saved settings you already have (`agentmemoryEnabled`,
 `ccTts.engine`); naming a stack explicitly overrides its toggle.
 
 `kokoro`'s `.env` sets `COMPOSE_FILE`, so which files merge depends on the
-machine profile. `ts-stack config <stack>` shows what actually resolves.
+machine profile. `tstack services config <stack>` shows what actually resolves.
 
 ## Verifying
 
 **"Up" is not evidence.** `kokoro` crash-loops while reporting `Up` when the CUDA
-build does not match the GPU. Each stack ships two things `ts-stack test` finds
+build does not match the GPU. Each stack ships two things `tstack services test` finds
 by filename:
 
 - `ts-checks.conf` — declarative health and reachability, one check per line.
@@ -112,10 +125,10 @@ Add a stack and it registers itself by having them.
 
 - **A `.env.example` with no `.env` is worse than nothing.** Compose falls back to
   the base file alone, which for kokoro means starting the GPU image with no GPU.
-  `ts-stack bootstrap` seeds them; `ts-stack doctor` reports the gap.
+  `tstack services bootstrap` seeds them; `tstack services doctor` reports the gap.
 - **headroom needs both secrets before it will start.** They are `:?`-required, so
   a missing one fails at `docker compose config` naming the variable rather than
-  starting an open data plane. `ts-stack bootstrap` generates them.
+  starting an open data plane. `tstack services bootstrap` generates them.
 - **headroom's proxy token is not your provider API key.** The proxy forwards
   `Authorization` upstream, so sending the proxy token to `/v1/chat/completions`
   gets you past headroom and then a 401 from the provider. Tell them apart by the
@@ -126,16 +139,16 @@ Add a stack and it registers itself by having them.
   "agentmemory is down".
 - **agentmemory can stop capturing while every read-path check passes.** Every
   vendor hook does `fetch(...).catch(() => {})` then `exit(0)`, so there is
-  nothing to read. `ts-stack test` writes a probe and reads it back, which is the
+  nothing to read. `tstack services test` writes a probe and reads it back, which is the
   only proof; `stacks/agentmemory/check-capture.sh` is the deeper diagnostic.
 - **agentmemory's billing deploy needs both env files, stack `.env` first.** A
   lone `--env-file .billing.env` *replaces* `.env` as compose's interpolation
   source, so every `${OPENAI_*}`-derived `LLM_*` value the console displays
-  resolves to `""` — blank panel, no error, everything healthy. `ts-stack`
+  resolves to `""` — blank panel, no error, everything healthy. `tstack services`
   assembles the list itself; hand-typed commands get it wrong.
 - **agentmemory's volumes are `external: true`, headroom's are not.** That
   asymmetry is the safety property: `down -v` cannot touch an external volume,
-  which is why every memory you have ever saved lives in one. `ts-stack reset
+  which is why every memory you have ever saved lives in one. `tstack services reset
   --purge` is the only path that removes them, and it needs a verified backup and
   a typed phrase.
 - **agentmemory's consolidation reports success while failing.** A `reflect` run
@@ -159,4 +172,4 @@ Add a stack and it registers itself by having them.
   match. Capture first, match in the shell.
 - **The console builds from `../../console`**, this repo's own tree. It used to be
   a pinned SHA of a separate repo, so a dirty working tree now builds a dirty
-  image: `git status` before `ts-stack up` is the whole discipline.
+  image: `git status` before `tstack services up` is the whole discipline.

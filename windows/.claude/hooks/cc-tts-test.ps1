@@ -12,7 +12,7 @@ param(
 
 if ($Daemon) {
     if (-not (Test-CcTtsDaemonReady)) {
-        Write-Error 'daemon not enabled in config (ts-config tts daemon status)'
+        Write-Error 'daemon not enabled in config (tstack config tts daemon status)'
         exit 1
     }
     $hook = '{"session_id":"cc-tts-test","last_assistant_message":"Daemon test. <!-- speak: Daemon test successful. -->"}'
@@ -20,7 +20,7 @@ if ($Daemon) {
         Write-Host 'cc-tts-test: daemon accepted the event — expect speech shortly.'
         exit 0
     }
-    Write-Error 'daemon did not accept the event (ts-config tts daemon status)'
+    Write-Error 'daemon did not accept the event (tstack config tts daemon status)'
     exit 1
 }
 

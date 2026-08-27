@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# The full gate before anything leaves this machine: the whole suite with the
+# coverage floor, plus the characterization fixtures that prove a ported
+# subsystem still behaves like the shell it replaced.
+#
+# Separate from pre-commit on purpose. Coverage and characterization are slow
+# enough that running them on every commit trains people to use --no-verify,
+# which then disables the fast gates too.
+#
+# Skip with `git push --no-verify` if you must.
+set -euo pipefail
+
+root="$(git rev-parse --show-toplevel)"
+[ -d "$root/tests" ] || exit 0
+
+if ! command -v python3 >/dev/null 2>&1 || ! python3 -c 'import pytest' >/dev/null 2>&1; then
+    echo "pre-push: pytest unavailable — the full suite did NOT run." >&2
+    echo "          install it with: python3 -m pip install --user pytest pytest-cov" >&2
+    exit 0
+fi
+
+cd "$root"
+
+if python3 -c 'import pytest_cov' >/dev/null 2>&1; then
+    echo "pre-push: full suite with the coverage floor"
+    python3 -m pytest tests/ --cov --cov-report=term-missing
+else
+    echo "pre-push: pytest-cov missing — running WITHOUT the coverage floor." >&2
+    echo "          install it with: python3 -m pip install --user pytest-cov" >&2
+    python3 -m pytest tests/
+fi
+
+# The replay lives in tests/test_characterize.py; tests/characterize/ holds the
+# fixtures and the sandbox helpers and contains no tests at all. Pointing pytest
+# at the directory collected nothing and exited 5, which failed the push for a
+# reason that had nothing to do with the change.
+#
+# The corpus only exists once a subsystem is being ported, so its absence is
+# normal early on and must not fail a push -- but an empty run that looks like it
+# passed is the thing to avoid, so say which one happened.
+if [ -f "$root/tests/test_characterize.py" ]; then
+    echo "pre-push: characterization replay"
+    python3 -m pytest "$root/tests/test_characterize.py" -q
+else
+    echo "pre-push: no characterization corpus yet (nothing ported)."
+fi

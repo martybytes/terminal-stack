@@ -2,7 +2,7 @@
 .NAME     ts-verify.ps1
 .SYNOPSIS agentmemory: prove a memory can be written and read back.
 .PLATFORM Windows (pwsh 7). Twin of ts-verify.sh -- change one, change the other.
-.USAGE    ts-verify.ps1            (run by `ts-stack test`; safe by hand)
+.USAGE    ts-verify.ps1            (run by `tstack services test`; safe by hand)
 .NOTE     Health is not evidence here. Every vendor hook does
           fetch(...).catch(() => {}) then exit(0), so a machine wired to a server
           that is up but refusing writes captures nothing and reports nothing.

@@ -226,7 +226,7 @@ def duplicates(within_sec: float = 8.0, since: float | None = None) -> list[dict
 
 
 def summary(within_sec: float = 86400.0, dupe_window: float = 8.0) -> dict:
-    """Counts for `ts-doctor` / `history --check`. Empty-but-valid on any failure.
+    """Counts for `tstack doctor` / `history --check`. Empty-but-valid on any failure.
 
     `daemon_silent_for` is the age of the last utterance the *daemon* spoke, which is the
     number that matters: while it is dead every hook takes the direct path and still exits

@@ -44,7 +44,7 @@ No file in this repo hard-codes a username. The username is resolved at apply ti
 
 The WSL bootstrap (`bootstrap/wsl-bootstrap.sh`) prompts for the Windows username at install time (pre-filling the interop-detected value) and persists it under `[data]`.
 
-`__WIN_USER__` is one of several tokens the sync substitutes: the saved wizard config supplies `__LEADER_KEY__` / `__LEADER_MODS__` (WezTerm leader), `__THEME_MODE__` / `__THEME_RESOLVED__` (theme), `__TMUX_PREFIX__`, `__WEZ_MUX__` (WezTerm multiplexer domain, `ts-mux`), `__WEZ_RESTORE__` (reopen the last session at startup), and the optional `__CC_TTS_*__` hook blocks. See `CLAUDE.md` § "User config tokens" and the header of `run_after_90-sync-windows.sh` for the full list.
+`__WIN_USER__` is one of several tokens the sync substitutes: the saved wizard config supplies `__LEADER_KEY__` / `__LEADER_MODS__` (WezTerm leader), `__THEME_MODE__` / `__THEME_RESOLVED__` (theme), `__TMUX_PREFIX__`, `__WEZ_MUX__` (WezTerm multiplexer domain, `tstack mux`), `__WEZ_RESTORE__` (reopen the last session at startup), and the optional `__CC_TTS_*__` hook blocks. See `CLAUDE.md` § "User config tokens" and the header of `run_after_90-sync-windows.sh` for the full list.
 
 ### The run_after hook
 
@@ -71,20 +71,28 @@ The WSL bootstrap (`bootstrap/wsl-bootstrap.sh`) prompts for the Windows usernam
 ## Other architectural notes
 
 - **Per-machine overrides have a file on every platform.** zsh sources `~/.zshrc.local` at the end of `.zshrc`; pwsh dot-sources `Documents\PowerShell\profile.local.ps1` at the end of `$PROFILE`. Neither is tracked — only `.example` twins ship. Workspace location is the canonical use: `ws`/`wsp`/`wspu` resolve `$WORKSPACE_DIR` → autodetect candidates at *call* time (see `docs/decisions.md` § "Why `$WORKSPACE_DIR` + call-time resolution"), so the override file is only needed on machines whose workspace lives somewhere non-standard.
-- **`ts-update` is reversible.** It records the pre-pull HEAD to `~/.local/state/terminal-stack/rollback-sha` (zsh) / `%LOCALAPPDATA%\terminal-stack\rollback-sha` (pwsh) before pulling; `ts-rollback` resets the clone to that SHA and re-applies. Both refuse to act on a dirty clone.
-- **`wso` is the one command implemented twice rather than shimmed.** Everything else in the stack is either a shell function mirrored per shell or a script one side calls; the workspace organizer is a full parallel pair — `bootstrap/_workspace.sh` + `bootstrap/wso.sh` (bash: WSL, native Linux, macOS) and `bootstrap/_workspace.ps1` + `bootstrap/_workspace_cmd.ps1` (pwsh: Windows). Calling into WSL from Windows would break a Windows-standalone install, and driving ~100 repos' worth of `git` calls across the 9p boundary is slow enough to matter. Both live under `bootstrap/**` (chezmoi-ignored) and run from the clone, so `ts-update` ships a fix without a profile re-sync. They must agree: same subcommands, same flags, same plan output, byte-identical `--help`.
-- **`ts-smb` is the one command that is deliberately *not* implemented twice.** Every other dual-shell command keeps a pwsh twin with byte-identical `-h`; `ts-smb` (`bootstrap/ts-smb.sh` + `bootstrap/_smb.sh`, zsh wrapper only) is macOS/Linux as of 2026-08-23. Most of what it does is moot on Windows — Explorer and `net use` already browse and map SMB shares, credentials live in Credential Manager, and the whole FUSE engine layer has no analogue beyond WinFsp. The gap is stated in its `-h`, in `CLAUDE.md`, and in `docs/decisions.md` § "Why `ts-smb` ships without a PowerShell twin", so it reads as a decision rather than drift. Its share store is untracked and machine-local by design and adds no chezmoi `[data]` key — see `docs/decisions.md` § "Why the SMB share inventory is local-only and never synced".
-- **`wso` writes outside the clone, and says so.** It moves repositories inside `$WORKSPACE_DIR` (atomic same-volume renames only — it refuses a cross-volume move rather than silently degrading to copy+delete), appends a TSV to `<workspace>/.terminal-stack/workspace-runs/`, and `wso identity` generates `~/.config/git/terminal-stack-workspace.gitconfig` plus per-owner `identity-<owner>` files, registering them with a single `git config --global --add include.path`. Those identity files hold real names and emails, so they are per-machine and generated rather than tracked — the source tree stays free of personal data. Anything it overwrites gets the standard `.bak.YYYYMMDD[.N]` treatment first, it never deletes a repository, and it never migrates a terminal-stack clone found un-tiered at the workspace root — moving the stack's own runtime clone is `ts-doctor --repair`'s job, and doing it here once orphaned an install.
+- **`tstack update` is reversible.** It records the pre-pull HEAD to `~/.local/state/terminal-stack/rollback-sha` (zsh) / `%LOCALAPPDATA%\terminal-stack\rollback-sha` (pwsh) before pulling; `tstack rollback` resets the clone to that SHA and re-applies. Both refuse to act on a dirty clone.
+- **`wso` is the one command implemented twice rather than shimmed.** Everything else in the stack is either a shell function mirrored per shell or a script one side calls; the workspace organizer is a full parallel pair — `bootstrap/_workspace.sh` + `bootstrap/wso.sh` (bash: WSL, native Linux, macOS) and `bootstrap/_workspace.ps1` + `bootstrap/_workspace_cmd.ps1` (pwsh: Windows). Calling into WSL from Windows would break a Windows-standalone install, and driving ~100 repos' worth of `git` calls across the 9p boundary is slow enough to matter. Both live under `bootstrap/**` (chezmoi-ignored) and run from the clone, so `tstack update` ships a fix without a profile re-sync. They must agree: same subcommands, same flags, same plan output, byte-identical `--help`.
+- **`tstack smb` is the one command that is deliberately *not* implemented twice.** Every other dual-shell command keeps a pwsh twin with byte-identical `-h`; `tstack smb` (`bootstrap/ts-smb.sh` + `bootstrap/_smb.sh`, zsh wrapper only) is macOS/Linux as of 2026-08-23. Most of what it does is moot on Windows — Explorer and `net use` already browse and map SMB shares, credentials live in Credential Manager, and the whole FUSE engine layer has no analogue beyond WinFsp. The gap is stated in its `-h`, in `CLAUDE.md`, and in `docs/decisions.md` § "Why `tstack smb` ships without a PowerShell twin", so it reads as a decision rather than drift. Its share store is untracked and machine-local by design and adds no chezmoi `[data]` key — see `docs/decisions.md` § "Why the SMB share inventory is local-only and never synced".
+- **`wso` writes outside the clone, and says so.** It moves repositories inside `$WORKSPACE_DIR` (atomic same-volume renames only — it refuses a cross-volume move rather than silently degrading to copy+delete), appends a TSV to `<workspace>/.terminal-stack/workspace-runs/`, and `wso identity` generates `~/.config/git/terminal-stack-workspace.gitconfig` plus per-owner `identity-<owner>` files, registering them with a single `git config --global --add include.path`. Those identity files hold real names and emails, so they are per-machine and generated rather than tracked — the source tree stays free of personal data. Anything it overwrites gets the standard `.bak.YYYYMMDD[.N]` treatment first, it never deletes a repository, and it never migrates a terminal-stack clone found un-tiered at the workspace root — moving the stack's own runtime clone is `tstack doctor --repair`'s job, and doing it here once orphaned an install.
 - **Run logs live with the workspace, not in per-OS state.** Unlike `rollback-sha`, which describes the clone and is genuinely per-side, an archive run describes the *workspace* — and on a combined Windows+WSL machine both sides drive the same tree. Logs therefore sit in `<workspace>/.terminal-stack/workspace-runs/` with paths stored relative to the workspace root and forward-slashed, so `wso unarchive --undo-last` from zsh can reverse a run made from PowerShell.
 - **PowerShell `$PROFILE` is whole-file-synced, marker-block *edited*.** Both sync scripts copy the repo source (`windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1`) over `$PROFILE` whole, with a `.bak.YYYYMMDD[.N]` backup on every overwrite — anything hand-added to the live `$PROFILE` outside the repo is replaced on the next sync (recoverable from the `.bak`, but gone from the live file). Per-machine content belongs in `profile.local.ps1`, which `$PROFILE` dot-sources at the end and is never synced. The `# ---- name-start ----` / `# ---- name-end ----` marker blocks survive as *editing discipline* in the repo source — they delimit the stack's functional regions, not a merge mechanism. See `docs/decisions.md` § "Why a whole-file `~/.zshrc` and a marker-block `$PROFILE`?".
-- **`~/.zshrc` is whole-file-managed.** It was created from scratch by oh-my-zsh during our deployment, so we own the entire file. If you ever hand-edit `~/.zshrc` to enable a plugin, run `chezmoi re-add ~/.zshrc` to capture the change in source.
+- **`~/.zshrc` is whole-file-managed.** It was created from scratch by oh-my-zsh during our deployment, so we own the entire file, and its source is not a template. Both conditions hold, so `chezmoi re-add ~/.zshrc` is correct here — it is the case the rule permits, not an exception to it. Whether re-add is safe for any other target is decided by **`CLAUDE.md` § "The one `re-add` rule"**, which states it once for all three cases; the entry below and `AGENTS.md` each cover one of the other two.
 - **Claude Code `settings.json` and Cursor `hooks.json` are *part-owned*, and must never be re-added or copied whole.** Both files hold another tool's state next to ours: Claude Code writes `model`, `enabledPlugins`, `permissions` and `env` into its settings (via `/model`, `/plugin`, `/config`), and agentmemory's Cursor hooks share the `stop` and `postToolUse` event arrays with our TTS hooks. On the Windows side the sync therefore splices — `bootstrap/_merge_claude_settings.ps1` per top-level key, `bootstrap/_merge_cursor_hooks.ps1` per hook entry — and leaves every byte it does not own alone. Do **not** run `chezmoi re-add ~/.claude/settings.json` to capture a UI preference: that pulls the other tool's private state (up to and including anything in `env`) into the tracked template, where the next apply pushes it to every machine. Change ours in the template; leave theirs where the app put it. See `docs/decisions.md` §§ "Why `~/.claude/settings.json` is spliced, not copied" / "Why `~/.cursor/hooks.json` needs per-entry ownership".
 
 ## Backup discipline
 
-Every overwrite of a user file (not chezmoi-managed apply, but human-or-script overwrites) writes a `.bak.YYYYMMDD` first. If multiple overwrites happen in one day, they get `.1` / `.2` / etc. suffixes — the same-day backup is never clobbered. The `run_after_90-sync-windows.sh` script implements this; `scripts/sync-windows.ps1` (the PowerShell-native equivalent used by `install.ps1` / `Update-TerminalStack`) and the bootstrap scripts follow the same convention.
+**This is the canonical statement of the rule; `CLAUDE.md` links here.**
 
-See `docs/decisions.md` § "Why two backups" for the incident that motivated the `.N` suffix collision guard.
+Any script in this repo that overwrites a user file writes a backup first, named
+`<path>.bak.YYYYMMDD`. If that name already exists (a same-day re-run), append
+`.1`, `.2`, and so on: a same-day backup is never clobbered, because the second
+run of a bad script would otherwise destroy the good copy the first one saved.
+
+This covers human-or-script overwrites, not a chezmoi-managed apply, which has
+its own state. Reference implementation: the `.bak` block near the top of
+`run_after_90-sync-windows.sh`. See `docs/decisions.md` § "Why two backups" for
+the Phase 7 incident that motivated the `.N` collision guard.
 
 ## Two halves: config and services
 
@@ -94,7 +102,7 @@ serve --transport stdio --proxy-url http://127.0.0.1:8787`; lifecycle adapters
 probe it with JSON-RPC `initialize` but still never start or mutate Docker. Port
 `8788` remains the dashboard-only nginx gateway, so `/mcp` there is invalid.
 
-chezmoi owns `$HOME`. `ts-stack` owns Docker. They meet in exactly two places: a
+chezmoi owns `$HOME`. `tstack services` owns Docker. They meet in exactly two places: a
 published loopback port, and `bootstrap/agent-tools.json`, the single file where
 a port, URL, image tag or version pin is written down.
 
@@ -102,7 +110,7 @@ a port, URL, image tag or version pin is written down.
 services/                        outside services/
   compose files, images,   <->   ~/.claude, ~/.codex, ~/.cursor,
   in-container patches           the shells, the prompt
-  ts-stack                       ts-config agents / ts-agentmemory
+  tstack services                       tstack config agents / tstack agentmemory
 ```
 
 The line used to be a repository boundary, which enforced itself — you could not
@@ -110,6 +118,6 @@ accidentally put a hook installer in the Docker repo, because it was a different
 clone. Absorbing that repo removes the enforcement, so the rule is written down
 and tested instead: `tests/test_agent_tools.py` asserts that `docker compose`,
 `docker rm` and `restart: unless-stopped` appear nowhere in
-`bootstrap/ts-agents.{sh,ps1}` — as a case-insensitive match over the whole file,
+`tstack/commands/agents.py` — as a case-insensitive match over the whole file,
 so even a comment naming the compose command fails it. When a probe fails,
-`ts-agents` prints the *verb* (`ts-stack up playwright`), never the command.
+`tstack agents` prints the *verb* (`tstack services up playwright`), never the command.

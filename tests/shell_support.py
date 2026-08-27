@@ -44,6 +44,7 @@ def _compatible_bash(candidate: Path) -> bool:
             encoding="utf-8",
             timeout=5,
             check=False,
+            start_new_session=True,
         )
     except (OSError, subprocess.TimeoutExpired):
         return False
@@ -85,6 +86,7 @@ def bash_path(path: str | Path) -> str:
         encoding="utf-8",
         timeout=5,
         check=False,
+        start_new_session=True,
     )
     if result.returncode != 0 or not result.stdout.strip():
         raise RuntimeError(f"could not translate path for Bash: {resolved}")

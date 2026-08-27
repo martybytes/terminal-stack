@@ -2,7 +2,7 @@
 .NAME     ts-verify.ps1
 .SYNOPSIS headroom: prove the proxy is not just up, but enforcing.
 .PLATFORM Windows (pwsh 7). Twin of ts-verify.sh -- change one, change the other.
-.USAGE    ts-verify.ps1            (run by `ts-stack test`; safe by hand)
+.USAGE    ts-verify.ps1            (run by `tstack services test`; safe by hand)
 .NOTE     "Up (healthy)" is not evidence for this stack. The interesting failure
           is a proxy that answers /readyz while accepting UNAUTHENTICATED /v1
           traffic: healthy from the outside, and an open data plane.

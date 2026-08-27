@@ -12,7 +12,7 @@
 #   TS_TERMINALS=wezterm-nightly,wezterm-stable,ghostty|none
 #                                            (macOS/desktop Linux; WSL uses the host's)
 #     (TS_WEZTERM=nightly|stable|skip is the older spelling and still maps across)
-#   TS_WEZ_MUX=on|off                        WezTerm multiplexer domain (ts-mux)
+#   TS_WEZ_MUX=on|off                        WezTerm multiplexer domain (tstack mux)
 #   TS_WEZ_RESTORE=on|off                    reopen the last session at startup
 #   TS_CC_TTS=on|off|skip   Claude Code Kokoro TTS at install
 #   TS_CC_TTS_DAEMON=on|off route TTS through the Windows tray daemon (WSL only)
@@ -226,7 +226,7 @@ ts_prompt_terminals() {
   author uses daily.
   Picking nightly SWAPS the cask: both own /Applications/WezTerm.app, so the
   other channel is removed first. Your config and sessions are untouched, and
-  nothing upgrades on its own afterwards — ts-update only offers."
+  nothing upgrades on its own afterwards — tstack update only offers."
     fi
 
     # The two WezTerm channels are mutually exclusive, so the tick-list enforces
@@ -240,7 +240,7 @@ ts_prompt_terminals() {
     ts_terminals_one_channel "$chosen"
 }
 
-# The multiplexer domain (ts-mux). Asked wherever a WezTerm GUI actually runs —
+# The multiplexer domain (tstack mux). Asked wherever a WezTerm GUI actually runs —
 # macOS, Windows, and WSL, whose GUI is the Windows one — and skipped headless.
 # Default off: it changes how every pane is hosted and how a config reload
 # behaves, which is a decision to make once at install rather than inherit.
@@ -253,7 +253,7 @@ ts_prompt_wezterm_mux() {
     ts_prompt_choice off 'WezTerm multiplexer (keeps panes alive when the GUI dies):' \
 '  RECOMMENDATION: off. You only want this if WezTerm crashes on you often
   enough to be worth the cost, and it costs real day-to-day comfort:
-    - every config change needs "ts-mux restart", which KILLS every pane;
+    - every config change needs "tstack mux restart", which KILLS every pane;
     - mux panes lose the Claude state tint, so the tab bar stops telling you
       which sessions are working, done or waiting;
     - the server holds your shells, so it is one more thing to restart.
@@ -313,7 +313,7 @@ ts_prompt_atuin() {
   Secrets are filtered the same way as ~/.zsh_history, so API keys do not
   land in the database either. Nothing syncs anywhere: no account is set up
   and auto-sync is off, so it all stays on this machine.
-  Reversible any time with `ts-config atuin off`.' \
+  Reversible any time with `tstack config atuin off`.' \
         'off|off|keep fzf on Ctrl+R' \
         'on|on|atuin owns Ctrl+R'
 }
@@ -563,7 +563,7 @@ ts_prompt_agent_toggle() {
     eval "value=\${$env_name:-}"
     if [ -n "$value" ]; then case "$value" in on) echo on ;; *) echo off ;; esac; return; fi
     ts_prompt_choice "$def" "$title" "$note" \
-        'off|off|configure later with ts-config agents' \
+        'off|off|configure later with tstack config agents' \
         "on|on|$onnote"
 }
 

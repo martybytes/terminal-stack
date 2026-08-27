@@ -8,7 +8,7 @@
 # vanish silently the first time this stack managed it. CLAUDE.md's rule is
 # explicit: anything that overwrites a user file writes a backup first.
 #
-# It also makes `ts-config ghostty off` a real revert rather than a delete —
+# It also makes `tstack config ghostty off` a real revert rather than a delete —
 # that command restores the newest backup this script leaves behind.
 #
 # Runs before every apply, but does nothing once the file is ours: the marker

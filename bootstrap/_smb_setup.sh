@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Guided, verified, transactional setup for ts-smb. Sourced by ts-smb.sh.
+# Guided, verified, transactional setup for tstack smb. Sourced by ts-smb.sh.
 
 ts_smb_setup_run() {
     need_rclone || return 1
     if ! ts_is_interactive; then
-        echo "ts-smb setup: an interactive terminal is required; use 'ts-smb add' for scripted setup." >&2
+        echo "tstack smb setup: an interactive terminal is required; use 'tstack smb add' for scripted setup." >&2
         return 2
     fi
     cat >/dev/tty <<'EOF'
@@ -50,8 +50,8 @@ EOF
         fi
     fi
     [ -n "$host" ] || host="$(ts_tty_prompt 'Computer hostname, full Tailscale name, or IP address: ')"
-    [ -n "$host" ] || { echo "ts-smb setup: a computer is required." >&2; return 2; }
-    ts_smb_valid_token "$host" || { echo "ts-smb setup: '$host' is not a usable hostname." >&2; return 2; }
+    [ -n "$host" ] || { echo "tstack smb setup: a computer is required." >&2; return 2; }
+    ts_smb_valid_token "$host" || { echo "tstack smb setup: '$host' is not a usable hostname." >&2; return 2; }
 
     local auth user domain="${OPT_DOMAIN:-}" plain="" blob="" cred
     auth="$(ts_prompt_choice account 'How do you sign in to this computer?' \
@@ -62,13 +62,13 @@ EOF
         user=guest; cred=none
     else
         user="${OPT_USER:-$(ts_tty_prompt 'SMB username (the account on the Windows PC or NAS): ')}"
-        [ -n "$user" ] || { echo "ts-smb setup: a username is required." >&2; return 2; }
-        ts_smb_valid_token "$user" || { echo "ts-smb setup: '$user' is not a usable username." >&2; return 2; }
+        [ -n "$user" ] || { echo "tstack smb setup: a username is required." >&2; return 2; }
+        ts_smb_valid_token "$user" || { echo "tstack smb setup: '$user' is not a usable username." >&2; return 2; }
         [ -n "$domain" ] || domain="$(ts_tty_prompt 'Windows domain (usually blank for a home PC or NAS): ')"
         if [ "$OPT_PASSWORD_STDIN" = 1 ]; then plain="$(cat)"; else plain="$(read_password_interactive)" || return 1; fi
-        [ -n "$plain" ] || { echo "ts-smb setup: an empty password was not stored." >&2; return 1; }
+        [ -n "$plain" ] || { echo "tstack smb setup: an empty password was not stored." >&2; return 1; }
         blob="$(printf '%s' "$plain" | ts_smb_obscure)"; plain=""
-        [ -n "$blob" ] || { echo "ts-smb setup: rclone could not obscure the password." >&2; return 1; }
+        [ -n "$blob" ] || { echo "tstack smb setup: rclone could not obscure the password." >&2; return 1; }
         cred="${OPT_CRED:-$(ts_prompt_choice "$(ts_smb_setting default_cred keychain)" \
             'Where should this password be kept after verification?' \
             'It is obscured before storage and never appears in a command line.' \
@@ -109,8 +109,8 @@ EOF
     if [ "$manual" = 1 ] && [ -z "$path" ]; then
         path="$(ts_tty_prompt 'Exact shared-folder name on that computer (example: Media): ')"
     fi
-    [ -n "$path" ] || { echo "ts-smb setup: a shared-folder name is required." >&2; return 2; }
-    case "$path" in *[[:space:]]*) echo "ts-smb setup: share names containing spaces are not supported by the local inventory format." >&2; return 2 ;; esac
+    [ -n "$path" ] || { echo "tstack smb setup: a shared-folder name is required." >&2; return 2; }
+    case "$path" in *[[:space:]]*) echo "tstack smb setup: share names containing spaces are not supported by the local inventory format." >&2; return 2 ;; esac
 
     local share_remote="$root_remote$path/" verified=0
     echo "$INFO verifying that '$path' is readable with these credentials..." >/dev/tty
@@ -120,7 +120,7 @@ EOF
         ts_smb_timeout 20 rclone lsf "$share_remote" --max-depth 1 --smb-idle-timeout 5s >/dev/null 2>&1 && verified=1
     fi
     [ "$verified" = 1 ] || {
-        echo "ts-smb setup: '$host/$path' could not be read. Nothing was saved." >&2
+        echo "tstack smb setup: '$host/$path' could not be read. Nothing was saved." >&2
         echo "Check the username, password, share name, and Windows sharing permissions, then retry." >&2
         return 1
     }
@@ -138,7 +138,7 @@ EOF
     cat >/dev/tty <<EOF
 
 Review — nothing has been saved yet:
-  local alias : $name        (used as: ts-smb ls $name)
+  local alias : $name        (used as: tstack smb ls $name)
   computer    : $host
   share       : $path
   account     : ${domain:+$domain\\}$user
@@ -158,7 +158,7 @@ EOF
             echo "$WARN no OS secret service is available; using a protected 0600 local file." >/dev/tty
             printf '%s' "$blob" | ts_smb_cred_set file "$user" "$host" || rc=$?
         fi
-        [ "$rc" = 0 ] || { echo "ts-smb setup: could not store the credential; nothing was saved." >&2; return 1; }
+        [ "$rc" = 0 ] || { echo "tstack smb setup: could not store the credential; nothing was saved." >&2; return 1; }
         stored=1
     fi
 
@@ -184,7 +184,7 @@ EOF
             if [ "$old_had" = 1 ]; then printf '%s' "$old_blob" | ts_smb_cred_set "$actual_cred" "$user" "$host" >/dev/null 2>&1 || true
             else ts_smb_cred_rm "$actual_cred" "$user" "$host"; fi
         fi
-        echo "ts-smb setup: could not save the local inventory; the credential change was rolled back." >&2
+        echo "tstack smb setup: could not save the local inventory; the credential change was rolled back." >&2
         return 1
     fi
 
@@ -196,11 +196,11 @@ EOF
     else
         ts_smb_timeout 20 rclone lsf "$share_remote" --max-depth 1 --smb-idle-timeout 5s 2>/dev/null | head -20 || true
     fi
-    echo "$INFO browse later: ts-smb ls $name"
+    echo "$INFO browse later: tstack smb ls $name"
     echo "$INFO mounting makes it appear at $(ts_smb_mountpoint "$name"); it remains read-only by default."
     c="$(ts_prompt_choice browse 'What next?' \
         'Browsing runs one command. Mounting starts a background filesystem until you unmount it.' \
-        'browse|Finish without mounting|recommended; use ts-smb ls when needed' \
-        'mount|Mount read-only now|unmount later with ts-smb umount')"
+        'browse|Finish without mounting|recommended; use tstack smb ls when needed' \
+        'mount|Mount read-only now|unmount later with tstack smb umount')"
     [ "$c" = mount ] && cmd_mount "$name"
 }

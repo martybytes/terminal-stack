@@ -128,9 +128,9 @@ ts_ws_build_plan() {
     while IFS= read -r d; do
         [ -n "$d" ] || continue
         # Never plan the active runtime clone into the tree — relocating it
-        # breaks the install; ts-doctor --repair owns that move.
+        # breaks the install; tstack doctor --repair owns that move.
         if [ -n "$runtime" ] && [ "$( (cd "$d" 2>/dev/null && pwd -P) || printf '%s' "$d")" = "$runtime" ]; then
-            printf 'runtime\t%s\t\t%s\n' "$d" "active terminal-stack runtime clone — not migrated (relocate with ts-doctor --repair)"
+            printf 'runtime\t%s\t\t%s\n' "$d" "active terminal-stack runtime clone — not migrated (relocate with tstack doctor --repair)"
             continue
         fi
         # Belt and braces: skip ANY un-tiered terminal-stack clone, not only the
@@ -141,7 +141,7 @@ ts_ws_build_plan() {
         # the install. A real dev clone already lives at a tier path and is
         # therefore never a scan candidate, so nothing legitimate is blocked.
         if git -C "$d" config --get remote.origin.url 2>/dev/null | grep -qi terminal-stack; then
-            printf 'runtime\t%s\t\t%s\n' "$d" "terminal-stack clone at the workspace root — not migrated (relocate with ts-doctor --repair)"
+            printf 'runtime\t%s\t\t%s\n' "$d" "terminal-stack clone at the workspace root — not migrated (relocate with tstack doctor --repair)"
             continue
         fi
         out="$(ts_ws_dest_for "$d")"
@@ -778,7 +778,7 @@ cmd_doctor() {
         if p="$(command -v "$t" 2>/dev/null)"; then
             printf '  %-8s ok    %s\n' "$t" "$p"
         else
-            printf '  %-8s MISSING — install it: ts-config apps\n' "$t"
+            printf '  %-8s MISSING — install it: tstack config apps\n' "$t"
             issues=$((issues + 1))
         fi
     done

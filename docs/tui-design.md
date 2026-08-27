@@ -1,158 +1,99 @@
-# A TUI for terminal-stack — design
+# A dashboard for terminal-stack - design
 
-Status: **design only.** Nothing here is built or shipped. The prototype is a
-separate, later step; see "Phasing" at the end.
+Status: **design only.** Nothing here is built. It is the last phase of the port
+described in `REVAMP-PLAN.md`, and it depends on every phase before it.
 
-## Why
+## What changed since the first draft
 
-The stack's configuration surface is now ~17k lines of shell and PowerShell
-across `bootstrap/`, `dot_zshrc` and `$PROFILE`, and every user-facing menu
-exists **twice** — bash and pwsh — under a rule that their rendered output stay
-byte-identical, verified by a manual pty diff (`docs/verifying-changes.md` § 3).
-That rule is the cost a single binary eventually removes. The surface itself is
-also past the point where a flat command list is discoverable: `ts-config` alone
-fronts leader/theme/tmux/apps/mux/restore/atuin/ghostty/agents/wezterm/wizard,
-and the TTS subtree has **43 `ccTts*` keys**.
+The original design assumed the management layer would stay bash + PowerShell
+twins, so a TUI had to be a separate program talking to them over a `--json`
+contract, and Ratatui was the natural choice. That assumption is gone: `tstack`
+is becoming one Python program.
 
-The goal is a `ts` TUI that can see and change everything — add, remove, change —
-and browse the docs, **with every existing command still working**. The TUI is a
-front-end, not a replacement.
+| first draft | now | why |
+|---|---|---|
+| Ratatui (Rust) | **Textual (Python)** | it ships with `git pull` like everything else; a compiled binary does not |
+| command `ts-tui` | **`tstack ui`** | one entry point, one namespace |
+| prebuilt binaries via cargo-dist | nothing to distribute | there is no artifact |
+| a `--json` contract between two programs | direct function calls | same process, same objects |
+| version skew between binary and clone | impossible | the dashboard *is* the clone |
 
-## The load-bearing decision: the TUI never writes config itself
+The skew problem was the largest single risk in the first design, and it
+disappeared rather than being solved: `tstack update` is `git pull` +
+`chezmoi apply`, and a Python dashboard participates in that automatically.
+`tstack rollback` takes the dashboard back with it.
 
-**Every mutation shells out to the existing scripts.** Reads go through new
-`--json` modes; writes invoke `ts-config`, `ts_data_set`, `ts_save_config` and
-friends exactly as a human would.
+`--json` read models are still worth building - they make the stack scriptable
+and they are what external probes want - but they are no longer load-bearing for
+the dashboard.
 
-This is not timidity, it is the repo's own history:
+## The rule that did not change
 
-- bash and pwsh are already parallel implementations held together only by a
-  byte-identical-menu rule and a manual diff.
-- the old Cursor script "drifted into not reproducing its own installed state".
-- the two config stores diverging silently removed **all five** Claude TTS hooks
-  in a single day, with no error and a diff that looked deliberate.
+**The dashboard never writes config itself.** It calls the same core functions
+the CLI calls. Not because Python could not write the file, but because two
+writers is exactly how this repo lost all five Claude TTS hooks in a single day
+and emptied `~/.cursor/hooks.json` of agentmemory's seven Cursor hooks: the
+chezmoi `[data]` store and the Windows `config.json` mirror disagreed, each side
+rendered a valid file from its own copy, and the setting flipped depending on
+which applied last.
 
-A Rust reimplementation of `ts_data_set` / `ts_save_config` would be a **third**
-store with the same failure mode, and the first bug would be invisible. Shelling
-out makes CLI/TUI divergence structurally impossible — which is precisely what
-"keep the command lines too" requires. It also means `chezmoi init` (which
-regenerates the derived `leaderKey` / `leaderMods` / `tmuxPrefixResolved`) and
-`ts_mirror_windows_config` keep happening for free, rather than being two more
-things a second implementation must remember.
+One writer, reached the same way from the CLI and the dashboard. A test enforces
+it: nothing under `tstack/ui/` may import a writer or touch a config path
+directly.
 
-The cost is process-spawn latency on each write. That is the right trade for a
-config editor, where writes are rare and correctness is everything.
+## What it shows
 
-## Phase 1 is `--json`, not Rust
+Ordered by what is worth opening it for.
 
-Every script today emits `printf`-formatted human text. A TUI over that is
-screen-scraping, and every cosmetic change to a status line becomes a parsing
-bug.
+1. **Home** - health summary, clone SHA and branch, mux state, service counts,
+   last update, anything `doctor` flagged.
+2. **Doctor** - checks by severity, `r` to run a repair. This is the screen people
+   open when something is wrong, so it has to be the one that reads best.
+3. **Services** - per-stack state, health and published ports; start, stop,
+   restart, logs.
+4. **Config** - every key with its value, its default, and **which layer won**.
+   That last column is the point; it is what `ttsd/webui.py` already does for the
+   TTS settings and the reason that dashboard can be trusted.
+5. **Doc browser** - the `docs/kb/` tree with preview. Worth building first: it
+   needs no config access at all, so it exercises the widget layer while risking
+   nothing.
 
-The in-repo precedent is already built: `bootstrap/tts-daemon/ttsd/settings_schema.py`
-is a machine-readable settings schema with a real front-end over it
-(`ttsd/webui.py`), including **which config layer won per field** — the exact
-thing a config TUI needs to render honestly. Copy that shape for the chezmoi
-`[data]` keys.
+Deliberately absent:
 
-Add `--json` read models to:
+- **The 43 `ccTts*` keys.** The daemon already has a full web dashboard for them
+  (`ttsd/webui.py`), including override display and restart-required labels.
+  Link to it rather than rebuilding it.
+- **`update` and `rollback` as in-app actions.** Both are interactive multi-stage
+  flows that can re-exec the shell. The dashboard suspends, hands the terminal
+  over, and re-enters.
+- **`wso` and `smb` mutations.** Read-only until they are ported and proven.
 
-| Command | Emits |
-|---|---|
-| `ts-config show` | every key, its value, its default, and where it came from |
-| `ts-doctor` | one record per check: id, status, message, repair hint |
-| `wso status` | one record per repo: path, dirty, unpushed, detached |
-| `ts-smb list` | one record per share/mount, with derived liveness |
+## Testing it
 
-**These are worth building whether or not the TUI ever exists** — they make the
-stack scriptable, and they are what `check-capture.sh`-style external probes
-want too.
+Textual is testable in a way a terminal UI usually is not, and that is a large
+part of why it wins here:
 
-## Surface the TUI must cover
+- `pytest-textual-snapshot` over the rendered output of every screen.
+- The `Pilot` API for keyboard interaction: focus order, key bindings, and what a
+  screen does when the backend raises.
+- `textual serve` puts the same app in a browser, so the Playwright setup this
+  repo already uses covers keyboard navigation, focus order, resize and visual
+  regression - without driving a native terminal, which Playwright cannot do and
+  should not be asked to.
 
-- `ts-config`: leader, theme, tmux prefix, apps, mux, session restore, atuin,
-  ghostty, agents, WezTerm channel, re-run wizard
-- the TTS subtree: 43 `ccTts*` keys, engines, voices, templates, daemon, history
-- `wso`: status, plan, migrate, archive/unarchive checklists
-- `ts-smb`: hosts → shares → probe → browse → mount
-- `ts-doctor`: checks and `--repair`
-- the `doc` knowledge base
-
-## Distribution: prebuilt binaries only
-
-The repo is **public**, so unauthenticated release downloads work and
-`common_install_github_binary` needs no auth change. `common_arch_tag rust`
-(added for atuin/yazi) is already the correct arch mapping — cargo-dist projects
-name their ARM asset `aarch64`, not `arm64`.
-
-- Build with **cargo-dist** in `.github/workflows` (none exists yet). atuin's own
-  `dist-workspace.toml` is the working reference, and it is a ratatui app, so the
-  target matrix is already proven.
-- A platform with no published asset simply has no TUI and keeps the scripts.
-
-**Why not build on device.** The TTS daemon compiles on-device, but it is
-Windows-only, opt-in (`ccTtsDaemon` defaults off), and its Python 3.10+
-toolchain is already in the catalog and present on essentially every machine.
-Rust is in neither the catalog nor any bootstrap. A toolchain requirement gating
-`ts-config` itself is a different proposition from one gating an optional
-feature, and `cargo build --release` on every `ts-update` is minutes, not
-seconds.
-
-## Fetch UX: offer, never force
-
-`ts-update` detects a newer release and prompts `[y/N]`, mirroring exactly what
-it already does for `ts_apps_pending` and `ts_wezterm_update_available`. Plus a
-standalone `ts-tui update` for on-demand.
-
-Nothing downloads silently. That would be the only thing in the stack that
-changes a machine without asking.
-
-## The version-skew trap
-
-This is the real risk in the release approach and it must be designed for, not
-discovered.
-
-`ts-update` is `git pull --ff-only` + `chezmoi apply`. `ts-rollback` is
-`git reset --hard <sha>` + `chezmoi apply`. **A separately-fetched binary
-participates in neither**, so a rollback leaves a *newer* binary driving *older*
-scripts — and since the TUI shells out to those scripts, that is exactly the
-configuration most likely to misbehave.
-
-The TTS daemon already solved this and the TUI must copy it wholesale:
-
-- stamp the **git SHA/tag** into the binary at build time (the daemon does this
-  in its PyInstaller spec) and expose it as `ts-tui --version`
-- `ts-doctor` reports a mismatch between the binary's stamp and the clone's HEAD
-- keep a `.previous` artifact beside the installed one
-- install as **stage → validate → atomic swap**, restoring `.previous` if the
-  final move leaves no binary (`bootstrap/install-tts-daemon.ps1` is the
-  reference)
-- `ts-rollback` must fetch the binary matching the SHA it rolled back to, or
-  refuse and say so
-
-## Two hard runtime rules
+## Two runtime rules carried forward
 
 - **Never `stat`, `ls` or glob an SMB mountpoint.** A dead FUSE mount blocks
-  forever and takes the calling process with it — in a TUI that means a frozen
-  render loop with no way out. Liveness comes from the kernel mount table, which
-  is why `ts-smb` derives it rather than storing it.
-- **`ts-update` and `ts-rollback` are ~140 lines of zsh inside `dot_zshrc`**,
-  with no `.sh` file. Shell out to them (`zsh -ic`), do not reimplement. They are
-  also *interactive* multi-stage flows with their own prompts, so the TUI must
-  hand the terminal over rather than trying to drive them.
+  forever and takes the calling process with it. In a CLI that is an annoying
+  hang; in a dashboard it is a frozen render loop with no way out. Liveness comes
+  from the kernel mount table, which is why `smb` derives it rather than storing
+  it.
+- **Never auto-restart `wezterm-mux-server`.** It loads its own copy of the
+  config, so a config change does not reach it - but restarting kills every live
+  pane. Print the reminder; the restart stays deliberate.
 
-## Phasing
+## Where it sits in the port
 
-1. `--json` read models (useful alone; no Rust)
-2. Prototype: the **doc browser** only. It needs no `--json` work —
-   `_doc_index`'s `label<TAB>path` output is effectively the doc system's public
-   contract and is ~30 lines to reimplement — and a native browser deletes the
-   `_doc_edit_bind` fzf-0.42 `become()` compatibility shim outright. It exercises
-   list, filter, preview and key handling while risking no config write.
-3. Read-only dashboard over the `--json` models
-4. Mutations, shelling out
-5. cargo-dist release pipeline + `ts-tui update` + the `ts-update` offer
-
-Ratatui **0.30.2** is the current release. `cargo` is not installed on the
-development Mac; the prototype needs `rustup` locally, which is deliberately
-**not** a catalog addition — no user machine should ever need Rust.
+Last, as phase 8 in `REVAMP-PLAN.md`, after `doctor`, `config`, `services` and the
+rest are Python. A dashboard built over shell-outs would be the screen-scraping
+design this whole port exists to avoid.

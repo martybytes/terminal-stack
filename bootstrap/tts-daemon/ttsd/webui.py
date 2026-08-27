@@ -148,7 +148,7 @@ PAGE = """<!doctype html>
       These are <b>machine-local overrides</b> written to
       <code>~/.claude/tts/local.json</code>. They win over the saved settings and survive
       every apply, but they do not travel to your other machines. For a setting that
-      should propagate, use <code>ts-config tts …</code> from WSL.
+      should propagate, use <code>tstack config tts …</code> from WSL.
     </div>
     <div id="secrets"></div>
     <div id="fields"></div>

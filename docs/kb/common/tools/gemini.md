@@ -13,7 +13,7 @@ Google's coding agent in the terminal.
   deprecated upstream and scheduled for removal on 2026-12-18, so installing
   from it would hand you a dead end. npm is the supported path.
 - Because it is a global npm package it lives under whatever Node fnm has active,
-  and fnm's PATH entry is per-shell — which is why `ts-update`'s "not installed"
+  and fnm's PATH entry is per-shell — which is why `tstack update`'s "not installed"
   check loads fnm's environment before probing.
 
 | Command | What it does |
@@ -21,7 +21,7 @@ Google's coding agent in the terminal.
 | `gemini` | interactive session in the current directory |
 | `gemini -p "summarise this repo"` | one-shot prompt |
 | `gemini --version` | installed version |
-| `npm install -g @google/gemini-cli` | upgrade (or re-run `ts-config apps gemini`) |
+| `npm install -g @google/gemini-cli` | upgrade (or re-run `tstack config apps gemini`) |
 | `npm ls -g --depth 0` | what else is installed globally under this Node |
 
 Authenticates against a Google account on first run; an API key from AI Studio

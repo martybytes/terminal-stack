@@ -1,0 +1,13 @@
+{
+  "subsystem": "services",
+  "case": "bad-verb",
+  "platform": "wsl",
+  "sandbox": "throwaway-store",
+  "argv": [
+    "definitely-not-a-verb"
+  ],
+  "recorded_from": "bootstrap/ts-stack.sh",
+  "exit_code": 2,
+  "stdout_lines": [],
+  "stderr_lines": []
+}

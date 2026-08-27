@@ -87,18 +87,18 @@ tmuxPrefixResolved = {{ $tmuxPrefixResolved | quote }}
 themeMode = {{ $themeMode | quote }}
 resolvedTheme = {{ $resolvedTheme | quote }}
 {{- /* WezTerm multiplexer domain: "on" hosts panes in wezterm-mux-server, "off"
-       (default) spawns them locally. Toggled by `ts-mux on|off`. */}}
+       (default) spawns them locally. Toggled by `tstack mux on|off`. */}}
 weztermMux = {{ index . "weztermMux" | default "off" | quote }}
 {{- /* Reopen the last session at WezTerm start: "on" registers resurrect's
-       gui-startup restore, "off" (default) starts clean. `ts-config restore`. */}}
+       gui-startup restore, "off" (default) starts clean. `tstack config restore`. */}}
 weztermRestore = {{ index . "weztermRestore" | default "off" | quote }}
 {{- /* atuin owns Ctrl+R when "on"; "off" (default) leaves it to fzf. Rendered
        into ~/.config/terminal-stack/atuin.zsh, which dot_zshrc sources — a
        saved setting rather than a presence check, because the binary is often
-       installed but dormant. `ts-config atuin on|off`. */}}
+       installed but dormant. `tstack config atuin on|off`. */}}
 atuinEnabled = {{ index . "atuinEnabled" | default "off" | quote }}
 {{- /* Ghostty config, macOS only. "off" makes .chezmoiignore drop it so apply
-       stops re-rendering; `ts-config ghostty off` also removes/restores the
+       stops re-rendering; `tstack config ghostty off` also removes/restores the
        deployed files. Default on. */}}
 ghosttyConfig = {{ index . "ghosttyConfig" | default "on" | quote }}
 {{- /* Per-computer agent integrations. These are deliberately user-global but
@@ -118,8 +118,8 @@ playwrightEnabled = {{ index . "playwrightEnabled" | default "off" | quote }}
 # agentmemory is the default because it is what every machine has effectively
 # been running: Headroom's memory needs a --memory flag its compose file never
 # passed, so its Qdrant and Neo4j were started and never once contacted.
-# agentmemoryEnabled above is DERIVED from this; ts-config memory is the only
-# thing that writes either, and ts-doctor reports drift between them.
+# agentmemoryEnabled above is DERIVED from this; tstack config memory is the only
+# thing that writes either, and tstack doctor reports drift between them.
 memoryBackend = {{ index . "memoryBackend" | default "agentmemory" | quote }}
 {{- if hasKey . "apps" }}
 apps = [{{ range $i, $a := .apps }}{{ if $i }}, {{ end }}{{ $a | quote }}{{ end }}]

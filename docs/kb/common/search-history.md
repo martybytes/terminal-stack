@@ -25,7 +25,7 @@ command out (`HIST_IGNORE_SPACE`).
 
 ## atuin (optional)
 
-`ts-config atuin on` swaps `Ctrl+R` for [atuin](https://atuin.sh): history in
+`tstack config atuin on` swaps `Ctrl+R` for [atuin](https://atuin.sh): history in
 SQLite, shared across every shell, with no 100k ceiling and no per-shell import
 step. `Ctrl+T`, `Alt+C` and Up-arrow are unchanged, and `hgrep` / `history` keep
 reading zsh's own file either way — the two stores coexist.

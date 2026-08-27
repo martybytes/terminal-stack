@@ -1,0 +1,69 @@
+# Tooling config for the Python side of terminal-stack.
+#
+# There is no package to build here and nothing is published: tstack/ runs from
+# the clone, invoked by the shell shims. This file exists so ruff, mypy, pytest
+# and coverage read the same settings from the pre-commit hook, the pre-push
+# hook and CI, instead of each caller passing its own flags.
+#
+# Not a chezmoi source file -- see .chezmoiignore.
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"           # matches the bar bootstrap/tts-daemon sets
+extend-exclude = ["bootstrap/tts-daemon/build", "bootstrap/tts-daemon/dist"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+ignore = [
+    "E501",    # line length is formatted, not linted
+    "SIM108",  # ternaries are not always clearer than an if/else
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests assert on literal shell and PowerShell fragments; those strings are
+# quoted source, not prose, and must stay byte-exact.
+"tests/*" = ["E741", "RUF001"]
+
+[tool.mypy]
+python_version = "3.10"
+files = ["tstack"]
+ignore_missing_imports = true
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+no_implicit_optional = true
+# Ratcheted per phase, never loosened. tstack/ is new code with no legacy to
+# grandfather, so it starts strict and the shell ports must arrive strict.
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Import mode matters: tests/ has no __init__.py but test modules import each
+# other (tests.shell_support, tests.test_agent_tools), which only resolves when
+# the repo root is on sys.path.
+addopts = "-q --strict-markers --strict-config"
+markers = [
+    "slow: takes more than a few seconds",
+    "pwsh: needs PowerShell 7+",
+    "wsl: only meaningful inside WSL",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["tstack"]
+omit = ["tstack/main.py"]          # a six-line sys.path shim with no branches
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]
+# RATCHET: raise this with each phase, never lower it. Phase 0 ships the
+# dispatcher, the registry and clone resolution; the number goes up as the shell
+# ports land, because every ported subsystem arrives with its own tests.
+fail_under = 80

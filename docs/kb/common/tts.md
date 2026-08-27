@@ -1,7 +1,7 @@
 # Agent voice notifications
 
 Claude Code, Cursor and Codex speak when they finish, hit an error, or need you.
-Turn it on with `ts-config tts on`, off with `cctts off`.
+Turn it on with `tstack config tts on`, off with `cctts off`.
 
 ## What works where
 
@@ -17,32 +17,32 @@ daemon** that only Windows has. Most of the "smart" options live in the daemon.
 | `haiku` / `ollama` summaries | ❌ daemon-only — refused, not silently stored | ✅ |
 | music ducking (`music`, `duck-level`) | ❌ daemon-only, pycaw/WinRT — refused | ✅ |
 | `ccmute`, global hotkey, tray icon | ❌ | ✅ |
-| `ts-config tts history`, `/ui` dashboard | ❌ | ✅ |
+| `tstack config tts history`, `/ui` dashboard | ❌ | ✅ |
 | per-session voices (`voices`) | ❌ | ✅ |
 
 Anything marked ❌ now **refuses with a reason** rather than accepting a value
-nothing will read. That was not always true: `ts-config tts music duck` used to
+nothing will read. That was not always true: `tstack config tts music duck` used to
 save happily on a Mac and do nothing.
 
 ## Commands
 
-`ts-config tts` on its own prints the effective config.
+`tstack config tts` on its own prints the effective config.
 
 | Command | What it does |
 |---|---|
-| `ts-config tts` / `show` | effective config (config.json + local.json) |
+| `tstack config tts` / `show` | effective config (config.json + local.json) |
 | `cctts` / `cctts on` / `cctts off` | quick status and toggle |
-| `ts-config tts test [--source claude\|cursor\|codex]` | speak a fixed line. **Ignores any text you pass** |
-| `ts-config tts engine kokoro\|chatterbox\|auto` | which synthesiser to try first |
-| `ts-config tts voice <name>` / `voice-chatter <name>` | per-engine voice |
-| `ts-config tts excitement <0-1>` | speaking rate |
-| `ts-config tts events waiting,error,question,permission` | when it speaks |
-| `ts-config tts message template\|hook` | fixed line, or read the last message raw |
-| `ts-config tts summarizer template\|self` | what a "finished" announcement says |
-| `ts-config tts template waiting\|error\|… "…"` | reword one announcement |
-| `ts-config tts prefix claude\|cursor\|codex on\|off\|<label>` | who is speaking |
-| `ts-config tts project on\|off` | include the project name |
-| `ts-config tts reset` | back to defaults |
+| `tstack config tts test [--source claude\|cursor\|codex]` | speak a fixed line. **Ignores any text you pass** |
+| `tstack config tts engine kokoro\|chatterbox\|auto` | which synthesiser to try first |
+| `tstack config tts voice <name>` / `voice-chatter <name>` | per-engine voice |
+| `tstack config tts excitement <0-1>` | speaking rate |
+| `tstack config tts events waiting,error,question,permission` | when it speaks |
+| `tstack config tts message template\|hook` | fixed line, or read the last message raw |
+| `tstack config tts summarizer template\|self` | what a "finished" announcement says |
+| `tstack config tts template waiting\|error\|… "…"` | reword one announcement |
+| `tstack config tts prefix claude\|cursor\|codex on\|off\|<label>` | who is speaking |
+| `tstack config tts project on\|off` | include the project name |
+| `tstack config tts reset` | back to defaults |
 
 ## What it says when the agent finishes
 
@@ -56,9 +56,9 @@ save happily on a Mac and do nothing.
 - **`hook`** — reads the agent's last message out raw, truncated to `maxChars`.
   Blunt, but needs no instruction block.
 
-`self` **edits your instruction files.** `ts-config tts summarizer self` appends
+`self` **edits your instruction files.** `tstack config tts summarizer self` appends
 a marker-delimited block to `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md` so the
-agent knows to write that line; `ts-config tts summarizer template` removes it
+agent knows to write that line; `tstack config tts summarizer template` removes it
 again. The block is bounded by `<!-- terminal-stack-tts-start -->` markers and
 the file is backed up first.
 
@@ -92,9 +92,9 @@ a fallback — Kokoro is probably down. A once-a-day notice says so.
 ## It went quiet
 
 - **`~/.claude/tts/local.json` with `"enabled": false`** overrides everything and
-  is the most common silent killer. `ts-config tts` shows the effective value.
+  is the most common silent killer. `tstack config tts` shows the effective value.
 - **A `chezmoi apply` from the wrong side.** On combined WSL+Windows, run
-  `ts-config tts …` from **WSL** — a pwsh save writes only the `config.json`
+  `tstack config tts …` from **WSL** — a pwsh save writes only the `config.json`
   mirror, so the next WSL apply renders the setting back off. This removed all
   five Claude TTS hooks once, with no error.
 - **`ccTtsEnabled` off** removes the hooks entirely on the next apply, which is
@@ -103,4 +103,4 @@ a fallback — Kokoro is probably down. A once-a-day notice says so.
 Windows extras — the tray, the dashboard, mute, duplicate suppression, the WSL
 firewall path — are in `doc windows/tts-daemon`.
 
-See also `doc common/claude-code`, `doc ts-config`.
+See also `doc common/claude-code`, `doc tstack config`.

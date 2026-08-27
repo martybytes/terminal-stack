@@ -2,6 +2,37 @@
 
 Notes on choices made during the original deployment that aren't obvious from reading the code. Order is roughly chronological.
 
+## The claims audit
+
+`CLAUDE.md`, `ARCHITECTURE.md` and `README.md` accumulated assertions of the form
+"X is pinned by a test" and "never do Z because W". On 2026-08-25 every checkable
+one was verified against `tests/`. Most held. These did not, and each is now
+either enforced or corrected:
+
+| claim | was | now |
+|---|---|---|
+| "There is no build, no test suite, no lint" (`CLAUDE.md` line 9) | false in three ways, and contradicted 19 lines later | replaced with the actual gate list |
+| `tstack mux` `-h` kept byte-identical between the twins | nothing compared them; only the `tstack services` pair had a test | `test_ts_mux_help_is_byte_identical_between_the_twins` |
+| `wso` `-h` byte-identical (`wso.sh:21-22` marker) | a comment, unenforced | `test_wso_help_is_byte_identical_between_the_twins` |
+| `ts_app_installable` gate | bash half pinned twice, pwsh twin **zero** times, so it could drift silently | `test_app_installable_is_pinned_on_both_sides_not_just_bash` |
+| "Never pipe `Where-Object` into `Set-Content`" | prose only | `test_no_where_object_piped_straight_into_set_content` |
+| backup convention "reference: `run_after_90-sync-windows.sh:28-34`" | stale; the `.bak` block starts at 27 | line number replaced with a description |
+| `check-capture.sh` probes `command -v ts-agentmemory` | there was never an executable by that name; it matched nothing on every host | probe removed, clone paths lead |
+| `.githooks/pre-commit`: "installed by `bootstrap.sh --apply` / `bootstrap.ps1 -Apply`" | **neither file has ever existed in this repo**; nothing set `core.hooksPath`; it was unset in every clone | `ts_install_git_hooks` / `Install-TsGitHooks`, called by all three bash bootstraps, pinned by `test_the_git_hooks_are_actually_installed_by_something` |
+
+The last one is the reason the others survived: the repo's only automated gate had
+never executed anywhere. That is how a literal TAB byte in `$PROFILE:1705` broke
+`tstack services` on Windows from `54da056` onward with nobody noticing, and how the
+`services/console` suite stayed red after being merged.
+
+**The lesson is structural, not clerical.** An unenforced invariant written as
+settled fact is worse than no invariant: it is read, believed, and quietly
+violated. Two guards now exist for the class -
+`test_the_hooks_never_claim_a_file_that_does_not_exist`, and `repo_file()` in
+`tests/test_agent_tools.py`, which makes any "string X must appear in file Y" test
+fail loudly when Y is deleted instead of passing vacuously forever.
+
+
 ## Why oh-my-zsh with `ZSH_THEME=""`?
 
 oh-my-zsh provides plugin loading (`plugins=(git ...)`), aliases, and a theme. Themes set `PROMPT` directly. Starship sets `PROMPT` to its own callback. The two would compete.
@@ -29,7 +60,7 @@ Both files started with user content. `~/.zshrc` is created from scratch by oh-m
 
 `$PROFILE` predated the terminal stack with user-personal content (workspace navigation funcs, zoxide init, `cc` aliases that evolved over time). It was originally managed by marker-block injection so re-running deployment touched only the bracketed regions. That content has since been absorbed into the repo copy (`windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1`), and **the sync mechanism is whole-file**: both sync scripts copy the rendered source over `$PROFILE`, with a `.bak.YYYYMMDD[.N]` backup on every overwrite. Two things keep that safe:
 
-- **Per-machine content lives in `profile.local.ps1`** (dot-sourced at the end of `$PROFILE`, never synced — the Windows counterpart of `~/.zshrc.local`, since v1.1.0). Anything personal that goes into `$PROFILE` itself *will* be replaced on the next `ts-update`/apply — recoverable from the `.bak`, but gone from the live file.
+- **Per-machine content lives in `profile.local.ps1`** (dot-sourced at the end of `$PROFILE`, never synced — the Windows counterpart of `~/.zshrc.local`, since v1.1.0). Anything personal that goes into `$PROFILE` itself *will* be replaced on the next `tstack update`/apply — recoverable from the `.bak`, but gone from the live file.
 - **The marker blocks remain as editing discipline**, not merge mechanics: they delimit the stack's functional regions (`starship-stack-*`, `cli-tools-*`, `git-shortcuts-*`, …) so an agent or human editing the source knows where each concern lives and adds new ones as new blocks.
 
 If a fresh machine has a pre-existing `$PROFILE`, the first sync backs it up and replaces it — migrate anything worth keeping into `profile.local.ps1`.
@@ -84,7 +115,7 @@ The original value was `'RESIZE'`, which draws only a resizable border — no OS
 
 ## Why `LEADER o` to detach a tab instead of dragging it out?
 
-WezTerm has no native mouse "tear-off": you cannot drag a tab off the bar to spawn a new window (long-standing limitation — see GH discussion #4080 and issue #549). The supported equivalent is the Lua `pane:move_to_new_window()`, which we bind to `LEADER o` (the leader — default `Ctrl+Space`, configurable via `ts-config leader` — then `o`) via `wezterm.action_callback`, plus `Ctrl+Shift+O` for access without the leader. `o` was the obvious free letter among the leader bindings at the time and is mnemonic for "out". For ad-hoc use without a keybinding, the CLI does the same thing: `wezterm cli move-pane-to-new-tab --new-window`. Bound in both WezTerm configs.
+WezTerm has no native mouse "tear-off": you cannot drag a tab off the bar to spawn a new window (long-standing limitation — see GH discussion #4080 and issue #549). The supported equivalent is the Lua `pane:move_to_new_window()`, which we bind to `LEADER o` (the leader — default `Ctrl+Space`, configurable via `tstack config leader` — then `o`) via `wezterm.action_callback`, plus `Ctrl+Shift+O` for access without the leader. `o` was the obvious free letter among the leader bindings at the time and is mnemonic for "out". For ad-hoc use without a keybinding, the CLI does the same thing: `wezterm cli move-pane-to-new-tab --new-window`. Bound in both WezTerm configs.
 
 ## Why local-only chezmoi git (no remote yet)?
 
@@ -126,11 +157,11 @@ The P/Invoke version (`Native.ConsoleCP::GetConsoleOutputCP()`) asks the OS dire
 
 An older, different WebGpu incident is kept for history. On some Intel iGPU drivers (an earlier Windows 11 setup, May 2026) WebGpu had an output-buffer queueing behavior where rapid post-redirect output from a child process (Claude Code starting up, a large `cat` of a colored log) didn't trigger an immediate redraw — the buffer flushed only on the next input event, so "type `ccd`, hit Enter, nothing happens; hit space and Claude Code's whole intro screen appears at once." We switched to `OpenGL` for a while (commit `7922da8`); a later WezTerm-nightly / driver update cleared it and the configs returned to WebGpu — until the crash above retired it on Windows for good.
 
-## Why the mux domain is opt-in, not the default (`ts-mux`)
+## Why the mux domain is opt-in, not the default (`tstack mux`)
 
 The same WebGpu crash motivated a structural fix beyond the renderer swap: with panes local to the GUI process, *any* GUI abort — renderer panic, driver update, misclick on a "close window" prompt — kills every shell and everything running in them. Hosting panes in a `wezterm-mux-server` process outside the GUI (`config.unix_domains = { { name = 'main' } }` + `config.default_domain = 'main'`) fixes that: a GUI crash leaves every pane alive and relaunching WezTerm reattaches.
 
-It shipped unconditionally in August 2026 and that was the mistake. The mux is a real change in how the terminal behaves, and it arrived through a routine `ts-update` — panes started coming up in a domain the user never asked for, with two visible side effects:
+It shipped unconditionally in August 2026 and that was the mistake. The mux is a real change in how the terminal behaves, and it arrived through a routine `tstack update` — panes started coming up in a domain the user never asked for, with two visible side effects:
 
 - **Per-pane background tints may not render under the mux domain.** The Claude cc-state tint is driven by `pane:inject_output` (see the ConPTY entry in `powershell-quirks.md`), which is local-pane-only; mux panes fall back to the hook's raw OSC 11, which ConPTY eats on Windows. Failures log once per pane to the debug overlay (`Ctrl+Shift+L`). Tab dots and title tints are unaffected (they ride the user var, not the byte stream).
 - **The mux server loads its own copy of `.wezterm.lua`.** A GUI reload does not change how the mux spawns panes, so every config change needs a mux restart — which kills every live pane. Nothing in the stack restarts it automatically for exactly that reason; the sync scripts print a reminder instead.
@@ -147,17 +178,17 @@ end
 
 Defaulting to *off* rather than preserving the shipped-on behaviour is deliberate: crash resilience is worth having, but it is worth **choosing**, and a machine that silently gained a mux is better served by landing back where it started and opting back in with one command. For the same reason the **install wizard asks** — `ts_prompt_wezterm_mux` / `Read-TsWeztermMux`, defaulting to off, `TS_WEZ_MUX=on|off` for scripted installs, and skipped on headless hosts where there is no GUI to host anything. A question at install is how a default becomes a decision; leaving it to a command nobody knows exists is how it stays a surprise.
 
-`ts-mux` is that command, and it also owns the live server, because the manual path (`taskkill /IM wezterm-mux-server.exe /F`) is both easy to get wrong and impossible from WSL without knowing the interop trick:
+`tstack mux` is that command, and it also owns the live server, because the manual path (`taskkill /IM wezterm-mux-server.exe /F`) is both easy to get wrong and impossible from WSL without knowing the interop trick:
 
 | Command | Does |
 |---|---|
-| `ts-mux` / `ts-mux status` | the setting, the *rendered* setting (catches an un-applied change), the server pid, the pane count |
-| `ts-mux on` / `off` | flip `weztermMux`, re-render, and say what takes effect when |
-| `ts-mux list` | `wezterm cli list` |
-| `ts-mux kill` / `restart` | stop / cycle `wezterm-mux-server` (confirmed — it kills every pane it hosts) |
-| `ts-mux reset` | back to the default: off + re-apply + kill + clear stale sockets |
+| `tstack mux` / `tstack mux status` | the setting, the *rendered* setting (catches an un-applied change), the server pid, the pane count |
+| `tstack mux on` / `off` | flip `weztermMux`, re-render, and say what takes effect when |
+| `tstack mux list` | `wezterm cli list` |
+| `tstack mux kill` / `restart` | stop / cycle `wezterm-mux-server` (confirmed — it kills every pane it hosts) |
+| `tstack mux reset` | back to the default: off + re-apply + kill + clear stale sockets |
 
-Two implementations, as everywhere else in this repo: `bootstrap/ts-mux.sh` (zsh wrapper in `dot_zshrc`) and `Invoke-TsMux` in `$PROFILE`. On WSL the GUI, the mux server and the rendered config are all Windows-side, so the bash script drives them over interop (`tasklist.exe` / `taskkill.exe` / `wezterm.exe`) rather than the Linux process table.
+One implementation, `tstack/commands/mux.py`. It was two - `bootstrap/ts-mux.sh` and `Invoke-TsMux` in `$PROFILE` - kept in agreement by hand. On WSL the GUI, the mux server and the rendered config are all Windows-side, so the bash script drives them over interop (`tasklist.exe` / `taskkill.exe` / `wezterm.exe`) rather than the Linux process table.
 
 `status` deliberately reports the **rendered** value separately from the saved one. A config written before this toggle existed has no `MUX_ENABLED` line at all, so it reads the unconditional `config.default_domain = 'main'` and reports `on (pre-toggle)` — which is exactly the state a machine is in between pulling this change and applying it.
 
@@ -202,14 +233,14 @@ end
 Forking around it was the alternative and was rejected: the fork is already pinned, and
 adding a `restore_on_startup` option there would mean a plugin-cache refresh on every
 machine before the fix took effect — while the config-side version ships with one
-`ts-update`. Skipping `setup()` costs us nothing today and the comment in both configs
+`tstack update`. Skipping `setup()` costs us nothing today and the comment in both configs
 says loudly why it must not be "simplified" back.
 
 Default **off**, for the same reason the mux domain is: a terminal that silently
-reopens last week's shells is a surprise, not a feature you chose. `ts-config restore
+reopens last week's shells is a surprise, not a feature you chose. `tstack config restore
 on` turns it back on, and that is a plain boolean with no live process behind it — which
-is why it lives in `ts-config` rather than earning its own `ts-*` command the way
-`ts-mux` did.
+is why it lives in `tstack config` rather than earning its own `ts-*` command the way
+`tstack mux` did.
 
 Two deliberate consequences:
 
@@ -220,9 +251,9 @@ Two deliberate consequences:
 - **No saved state is deleted.** Turning the feature off is not a reason to throw away
   the user's sessions.
 
-A `ts-mux status`-style saved-vs-rendered drift line would be cheap here (the gate is a
+A `tstack mux status`-style saved-vs-rendered drift line would be cheap here (the gate is a
 column-0 `local RESTORE_ENABLED = '<on|off>'`, greppable exactly like `MUX_ENABLED`) but
-is deliberately skipped: every `ts-config` mutation ends in an apply, so the drift the
+is deliberately skipped: every `tstack config` mutation ends in an apply, so the drift the
 mux has to worry about — a live server disagreeing with both — has no analogue here.
 
 ## Why the status bar starts quiet
@@ -284,9 +315,9 @@ We use (2). Templating fails three ways that the env var doesn't: it requires `c
 
 The installer only persists `WORKSPACE_DIR` to `~/.zshrc.local` when the user's answer differs from what autodetect would find — a machine whose workspace is in a standard location carries zero local config.
 
-## Why does `ts-rollback` use a recorded SHA file instead of `git reflog`?
+## Why does `tstack rollback` use a recorded SHA file instead of `git reflog`?
 
-`ts-update` writes the pre-pull HEAD to `~/.local/state/terminal-stack/rollback-sha` before pulling, and `ts-rollback` resets to exactly that. The alternative — `git reset --hard HEAD@{1}` — is shorter but wrong in practice: the reflog entry one back is whatever git did last, which after a few manual operations in the clone (branch switches, amends on a dev machine where the clone doubles as a checkout) is not "the state before the last ts-update". An explicit file is unambiguous, human-inspectable (`cat` it to see where rollback would land), and survives `git gc`. The file is only written when an update actually has incoming commits, so a no-op `ts-update` can't clobber a real rollback point. Both commands refuse to run over a dirty working tree for the same dev-checkout reason.
+`tstack update` writes the pre-pull HEAD to `~/.local/state/terminal-stack/rollback-sha` before pulling, and `tstack rollback` resets to exactly that. The alternative — `git reset --hard HEAD@{1}` — is shorter but wrong in practice: the reflog entry one back is whatever git did last, which after a few manual operations in the clone (branch switches, amends on a dev machine where the clone doubles as a checkout) is not "the state before the last tstack update". An explicit file is unambiguous, human-inspectable (`cat` it to see where rollback would land), and survives `git gc`. The file is only written when an update actually has incoming commits, so a no-op `tstack update` can't clobber a real rollback point. Both commands refuse to run over a dirty working tree for the same dev-checkout reason.
 
 ## Why convert zsh `cc*` from aliases to functions just for the tab title?
 
@@ -296,7 +327,7 @@ The title text and the per-prompt clearing behavior are covered separately under
 
 ## Why Claude Code TTS is opt-in chezmoi data (not a sentinel file)
 
-Like tab tinting, TTS is stack infrastructure — but unlike `ccnotify` (a sentinel file users toggle without re-apply), **enabling TTS adds hooks to the managed whole-file `settings.json`**. Conditional chezmoi template blocks keyed on `ccTtsEnabled` mean `ts-config tts off` + apply truly removes the hooks; no orphan processes or stale sentinel files. Runtime knobs live in **`~/.claude/tts/config.json`** (chezmoi-rendered) with optional untracked **`local.json`** merged at hook time — not in the template files themselves. **Async-only:** hooks spawn background workers and return immediately. **WSL playback goes through Windows interop** because Docker forwards `:8880` but audio devices do not.
+Like tab tinting, TTS is stack infrastructure — but unlike `ccnotify` (a sentinel file users toggle without re-apply), **enabling TTS adds hooks to the managed whole-file `settings.json`**. Conditional chezmoi template blocks keyed on `ccTtsEnabled` mean `tstack config tts off` + apply truly removes the hooks; no orphan processes or stale sentinel files. Runtime knobs live in **`~/.claude/tts/config.json`** (chezmoi-rendered) with optional untracked **`local.json`** merged at hook time — not in the template files themselves. **Async-only:** hooks spawn background workers and return immediately. **WSL playback goes through Windows interop** because Docker forwards `:8880` but audio devices do not.
 
 **Hooks vs MCP:** lifecycle alerts (stop, AskQuestion, permission) must stay **hooks** — IDEs fire those events; an MCP server would not hear them unless the model voluntarily called it. A future **terminal-stack-tts MCP** can share the same `cc-tts-lib` for on-demand `speak` from Claude Desktop / Co-work; it complements hooks rather than replacing them.
 
@@ -314,13 +345,13 @@ The **never-silence** rule remains, but the fallback is now another mode of the 
 
 ## Why the TTS source and PyInstaller spec live in `bootstrap/tts-daemon/`
 
-The source, tests, build script, and spec ship with `ts-update`, while the built runtime lives at `%LOCALAPPDATA%\terminal-stack\tts-daemon\terminal-stack-tts.exe`. The installer creates a temporary build venv, freezes one EXE, validates it, atomically swaps it into place, and removes the legacy persistent venv/launcher only after validation. HKCU Run points directly at `"terminal-stack-tts.exe" daemon`, so clone relocation cannot strand autostart. The build embeds the clone Git SHA for `/healthz`; updates nudge rather than auto-restart because the daemon may be speaking or holding a duck.
+The source, tests, build script, and spec ship with `tstack update`, while the built runtime lives at `%LOCALAPPDATA%\terminal-stack\tts-daemon\terminal-stack-tts.exe`. The installer creates a temporary build venv, freezes one EXE, validates it, atomically swaps it into place, and removes the legacy persistent venv/launcher only after validation. HKCU Run points directly at `"terminal-stack-tts.exe" daemon`, so clone relocation cannot strand autostart. The build embeds the clone Git SHA for `/healthz`; updates nudge rather than auto-restart because the daemon may be speaking or holding a duck.
 
 ## Why duplicate speech is collapsed by a history table
 
 Three hooks described one `AskUserQuestion` — `Notification`, `PermissionRequest`, and the `AskUserQuestion` `PreToolUse` matcher (the middle one has since been pruned; see below) — and the obvious fix, "make the scheduler smarter", does not work. The scheduler already keys pending events on `(session_key, priority class)`, but all three are `P0_INTERACTIVE` and `collect_due` drains `P0` **immediately**: the first is spoken and gone ~2.5s before the second arrives, so the slot never holds two at once. There is nothing in memory left to compare against. Worse, when the daemon is down each hook spawns its own detached `_direct` worker, so the state has to be shared between *processes*, not threads.
 
-Hence a durable record instead of a queue tweak. `state\history.db` stores one row per **decision** — `spoken`, `deduped`, `suppressed_dnd`, `synth_failed`, `failed` — and both paths check `recently_spoken(session, priority, debounceSec)` before speaking. The direct path checks it a second time *inside* the play lock, which is the check that actually collapses the burst: the first look raced with its siblings. Recording the rejections is the point; the dispatcher's in-memory `spoken`/`suppressed` counters die with the process, and the original investigation needed hand-parsing of `ttsd.log` to establish that anything had spoken twice at all. `ts-config tts history --dupes` is now that query.
+Hence a durable record instead of a queue tweak. `state\history.db` stores one row per **decision** — `spoken`, `deduped`, `suppressed_dnd`, `synth_failed`, `failed` — and both paths check `recently_spoken(session, priority, debounceSec)` before speaking. The direct path checks it a second time *inside* the play lock, which is the check that actually collapses the burst: the first look raced with its siblings. Recording the rejections is the point; the dispatcher's in-memory `spoken`/`suppressed` counters die with the process, and the original investigation needed hand-parsing of `ttsd.log` to establish that anything had spoken twice at all. `tstack config tts history --dupes` is now that query.
 
 `debounceSec` already existed in `config.py` with **no reader anywhere** — a config key nothing read is exactly why this looked fine on inspection — so it was wired up rather than replaced by a new key. A new chezmoi `[data]` key has a 7-step blast radius and a second store to diverge with; a runtime knob in `~/.claude/tts/config.json` (settable in the untracked `local.json`, `0` to disable dedupe entirely) has neither.
 
@@ -329,7 +360,7 @@ Two constraints shaped the mechanism:
 - **The lock orders speech, it never drops it.** A waiter polls, then speaks anyway once `wait_sec` is up, and a lock older than `stale_sec` is reclaimed rather than trusted. Silencing a permission prompt is worse than hearing it twice, so dropping duplicates is `recently_spoken`'s job and the lock's only job is preventing overlap. The mutex is an atomic exclusive create, not a read-then-write test — two workers a millisecond apart would both pass a "is it locked?" read, which is the race being closed.
 - **Fail open, everywhere.** A missing, locked, read-only or corrupt database returns "nothing known" and writes nothing; the first failure logs once and the module goes quiet so a bad disk cannot flood the log. Verified by pointing `LOCALAPPDATA` at a regular file: history, lock and log all unusable, and it still spoke. That drill found two pre-existing crashes on the way to speech — `_setup_logging` and `_spawn_direct` both ran `mkdir` outside any guard, and the second sat outside the `try` whose `False` return is what makes `submit_hook` fall back to speaking in-process.
 
-The availability half is smaller but mattered more in practice: autostart is logon-only with no watchdog, so a daemon that died at 22:17 was still dead at 13:30 the next day, with no error and nothing in the log. Every hook in between took the unserialized direct path and exited 0, which is how genuinely overlapping voices went unnoticed for fifteen hours. A hook that cannot reach an enabled daemon now starts it and retries once. That is safe to race: two hooks both spawning means the loser fails to bind the port and exits 0 (`_already_running`), so the check only ever asks whether the port answers, never which process won it. `ts-doctor` reports how long the daemon has been silent and flags any session that spoke twice, because neither is visible otherwise — every hook exits 0 either way.
+The availability half is smaller but mattered more in practice: autostart is logon-only with no watchdog, so a daemon that died at 22:17 was still dead at 13:30 the next day, with no error and nothing in the log. Every hook in between took the unserialized direct path and exited 0, which is how genuinely overlapping voices went unnoticed for fifteen hours. A hook that cannot reach an enabled daemon now starts it and retries once. That is safe to race: two hooks both spawning means the loser fails to bind the port and exits 0 (`_already_running`), so the check only ever asks whether the port answers, never which process won it. `tstack doctor` reports how long the daemon has been silent and flags any session that spoke twice, because neither is visible otherwise — every hook exits 0 either way.
 
 ## Why the dashboard writes only local.json, and needs a token to do it
 
@@ -357,7 +388,7 @@ CORS headers.
 
 Three routes stayed open, deliberately, and it is worth knowing which: `/v1/event`, because
 every hook posts it and none of them has a token to hand; `/v1/config/reload`, because
-`ts-config` from pwsh has no token either; and `/v1/duck/release` with `/v1/shutdown`,
+`tstack config` from pwsh has no token either; and `/v1/duck/release` with `/v1/shutdown`,
 because the installer calls them and both are nuisances rather than compromises now that a
 dead daemon restarts itself on the next hook.
 
@@ -555,7 +586,7 @@ The recovery re-reads the value from the user environment on a 401 and retries o
 
 It also covers the case where the secret is missing from the process entirely, since "no `Authorization` header" and "wrong `Authorization` header" produce the same 401.
 
-What it cannot fix is a user environment that is *itself* stale relative to the container — nothing local can recover from that, so `ts-doctor` reports it instead, comparing the two when Docker is reachable and staying quiet when it is not.
+What it cannot fix is a user environment that is *itself* stale relative to the container — nothing local can recover from that, so `tstack doctor` reports it instead, comparing the two when Docker is reachable and staying quiet when it is not.
 
 ## Why the mute is a sentinel file, not the tray's DND
 
@@ -569,7 +600,7 @@ Three details worth not undoing:
 
 - **It fails open toward speech**, the opposite of `history.py`. If the state directory is unusable, "not muted" is the answer. A mute that cannot be lifted is indistinguishable from the feature being broken, whereas one that fails audibly is something you can hear and act on. An existence check gives that default for free.
 - **Muting cuts off the sentence already playing.** Nothing could interrupt speech before: `Playback.play` built the WinRT `MediaPlayer` as a local and blocked until the audio finished. It now publishes the player so `stop()` can pause it and release the waiter, wrapped so a failed cross-thread COM call merely lets the sentence finish.
-- **Three surfaces report it.** The tray icon greys out with a slash, WezTerm shows a `MUTED` chip, and `ts-doctor` names it — plus the `local.json` `enabled:false` mask that hid a mute for an afternoon while `cctts` cheerfully reported ON. An unreported mute *is* a bug report waiting to happen.
+- **Three surfaces report it.** The tray icon greys out with a slash, WezTerm shows a `MUTED` chip, and `tstack doctor` names it — plus the `local.json` `enabled:false` mask that hid a mute for an afternoon while `cctts` cheerfully reported ON. An unreported mute *is* a bug report waiting to happen.
 
 The tray and the global hotkey are conveniences on top of the file, not the mechanism, because both exist only while the daemon runs — and it has died silently more than once. `ccmute` writes the sentinel itself and works regardless; it also best-effort POSTs `/v1/mute` purely to get the barge-in, since only the process that owns the audio can stop it.
 
@@ -581,15 +612,15 @@ It never contributed text the others lacked. `build_payload` sets its `override`
 
 Dedupe made the redundancy worse rather than harmless: `recently_spoken` is **first-wins, not best-wins**, so which of the three sentences you heard depended on which hook Claude happened to fire first. Deleting the weakest one is a smaller change than teaching the dispatcher to rank candidates, and it removes a class of announcement nobody was choosing.
 
-Accepted cost: the `permission` state becomes unreachable from Claude (Cursor still sends it), so permission prompts can no longer be muted separately from questions via the `events` list, and `announce.templates.permission` is now only exercised by Cursor and `ts-config tts test`. The absolute mute covers the "silence everything" case that granularity was standing in for.
+Accepted cost: the `permission` state becomes unreachable from Claude (Cursor still sends it), so permission prompts can no longer be muted separately from questions via the `events` list, and `announce.templates.permission` is now only exercised by Cursor and `tstack config tts test`. The absolute mute covers the "silence everything" case that granularity was standing in for.
 
 ## Why ducking snapshots pre-duck volumes to disk before touching anything
 
-Windows persists per-app mixer volume indefinitely. A daemon that dies between ramp-down and restore leaves the music at 30% until the user finds the Volume Mixer — so the duck engine writes `state\duck-snapshot.json` *before* the first volume change, restores any stale snapshot at next startup, runs a 15 s watchdog while holding, and exposes `POST /v1/duck/release` plus a `--restore-volumes` oneshot that `ts-doctor --repair` invokes. Pause mode uses the Windows media-session API (`TryPauseAsync` only on sessions that were Playing, resume exactly those) and never simulates the media key, which is a blind toggle other apps can hijack.
+Windows persists per-app mixer volume indefinitely. A daemon that dies between ramp-down and restore leaves the music at 30% until the user finds the Volume Mixer — so the duck engine writes `state\duck-snapshot.json` *before* the first volume change, restores any stale snapshot at next startup, runs a 15 s watchdog while holding, and exposes `POST /v1/duck/release` plus a `--restore-volumes` oneshot that `tstack doctor --repair` invokes. Pause mode uses the Windows media-session API (`TryPauseAsync` only on sessions that were Playing, resume exactly those) and never simulates the media key, which is a blind toggle other apps can hijack.
 
 ## Why the `self` summarizer instruction uses agent-owned marker blocks
 
-`summarizer self` needs the model to end each turn with a `<!-- speak: … -->` one-liner, which requires an instruction visible to every session. The repo deliberately does **not** manage Claude's `~/.claude/CLAUDE.md` or Codex's active global `$CODEX_HOME/AGENTS.md` whole-file (they are user-owned agent instructions) and does not force an output style outside this opt-in feature. Instead `ts-config tts summarizer self` edits a `<!-- terminal-stack-tts-start/end -->` marker block into both files, with `.bak.YYYYMMDD` backups, and switching to any other mode removes exactly those blocks. Codex sessions load instructions at startup, so already-running sessions may not emit the marker; the final-response hook text is locally shortened in that case.
+`summarizer self` needs the model to end each turn with a `<!-- speak: … -->` one-liner, which requires an instruction visible to every session. The repo deliberately does **not** manage Claude's `~/.claude/CLAUDE.md` or Codex's active global `$CODEX_HOME/AGENTS.md` whole-file (they are user-owned agent instructions) and does not force an output style outside this opt-in feature. Instead `tstack config tts summarizer self` edits a `<!-- terminal-stack-tts-start/end -->` marker block into both files, with `.bak.YYYYMMDD` backups, and switching to any other mode removes exactly those blocks. Codex sessions load instructions at startup, so already-running sessions may not emit the marker; the final-response hook text is locally shortened in that case.
 
 Cursor's global User Rules live in a GUI-only settings store, so its optional rule ships as copy-paste text in `docs/kb/windows/tts-daemon.md`. Cursor's `afterAgentResponse` hook supplies the actual final response, which is locally shortened when no marker exists; its separate `stop` hook carries only status and speaks only failures. This asymmetry is deliberate — don't try to manage Cursor's rules database from a dotfiles repo.
 
@@ -681,9 +712,9 @@ Trade-off: the browser/Obsidian `.html` export is gone. It was the weakest-justi
 
 ## Why config lives in chezmoi `[data]` + a Windows JSON mirror
 
-The wizard/`ts-config` choices (leader chord, theme mode, tmux prefix, app selection, and the `ts-mux` domain toggle) need to survive every `ts-update` and be readable by *all* the apply paths. The stack already had exactly the right bridge: chezmoi `[data]` in `~/.config/chezmoi/chezmoi.toml` — the same place `windowsUsername` is stored and consumed by the WSL `run_after` hook to render Windows-side files. So the choices live there too. `.chezmoi.toml.tmpl` re-emits them (so a bare `chezmoi init` doesn't drop them) and *derives* the concrete bindings — `leaderChord "ctrl-space"` → `leaderKey "phys:Space"` + `leaderMods "CTRL"`, `tmuxPrefix "ctrl-b"` → `tmuxPrefixResolved "C-b"` — in one Go-template mapping. WSL/native chezmoi templates read them directly (`{{ .leaderKey }}`); the WSL hook reads them via `chezmoi execute-template` and substitutes `__LEADER_*__`/`__THEME_*__`/`__TMUX_PREFIX__`/`__WEZ_MUX__` tokens into the Windows `.tmpl` files (same mechanism as `__WIN_USER__`).
+The wizard/`tstack config` choices (leader chord, theme mode, tmux prefix, app selection, and the `tstack mux` domain toggle) need to survive every `tstack update` and be readable by *all* the apply paths. The stack already had exactly the right bridge: chezmoi `[data]` in `~/.config/chezmoi/chezmoi.toml` — the same place `windowsUsername` is stored and consumed by the WSL `run_after` hook to render Windows-side files. So the choices live there too. `.chezmoi.toml.tmpl` re-emits them (so a bare `chezmoi init` doesn't drop them) and *derives* the concrete bindings — `leaderChord "ctrl-space"` → `leaderKey "phys:Space"` + `leaderMods "CTRL"`, `tmuxPrefix "ctrl-b"` → `tmuxPrefixResolved "C-b"` — in one Go-template mapping. WSL/native chezmoi templates read them directly (`{{ .leaderKey }}`); the WSL hook reads them via `chezmoi execute-template` and substitutes `__LEADER_*__`/`__THEME_*__`/`__TMUX_PREFIX__`/`__WEZ_MUX__` tokens into the Windows `.tmpl` files (same mechanism as `__WIN_USER__`).
 
-The wrinkle: a **Windows-standalone** install (no WSL) never runs chezmoi, so it can't read chezmoi `[data]`. That path gets a JSON mirror at `%LOCALAPPDATA%\terminal-stack\config.json` (next to the existing `rollback-sha`), written by `windows-bootstrap.ps1` / the pwsh `ts-config` and read by `scripts/sync-windows.ps1`. To keep the two stores from drifting in a **combined** Windows+WSL setup, the WSL side is authoritative: `ts_save_config` (bash) also writes the Windows `config.json` mirror when `/mnt/c/Users/<user>` exists, and the docs tell you to run `ts-config` from WSL. Defaults are baked into every consumer (`hasKey` guards in the templates, `cfg <key> <default>` in the hook, fallbacks in `sync-windows.ps1`), so a clone that predates the wizard renders today's behaviour (Ctrl+Space, Mocha, mux off) until you run it.
+The wrinkle: a **Windows-standalone** install (no WSL) never runs chezmoi, so it can't read chezmoi `[data]`. That path gets a JSON mirror at `%LOCALAPPDATA%\terminal-stack\config.json` (next to the existing `rollback-sha`), written by `windows-bootstrap.ps1` / the pwsh `tstack config` and read by `scripts/sync-windows.ps1`. To keep the two stores from drifting in a **combined** Windows+WSL setup, the WSL side is authoritative: `ts_save_config` (bash) also writes the Windows `config.json` mirror when `/mnt/c/Users/<user>` exists, and the docs tell you to run `tstack config` from WSL. Defaults are baked into every consumer (`hasKey` guards in the templates, `cfg <key> <default>` in the hook, fallbacks in `sync-windows.ps1`), so a clone that predates the wizard renders today's behaviour (Ctrl+Space, Mocha, mux off) until you run it.
 
 A single dedicated config file (one TOML/JSON on every platform) was the alternative. Rejected: it would duplicate the cross-side plumbing that chezmoi `[data]` + the sync hook already provide for `windowsUsername`, and chezmoi templates can't cleanly read an arbitrary external file on every apply. Reusing the existing bridge keeps the mapping in one Go template and the I/O in `bootstrap/_config.{sh,ps1}`.
 
@@ -695,12 +726,12 @@ valid file from it. Whichever path runs last wins, so the setting appears to wor
 side applies and takes it away.
 
 Observed 2026-08-21: `ccTtsEnabled` was `false` in chezmoi `[data]` and `true` in the mirror. Every
-`ts-update` from pwsh rendered the five Claude TTS hooks; the next `chezmoi apply` from WSL rendered
+`tstack update` from pwsh rendered the five Claude TTS hooks; the next `chezmoi apply` from WSL rendered
 none and removed them. Nothing failed, nothing warned, the diff looked intentional, and the only
 symptom was that voice notifications quietly stopped. It had presumably been flip-flopping for some
 time.
 
-Two things follow. `ts-config` from WSL is not a style preference — it is the only path that writes
+Two things follow. `tstack config` from WSL is not a style preference — it is the only path that writes
 both stores, which is why CLAUDE.md states it as a rule. And when a setting mysteriously reverts
 after an apply, compare the stores before debugging the templates:
 
@@ -709,25 +740,25 @@ chezmoi execute-template '{{ .ccTtsEnabled }}'                     # WSL, author
 python -c "import json;print(json.load(open('/mnt/c/Users/<you>/AppData/Local/terminal-stack/config.json'))['ccTts']['enabled'])"
 ```
 
-They must agree. Repair by re-saving from WSL (`ts-config tts on`), which writes both. Nothing
-currently *detects* the divergence — `ts-doctor` would be the natural home for a check that walks
+They must agree. Repair by re-saving from WSL (`tstack config tts on`), which writes both. Nothing
+currently *detects* the divergence — `tstack doctor` would be the natural home for a check that walks
 the shared keys and reports any that disagree.
 
 ## Why WezTerm follows the OS theme live, but Starship/tmux bake at apply time
 
 `follow` mode means "track the OS light/dark setting." WezTerm can do this *live*: `wezterm.gui.get_appearance()` returns `Dark`/`Light`, and WezTerm re-evaluates the config when the OS appearance changes — so `.wezterm.lua` carries both palettes (Catppuccin Mocha dark + VS Code Light Modern light) and a `pick_palette(mode)` that flips the whole UI (scheme, tab bar, status line, Claude tints) with no re-apply. Only the *mode* (`themeMode`) is injected.
 
-Starship and tmux can't: their configs are static files with no runtime OS-theme hook (Starship picks one `palette` at load; tmux reads a fixed status style). Querying the OS theme on every shell start was rejected — it adds startup latency to every prompt and OS detection from inside WSL is unreliable. So for those two the palette is **baked**: a `resolvedTheme` (`light`|`dark`) is computed once at apply time (`resolve_os_theme` reads the Windows registry / `defaults` / `gsettings`; `follow` resolves to the current OS theme, fixed modes resolve to themselves) and written into the store. `ts-update` and `ts-config` re-run that resolution (`ts_refresh_resolved_theme` / `Update-TsResolvedTheme`) and re-apply, so a `follow` user who toggles the OS theme picks up the new shell palette on the next update — while WezTerm has already switched live. The asymmetry is intrinsic to what each tool exposes, not a shortcut. (One palette wrinkle: WezTerm and Starship use VS Code Light Modern for `light`, while `dot_tmux.conf.tmpl` deliberately keeps Catppuccin-Latte-derived hexes for its light status colours.)
+Starship and tmux can't: their configs are static files with no runtime OS-theme hook (Starship picks one `palette` at load; tmux reads a fixed status style). Querying the OS theme on every shell start was rejected — it adds startup latency to every prompt and OS detection from inside WSL is unreliable. So for those two the palette is **baked**: a `resolvedTheme` (`light`|`dark`) is computed once at apply time (`resolve_os_theme` reads the Windows registry / `defaults` / `gsettings`; `follow` resolves to the current OS theme, fixed modes resolve to themselves) and written into the store. `tstack update` and `tstack config` re-run that resolution (`ts_refresh_resolved_theme` / `Update-TsResolvedTheme`) and re-apply, so a `follow` user who toggles the OS theme picks up the new shell palette on the next update — while WezTerm has already switched live. The asymmetry is intrinsic to what each tool exposes, not a shortcut. (One palette wrinkle: WezTerm and Starship use VS Code Light Modern for `light`, while `dot_tmux.conf.tmpl` deliberately keeps Catppuccin-Latte-derived hexes for its light status colours.)
 
-## Why a re-run repoints `sourceDir` (and why `ts-doctor` exists)
+## Why a re-run repoints `sourceDir` (and why `tstack doctor` exists)
 
 The original bootstraps refused to touch an existing `~/.config/chezmoi/chezmoi.toml` ("already exists; not overwriting sourceDir"). That looked conservative but caused a silent, confusing failure: install once to `~/terminal-stack`, later re-run the installer (which now clones to `~/code/terminal-stack`), and chezmoi keeps applying from the *old* clone. A clone that predates a feature (e.g. `doc`) therefore never delivers it, and `chezmoi apply` prints no changes because the old source already matches the target — the user sees "I updated, why is `doc` not found?".
 
-The fix is to treat `sourceDir` as something the installer **owns and corrects**, not something it tiptoes around: `ts_ensure_source_dir` rewrites only the `sourceDir` line (preserving the `[data]` block — leader/theme/apps/`windowsUsername`) when it differs. This lives in `_config.sh` and is shared by all three POSIX bootstraps, so the three near-identical toml-writing blocks collapsed to one. `ts-doctor` is the standing version of the same check for an existing install: it verifies `sourceDir` resolves to a real terminal-stack clone (and the *intended* one), that `~/.zshrc`/`$PROFILE` actually carry the stack, and that tools are present — then `--repair` repoints and re-applies. Windows has no `chezmoi.toml`, so its analogue persists `$env:TERMINAL_STACK_DIR` to `profile.local.ps1` instead.
+The fix is to treat `sourceDir` as something the installer **owns and corrects**, not something it tiptoes around: `ts_ensure_source_dir` rewrites only the `sourceDir` line (preserving the `[data]` block — leader/theme/apps/`windowsUsername`) when it differs. This lives in `_config.sh` and is shared by all three POSIX bootstraps, so the three near-identical toml-writing blocks collapsed to one. `tstack doctor` is the standing version of the same check for an existing install: it verifies `sourceDir` resolves to a real terminal-stack clone (and the *intended* one), that `~/.zshrc`/`$PROFILE` actually carry the stack, and that tools are present — then `--repair` repoints and re-applies. Windows has no `chezmoi.toml`, so its analogue persists `$env:TERMINAL_STACK_DIR` to `profile.local.ps1` instead.
 
 ## Why re-clone fresh (not adopt-in-place) when an old clone is found
 
-When the installer finds an old clone at a different path, it clones fresh to the chosen location and *offers to delete* the old one, rather than adopting the old clone where it sits. Adopt-in-place is less disruptive but inherits whatever state the old clone carried — a detached HEAD, a half-finished rebase, a wrong branch, local edits — and silently makes that the source of truth. A fresh clone is guaranteed to be `main` at a known-good commit, which is what an *installer* (as opposed to `ts-update`) should guarantee. Deletion is never automatic: the cleanup checklist shows each old clone's last commit, pre-ticks it, and removes nothing without an explicit confirmation; the keep-list (`~/.zshrc.local`/`profile.local.ps1`, `~/.doc.local`, rollback state, `*.local.md`) is never offered.
+When the installer finds an old clone at a different path, it clones fresh to the chosen location and *offers to delete* the old one, rather than adopting the old clone where it sits. Adopt-in-place is less disruptive but inherits whatever state the old clone carried — a detached HEAD, a half-finished rebase, a wrong branch, local edits — and silently makes that the source of truth. A fresh clone is guaranteed to be `main` at a known-good commit, which is what an *installer* (as opposed to `tstack update`) should guarantee. Deletion is never automatic: the cleanup checklist shows each old clone's last commit, pre-ticks it, and removes nothing without an explicit confirmation; the keep-list (`~/.zshrc.local`/`profile.local.ps1`, `~/.doc.local`, rollback state, `*.local.md`) is never offered.
 
 ## Why headless is auto-detected (and what it changes)
 
@@ -837,7 +868,7 @@ elsewhere in this repo.
 
 ## Runtime clone location: canonical app-data paths, invisible dev clones
 
-The runtime clone — the one `ts-update` pulls and chezmoi applies from — lives at a
+The runtime clone — the one `tstack update` pulls and chezmoi applies from — lives at a
 **canonical location** per platform:
 
 - Windows + WSL (shared, ONE clone for both worlds): `%LOCALAPPDATA%\terminal-stack\stack`,
@@ -866,14 +897,14 @@ parse-time isolation forces the copies). Priority order IS resolution order:
    WSL `/mnt/c` probes)
 
 The old pwsh newest-commit ranking is gone: it would prefer a **dev clone** the moment
-you commit to it, making `ts-update` mutate the tree you are developing in.
+you commit to it, making `tstack update` mutate the tree you are developing in.
 
 **Dev clones are invisible unless pinned.** A clone at a wso tier path
 (`<tier>/<host-with-dot>/<owner>/<repo>` — `ts_is_dev_clone` / `Test-TsDevClone`) is
 skipped by every resolver, doctor probe, doc root, and cleanup menu. Setting
 `TERMINAL_STACK_DIR` at it still works — pins are deliberate. This is what lets the
 same repo be simultaneously the runtime install (canonical path) and a working
-checkout (`wsmb` → `src/github.com/martybytes/terminal-stack`) without `ts-update`
+checkout (`wsmb` → `src/github.com/martybytes/terminal-stack`) without `tstack update`
 ever touching the latter. `wso` plan/migrate additionally mark the *active* runtime
 clone as `runtime … not migrated` if it is ever scanned.
 
@@ -897,7 +928,7 @@ when it is dangling *and* the canonical location holds a real clone.
 and fall through to the candidate search when `$TERMINAL_STACK_DIR` names a path with no
 clone. The two pin sources are deliberately not equivalent: an explicit `-SourceDir` is
 typed per call, so a bad one still fails loudly, while the env pin arrives unbidden in
-every session and a stale line would otherwise brick `ts-update` / `wso` / `doc`
+every session and a stale line would otherwise brick `tstack update` / `wso` / `doc`
 machine-wide with no way out short of hand-editing `profile.local.ps1`. That is exactly
 what happened.
 
@@ -916,11 +947,11 @@ already did), and any scan candidate whose `origin` names the project is blocked
 A genuine dev clone already lives at a tier path and is therefore never a scan candidate,
 so nothing legitimate is caught.
 
-**Migration is ts-doctor's job.** `ts-doctor --repair` (pwsh `-Repair`) offers to move
+**Migration is tstack doctor's job.** `tstack doctor --repair` (pwsh `-Repair`) offers to move
 a legacy-path clone to the canonical location: a plain directory move (same-volume
 rename; cross-volume copy + HEAD-verify), then repoints chezmoi `sourceDir` (POSIX) or
 clears the stale pin (Windows), offers to normalize a renamed-account origin URL, and
-re-applies. `ts-update` only prints a one-line notice — an update must never move
+re-applies. `tstack update` only prints a one-line notice — an update must never move
 directories as a side effect. Installers default to the canonical paths and offer the
 same move when they find an existing legacy clone (pulling it first so the move
 routine is present inside it).
@@ -999,8 +1030,8 @@ unticks the other on screen. That used to be resolved only *after* Enter, which 
 list happily displayed `[x] [x]` for a combination the code would silently refuse.
 
 **But nothing is automatic.** Nightly moving daily is precisely why it must not upgrade
-behind your back: the wizard asks at install, `ts-update` reports and offers when something
-newer exists on the channel you are already on, and `ts-config wezterm` changes it on demand.
+behind your back: the wizard asks at install, `tstack update` reports and offers when something
+newer exists on the channel you are already on, and `tstack config wezterm` changes it on demand.
 No path installs, upgrades or switches without a yes. Non-interactive runs print the command
 instead of running it.
 
@@ -1019,7 +1050,7 @@ count of what changed in between. All of it is derivable without an LLM:
 - "What changed" is sliced out of upstream's own `docs/changelog.md`, whose release headings
   are exactly the strings `wezterm --version` prints — so the slice is an exact match rather
   than a guess. The tally counts bullets per `#### Changed / New / Fixed / Updated`; the full
-  text is `ts-config wezterm changes`, paged through the same reader `doc` uses. For a
+  text is `tstack config wezterm changes`, paged through the same reader `doc` uses. For a
   nightly there is no heading to anchor on, so the honest answer there is the commit count
   from `compare/<hash>...main`.
 
@@ -1082,7 +1113,7 @@ hand-maintained copies of a 16-colour palette drift the moment anyone touches ei
 implementation — list `.config/ghostty/**` in `.chezmoiremove` behind the same gate — is
 wrong, because `.chezmoiremove` is evaluated on *every* machine. A user who never opted in,
 on a Linux box with a hand-written Ghostty config, would have it deleted by an apply. So the
-gate in `.chezmoiignore` only stops re-rendering, and `ts-config ghostty off` does the
+gate in `.chezmoiignore` only stops re-rendering, and `tstack config ghostty off` does the
 removal explicitly, for the machine you actually run it on.
 
 **Nothing on the POSIX side backs up before an overwrite.** The `.bak.YYYYMMDD[.N]`
@@ -1093,7 +1124,7 @@ show it. `run_before_20-backup-ghostty.sh` takes the backup, skipping any file t
 carries our marker so a managed config does not spawn a new `.bak` on every apply. That
 backup is also what makes `off` a restore rather than a delete.
 
-**No PowerShell twin**, for the same reason `ts-smb` has none: Ghostty ships no Windows
+**No PowerShell twin**, for the same reason `tstack smb` has none: Ghostty ships no Windows
 build, so there is nothing there to configure. Stated in `-h` so the absence reads as a
 decision rather than drift.
 
@@ -1265,13 +1296,13 @@ configures a program running on this host. The two meet at exactly two places: a
 port, and `bootstrap/agent-tools.json`, the one file where a port, URL, image tag or version pin is
 written down. Neither side reaches into the other by path.
 
-At the command level the same line is `ts-stack` versus `ts-agents`. **`ts-stack` is the only thing
-in this repo that starts, stops or builds a container; `ts-agents` may only probe one.** That is not
+At the command level the same line is `tstack services` versus `tstack agents`. **`tstack services` is the only thing
+in this repo that starts, stops or builds a container; `tstack agents` may only probe one.** That is not
 a style preference — `test_no_project_scope_or_docker_mutation_in_lifecycle_adapters` asserts the
 strings `docker compose`, `docker rm` and `restart: unless-stopped` appear nowhere in
-`bootstrap/ts-agents.{sh,ps1}`, as case-insensitive matches over the whole file, **so even a comment
-naming the compose command fails it**. When a probe fails, `ts-agents` prints the *verb*
-(`ts-stack up playwright`), never the command. Having an in-repo verb to point at is what makes that
+`tstack/commands/agents.py`, as case-insensitive matches over the whole file, **so even a comment
+naming the compose command fails it**. When a probe fails, `tstack agents` prints the *verb*
+(`tstack services up playwright`), never the command. Having an in-repo verb to point at is what makes that
 guardrail easy to keep: before the merge there was no such command, which is precisely why inlining
 `docker compose` was tempting.
 
@@ -1288,8 +1319,8 @@ Three consequences worth writing down.
 inside plugin caches. An upgrade replaces the cache and reverts every edit, which silently turns
 retrieval off — no error, nothing in any log, and capture keeps working so nothing looks wrong.
 Previously the fix was re-running an installer nobody remembered. Now both sync paths run
-`ts-agentmemory.ps1 -Check` and only `-Apply` when something is missing, so `ts-update` and
-`chezmoi apply` restore it. `ts-doctor` reports the same condition for when you want to know
+`ts-agentmemory.ps1 -Check` and only `-Apply` when something is missing, so `tstack update` and
+`chezmoi apply` restore it. `tstack doctor` reports the same condition for when you want to know
 rather than have it fixed.
 
 **The duplicate is suppressed client-side, before the request.** Codex loads two hook
@@ -1361,12 +1392,12 @@ Headroom intentionally exempts them from authentication. The independently-run
 MCP sidecar is diagnostic only and does not make a working model proxy fail.
 
 Pins live together in `bootstrap/agent-tools.json`; upgrades change there through
-review rather than following `latest` service images. `ts-update` checks only tools
+review rather than following `latest` service images. `tstack update` checks only tools
 enabled on the current machine and repairs their user-global client wiring. JSON
 files shared with the agents are edited by named entry, with a backup, so unrelated
 MCP servers and hooks survive.
 
-## Why `ts-smb` pins the macOS FUSE library instead of letting rclone choose
+## Why `tstack smb` pins the macOS FUSE library instead of letting rclone choose
 
 `rclone mount` uses cgofuse, which on darwin loads the first FUSE library it
 finds in a fixed order: `$CGOFUSE_LIBFUSE_PATH`, then macFUSE's
@@ -1381,7 +1412,7 @@ resulting failure is a **hang, not an error** — and a hung FUSE mount takes an
 shell that touches the mountpoint with it. Nothing in the error surface points at
 the library that was actually chosen.
 
-So `ts-smb` never invokes `rclone mount` on darwin without setting
+So `tstack smb` never invokes `rclone mount` on darwin without setting
 `CGOFUSE_LIBFUSE_PATH` explicitly, and `auto` prefers FUSE-T: it is userspace, it
 is unaffected by Apple deprecating kexts, and unlike a kext its viability is
 decidable from the filesystem alone. macFUSE is used only when
@@ -1394,13 +1425,13 @@ Two related findings are baked into the code as comments, because both cost real
 time to rediscover. Homebrew's macOS rclone refuses to mount at all, aborting
 with "rclone mount is not supported on MacOS when rclone is installed via
 Homebrew" — a build-time guard no library or variable can get past, so a brew
-rclone browses and copies perfectly but can never mount; `ts-smb doctor` reports
+rclone browses and copies perfectly but can never mount; `tstack smb doctor` reports
 it and names the official binary. And FUSE-T's FSKit backend, which looks like
 the modern choice on macOS 26, fails outright there (`fuse: mount failed with
 error: -1`) where the default NFS backend does not, so `-o backend=fskit` is
 **not** passed automatically.
 
-## Why `ts-smb` tracks mounts in a state dir rather than through `rclone rc`
+## Why `tstack smb` tracks mounts in a state dir rather than through `rclone rc`
 
 rclone can expose a control API with `--rc`, including `mount/listmounts` and
 `mount/unmount`. It is the wrong tool here for three reasons.
@@ -1421,7 +1452,7 @@ whitespace `key value` grammar as the share store so one parser serves both, and
 **liveness is derived, never stored**: pid alive × mountpoint present gives
 live/zombie/orphan/gone. The state dir alone cannot tell whether a mount is real;
 the mount table alone cannot tell whether a mount is *ours*, which is what makes
-`ts-smb umount --all` safe.
+`tstack smb umount --all` safe.
 
 The hard constraint underneath is that nothing may `stat`, `ls`, `test -d` or glob
 a mountpoint to answer "is this mounted": on a dead FUSE mount those block forever.
@@ -1443,7 +1474,7 @@ matters. A private repository is the primitive that actually has org ownership
 and access control.
 
 The deeper objection is architectural: a network round-trip must not sit in the
-path of `ts-smb mount`. A mount tool has to work when the network is flaky, which
+path of `tstack smb mount`. A mount tool has to work when the network is flaky, which
 is precisely when someone is using it. Any sync design therefore has to be
 local-first with explicit push/pull anyway — at which point the sync is a separate
 concern that can be added later without changing anything here.
@@ -1454,14 +1485,14 @@ only and never a host**, so the repository never learns where anyone's NAS is.
 No chezmoi `[data]` key is involved either: the inventory is a list of records,
 which that store is explicitly not built for, and every field here is per-machine.
 
-## Why `ts-smb` ships without a PowerShell twin
+## Why `tstack smb` ships without a PowerShell twin
 
 Every other dual-shell command in this stack keeps a parallel pwsh implementation
-whose `-h` output stays byte-identical. `ts-smb` does not, as of 2026-08-23, and
+whose `-h` output stays byte-identical. `tstack smb` does not, as of 2026-08-23, and
 that is a decision rather than drift — recorded here, stated in the `-h` prose,
 and noted in `CLAUDE.md` so nobody "fixes" the asymmetry without reading this.
 
-Most of what `ts-smb` exists to do is moot on Windows: Explorer and `net use`
+Most of what `tstack smb` exists to do is moot on Windows: Explorer and `net use`
 already browse and map SMB shares natively, with credentials in Credential
 Manager, and the entire FUSE engine layer has no Windows analogue beyond WinFsp.
 The interrogation half would still be useful, so a twin may be worth writing —
@@ -1494,7 +1525,7 @@ cmdlet` — names the whole function body, which is why it reads as gibberish.
 It parses cleanly, so `ParseFile` (our pwsh equivalent of `bash -n`) cannot see
 it, and there is no `set -u` for PowerShell to catch the aliasing. It killed
 every `Read-TsMulti` call — the terminal question, the tool-group pickers, and so
-`install.ps1`, `windows-bootstrap.ps1` and `ts-config apps` — while every test
+`install.ps1`, `windows-bootstrap.ps1` and `tstack config apps` — while every test
 and the whole POSIX side stayed green, because bash keeps functions and variables
 in separate namespaces and cannot have this bug at all.
 
@@ -1547,7 +1578,7 @@ live on disk.
 its entries were not real: `pypa.pipx`, `Python-Poetry.Poetry` and
 `nicolargo.glances` all answer *"No package found matching input criteria"*.
 `pipx` is in the recommended set, so every Windows machine was offered it on
-every `ts-update`, accepted, and watched the install fail — permanently, because
+every `tstack update`, accepted, and watched the install fail — permanently, because
 a failed install leaves the tool missing and therefore still pending.
 
 The existing rule for this (`ncdu`, `bandwhich`, `tree`, `atuin`) is that an id
@@ -1571,7 +1602,7 @@ silently never installed.
 
 ## Why the pending gate asks "can we install it", not "is it in winget"
 
-`Get-TsAppsPending` decides what `ts-update` offers. It gated on
+`Get-TsAppsPending` decides what `tstack update` offers. It gated on
 `$TsWingetIds.ContainsKey($id)` under a comment reading *"Only offer what this
 platform can actually install"* — which those two things stopped meaning the same
 day the agent CLIs arrived. `claude`, `codex`, `cursor-agent`, `grok`, `gemini`
@@ -1586,7 +1617,7 @@ true for a winget id, an agent CLI, or a Python tool.
 
 The visible consequence is that Windows users are now offered agent CLIs they are
 missing. That is the point, and it matches macOS and Linux — but it does mean the
-first `ts-update` after this change has more to say than the last one did.
+first `tstack update` after this change has more to say than the last one did.
 
 ## Why `Update-TsSessionPath` exists
 
@@ -1603,7 +1634,7 @@ swallows everything: a stale PATH costs an inaccurate report, never an install.
 
 ## Why Ghostty is managed on Windows too
 
-`ts-config ghostty` used to refuse anywhere but macOS, and `.chezmoiignore` said
+`tstack config ghostty` used to refuse anywhere but macOS, and `.chezmoiignore` said
 "Ghostty has no Windows build". That was true when it was written and is not any
 more: [noctty](https://github.com/amanthanvi/noctty) is Ghostty's terminal core
 wrapped in a native Win32 app — tabs, splits, session restore, an OpenGL
@@ -1633,7 +1664,7 @@ relative-path-preserving sync as `$PROFILE` and `.wezterm.lua`:
 `windows/AppData/Local/ghostty/…` → `C:\Users\<you>\AppData\Local\ghostty\…`.
 That also means the `ghosttyConfig=off` switch needed a second implementation —
 a path skip in both sync paths — rather than the `.chezmoiignore` gate the macOS
-side uses. Both skip; neither deletes. Deleting stays `ts-config`'s job for the
+side uses. Both skip; neither deletes. Deleting stays `tstack config`'s job for the
 same reason it does on macOS: a sync-side removal runs on *every* machine and
 would wipe a hand-written config on a box that never opted in.
 
@@ -1643,7 +1674,7 @@ substitution with no template engine — so `{{ if }}` would be copied through
 literally. `themeMode` therefore maps to two computed tokens,
 `__GHOSTTY_THEME__` and `__GHOSTTY_WINDOW_THEME__`, exactly as
 `tmuxPrefixResolved` is derived. The mapping now exists three times (bash sync,
-pwsh sync, `ts-config ghostty diff`) and a test pins them together, because a
+pwsh sync, `tstack config ghostty diff`) and a test pins them together, because a
 drift between them shows up as `diff` reporting a phantom change forever.
 
 `follow` cannot be expressed by pinning `window-theme`, and an explicit mode
@@ -1661,7 +1692,7 @@ config that pretends to set something it cannot is a lie to the next reader.
 Windows gains `window-theme`, which drives the DWM title bar.
 
 **There is no honest syntax gate on Windows.** On macOS `ghostty
-+validate-config` exits 1 on error and `ts-config ghostty status` runs it as a
++validate-config` exits 1 on error and `tstack config ghostty status` runs it as a
 real check. Neither Windows equivalent works on 1.3.123: `+validate-config` fails
 with `FileTooBig` even for a 14-byte config, and `+show-config` reports *nothing*
 for an unknown key or for a bad value on a real key — it silently drops both.
@@ -1802,12 +1833,12 @@ ref rather than a branch. With the source in `services/console/`, the same pin c
 re-pin and a rebuild for every change — the loop `update-console.*` existed to automate.
 
 The context is now `../../console`, so what runs is what you have checked out. The trade is real and
-worth stating: a dirty working tree builds a dirty image. `git status` before `ts-stack up` is the
-whole discipline, and `ts-stack --dry-run up` shows exactly what would be built.
+worth stating: a dirty working tree builds a dirty image. `git status` before `tstack services up` is the
+whole discipline, and `tstack services --dry-run up` shows exactly what would be built.
 
 Dropping `update-console.*` also dropped two behaviours that had to be inherited rather than lost:
 the double `--env-file` billing deploy in the correct order, and the post-rebuild `/healthz` verify.
-Both live in `ts-stack` now. A lone `--env-file .billing.env` *replaces* `.env` as compose's
+Both live in `tstack services` now. A lone `--env-file .billing.env` *replaces* `.env` as compose's
 interpolation source, so every `${OPENAI_*}`-derived value the console displays resolves to empty —
 a blank provider panel, no error, everything healthy.
 
@@ -1832,10 +1863,10 @@ They stay non-external deliberately: **the asymmetry is the safety property**. `
 touch an external volume, which is why every memory ever saved lives in one, while headroom's graph
 and vectors are removable by design behind `--destroy-data`.
 
-`ts-stack up` refuses to start while a legacy volume exists and its replacement does not, because
+`tstack services up` refuses to start while a legacy volume exists and its replacement does not, because
 compose would otherwise create an empty one and start the stack with no memories in it, reporting
-success. `ts-stack migrate-volumes` copies in a container, verifies the file count came across, and
-leaves the old volume as the rollback. The same trap caught `ts-stack bootstrap`, which happily
+success. `tstack services migrate-volumes` copies in a container, verifies the file count came across, and
+leaves the old volume as the rollback. The same trap caught `tstack services bootstrap`, which happily
 created the empty replacement until it learned the same rule.
 
 ## Why the agentmemory secret cache kept a fallback when it moved
@@ -1843,7 +1874,7 @@ created the empty replacement until it learned the same rule.
 The cache moved from `$XDG_CONFIG_HOME/docker-local/agentmemory.secret` to
 `$XDG_CONFIG_HOME/terminal-stack/agentmemory.secret`, which sounds like a rename and is not. The
 *reader* is JavaScript already injected into vendor hook files on live machines, and those files are
-only rewritten when `ts-agentmemory --apply` runs. Moving the writer alone turns 401-recovery into a
+only rewritten when `tstack agentmemory --apply` runs. Moving the writer alone turns 401-recovery into a
 permanent no-op — the exact failure that cost 56 consecutive captures on 2026-08-21 with nothing in
 any log, because `/observe` swallows errors and retrieval discards non-2xx.
 
@@ -1907,7 +1938,7 @@ place the two met.
 It is the wrong shape now. The console is a 104-file TypeScript application with
 its own lifecycle — you rebuild the UI while the memory server keeps running —
 and as an overlay it appeared in `docker ps`, in Docker Desktop and in
-`ts-stack status` as a second row under someone else's name. Splitting it makes
+`tstack services status` as a second row under someone else's name. Splitting it makes
 "3110 answers, 3111 does not" read as *one stack down and the other fine*
 instead of a mystery inside a single stack, which is exactly the verdict the
 check ordering has always been trying to produce.
@@ -1939,7 +1970,7 @@ no edit anywhere:
   asserts no path appears in both.
 
 - **A pinned network name.** `ts-agentmemory-net`, not the project-derived
-  `ts-agentmemory_default`. Anything that reaches across projects has to be
+  `tstack agentmemory_default`. Anything that reaches across projects has to be
   pinned, or it changes under the other side the day that project is renamed.
   For the same reason the console addresses `ts-agentmemory-server` by container
   name rather than the `agentmemory` service alias.
@@ -1969,10 +2000,10 @@ half is exclusive.
 
 `agentmemoryEnabled` is derived from it, and `ts_memory_apply` /
 `Set-TsMemoryBackend` is the only thing that writes either key.
-`ts-config agents agentmemory on` refuses when the backend is something else and
-names `ts-config memory agentmemory`, rather than silently reconciling —
+`tstack config agents agentmemory on` refuses when the backend is something else and
+names `tstack config memory agentmemory`, rather than silently reconciling —
 quietly undoing what someone asked for is worse than telling them the two
-disagree. `ts-doctor` reports drift for the case where something wrote the key
+disagree. `tstack doctor` reports drift for the case where something wrote the key
 anyway.
 
 The default is `agentmemory`, and that is not a preference: it is what every
@@ -2013,10 +2044,10 @@ environment variable to gate instead. The overlay also means Qdrant and Neo4j
 are never *referenced* on a machine that does not want them, so they are never
 pulled — which is most of the point on a laptop.
 
-`ts-config memory` restarts headroom rather than printing the command. The
+`tstack config memory` restarts headroom rather than printing the command. The
 setting and the running state disagreeing is exactly the failure mode above, and
 a restart of a compression proxy costs an in-flight request, not a pane full of
-work (contrast `ts-mux restart`, which is deliberate for that reason).
+work (contrast `tstack mux restart`, which is deliberate for that reason).
 
 ## `ts-after` and `ts-envfiles`
 
@@ -2076,3 +2107,86 @@ registration. Model routing stays independently gated by authenticated `/stats`.
 Trade-off: Docker and `ts-headroom-proxy` must be available when an MCP client
 starts. That dependency already exists for Headroom, and failed reconciliation
 removes stale registrations so Codex starts cleanly in direct mode.
+
+
+## Why `tstack services` stopped handing WSL work to PowerShell
+
+Inside WSL with Docker Desktop's integration switched off, `docker` on PATH is
+Desktop's stub: it exits 1 for every command and prints its complaint on STDOUT,
+so `command -v docker` is true and useless. `bootstrap/ts-stack.sh` handled that
+by re-exec'ing `bootstrap/ts-stack.ps1` through interop for `up`, `down`,
+`restart`, `logs` and `config`, on the reasoning that compose resolves `-f`, build
+contexts and bind mounts as *Windows* paths and a `\\wsl.localhost` 9p share is
+not reliably bind-mountable - a failure that would land after the stack was
+already down.
+
+The reasoning about paths was right. The handoff was a consequence of the logic
+existing twice, and it had two costs that were never written down:
+
+- **It gave up entirely with no pwsh 7**, printing "no Linux Docker CLI in this
+  WSL distro, and no pwsh 7 to hand off to" and exiting 1. Nothing was wrong with
+  the engine; the wrong process was being asked to talk to it.
+- **It covered five verbs of twelve.** `bootstrap`, `test`, `backup`, `reset`,
+  `migrate-volumes`, `doctor` and `status` never handed off, so on exactly the
+  machine that needed the handoff they ran against the stub and failed.
+
+There is one implementation now, so there is nothing to hand off *to*. The Python
+port runs `docker.exe` through interop from the same process
+(`tstack/engine.py:binary_for`), which reaches the identical engine, works with no
+pwsh installed, and covers every verb.
+
+The path constraint is still real and is now stated rather than side-stepped:
+`require_windows_visible` refuses a stack tree that a Windows engine cannot
+bind-mount, **before** anything is torn down, and names the fix. A clone under
+`/mnt/<drive>` is fine, which the canonical
+`%LOCALAPPDATA%\terminal-stack\stack` always is; a clone inside the WSL
+filesystem is not.
+
+That check is pure string work on a POSIX path and must stay that way.
+`Path.resolve()` on Windows - where this suite also runs - turns `/mnt/c/x` into a
+drive-relative path and inverts the answer.
+
+## Why kokoro was never reported as off (and how a twin hid it)
+
+`bootstrap/ts-stack.sh` gated the kokoro stack with:
+
+```sh
+on="$(ts_cc_tts_get enabled 2>/dev/null || echo true)"
+engine="$(ts_cc_tts_get engine 2>/dev/null || echo kokoro)"
+```
+
+The keys are `ccTtsEnabled` and `ccTtsEngine`. `ts_cc_tts_get enabled` therefore
+looked up a `[data]` key that does not exist, got nothing, fell through to
+`ts_cc_tts_default`, whose `*)` branch is the bare word `1` - a command, not a
+value, so the function exited 127. The `|| echo true` guard then turned that
+failure into "TTS is on", and the second line turned it into "engine is kokoro".
+
+**kokoro was reported as enabled on every macOS and Linux machine, whatever the
+settings said**, including machines with voice notifications off entirely. The
+pwsh twin read the real values through `Get-CcTtsConfig` and behaved correctly, so
+the two disagreed on every such machine and nothing compared them: the parity test
+for this subsystem checked that both files *contained the string* `ccTts`, which
+both did.
+
+That is the shape of the failure this whole port exists to remove - not a missing
+test, but a test that could only ever check the two files looked alike. There is
+one implementation now (`tstack/stacks.py:stack_state`) and the test drives it
+with real values instead.
+
+## Why the compose choke point is a class, not a helper
+
+Every docker argv is built in `tstack/stacks.py`'s `Compose.argv`, and
+`tests/test_stack.py` asserts that no other file under `tstack/` builds one. Three
+invariants ride on that being literally true:
+
+- `down` never receives `-v`. Volumes are destroyed only by explicitly gated
+  paths, and the two that do are `test --destroy-data` and `reset --destroy-data`.
+- `--env-file .env` always precedes `--env-file .billing.env`. A lone
+  `--env-file .billing.env` *replaces* `.env` as compose's interpolation source,
+  so every `${OPENAI_*}`-derived `LLM_*` display value resolves to empty: a blank
+  provider panel in the console, no error, everything healthy.
+- `--dry-run` prints the exact argv and runs nothing, naming the real binary
+  (`docker.exe` on the interop path) rather than a plausible-looking `docker`.
+
+A second builder would be a second set of rules that nothing checks, which is how
+the ordering bug happened the first time.

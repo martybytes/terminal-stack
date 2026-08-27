@@ -32,6 +32,7 @@ _ts_persist_wizard() {
     TOML="$HOME/.config/chezmoi/chezmoi.toml"
     if [ -d "$SOURCE_DIR" ]; then
         ts_ensure_source_dir "$SOURCE_DIR"
+        ts_install_git_hooks "$SOURCE_DIR"
     else
         echo "$WARN $SOURCE_DIR not found; skipping chezmoi.toml. Set SOURCE_DIR env var and re-run, or edit manually."
     fi
@@ -48,7 +49,7 @@ _ts_persist_wizard() {
         # asked the question and threw the answer away.
         ts_memory_apply "${TS_WIZ_MEMORY_BACKEND:-agentmemory}"
         # Stored on its own, not through ts_save_config: the mux key is positional-
-        # argument-free by design so ts-mux can flip it without re-stating the rest.
+        # argument-free by design so tstack mux can flip it without re-stating the rest.
         ts_wez_mux_set "${TS_WIZ_WEZ_MUX:-off}"
         ts_wez_restore_set "${TS_WIZ_WEZ_RESTORE:-off}"
         ts_atuin_set "${TS_WIZ_ATUIN:-off}"
@@ -64,7 +65,7 @@ common_install_all
 # The agent WIRING half: needs the claude/codex CLIs, so unlike the settings it
 # has to wait until after the app install.
 if [ -f "${TOML:-}" ]; then
-    ts_agents_apply_wizard "$SOURCE_DIR/bootstrap/ts-agents.sh"
+    ts_agents_apply_wizard "$SOURCE_DIR"
 fi
 
 echo ""

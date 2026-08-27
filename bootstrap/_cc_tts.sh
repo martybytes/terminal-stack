@@ -276,7 +276,7 @@ EOF
 # ── ttsd daemon plumbing (Windows-only; WSL reaches it via interop) ────────────
 
 ts_cc_tts_bootstrap_dir() {
-    # Directory of this file — the clone's bootstrap/ (works because ts-config
+    # Directory of this file — the clone's bootstrap/ (works because tstack config
     # and the bootstraps source _cc_tts.sh from the clone).
     printf '%s' "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 }
@@ -341,13 +341,13 @@ ts_cc_tts_daemon_status() {
     fi
     if [ -z "$health" ]; then
         echo "tts daemon: not reachable on port $port (hooks fall back to direct playback)"
-        echo "  saved setting ccTtsDaemon=$(ts_cc_tts_get ccTtsDaemon)  —  start: ts-config tts daemon on"
+        echo "  saved setting ccTtsDaemon=$(ts_cc_tts_get ccTtsDaemon)  —  start: tstack config tts daemon on"
         return 1
     fi
     echo "tts daemon: $health"
     sha="$(git -C "$(ts_cc_tts_bootstrap_dir)/.." rev-parse HEAD 2>/dev/null || true)"
     if [ -n "$sha" ] && ! printf '%s' "$health" | grep -q "$sha"; then
-        echo "tts daemon: running an older build than this clone — ts-config tts daemon restart"
+        echo "tts daemon: running an older build than this clone — tstack config tts daemon restart"
     fi
 }
 
@@ -388,7 +388,7 @@ ts_cc_tts_codex_instruction_path() {
 ts_cc_tts_self_install_one() {
     local target="$1" agent="$2" asset
     asset="$(ts_cc_tts_bootstrap_dir)/tts-daemon/assets/speak-summary.md"
-    [ -f "$asset" ] || { echo "tts: speak-summary.md asset not found (run ts-update?)" >&2; return 1; }
+    [ -f "$asset" ] || { echo "tts: speak-summary.md asset not found (run tstack update?)" >&2; return 1; }
     mkdir -p "$(dirname "$target")" 2>/dev/null || true
     if [ -f "$target" ]; then
         ts_cc_tts_backup_file "$target"
@@ -526,7 +526,7 @@ ts_prompt_cc_tts_message() {
   the same sentence every time. No extra model call, no added latency.
   NOTE: self appends a short instruction block to ~/.claude/CLAUDE.md and
   ~/.codex/AGENTS.md, between markers, so the agent knows to write that line.
-  ts-config tts summarizer template removes it again.
+  tstack config tts summarizer template removes it again.
   template is the fixed wording. hook reads the last message out raw, which is
   blunt but needs no instruction block.' \
         'self|self|the agent writes its own line' \
@@ -552,8 +552,8 @@ ts_cc_tts_apply_wizard_choice() {
     local choice="$1" daemon="${2:-off}" message="${3:-}"
     # Seed the defaults ONLY on a host that has never been configured. This used
     # to call ts_cc_tts_reset_defaults unconditionally on both on and off, so
-    # every `ts-config wizard` re-run silently discarded whatever the user had
-    # tuned with `ts-config tts voice …`, `… engine …`, `… template …`.
+    # every `tstack config wizard` re-run silently discarded whatever the user had
+    # tuned with `tstack config tts voice …`, `… engine …`, `… template …`.
     local configured
     configured="$(ts_data_get ccTtsEnabled 2>/dev/null || true)"
     case "$choice" in
@@ -606,12 +606,12 @@ ts_cc_tts_apply_wizard_choice() {
     fi
 }
 
-# ts-config tts subcommands (requires $CZ and finish() from ts-config.sh caller).
+# tstack config tts subcommands (requires $CZ and finish() from ts-config.sh caller).
 ts_config_tts() {
     local sub="${1:-}" arg="${2:-}" arg2="${3:-}"
     case "$sub" in
-        # Bare `ts-config tts` shows status. Every sibling entrypoint does this
-        # (ts-mux, ts-smb, ts-wezterm, ts-doctor, and `tts daemon` below); this
+        # Bare `tstack config tts` shows status. Every sibling entrypoint does this
+        # (tstack mux, tstack smb, tstack wezterm, tstack doctor, and `tts daemon` below); this
         # was the one verb in the stack that answered with an error instead.
         ''|show)
             ts_cc_tts_show
@@ -632,57 +632,57 @@ ts_config_tts() {
             finish
             ;;
         engine)
-            [ -n "$arg" ] || { echo "usage: ts-config tts engine kokoro|chatterbox|auto" >&2; return 2; }
+            [ -n "$arg" ] || { echo "usage: tstack config tts engine kokoro|chatterbox|auto" >&2; return 2; }
             case "$arg" in kokoro|chatterbox|auto) ;; *)
-                echo "ts-config tts engine: expected kokoro, chatterbox, or auto" >&2; return 2 ;; esac
+                echo "tstack config tts engine: expected kokoro, chatterbox, or auto" >&2; return 2 ;; esac
             ts_cc_tts_set ccTtsEngine "$arg"
             ts_cc_tts_finish
             finish
             ;;
         message)
-            [ -n "$arg" ] || { echo "usage: ts-config tts message template|hook" >&2; return 2; }
+            [ -n "$arg" ] || { echo "usage: tstack config tts message template|hook" >&2; return 2; }
             case "$arg" in template|hook) ;; *)
-                echo "ts-config tts message: expected template or hook" >&2; return 2 ;; esac
+                echo "tstack config tts message: expected template or hook" >&2; return 2 ;; esac
             ts_cc_tts_set ccTtsMessageMode "$arg"
             ts_cc_tts_finish
             finish
             ;;
         voice)
-            [ -n "$arg" ] || { echo "usage: ts-config tts voice <kokoro-voice>" >&2; return 2; }
+            [ -n "$arg" ] || { echo "usage: tstack config tts voice <kokoro-voice>" >&2; return 2; }
             ts_cc_tts_set ccTtsKokoroVoice "$arg"
             ts_cc_tts_finish
             finish
             ;;
         voice-chatter)
-            [ -n "$arg" ] || { echo "usage: ts-config tts voice-chatter <name>" >&2; return 2; }
+            [ -n "$arg" ] || { echo "usage: tstack config tts voice-chatter <name>" >&2; return 2; }
             ts_cc_tts_set ccTtsChatterboxVoice "$arg"
             ts_cc_tts_finish
             finish
             ;;
         energy)
-            [ -n "$arg" ] || { echo "usage: ts-config tts energy <0-1>" >&2; return 2; }
+            [ -n "$arg" ] || { echo "usage: tstack config tts energy <0-1>" >&2; return 2; }
             ts_cc_tts_set ccTtsChatterboxEnergy "$arg"
             ts_cc_tts_finish
             finish
             ;;
         url)
-            [ -n "$arg" ] && [ -n "$arg2" ] || { echo "usage: ts-config tts url kokoro|chatterbox <url>" >&2; return 2; }
+            [ -n "$arg" ] && [ -n "$arg2" ] || { echo "usage: tstack config tts url kokoro|chatterbox <url>" >&2; return 2; }
             case "$arg" in
                 kokoro)      ts_cc_tts_set ccTtsKokoroUrl "$arg2" ;;
                 chatterbox)  ts_cc_tts_set ccTtsChatterboxUrl "$arg2" ;;
-                *) echo "ts-config tts url: expected kokoro or chatterbox" >&2; return 2 ;;
+                *) echo "tstack config tts url: expected kokoro or chatterbox" >&2; return 2 ;;
             esac
             ts_cc_tts_finish
             finish
             ;;
         events)
-            [ -n "$arg" ] || { echo "usage: ts-config tts events waiting,error,question,permission" >&2; return 2; }
+            [ -n "$arg" ] || { echo "usage: tstack config tts events waiting,error,question,permission" >&2; return 2; }
             ts_cc_tts_set ccTtsEvents "$arg"
             ts_cc_tts_finish
             finish
             ;;
         prefix)
-            [ -n "$arg" ] && [ -n "$arg2" ] || { echo "usage: ts-config tts prefix claude|cursor|codex on|off|<label>" >&2; return 2; }
+            [ -n "$arg" ] && [ -n "$arg2" ] || { echo "usage: tstack config tts prefix claude|cursor|codex on|off|<label>" >&2; return 2; }
             case "$arg" in
                 claude)
                     case "$arg2" in
@@ -702,36 +702,36 @@ ts_config_tts() {
                         off) ts_cc_tts_set ccTtsPrefixCodexEnabled false ;;
                         *)   ts_cc_tts_set ccTtsPrefixCodex "$arg2"; ts_cc_tts_set ccTtsPrefixCodexEnabled true ;;
                     esac ;;
-                *) echo "ts-config tts prefix: expected claude, cursor, or codex" >&2; return 2 ;;
+                *) echo "tstack config tts prefix: expected claude, cursor, or codex" >&2; return 2 ;;
             esac
             ts_cc_tts_finish
             finish
             ;;
         project)
-            [ -n "$arg" ] || { echo "usage: ts-config tts project on|off" >&2; return 2; }
+            [ -n "$arg" ] || { echo "usage: tstack config tts project on|off" >&2; return 2; }
             case "$arg" in
                 on)  ts_cc_tts_set ccTtsIncludeProject true ;;
                 off) ts_cc_tts_set ccTtsIncludeProject false ;;
-                *) echo "ts-config tts project: expected on or off" >&2; return 2 ;;
+                *) echo "tstack config tts project: expected on or off" >&2; return 2 ;;
             esac
             ts_cc_tts_finish
             finish
             ;;
         excitement)
-            [ -n "$arg" ] || { echo "usage: ts-config tts excitement <0-1>" >&2; return 2; }
+            [ -n "$arg" ] || { echo "usage: tstack config tts excitement <0-1>" >&2; return 2; }
             ts_cc_tts_set ccTtsExcitement "$arg"
             ts_cc_tts_set ccTtsChatterboxEnergy "$arg"
             ts_cc_tts_finish
             finish
             ;;
         template)
-            [ -n "$arg" ] && [ -n "$arg2" ] || { echo "usage: ts-config tts template waiting|error|question|permission \"…\"" >&2; return 2; }
+            [ -n "$arg" ] && [ -n "$arg2" ] || { echo "usage: tstack config tts template waiting|error|question|permission \"…\"" >&2; return 2; }
             case "$arg" in
                 waiting)    ts_cc_tts_set ccTtsTemplateWaiting "$arg2" ;;
                 error)      ts_cc_tts_set ccTtsTemplateError "$arg2" ;;
                 question)   ts_cc_tts_set ccTtsTemplateQuestion "$arg2" ;;
                 permission) ts_cc_tts_set ccTtsTemplatePermission "$arg2" ;;
-                *) echo "ts-config tts template: unknown event '$arg'" >&2; return 2 ;;
+                *) echo "tstack config tts template: unknown event '$arg'" >&2; return 2 ;;
             esac
             ts_cc_tts_finish
             finish
@@ -765,20 +765,20 @@ ts_config_tts() {
                     ts_cc_tts_daemon_status
                     ;;
                 *)
-                    echo "usage: ts-config tts daemon on|off|status|restart|install" >&2; return 2 ;;
+                    echo "usage: tstack config tts daemon on|off|status|restart|install" >&2; return 2 ;;
             esac
             ;;
         summarizer)
-            [ -n "$arg" ] || { echo "usage: ts-config tts summarizer template|self|haiku|ollama" >&2; return 2; }
+            [ -n "$arg" ] || { echo "usage: tstack config tts summarizer template|self|haiku|ollama" >&2; return 2; }
             case "$arg" in template|self|haiku|ollama) ;; *)
-                echo "ts-config tts summarizer: expected template, self, haiku, or ollama" >&2; return 2 ;; esac
+                echo "tstack config tts summarizer: expected template, self, haiku, or ollama" >&2; return 2 ;; esac
             # template and self run in the shell path on every platform. haiku
             # and ollama live in the daemon, so storing them on a host without
             # one is a setting nothing will ever read — say so instead.
             case "$arg" in
                 haiku|ollama)
                     ts_cc_tts_daemon_supported || {
-                        echo "ts-config tts summarizer: '$arg' needs the tray daemon (Windows)." >&2
+                        echo "tstack config tts summarizer: '$arg' needs the tray daemon (Windows)." >&2
                         echo "  On this host use: template (fixed lines) or self (the agent writes its own line)." >&2
                         return 1
                     } ;;
@@ -789,13 +789,13 @@ ts_config_tts() {
             finish
             ;;
         haiku-model)
-            [ -n "$arg" ] || { echo "usage: ts-config tts haiku-model <model>" >&2; return 2; }
+            [ -n "$arg" ] || { echo "usage: tstack config tts haiku-model <model>" >&2; return 2; }
             ts_cc_tts_set ccTtsHaikuModel "$arg"
             ts_cc_tts_finish
             finish
             ;;
         ollama)
-            [ -n "$arg" ] || { echo "usage: ts-config tts ollama <url> [<model>]" >&2; return 2; }
+            [ -n "$arg" ] || { echo "usage: tstack config tts ollama <url> [<model>]" >&2; return 2; }
             ts_cc_tts_set ccTtsOllamaUrl "$arg"
             [ -n "$arg2" ] && ts_cc_tts_set ccTtsOllamaModel "$arg2"
             ts_cc_tts_finish
@@ -805,13 +805,13 @@ ts_config_tts() {
             # Ducking is daemon-only AND built on pycaw/WinRT, so on any
             # other host this accepted and persisted a value with no reader.
             ts_cc_tts_daemon_supported || {
-                echo "ts-config tts $sub: music ducking needs the tray daemon (Windows only)." >&2
+                echo "tstack config tts $sub: music ducking needs the tray daemon (Windows only)." >&2
                 echo "  There is no CoreAudio equivalent here; the setting would do nothing." >&2
                 return 1
             }
-            [ -n "$arg" ] || { echo "usage: ts-config tts music duck|smart|pause|off" >&2; return 2; }
+            [ -n "$arg" ] || { echo "usage: tstack config tts music duck|smart|pause|off" >&2; return 2; }
             case "$arg" in duck|smart|pause|off) ;; *)
-                echo "ts-config tts music: expected duck, smart, pause, or off" >&2; return 2 ;; esac
+                echo "tstack config tts music: expected duck, smart, pause, or off" >&2; return 2 ;; esac
             ts_cc_tts_set ccTtsMusicMode "$arg"
             ts_cc_tts_finish
             finish
@@ -820,12 +820,12 @@ ts_config_tts() {
             # Ducking is daemon-only AND built on pycaw/WinRT, so on any
             # other host this accepted and persisted a value with no reader.
             ts_cc_tts_daemon_supported || {
-                echo "ts-config tts $sub: music ducking needs the tray daemon (Windows only)." >&2
+                echo "tstack config tts $sub: music ducking needs the tray daemon (Windows only)." >&2
                 echo "  There is no CoreAudio equivalent here; the setting would do nothing." >&2
                 return 1
             }
-            case "$arg" in ''|*[!0-9]*) echo "usage: ts-config tts duck-level <0-100>" >&2; return 2 ;; esac
-            [ "$arg" -le 100 ] || { echo "ts-config tts duck-level: expected 0-100" >&2; return 2; }
+            case "$arg" in ''|*[!0-9]*) echo "usage: tstack config tts duck-level <0-100>" >&2; return 2 ;; esac
+            [ "$arg" -le 100 ] || { echo "tstack config tts duck-level: expected 0-100" >&2; return 2; }
             ts_cc_tts_set ccTtsDuckPercent "$arg"
             ts_cc_tts_finish
             finish
@@ -840,7 +840,7 @@ ts_config_tts() {
             fi
             ;;
         port)
-            case "$arg" in ''|*[!0-9]*) echo "usage: ts-config tts port <n>" >&2; return 2 ;; esac
+            case "$arg" in ''|*[!0-9]*) echo "usage: tstack config tts port <n>" >&2; return 2 ;; esac
             ts_cc_tts_set ccTtsDaemonPort "$arg"
             ts_cc_tts_finish
             finish
@@ -853,7 +853,7 @@ ts_config_tts() {
                     CC_TTS_VERBOSE=1 "${HOME}/.claude/hooks/cc-tts-test.sh"
                 fi
             else
-                echo "ts-config tts test: cc-tts-test.sh not found (run chezmoi apply)" >&2
+                echo "tstack config tts test: cc-tts-test.sh not found (run chezmoi apply)" >&2
                 return 1
             fi
             ;;
@@ -863,7 +863,7 @@ ts_config_tts() {
             ts_cc_tts_daemon_supported || { echo "tts history: Windows-only; this host uses direct playback." >&2; return 1; }
             local hexe
             hexe="$(ts_cc_tts_exe_path)" || { echo "tts history: not a WSL host" >&2; return 1; }
-            [ -f "$hexe" ] || { echo "tts history: terminal-stack-tts.exe not found (run ts-config tts daemon install)" >&2; return 1; }
+            [ -f "$hexe" ] || { echo "tts history: terminal-stack-tts.exe not found (run tstack config tts daemon install)" >&2; return 1; }
             case "$arg" in
                 --dupes|dupes)
                     if [ -n "$arg2" ]; then "$hexe" history --dupes --within "$arg2"; else "$hexe" history --dupes; fi ;;
@@ -878,7 +878,7 @@ ts_config_tts() {
             ;;
         -h|--help|help)
             cat <<'EOF'
-ts-config tts — agent local TTS (Kokoro / Chatterbox / edge-tts)
+tstack config tts — agent local TTS (Kokoro / Chatterbox / edge-tts)
   show | on | off | test [--source claude|cursor|codex|test] | reset
   engine kokoro|chatterbox|auto
   message template|hook
@@ -899,7 +899,7 @@ ts-config tts — agent local TTS (Kokoro / Chatterbox / edge-tts)
 EOF
             ;;
         *)
-            echo "ts-config tts: unknown subcommand '$sub' (try: show, on, off, test; -h for all)" >&2
+            echo "tstack config tts: unknown subcommand '$sub' (try: show, on, off, test; -h for all)" >&2
             return 2
             ;;
     esac

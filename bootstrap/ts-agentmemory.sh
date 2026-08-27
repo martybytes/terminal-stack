@@ -5,9 +5,9 @@
 #
 # Usage: ts-agentmemory.sh [--apply] [--undo] [--check] [--host claude|codex|cursor]
 #
-# POSIX twin of ts-agentmemory.ps1. Runs from ts-agents.sh's agentmemory verb, so
+# POSIX twin of ts-agentmemory.ps1. Runs from `tstack agents agentmemory`, so
 # a plugin upgrade that reverts the hook-script edits is repaired on the next
-# `ts-update`. services/stacks/agentmemory/check-capture.sh probes for this exact
+# `tstack update`. services/stacks/agentmemory/check-capture.sh probes for this exact
 # path, which is why the name is not negotiable.
 #
 # Without this, macOS and Linux serve and search but never capture — silently,
@@ -33,13 +33,13 @@ while [ $# -gt 0 ]; do
         -h|--help)
             sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
             exit 0 ;;
-        *) echo "ts-agentmemory: unknown option '$1'" >&2; exit 2 ;;
+        *) echo "tstack agentmemory: unknown option '$1'" >&2; exit 2 ;;
     esac
     shift
 done
 [ -n "$HOSTS" ] || HOSTS="$AM_HOSTS"
 for h in $HOSTS; do
-    case "$h" in claude|codex|cursor) ;; *) echo "ts-agentmemory: unknown host '$h'" >&2; exit 2 ;; esac
+    case "$h" in claude|codex|cursor) ;; *) echo "tstack agentmemory: unknown host '$h'" >&2; exit 2 ;; esac
 done
 
 EXECUTE=$APPLY
@@ -59,7 +59,7 @@ _pass()    { printf '  OK   %s\n' "$1"; }
 _fail()    { PROBLEMS=$((PROBLEMS + 1)); _warn "$1"; }
 
 if [ "$CHECK" != 1 ]; then
-    printf 'ts-agentmemory  mode=%s\n' "$MODE"
+    printf 'tstack agentmemory  mode=%s\n' "$MODE"
     [ "$EXECUTE" = 1 ] || printf '(preview only - add --apply to write, or --undo --apply to remove)\n'
 fi
 
@@ -205,7 +205,7 @@ PY
             _step "update env in $settings"
             if [ "$EXECUTE" = 1 ]; then
                 am_backup_file "$settings"
-                ts_merge_json_key "$settings" env "$body" ts-agentmemory >/dev/null \
+                ts_merge_json_key "$settings" env "$body" tstack agentmemory >/dev/null \
                     || _fail "splice failed for $settings"
             fi
         fi
@@ -599,7 +599,7 @@ echo
 if [ "$PROBLEMS" -gt 0 ]; then
     # Exit non-zero on problems in EVERY mode, not just --check. The .ps1 reports
     # and still exits 0, so a caller cannot tell a clean apply from one where an
-    # edit's anchor had moved — and ts-agents.sh needs to know.
+    # edit's anchor had moved - and `tstack agents` needs to know.
     printf '%s problem(s) - see the ! lines above.\n' "$PROBLEMS"
     exit 1
 elif [ "$EXECUTE" != 1 ]; then

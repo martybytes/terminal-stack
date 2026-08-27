@@ -88,12 +88,12 @@ function Get-TsWsPlan {
     $runtime = Get-TsWsRuntimeClone
     $rows = foreach ($d in (Get-TsWsScanCandidates)) {
         # Never plan the active runtime clone into the tree — relocating it
-        # breaks the install; ts-doctor -Repair owns that move.
+        # breaks the install; tstack doctor -Repair owns that move.
         if ($runtime) {
             $dResolved = try { (Resolve-Path -LiteralPath $d).Path } catch { $d }
             if ($dResolved.TrimEnd('\') -ieq $runtime.TrimEnd('\')) {
                 [pscustomobject]@{ Status = 'runtime'; Source = $d; Dest = ''
-                    Note = 'active terminal-stack runtime clone - not migrated (relocate with ts-doctor -Repair)' }
+                    Note = 'active terminal-stack runtime clone - not migrated (relocate with tstack doctor -Repair)' }
                 continue
             }
         }
@@ -106,7 +106,7 @@ function Get-TsWsPlan {
         # never a scan candidate, so nothing legitimate is blocked here.
         if ((& git -C $d config --get remote.origin.url 2>$null) -match 'terminal-stack') {
             [pscustomobject]@{ Status = 'runtime'; Source = $d; Dest = ''
-                Note = 'terminal-stack clone at the workspace root - not migrated (relocate with ts-doctor -Repair)' }
+                Note = 'terminal-stack clone at the workspace root - not migrated (relocate with tstack doctor -Repair)' }
             continue
         }
         $dest = Get-TsWsDestFor $d
@@ -673,7 +673,7 @@ function Invoke-TsWsDoctor {
     foreach ($t in @('git', 'gh', 'ghq', 'fzf', 'lazygit')) {
         $cmd = Get-Command $t -ErrorAction SilentlyContinue
         if ($cmd) { "  {0,-8} ok    {1}" -f $t, $cmd.Source }
-        else { "  {0,-8} MISSING - install it: ts-config apps" -f $t; $issues++ }
+        else { "  {0,-8} MISSING - install it: tstack config apps" -f $t; $issues++ }
     }
     if (Get-Command gh -ErrorAction SilentlyContinue) {
         & gh auth status 2>&1 | Out-Null

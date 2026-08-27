@@ -1,0 +1,26 @@
+{
+  "subsystem": "config",
+  "case": "show",
+  "platform": "wsl",
+  "sandbox": "throwaway-store",
+  "argv": [
+    "show"
+  ],
+  "recorded_from": "bootstrap/ts-config.sh",
+  "exit_code": 0,
+  "stdout_lines": [
+    "terminal-stack config:",
+    "  leader     : ctrl-space   (WezTerm: CTRL+phys:Space)",
+    "  theme      : dark   (baked palette: dark)",
+    "  tmux       : ctrl-b   (prefix: C-b)",
+    "  apps       : fzf bat",
+    "  wezmux     : off   (tstack mux on|off|status)",
+    "  wezrestore : off   (tstack config restore on|off)",
+    "  atuin      : off   (tstack config atuin on|off)",
+    "  wezterm    : none   (tstack config wezterm)",
+    "  headroom   : off   (Cursor: mcp)",
+    "  caveman    : off",
+    "  agentmemory: on"
+  ],
+  "stderr_lines": []
+}

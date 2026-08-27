@@ -16,7 +16,7 @@
 #   __THEME_MODE__      dark|light|follow    (from themeMode)
 #   __THEME_RESOLVED__  baked palette light|dark (from resolvedTheme)
 #   __TMUX_PREFIX__     tmux prefix spec     (from tmuxPrefixResolved)
-#   __WEZ_MUX__         on|off WezTerm mux domain (from weztermMux; see ts-mux)
+#   __WEZ_MUX__         on|off WezTerm mux domain (from weztermMux; see tstack mux)
 #   __GHOSTTY_THEME__   Ghostty `theme` value derived from themeMode
 #   __GHOSTTY_WINDOW_THEME__  its Windows-only DWM title-bar counterpart
 #   __WEZ_RESTORE__     on|off reopen last session (from weztermRestore)
@@ -226,6 +226,19 @@ resolve_pwsh() {
   return 1
 }
 
+# A WINDOWS python, for the agent wiring. It has to be the Windows one: the GUI
+# agents and their user configuration live on that side, and a Linux python here
+# would edit files in the WSL home that nothing ever reads.
+resolve_win_python() {
+  local p
+  if command -v python.exe >/dev/null 2>&1; then command -v python.exe; return 0; fi
+  for p in "/mnt/c/Users/$WIN_USER/AppData/Local/Programs/Python"/*/python.exe \
+           /mnt/c/Python3*/python.exe; do
+    if [ -x "$p" ]; then printf '%s' "$p"; return 0; fi
+  done
+  return 1
+}
+
 # merge_part_owned <helper-basename> <stage-name> <rendered-src> <dst>
 # Two Windows destinations are part-owned: another tool writes the same file, so a
 # whole-file copy deletes its state. On 2026-08-20 one sync did exactly that to both.
@@ -287,7 +300,7 @@ sync_tree() {
     # ghosttyConfig=off: skip the Ghostty subtree rather than deleting it.
     # Same rule as the macOS .chezmoiignore gate - turning it off stops the
     # config being re-rendered; removing what is already there is
-    # ts-config's job, so a hand-written config on a box that never opted
+    # tstack config's job, so a hand-written config on a box that never opted
     # in is never touched by a sync.
     case "$rel" in
       AppData/Local/ghostty/*)
@@ -457,16 +470,19 @@ fi
 # Enabled user-global coding-agent integrations are reconciled on update. The
 # adapter runs on Windows because that is where the GUI agents and their user
 # configuration live on a combined host.
-agents_script="$stack_root/bootstrap/ts-agents.ps1"
-agents_pwsh="$(resolve_pwsh || true)"
-if [ -f "$agents_script" ] && [ -n "$agents_pwsh" ]; then
+# One implementation now, so this runs the same Python the rest of the stack
+# does -- but still on the WINDOWS side, through interop, because that is where
+# the GUI agents and their user configuration live.
+agents_script="$stack_root/tstack/main.py"
+agents_python="$(resolve_win_python || true)"
+if [ -f "$agents_script" ] && [ -n "$agents_python" ]; then
   agents_script_win="$(wslpath -w "$agents_script" 2>/dev/null || printf '%s' "$agents_script")"
-  if [ "$HEADROOM_ENABLED" = on ] && ! "$agents_pwsh" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$agents_script_win" -Tool headroom -Action status -CursorMode "$HEADROOM_CURSOR_MODE" >/dev/null 2>&1; then
-    "$agents_pwsh" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$agents_script_win" -Tool headroom -Action repair -CursorMode "$HEADROOM_CURSOR_MODE" \
+  if [ "$HEADROOM_ENABLED" = on ] && ! "$agents_python" "$agents_script_win" agents headroom status "$HEADROOM_CURSOR_MODE" >/dev/null 2>&1; then
+    "$agents_python" "$agents_script_win" agents headroom repair "$HEADROOM_CURSOR_MODE" \
       || echo "sync-windows: Headroom reconciliation failed (non-fatal)." >&2
   fi
-  if [ "$CAVEMAN_ENABLED" = on ] && ! "$agents_pwsh" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$agents_script_win" -Tool caveman -Action status >/dev/null 2>&1; then
-    "$agents_pwsh" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$agents_script_win" -Tool caveman -Action repair \
+  if [ "$CAVEMAN_ENABLED" = on ] && ! "$agents_python" "$agents_script_win" agents caveman status >/dev/null 2>&1; then
+    "$agents_python" "$agents_script_win" agents caveman repair \
       || echo "sync-windows: Caveman reconciliation failed (non-fatal)." >&2
   fi
 fi
@@ -498,5 +514,5 @@ printf 'sync-windows: user=%s, %d created, %d updated, %d unchanged\n' "$WIN_USE
 # and only when the mux is actually the thing hosting panes.
 if [ "$wezterm_cfg_changed" = 1 ] && [ "$WEZ_MUX" = on ]; then
   echo "sync-windows: WezTerm config changed. The GUI reloads live, but wezterm-mux-server keeps the old config for spawning panes." >&2
-  echo "  When convenient (closes all panes!): 'ts-mux restart'." >&2
+  echo "  When convenient (closes all panes!): 'tstack mux restart'." >&2
 fi

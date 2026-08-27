@@ -24,8 +24,8 @@ That is a different fix, and it is the mistake worth avoiding because 3111 is th
 port everything is configured to use.
 
 ```sh
-ts-stack status            # shows all of them
-ts-stack logs agentmemory  # both containers
+tstack services status            # shows all of them
+tstack services logs agentmemory  # both containers
 ```
 
 ## Making it fit: the console's own zoom
@@ -70,10 +70,10 @@ remove it.
 The console's source is `services/console/`, and the compose build context is a
 relative path to it. Before, it was a pinned commit SHA of a separate repository,
 so every console change was push → re-pin → rebuild. The trade: a dirty working
-tree builds a dirty image, so `git status` before `ts-stack up` is the discipline.
+tree builds a dirty image, so `git status` before `tstack services up` is the discipline.
 
 ```sh
-ts-stack up agentmemory     # rebuilds the console when its source changed
+tstack services up agentmemory     # rebuilds the console when its source changed
 cd services/console && npm ci && npm test    # its own suite, no Docker needed
 ```
 

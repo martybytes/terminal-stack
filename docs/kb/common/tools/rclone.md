@@ -2,7 +2,7 @@
 
 One binary that speaks S3, SFTP, WebDAV, Google Drive, SMB and about seventy
 other things with the same flags everywhere. In this stack it is the engine
-behind `ts-smb`; see `doc smb-shares` for the wrapper.
+behind `tstack smb`; see `doc smb-shares` for the wrapper.
 
 | Command | What it does |
 |---|---|
@@ -29,7 +29,7 @@ plaintext there.
 The guided setup explains that rclone's **Storage** question means the kind of
 server or service—not a folder and not where its configuration file lives. It
 preselects common providers, progressively searches uncommon ones, and uses
-`ts-smb setup` for Windows/NAS shared folders. `rclone-stock config` is the raw
+`tstack smb setup` for Windows/NAS shared folders. `rclone-stock config` is the raw
 escape hatch for upstream instructions.
 
 rclone's Tier is backend support/maturity: Tier 1 is production-grade, Tier 2

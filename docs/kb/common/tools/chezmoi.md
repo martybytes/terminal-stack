@@ -34,8 +34,8 @@ Keeps dotfiles in a git "source tree" and renders them into `$HOME`. This repo
 | `chezmoi cd` | shell into the source dir |
 | `chezmoi init` | re-render the config after `.chezmoi.toml.tmpl` changes |
 
-Day to day you rarely call it directly: `ts-update` (pull + re-apply) and
-`ts-rollback` (undo the last update) wrap it — see `doc common/stack`.
+Day to day you rarely call it directly: `tstack update` (pull + re-apply) and
+`tstack rollback` (undo the last update) wrap it — see `doc common/stack`.
 
 WezTerm dev on macOS: `chezmoi apply -v ~/.wezterm.lua ~/.wezterm/pane_nav.lua`
 — see `doc wezterm/dev-config`.

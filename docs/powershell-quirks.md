@@ -290,7 +290,7 @@ harmless become **terminating** errors:
 | `$obj.MissingProperty` (including `ConvertFrom-Json` output) | `The property 'X' cannot be found on this object.` |
 
 Both were live. `Resolve-TsSourceDir` assigned `$stalePin` only inside the dangling-pin
-branch and then read it unconditionally, so **`ts-update` and `ts-config` failed outright**
+branch and then read it unconditionally, so **`tstack update` and `tstack config` failed outright**
 in a strict session — before doing anything, with an error naming an internal variable.
 `Read-TsChoice` rendered its optional `Note` column with `$o.Note`, so the install wizard
 died on the very first question (leader key), whose options have no `Note`. `Get-CcTtsConfig`
@@ -310,7 +310,7 @@ The rules:
   (`bootstrap/_agentmemory.ps1` carries a comment saying exactly that). Write code that is
   correct either way.
 
-Reproducing is a one-liner, and worth doing for anything on the `ts-config` / `ts-update` /
+Reproducing is a one-liner, and worth doing for anything on the `tstack config` / `tstack update` /
 wizard path:
 
 ```powershell
@@ -372,7 +372,7 @@ function Invoke-Thing {
 if (-not (Invoke-Thing)) { ... }       # non-empty array is ALWAYS truthy
 ```
 
-Three failures at once, observed live when `ts-config tts daemon on` shipped:
+Three failures at once, observed live when `tstack config tts daemon on` shipped:
 the child's output (including its error text) never reaches the user, the
 boolean is buried as the last element of an array, and `-not (array)` reads
 any failure as success. Only the child's *stderr* leaks to the console, which
