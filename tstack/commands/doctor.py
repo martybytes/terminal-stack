@@ -37,6 +37,7 @@ from pathlib import Path
 from .. import checks, paths, store
 from .. import platform as plat
 from ..checks import Report
+from . import agents
 
 HEADER = "==> terminal-stack doctor"
 PASSED = "==> all checks passed."
@@ -383,12 +384,39 @@ def _check_claude_tts_hooks(report: Report) -> None:
         )
 
 
+def agentmemory_plugin_caches() -> list[Path]:
+    """Where each vendor keeps the agentmemory plugin, for the host whose config
+    counts (the Windows profile when this is WSL)."""
+    root = agents.user_root()
+    codex = os.environ.get("CODEX_HOME")
+    codex_root = Path(codex) if codex else root / ".codex"
+    return [
+        root / ".claude" / "plugins" / "cache" / "agentmemory" / "agentmemory",
+        codex_root / "plugins" / "cache" / "agentmemory" / "agentmemory",
+    ]
+
+
 def check_agentmemory_wiring(report: Report, src: Path | None) -> None:
     """Vendor plugin caches hold the hook scripts, so a plugin upgrade reverts
-    every edit and retrieval silently stops. Nothing else reports it."""
+    every edit and retrieval silently stops. Nothing else reports it.
+
+    "Nothing is wired" and "the wiring is intact" are different answers, and
+    `--check` cannot tell them apart: every host gates on its plugin cache and
+    returns 0 when there is none, so a machine with no agentmemory plugin at all
+    reported `ok wiring intact` while capturing nothing. Ask the same question
+    --check asks -- does a plugin cache exist -- before believing it.
+    """
     if src is None:
         return
     if store.normalise(store.get("agentmemoryEnabled", "off")) != "true":
+        return
+    if not any(cache.is_dir() for cache in agentmemory_plugin_caches()):
+        report.fail(
+            "agentmemory-wiring",
+            "agentmemory is enabled but its plugin is not installed for any agent "
+            "- nothing captures",
+            "install it: tstack agents agentmemory repair",
+        )
         return
     script = src / "bootstrap" / "ts-agentmemory.sh"
     if plat.kind() == plat.WINDOWS:
@@ -422,6 +450,88 @@ def check_agentmemory_wiring(report: Report, src: Path | None) -> None:
             "agentmemory-wiring",
             "agentmemory hook wiring is incomplete (a plugin upgrade reverts it)",
             "repair: tstack config agents agentmemory repair",
+        )
+
+
+def _agentmemory_container(kind_hint: str = "") -> str:
+    """The running agentmemory server container, or "".
+
+    Never the console: it shares the name prefix and holds no secret. Bounded,
+    because a wedged Docker must not hang the report -- Python's own timeout is
+    the portable watchdog the shell had to hand-write, macOS having no timeout(1).
+    """
+    got = _run(
+        ["docker", "ps", "--filter", "name=agentmemory", "--format", "{{.Names}}"], timeout=5
+    )
+    if not got or got.returncode != 0:
+        return ""
+    for name in got.stdout.splitlines():
+        name = name.strip()
+        if name and "console" not in name:
+            return name
+    return ""
+
+
+def _agentmemory_recovered_secret(src: Path | None) -> str:
+    """The value a hook would recover to on THIS host, or "".
+
+    Windows-side: a freshly spawned cmd.exe reads the current user environment,
+    which is what the hook's recovery re-reads -- not this process's possibly stale
+    copy. That read is gated on the Windows side existing, because cmd.exe exits
+    127 on every host that is not Windows.
+
+    Unix: there is no HKCU\\Environment, so the 0600 cache IS what a hook recovers
+    to. A group- or world-readable cache is refused, matching what the hook would
+    have trusted.
+    """
+    if plat.is_windows_side():
+        got = _run(["cmd.exe", "/c", "echo %AGENTMEMORY_SECRET%"], timeout=5)
+        value = (got.stdout.strip() if got and got.returncode == 0 else "").strip()
+        return "" if "%AGENTMEMORY_SECRET%" in value else value
+    base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    for name in ("terminal-stack", "docker-local"):
+        cache = Path(base) / name / "agentmemory.secret"
+        if not cache.is_file():
+            continue
+        try:
+            if (cache.stat().st_mode & 0o777) != 0o600:
+                continue
+            value = cache.read_text(encoding="utf-8").strip()
+        except OSError:
+            continue
+        if value:
+            return value
+    return ""
+
+
+def check_agentmemory_secret(report: Report, src: Path | None) -> None:
+    """A stale secret 401s every request, and both capture and retrieval swallow
+    it -- so a whole session's observations vanish with nothing in any log.
+
+    Compares the container's copy against the one this host's hooks would recover
+    to. Skips quietly when Docker is unreachable: the container is not this repo's
+    concern. NEITHER VALUE IS EVER PRINTED.
+    """
+    if src is None:
+        return
+    if store.normalise(store.get("agentmemoryEnabled", "off")) != "true":
+        return
+    if not shutil.which("docker"):
+        return
+    container = _agentmemory_container()
+    if not container:
+        return
+    got = _run(["docker", "exec", container, "cat", "/data/.hmac"], timeout=5)
+    in_container = (got.stdout.strip() if got and got.returncode == 0 else "").strip()
+    recovered = _agentmemory_recovered_secret(src)
+    if not in_container or not recovered:
+        return
+    if in_container != recovered:
+        report.fail(
+            "agentmemory-secret",
+            "agentmemory secret mismatch: the container's differs from the one your "
+            "hooks would recover - every request 401s and is swallowed",
+            "refresh it with the plugin's setup",
         )
 
 
@@ -584,6 +694,7 @@ def collect() -> Report:
     check_memory_backend(report)
     check_tts(report)
     check_agentmemory_wiring(report, src)
+    check_agentmemory_secret(report, src)
     check_smb(report)
     check_clone_location(report, src)
     check_other_clones(report, src)

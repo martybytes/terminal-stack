@@ -1023,3 +1023,15 @@ def test_run_checks_reports_every_file_it_found(tree, calls, monkeypatch, capsys
 def test_a_non_numeric_port_check_is_absent_rather_than_a_crash(tree, calls):
     svc = build(tree, "status")
     assert services.port_publication(svc, "not-a-port") == 2
+
+
+def test_replace_in_file_tells_matched_apart_from_changed(tmp_path):
+    """Both shell implementations conflated them -- node exits 3 for "unchanged",
+    and the kokoro seeder read that as "no COMPOSE_FILE line to set". On a
+    Blackwell box, where the shipped example already carries the profile the
+    machine needs, that warned about a file that was perfectly correct."""
+    f = tmp_path / "x.env"
+    f.write_text("KEY=already-right\n", encoding="utf-8")
+    assert stacks.replace_in_file(f, "^KEY=.*$", "KEY=already-right") is True
+    assert f.read_text(encoding="utf-8") == "KEY=already-right\n"
+    assert stacks.replace_in_file(f, "^MISSING=.*$", "MISSING=x") is False

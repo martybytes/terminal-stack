@@ -458,6 +458,8 @@ def test_a_malformed_cursor_config_is_never_overwritten(tmp_path, monkeypatch, c
     agents._write_cursor_mcp("headroom", {"command": "docker", "args": []})
     assert mcp.read_text(encoding="utf-8") == "{ not json"
     assert "refusing to overwrite malformed JSON" in capsys.readouterr().err
+
+
 @pytest.mark.skipif(not shutil.which("pwsh"), reason="PowerShell 7 is unavailable")
 def test_windows_config_preserves_agent_settings_when_other_values_change(tmp_path):
     home = tmp_path / "home"
@@ -2043,9 +2045,7 @@ def test_the_agents_command_invokes_the_hook_wiring(monkeypatch, tmp_path):
 
     ran = []
     monkeypatch.setattr(agents, "find_agent", lambda name: None)
-    monkeypatch.setattr(
-        agents.subprocess, "run", lambda argv, **k: ran.append(argv) or _Ok()
-    )
+    monkeypatch.setattr(agents.subprocess, "run", lambda argv, **k: ran.append(argv) or _Ok())
     memory = agents.AgentMemory(ROOT, agents.Out())
     monkeypatch.setattr(memory, "adapter", lambda: ["bash", "ts-agentmemory.sh"])
 

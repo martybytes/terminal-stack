@@ -224,6 +224,31 @@ ts_apps_install_note() {
 # `curl -fsS` treats either as failure, which is why `tstack agents agentmemory
 # status` reported the service down while it was up and serving.
 
+# ts_timeout <seconds> <cmd> [args...] — bound a command that might never return.
+# macOS has no timeout(1); brew coreutils supplies gtimeout, and NEITHER is
+# guaranteed. Without the watchdog fallback a check that merely wants a time
+# bound becomes a hard 127 on a stock Mac, which is worse than the hang it was
+# guarding against. `ts_smb_timeout` delegates here; do not fork a second copy.
+ts_timeout() {
+    local secs="$1"; shift
+    if command -v timeout >/dev/null 2>&1; then
+        timeout "$secs" "$@"
+        return $?
+    fi
+    if command -v gtimeout >/dev/null 2>&1; then
+        gtimeout "$secs" "$@"
+        return $?
+    fi
+    "$@" &
+    local pid=$! rc=0
+    ( sleep "$secs"; kill -TERM "$pid" 2>/dev/null || true ) 2>/dev/null &
+    local watchdog=$!
+    wait "$pid" 2>/dev/null || rc=$?
+    kill -TERM "$watchdog" 2>/dev/null || true
+    wait "$watchdog" 2>/dev/null || true
+    return "$rc"
+}
+
 # ts_probe_http <url> [timeout] — 0 if anything answered, 1 if nothing did.
 ts_probe_http() {
     local url="$1" t="${2:-2}" code
@@ -913,12 +938,20 @@ ts_memory_apply() {                        # <agentmemory|headroom|none>
     ts_memory_write_compose_file "$backend"
 }
 
+# The agent toggles that are genuinely independent choices. agentmemoryEnabled is
+# NOT among them: it is derived from memoryBackend, and ts_memory_apply is its
+# only writer (see the comment above it). Every caller here follows this with
+# ts_memory_apply, which is what actually records the wizard's memory answer --
+# writing the derived key here and never the authoritative one is precisely how a
+# machine ended up with agentmemoryEnabled=off next to memoryBackend=agentmemory,
+# a combination the wizard cannot offer and ts-doctor reports as drift.
+# The 4th positional argument is still accepted and ignored, so an out-of-tree
+# caller does not silently start passing cursor mode into caveman.
 ts_agents_save_config() {
-    local headroom="${1:-off}" cursor="${2:-mcp}" caveman="${3:-off}" agentmemory="${4:-off}"
+    local headroom="${1:-off}" cursor="${2:-mcp}" caveman="${3:-off}"
     ts_data_set headroomEnabled "$headroom"
     ts_data_set headroomCursorMode "$cursor"
     ts_data_set cavemanEnabled "$caveman"
-    ts_data_set agentmemoryEnabled "$agentmemory"
     ts_mirror_windows_config
 }
 

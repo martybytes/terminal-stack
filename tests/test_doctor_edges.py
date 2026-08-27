@@ -58,12 +58,32 @@ def test_a_timeout_is_not_an_exception(monkeypatch):
     assert doctor._run(["x"]) is None
 
 
+def _with_agentmemory_plugin(monkeypatch, tmp_path):
+    """A machine that HAS the plugin installed.
+
+    The wiring check now asks that question before believing `--check`, because
+    every host gates on its plugin cache and returns 0 when there is none -- so a
+    machine with no plugin at all used to report `ok wiring intact` while
+    capturing nothing. These two tests are about what happens once the plugin IS
+    there, so they have to say so; without it they passed on a developer's machine
+    and failed in a clean container, which is the trap the parity harness exists
+    to catch.
+    """
+    from tstack.commands import agents
+
+    home = tmp_path / "agent-home"
+    (home / ".claude/plugins/cache/agentmemory/agentmemory").mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(agents, "user_root", lambda: home)
+    monkeypatch.setenv("CODEX_HOME", str(home / ".codex"))
+
+
 def test_a_broken_agentmemory_probe_is_silent_not_fatal(monkeypatch, tmp_path):
     """When the probe itself cannot run, say nothing rather than claim the wiring
     is broken -- an unrunnable check is not evidence."""
     as_platform(monkeypatch, plat.LINUX)
     (tmp_path / "bootstrap").mkdir()
     (tmp_path / "bootstrap" / "ts-agentmemory.sh").write_text("", encoding="utf-8")
+    _with_agentmemory_plugin(monkeypatch, tmp_path)
     monkeypatch.setattr(store, "get", lambda k, d=None: "on")
     monkeypatch.setattr(doctor, "_run", lambda *a, **k: None)
     report = Report()
@@ -75,6 +95,7 @@ def test_agentmemory_wiring_intact_is_ok(monkeypatch, tmp_path):
     as_platform(monkeypatch, plat.LINUX)
     (tmp_path / "bootstrap").mkdir()
     (tmp_path / "bootstrap" / "ts-agentmemory.sh").write_text("", encoding="utf-8")
+    _with_agentmemory_plugin(monkeypatch, tmp_path)
     monkeypatch.setattr(store, "get", lambda k, d=None: "on")
     monkeypatch.setattr(
         doctor, "_run", lambda argv, **k: subprocess.CompletedProcess(argv, 0, "", "")

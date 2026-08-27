@@ -509,22 +509,43 @@ ts_pick_app_groups() {
     echo "${selected# }"
 }
 
+# The re-run case is the one that bites: this wizard is not only an installer,
+# it is what `ts-config reconfigure` and a repeat bootstrap run. Defaulting to
+# `recommended` on a machine that already has a larger saved selection meant
+# pressing Enter through the questions SHRANK `apps` in chezmoi [data] -- the
+# binaries stayed, the record of wanting them did not, and the next ts-update
+# had nothing to nag about. So when a selection already exists it becomes both
+# the first option and the default, and the recommended set is still one key away.
 ts_prompt_apps() {
-    local intro choice
+    local intro choice saved def
+    saved="$(ts_data_get_apps 2>/dev/null || true)"
     # ts_apps_install_note prints its own trailing blank line; strip it so the
     # menu stays a single block.
     intro="$(ts_apps_install_note 2>/dev/null || true)"
     intro="${intro:+$intro
 }  recommended: $TS_APPS_RECOMMENDED
   also available: $TS_APPS_OPTIONAL"
-    choice="$(ts_prompt_choice recommended \
+    local opts=()
+    def=recommended
+    if [ -n "$saved" ]; then
+        def=keep
+        opts=("keep|keep this machine's current selection|$(echo "$saved" | wc -w | tr -d ' ') tools already chosen here")
+    fi
+    # ${opts[@]+"${opts[@]}"}, not "${opts[@]}": bash 3.2 -- the only bash on macOS
+    # -- treats an EMPTY array as unbound under `set -u`, and every bootstrap runs
+    # `set -euo pipefail`. The empty case here is a machine with no saved apps,
+    # i.e. a first install, so the bare form would break exactly the fresh run.
+    opts=(${opts[@]+"${opts[@]}"}
+        'recommended|install the recommended set'
+        "all|install everything|recommended + $(echo "$TS_APPS_OPTIONAL" | tr ' ' ',' | sed 's/,/, /g')"
+        "groups|choose whole groups|$(echo "$TS_APP_GROUPS" | tr ' ' ',' | sed 's/,/, /g')"
+        'customize|choose individual tools'
+        'none|skip all optional apps')
+    choice="$(ts_prompt_choice "$def" \
         'Optional CLI tools (font, Starship, chezmoi, zsh — always installed):' "$intro" \
-        'recommended|install the recommended set' \
-        "all|install everything|recommended + $(echo "$TS_APPS_OPTIONAL" | tr ' ' ',' | sed 's/,/, /g')" \
-        "groups|choose whole groups|$(echo "$TS_APP_GROUPS" | tr ' ' ',' | sed 's/,/, /g')" \
-        'customize|choose individual tools' \
-        'none|skip all optional apps')"
+        "${opts[@]}")"
     case "$choice" in
+        keep)      echo "$saved" ;;
         all)       echo "$TS_APPS_ALL" ;;
         none)      echo "" ;;
         groups)    ts_pick_app_groups ;;
@@ -676,7 +697,13 @@ ts_wizard_ask() {
     if [ -n "${TS_APPS:-}" ]; then TS_WIZ_APPS="$(ts_expand_apps "$TS_APPS")"
     else TS_WIZ_APPS="$(ts_prompt_apps)"; TS_WIZ_ASKED=$((TS_WIZ_ASKED + 1)); fi
 
-    TS_WIZ_TMUX="${TS_TMUX:-ctrl-b}"
+    # Never asked, but a re-run must not silently reset it: this used to be a bare
+    # `${TS_TMUX:-ctrl-b}`, so any machine whose prefix had been changed had it
+    # forced back to ctrl-b by the next reconfigure. Saved value first, then the
+    # default for a machine that has never answered.
+    TS_WIZ_TMUX="${TS_TMUX:-}"
+    [ -n "$TS_WIZ_TMUX" ] || TS_WIZ_TMUX="$(ts_data_get tmuxPrefix 2>/dev/null || true)"
+    [ -n "$TS_WIZ_TMUX" ] || TS_WIZ_TMUX=ctrl-b
 
     # Normalise here rather than passing the raw env value through: the review
     # screen and the saved config should say on/off, not the user's "skip".

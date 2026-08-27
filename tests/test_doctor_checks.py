@@ -279,6 +279,13 @@ def _stub_everything(monkeypatch, tmp_path, *, healthy: bool) -> None:
     home.mkdir(exist_ok=True)
     (home / ".zshrc").write_text("terminal-stack-zsh-start\ndoc-start\n", encoding="utf-8")
     monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
+    # A healthy machine with agentmemory ON has the plugin installed somewhere.
+    # Without a cache the wiring check correctly reports "enabled but not
+    # installed for any agent" -- which is the whole point of that gate, so the
+    # sandbox has to be honest about which machine it is pretending to be.
+    if healthy:
+        (home / ".claude/plugins/cache/agentmemory/agentmemory").mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("CODEX_HOME", str(home / ".codex"))
     monkeypatch.setattr(doctor.shutil, "which", lambda t: "/usr/bin/" + t)
 
 

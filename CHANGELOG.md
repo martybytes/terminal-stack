@@ -6,6 +6,31 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Added
 
+- **The macOS regression fixes, carried forward into the Python (08/27/2026).**
+  `e969c30f` landed on `main` while the `tstack` port was in flight, fixing four
+  regressions that ran on every non-Windows host - and three of the files it fixed
+  are files the port had deleted. Resolving the merge as "deleted wins" would have
+  dropped those fixes silently, so the *rules* moved instead:
+
+  - **The doctor no longer believes `--check`'s exit code.** Every host gates on
+    its agentmemory plugin cache and returns 0 when there is none, so a machine
+    with no plugin at all reported `ok wiring intact` while capturing nothing.
+    `tstack doctor` now asks that question first and reports the third outcome:
+    *enabled but not installed for any agent - nothing captures*.
+  - **`tstack services bootstrap` seeds kokoro for THIS machine.** kokoro's
+    `.env.example` ships Profile A (Blackwell, CUDA 12.8) uncommented, and seeding
+    was a blind copy - so a Mac or a 40-series box got a cu128 image and the NVIDIA
+    device reservation, and `up` failed on "could not select device driver" after
+    pulling several GB. `stacks.gpu_profile()` is the one implementation of the
+    detection, keeping the darwin branch the pwsh twin never had: Docker Desktop
+    for Mac has no passthrough of any kind, so C is the only profile that can run
+    there and `nvidia-smi` is never probed.
+
+  Every upstream change to a file that still exists was taken as-is: `ts_timeout`,
+  the 0600 secret-cache reader, `ts_smb_timeout` delegating, the wizard keeping a
+  saved app selection and no longer resetting `tmuxPrefix`, `ts_memory_apply` in
+  all four save paths, and `-MemoryBackend` on the Windows `Save-TsConfig` calls.
+
 - **Every caller of the deleted twins repointed (08/26/2026).**
   Four executable call sites still ran `bootstrap/ts-agents.ps1` after it was
   deleted: `windows-bootstrap.ps1`'s post-wizard wiring, `sync-windows.ps1`'s and
@@ -231,6 +256,26 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
   **and WSL**, and a `.githooks/pre-push` full gate beside the existing pre-commit one.
 
 ### Fixed
+
+- **The doctor's agentmemory secret check, which the port had dropped (08/27/2026).**
+  The shell doctor compared the container's `/data/.hmac` against the value a hook
+  would recover to; `tstack doctor` did not carry it over at all, so a stale secret
+  - which 401s every request while both capture and retrieval swallow the error -
+  had nothing watching for it. CLAUDE.md said the check existed. It does now.
+
+  In the hardened form upstream gave it: the `cmd.exe` read is gated on the
+  Windows side existing (it is 127 everywhere else), Unix reads the 0600 cache
+  instead because there is no `HKCU\Environment` there, a group-readable cache is
+  refused, every probe is bounded, a dead Docker is silence rather than a verdict,
+  and neither value is ever printed.
+
+- **`replace_in_file` called a correct file a broken one (08/27/2026).**
+  It reported "the pattern matched nothing" whenever the text came back unchanged,
+  so seeding kokoro on a Blackwell box - where the shipped example already carries
+  the profile that machine needs - warned *no COMPOSE_FILE line to set* about a
+  file that was perfectly correct. Both shell implementations had the same
+  conflation (node exits 3 for "unchanged"). It now distinguishes matched from
+  changed.
 
 - **The Windows mirror nests the TTS block, and the reader did not know (08/26/2026).**
   chezmoi `[data]` is flat (`ccTtsEnabled`); `config.json` nests (`ccTts.enabled`),

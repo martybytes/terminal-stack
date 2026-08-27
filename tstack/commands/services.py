@@ -475,6 +475,14 @@ def _seed_env(svc: Services, directory: Path) -> None:
         return
     target.write_bytes(example.read_bytes())
     svc.out.info("seeded with the default profile - review it before starting the stack")
+    # kokoro is the one stack whose shipped default is wrong on most machines: its
+    # .env.example carries Profile A (Blackwell, CUDA 12.8) uncommented, so a blind
+    # copy hands a cu128 image and the NVIDIA device reservation to a Mac.
+    # setup-kokoro-docker.sh already refuses GPU on darwin; this is the same
+    # knowledge, applied to the file compose actually reads.
+    if directory.name == "kokoro":
+        ok, message = stacks.seed_kokoro_profile(target)
+        (svc.out.info if ok else svc.out.warn)(message)
 
 
 def _generated_secrets(source: Path) -> list[dict]:

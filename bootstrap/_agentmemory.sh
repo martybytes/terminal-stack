@@ -66,6 +66,37 @@ am_add_edit() {
 # traffic. Single source of truth for the URL.
 AM_HOSTS="claude codex cursor"
 
+# The 0600 secret cache, newest path first. This file already owns the pair --
+# the injected `amStoredSecret` reader below loops exactly these two directories
+# -- so anything else that needs to know reads it from here rather than growing a
+# third copy that can drift from the reader. ts-doctor sources this file in a
+# subshell for it. The legacy path is still live: the reader is JavaScript already
+# written into vendor hook files, and a machine only picks up a new reader when
+# `ts-agentmemory --apply` next runs.
+am_secret_cache_paths() {
+    local base="${XDG_CONFIG_HOME:-$HOME/.config}"
+    printf '%s\n' "$base/terminal-stack/agentmemory.secret" "$base/docker-local/agentmemory.secret"
+}
+
+# The cached secret, or empty. Refuses a cache that is not mode 600, matching
+# agentmemory_secret in services/_stack.sh: a group- or world-readable cache is
+# not the value a hook would have trusted either.
+am_secret_cache_read() {
+    local path mode value
+    while IFS= read -r path; do
+        [ -f "$path" ] || continue
+        mode="$(stat -f '%Lp' "$path" 2>/dev/null || stat -c '%a' "$path" 2>/dev/null || true)"
+        [ "$mode" = 600 ] || continue
+        value="$(tr -d '\r\n' < "$path" 2>/dev/null || true)"
+        [ -n "$value" ] || continue
+        printf '%s' "$value"
+        return 0
+    done <<EOF
+$(am_secret_cache_paths)
+EOF
+    return 0
+}
+
 am_agent_url() { printf 'http://localhost:3111/_agent/%s\n' "$1"; }
 
 # ---- the edits ----------------------------------------------------------------

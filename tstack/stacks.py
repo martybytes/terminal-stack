@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 import re
 import secrets
+import shutil
 import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -397,7 +398,11 @@ def rand_hex(chars: int = 32) -> str:
 
 
 def replace_in_file(path: Path, pattern: str, replacement: str) -> bool:
-    """Byte-exact whole-file regex replace. True when the file changed.
+    """Byte-exact whole-file regex replace. True when the pattern MATCHED.
+
+    Matched, not changed: a caller that anchors on `^KEY=` wants to know whether
+    the key was there, and a file already holding the wanted value is a success
+    with nothing to write.
 
     Not sed: sed is line-oriented and appends a trailing newline to a file that
     lacked one, and `-i` needs `-i ''` on BSD while GNU rejects it. These rewrite
@@ -419,8 +424,18 @@ def replace_in_file(path: Path, pattern: str, replacement: str) -> bool:
     # than reproduced.
     crlf = "\r\n" in before and before.count("\n") == before.count("\r\n")
     subject = before.replace("\r\n", "\n") if crlf else before
-    result = re.sub(pattern, replacement, subject, flags=re.MULTILINE)
-    if result == subject or not result:
+    result, matched = re.subn(pattern, replacement, subject, flags=re.MULTILINE)
+    if not matched:
+        return False
+    if result == subject:
+        # The pattern matched and the value is already what was wanted. That is a
+        # success with nothing to write, and it must not be reported as a missing
+        # anchor: both shell implementations conflated the two (node exits 3 for
+        # "unchanged"), so seeding kokoro on a Blackwell box -- where the shipped
+        # example already carries the right profile -- warned about a file that
+        # was perfectly correct.
+        return True
+    if not result:
         return False
     after = result.replace("\n", "\r\n") if crlf else result
     tmp = path.with_name(path.name + f".tmp{os.getpid()}")
@@ -437,6 +452,93 @@ def secret_fingerprint(secret: str) -> str:
     `docker logs` until it is rotated.
     """
     return f"{secret[:6]}...{secret[-4:]}"
+
+
+# ------------------------------------------------------------------ kokoro GPU
+
+# The three profiles kokoro/.env.example documents, and the image each one needs.
+KOKORO_PROFILES: dict[str, tuple[str, str]] = {
+    "A": (
+        "docker-compose.yml:docker-compose.gpu.yml",
+        "ghcr.io/remsky/kokoro-fastapi-gpu:v0.8.0-cu128",
+    ),
+    "B": (
+        "docker-compose.yml:docker-compose.gpu.yml",
+        "ghcr.io/remsky/kokoro-fastapi-gpu:v0.8.0-cu126",
+    ),
+    "C": ("docker-compose.yml", "ghcr.io/remsky/kokoro-fastapi-cpu:v0.8.0"),
+}
+
+
+def gpu_profile() -> tuple[str, str]:
+    """(profile, reason) for THIS machine. Port of tss_gpu_profile.
+
+    On macOS the answer is C unconditionally and nvidia-smi is never probed:
+    Docker Desktop for Mac has no GPU passthrough of any kind - not CUDA, and not
+    Metal/MPS - so a Linux container cannot reach the Apple GPU under any
+    configuration. The reason says that, rather than the pwsh twin's generic "no
+    NVIDIA GPU detected", which reads like something you could go and fix.
+    """
+    if engine.os_name() == engine.DARWIN:
+        return (
+            "C",
+            "Docker Desktop for Mac has no NVIDIA passthrough (and no Metal/MPS "
+            "passthrough either) - C is the only profile that can run here",
+        )
+    if not shutil.which("nvidia-smi"):
+        return ("C", "nvidia-smi not on PATH - treating this as a CPU-only machine")
+    got = _probe(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"])
+    name = got.splitlines()[0].strip() if got.strip() else ""
+    if not name:
+        return (
+            "C",
+            "nvidia-smi present but reported no GPU - treating this as a CPU-only machine",
+        )
+    # Blackwell consumer cards (RTX 50-series, sm_120) need the CUDA 12.8 build;
+    # the cu126 build starts fine then crash-loops on the first synthesis with
+    # "no kernel image is available".
+    if re.search(r"RTX\s*50\d{2}", name):
+        return ("A", f"{name} is Blackwell (RTX 50-series) - Profile A (cu128)")
+    return ("B", f"{name} is pre-Blackwell - Profile B (cu126) is the narrower match")
+
+
+def _probe(argv: list[str], timeout: int = 15) -> str:
+    try:
+        got = subprocess.run(
+            argv,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+            start_new_session=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return got.stdout if got.returncode == 0 else ""
+
+
+def seed_kokoro_profile(env_file: Path) -> tuple[bool, str]:
+    """Rewrite a freshly seeded kokoro .env for this machine's hardware.
+
+    (ok, message). Only ever called on a file the current run just created, so it
+    cannot overwrite a profile somebody chose.
+
+    kokoro is the one stack whose shipped default is wrong on most machines:
+    .env.example carries Profile A (Blackwell, CUDA 12.8) uncommented, and a blind
+    copy hands a cu128 image and the NVIDIA device reservation to a Mac or a
+    40-series box. `up` then fails on "could not select device driver", after
+    pulling several GB.
+
+    A missing anchor is reported rather than ignored: a silent no-op here is how
+    the GPU default gets shipped to a Mac all over again.
+    """
+    profile, reason = gpu_profile()
+    spec, image = KOKORO_PROFILES[profile]
+    if not replace_in_file(env_file, r"^COMPOSE_FILE=.*$", f"COMPOSE_FILE={spec}"):
+        return (False, f"{env_file}: no COMPOSE_FILE line to set - check it by hand")
+    if not replace_in_file(env_file, r"^KOKORO_IMAGE=.*$", f"KOKORO_IMAGE={image}"):
+        return (False, f"{env_file}: no KOKORO_IMAGE line to set - check it by hand")
+    return (True, f"kokoro profile {profile} - {reason}")
 
 
 # ---------------------------------------------------------------------- backup

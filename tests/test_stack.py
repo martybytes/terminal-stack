@@ -18,7 +18,8 @@ from pathlib import Path
 
 import pytest
 
-from tstack import engine, stacks
+from tests.shell_support import BASH, bash_path
+from tstack import checks, engine, stacks
 from tstack.commands import services
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -825,3 +826,329 @@ def test_overlay_checks_are_paired_with_their_overlay():
     base = (stacks / "headroom" / "ts-checks.conf").read_text(encoding="utf-8")
     assert "ts-headroom-qdrant" not in base and "ts-headroom-neo4j" not in base
     assert "sh" in "sh"  # keep the module import-light; no docker needed anywhere above
+
+
+# ── the macOS/Linux regressions that ran on every non-Windows host ────────────
+# All four were found by reading the code against one Mac that had never run the
+# absorbed service tree. Three of them fail identically on native Linux.
+
+
+def _sh_function(text, name):
+    """One shell function's body. Ends at a line that is exactly `}`, not at the
+    first `\n}`: ts_prompt_apps embeds a line STARTING with `}` inside a quoted
+    string, and slicing on that returns three lines of a twenty-line function."""
+    import re as _re
+
+    start = text.index(f"{name}() {{")
+    m = _re.search(r"^\}$", text[start:], _re.M)
+    assert m, f"{name} has no closing brace on its own line"
+    return text[start : start + m.end()]
+
+
+def test_the_agentmemory_secret_check_cannot_abort_the_doctor(monkeypatch):
+    """The shell version of this block ended the WHOLE report -- no summary, no
+    ts-smb checks, no clone advisories -- because it ran under `set -euo pipefail`
+    and three substitutions were unguarded: `docker ps | grep -v console` exits 1
+    when nothing matches, `docker exec` exits non-zero when it fails, and
+    `cmd.exe` exits 127 on every host that is not Windows.
+
+    Python has no `set -e`, so the rule those guards existed for is asserted
+    directly: every failure here leaves the rest of the report running, and the
+    probes are bounded -- Python's own timeout being the portable watchdog the
+    shell had to hand-write, macOS having no timeout(1).
+    """
+    from tstack import store
+    from tstack.commands import doctor
+
+    report = checks.Report()
+    monkeypatch.setattr(store, "get", lambda key, default=None: "on")
+    monkeypatch.setattr(doctor.shutil, "which", lambda name: "/usr/bin/docker")
+
+    def explode(argv, timeout=15):
+        raise AssertionError("docker was run without _run's guard")
+
+    # Every docker call goes through _run, which swallows OSError and returns None.
+    monkeypatch.setattr(doctor, "_run", lambda argv, timeout=15: None)
+    doctor.check_agentmemory_secret(report, ROOT)
+    assert report.issues == 0, "a dead docker must not be reported as a mismatch"
+
+    # A non-zero exit is equally not a mismatch.
+    class Failed:
+        returncode = 1
+        stdout = ""
+        stderr = ""
+
+    monkeypatch.setattr(doctor, "_run", lambda argv, timeout=15: Failed())
+    doctor.check_agentmemory_secret(report, ROOT)
+    assert report.issues == 0
+
+    # And every probe is bounded.
+    seen = []
+    monkeypatch.setattr(doctor, "_run", lambda argv, timeout=15: seen.append(timeout) or Failed())
+    doctor.check_agentmemory_secret(report, ROOT)
+    assert seen and all(t and t <= 15 for t in seen), seen
+
+
+def test_the_secret_probe_reads_cmd_exe_only_on_the_windows_side(monkeypatch, tmp_path):
+    """cmd.exe exits 127 on every host that is not Windows, which is what took the
+    shell doctor down. On Unix the 0600 cache IS what a hook recovers to."""
+    from tstack import platform as plat
+    from tstack.commands import doctor
+
+    calls = []
+
+    class Got:
+        returncode = 0
+        stdout = "from-cmd"
+        stderr = ""
+
+    monkeypatch.setattr(doctor, "_run", lambda argv, timeout=15: calls.append(argv) or Got())
+    monkeypatch.setattr(plat, "is_windows_side", lambda: True)
+    assert doctor._agentmemory_recovered_secret(ROOT) == "from-cmd"
+    assert any("cmd.exe" in c[0] for c in calls)
+
+    calls.clear()
+    monkeypatch.setattr(plat, "is_windows_side", lambda: False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    cache = tmp_path / "terminal-stack" / "agentmemory.secret"
+    cache.parent.mkdir(parents=True)
+    cache.write_text("from-cache\n", encoding="utf-8")
+    cache.chmod(0o600)
+    got = doctor._agentmemory_recovered_secret(ROOT)
+    assert not any("cmd.exe" in c[0] for c in calls), "cmd.exe is 127 off Windows"
+    # chmod is advisory on Windows, where the mode check cannot bite.
+    if os.name != "nt":
+        assert got == "from-cache"
+        cache.chmod(0o644)
+        assert doctor._agentmemory_recovered_secret(ROOT) == "", (
+            "a group-readable cache is not what a hook would have trusted"
+        )
+
+
+def test_the_secret_itself_is_never_printed(monkeypatch, capsys):
+    """It is a credential, and the report is read over someone's shoulder."""
+    from tstack import store
+    from tstack.commands import doctor
+
+    monkeypatch.setattr(store, "get", lambda key, default=None: "on")
+    monkeypatch.setattr(doctor.shutil, "which", lambda name: "/usr/bin/docker")
+    monkeypatch.setattr(doctor, "_agentmemory_container", lambda kind_hint="": "ts-agentmemory")
+    monkeypatch.setattr(doctor, "_agentmemory_recovered_secret", lambda src: "user-side-secret")
+
+    class Got:
+        returncode = 0
+        stdout = "container-side-secret"
+        stderr = ""
+
+    monkeypatch.setattr(doctor, "_run", lambda argv, timeout=15: Got())
+    report = checks.Report()
+    doctor.check_agentmemory_secret(report, ROOT)
+    rendered = "\n".join(doctor.render(report, quiet=False))
+    assert "mismatch" in rendered
+    assert "container-side-secret" not in rendered
+    assert "user-side-secret" not in rendered
+
+
+def test_a_missing_agentmemory_plugin_is_not_reported_as_intact_wiring(monkeypatch, tmp_path):
+    """--check gates every host on its plugin cache and returns 0 when there is
+    none, so a machine with no agentmemory plugin at all reported `ok wiring
+    intact` while capturing nothing. Ask the cache question first."""
+    from tstack import store
+    from tstack.commands import agents, doctor
+
+    monkeypatch.setattr(store, "get", lambda key, default=None: "on")
+    monkeypatch.setattr(agents, "user_root", lambda: tmp_path)
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / ".codex"))
+    monkeypatch.setattr(
+        doctor, "_run", lambda argv, timeout=15: pytest.fail("--check was believed with no cache")
+    )
+
+    report = checks.Report()
+    doctor.check_agentmemory_wiring(report, ROOT)
+    messages = " ".join(r.message for r in report.results if r.status == checks.FAIL)
+    assert "not installed for any agent" in messages
+    assert "nothing captures" in messages
+
+    # With a cache present, --check is consulted again.
+    cache = tmp_path / ".claude" / "plugins" / "cache" / "agentmemory" / "agentmemory"
+    cache.mkdir(parents=True)
+
+    class Ok:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    monkeypatch.setattr(doctor, "_run", lambda argv, timeout=15: Ok())
+    report = checks.Report()
+    doctor.check_agentmemory_wiring(report, ROOT)
+    assert report.issues == 0
+
+
+def test_every_bootstrap_persists_the_memory_backend():
+    """The wizard asked the question and threw the answer away: TS_WIZ_MEMORY_BACKEND
+    was collected and exported, but ts_agents_save_config writes only the derived
+    agentmemoryEnabled. Answering 'headroom' or 'none' therefore produced
+    memoryBackend=agentmemory next to agentmemoryEnabled=off -- a pair the wizard
+    cannot offer and both doctors report as drift."""
+    for name in ("mac-bootstrap.sh", "linux-bootstrap.sh", "wsl-bootstrap.sh", "ts-config.sh"):
+        body = (ROOT / "bootstrap" / name).read_text(encoding="utf-8")
+        if "ts_agents_save_config" not in body:
+            continue
+        assert "ts_memory_apply" in body, f"{name} saves the agent toggles but not the backend"
+        assert body.index("ts_agents_save_config") < body.index("ts_memory_apply"), (
+            f"{name}: ts_memory_apply must run last so it owns the derived key"
+        )
+
+    # ts_memory_apply is documented as the ONLY writer of agentmemoryEnabled;
+    # ts_agents_save_config used to write it too, which is what made the drift
+    # representable in the first place.
+    cfg = (ROOT / "bootstrap" / "_config.sh").read_text(encoding="utf-8")
+    helper = _sh_function(cfg, "ts_agents_save_config")
+    assert "agentmemoryEnabled" not in helper, (
+        "ts_agents_save_config must not write the key ts_memory_apply derives"
+    )
+
+    # The pwsh bootstrap carried the OLD value forward instead of recording the
+    # new one, which is the same bug with a quieter failure.
+    ps = (ROOT / "bootstrap" / "windows-bootstrap.ps1").read_text(encoding="utf-8")
+    for line in ps.splitlines():
+        if "Save-TsConfig" in line and "-AgentmemoryEnabled" in line:
+            assert "-MemoryBackend" in line, (
+                "Save-TsConfig call records the derived key but not the backend"
+            )
+
+
+def test_the_wizard_does_not_reset_saved_choices_on_a_re_run():
+    """This wizard is also what `ts-config reconfigure` and a repeat bootstrap
+    run. Defaulting to `recommended` shrank a larger saved app list, and the tmux
+    prefix was forced back to ctrl-b unconditionally -- both silently, on Enter."""
+    wiz = (ROOT / "bootstrap" / "_wizard.sh").read_text(encoding="utf-8")
+
+    apps = _sh_function(wiz, "ts_prompt_apps")
+    assert "ts_data_get_apps" in apps, "the app prompt must know what is already saved"
+    assert "keep|" in apps and "def=keep" in apps, (
+        "an existing selection must be offered, and be the default"
+    )
+
+    assert 'TS_WIZ_TMUX="${TS_TMUX:-ctrl-b}"' not in wiz, (
+        "a bare default resets a prefix the machine already had"
+    )
+    assert "ts_data_get tmuxPrefix" in wiz
+
+    # bash 3.2 -- the only bash on macOS -- treats an EMPTY array as unbound
+    # under `set -u`, and every bootstrap runs `set -euo pipefail`. The empty
+    # case is a machine with nothing saved, so the bare form breaks the FIRST
+    # install and nothing else, which is the hardest kind to notice.
+    assert 'opts=(${opts[@]+"${opts[@]}"}' in apps, (
+        'expand a possibly-empty array as ${opts[@]+"${opts[@]}"}, not "${opts[@]}"'
+    )
+
+
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+def test_the_app_prompt_runs_on_a_fresh_machine_under_set_u():
+    """The static check above, actually executed: source the wizard under the
+    same flags a bootstrap uses and take the default on an empty selection."""
+    script = (
+        "set -euo pipefail\n"
+        f"cd {bash_path(ROOT)}\n"
+        "source bootstrap/_config.sh >/dev/null 2>&1\n"
+        "source bootstrap/_wizard.sh >/dev/null 2>&1\n"
+        'ts_data_get_apps() { printf ""; }\n'
+        'printf "\\n" | ts_prompt_apps 2>/dev/null\n'
+    )
+    r = subprocess.run(
+        [BASH, "-c", script],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=60,
+        # ts_prompt_choice reads /dev/tty, not stdin, so stdin=DEVNULL does not
+        # stop it: without a new session there is no controlling terminal to read.
+        start_new_session=True,
+    )
+    assert r.returncode == 0, f"fresh-machine app prompt failed: {r.stderr}"
+    assert len(r.stdout.split()) > 0, "the default produced no apps at all"
+
+
+def test_kokoro_is_seeded_for_this_machine_not_for_a_blackwell_box(monkeypatch, tmp_path):
+    """kokoro's .env.example ships Profile A (CUDA 12.8) uncommented, and seeding
+    was a blind copy -- so a Mac got a cu128 image and the NVIDIA device
+    reservation, and `up` failed on `could not select device driver` after pulling
+    several GB. setup-kokoro-docker.sh already refused GPU on darwin; the file
+    compose actually reads did not."""
+    # The example must keep shipping the lines the rewrite anchors on.
+    example = ROOT / "services/stacks/kokoro/.env.example"
+    body = example.read_text(encoding="utf-8")
+    assert any(line.startswith("COMPOSE_FILE=") for line in body.splitlines())
+    assert any(line.startswith("KOKORO_IMAGE=") for line in body.splitlines())
+
+    env = tmp_path / ".env"
+    env.write_text(body, encoding="utf-8")
+
+    monkeypatch.setattr(stacks, "gpu_profile", lambda: ("C", "no GPU here"))
+    ok, message = stacks.seed_kokoro_profile(env)
+    assert ok, message
+    rewritten = env.read_text(encoding="utf-8")
+    assert "COMPOSE_FILE=docker-compose.yml\n" in rewritten, "the GPU overlay was left in"
+    assert "kokoro-fastapi-cpu:v0.8.0" in rewritten
+    assert "cu128" not in rewritten
+
+    # A missing anchor is reported, never a silent no-op: that is how the GPU
+    # default gets shipped to a Mac all over again.
+    bare = tmp_path / "bare.env"
+    bare.write_text("SOMETHING=else\n", encoding="utf-8")
+    ok, message = stacks.seed_kokoro_profile(bare)
+    assert not ok and "COMPOSE_FILE" in message
+
+
+def test_the_gpu_profile_never_probes_a_mac(monkeypatch):
+    """Docker Desktop for Mac has no passthrough of any kind -- not CUDA, not
+    Metal/MPS -- so C is the only profile that can run there and nvidia-smi is
+    not worth asking. The reason says that, rather than the pwsh twin's "no GPU
+    detected", which reads like something you could go and fix."""
+    monkeypatch.setattr(engine, "os_name", lambda: engine.DARWIN)
+    monkeypatch.setattr(
+        stacks.shutil, "which", lambda name: pytest.fail("nvidia-smi was probed on darwin")
+    )
+    profile, reason = stacks.gpu_profile()
+    assert profile == "C"
+    assert "Metal" in reason
+
+
+def test_the_gpu_profile_tells_blackwell_from_everything_else(monkeypatch):
+    """The cu126 build starts fine on a 50-series card and then crash-loops on the
+    first synthesis with "no kernel image is available"."""
+    monkeypatch.setattr(engine, "os_name", lambda: engine.LINUX)
+    monkeypatch.setattr(stacks.shutil, "which", lambda name: "/usr/bin/nvidia-smi")
+
+    monkeypatch.setattr(stacks, "_probe", lambda argv, timeout=15: "NVIDIA GeForce RTX 5090\n")
+    assert stacks.gpu_profile()[0] == "A"
+
+    monkeypatch.setattr(stacks, "_probe", lambda argv, timeout=15: "NVIDIA GeForce RTX 4090\n")
+    assert stacks.gpu_profile()[0] == "B"
+
+    monkeypatch.setattr(stacks, "_probe", lambda argv, timeout=15: "")
+    profile, reason = stacks.gpu_profile()
+    assert profile == "C" and "no GPU" in reason
+
+    monkeypatch.setattr(stacks.shutil, "which", lambda name: None)
+    assert stacks.gpu_profile()[0] == "C"
+
+
+def test_seeding_kokoro_reports_the_profile_it_chose(tmp_path, monkeypatch, capsys):
+    """The line is the only place a person learns which image they are about to
+    pull several GB of."""
+    from tstack.commands import services as services_cmd
+
+    directory = tmp_path / "kokoro"
+    directory.mkdir()
+    (directory / ".env.example").write_text(
+        "COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml\nKOKORO_IMAGE=x\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(stacks, "gpu_profile", lambda: ("B", "a 4090 is pre-Blackwell"))
+    svc = services_cmd.Services(tmp_path, services_cmd.parse(["bootstrap"]))
+    services_cmd._seed_env(svc, directory)
+    out = capsys.readouterr().out
+    assert "kokoro profile B" in out
+    assert "cu126" in (directory / ".env").read_text(encoding="utf-8")

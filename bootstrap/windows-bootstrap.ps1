@@ -160,7 +160,7 @@ Show-TsInstalledApps $selectedApps
 # Save the chosen config to %LOCALAPPDATA%\terminal-stack\config.json — read by
 # sync-windows.ps1 (and the WSL hook's mirror) to render the Windows .tmpl files.
 if ($PSCmdlet.ShouldProcess('terminal-stack config.json', 'save config')) {
-    Save-TsConfig -LeaderChord $leaderChord -ThemeMode $themeMode -Apps $selectedApps -WeztermMux $wizard.WezMux -WeztermRestore $wizard.WezRestore -CcTts $ccTts -HeadroomEnabled $wizard.Headroom -HeadroomCursorMode $wizard.HeadroomCursor -CavemanEnabled $wizard.Caveman -AgentmemoryEnabled $wizard.Agentmemory | Out-Null
+    Save-TsConfig -LeaderChord $leaderChord -ThemeMode $themeMode -Apps $selectedApps -WeztermMux $wizard.WezMux -WeztermRestore $wizard.WezRestore -CcTts $ccTts -HeadroomEnabled $wizard.Headroom -HeadroomCursorMode $wizard.HeadroomCursor -CavemanEnabled $wizard.Caveman -AgentmemoryEnabled $wizard.Agentmemory -MemoryBackend $wizard.MemoryBackend | Out-Null
     Export-CcTtsJson
     Write-Host "==> Saved config to $(Get-TsConfigPath)"
     if ($wizard.CcTts -eq 'on') {
@@ -168,13 +168,13 @@ if ($PSCmdlet.ShouldProcess('terminal-stack config.json', 'save config')) {
             else { @('-NoStart', '-NoAutostart') }
         if (Invoke-TsCcTtsDaemonInstaller $installerArgs) {
             $ccTts.daemon.enabled = ($wizard.CcTtsDaemon -eq 'on')
-            Save-TsConfig -LeaderChord $leaderChord -ThemeMode $themeMode -Apps $selectedApps -WeztermMux $wizard.WezMux -WeztermRestore $wizard.WezRestore -CcTts $ccTts -HeadroomEnabled $wizard.Headroom -HeadroomCursorMode $wizard.HeadroomCursor -CavemanEnabled $wizard.Caveman -AgentmemoryEnabled $wizard.Agentmemory | Out-Null
+            Save-TsConfig -LeaderChord $leaderChord -ThemeMode $themeMode -Apps $selectedApps -WeztermMux $wizard.WezMux -WeztermRestore $wizard.WezRestore -CcTts $ccTts -HeadroomEnabled $wizard.Headroom -HeadroomCursorMode $wizard.HeadroomCursor -CavemanEnabled $wizard.Caveman -AgentmemoryEnabled $wizard.Agentmemory -MemoryBackend $wizard.MemoryBackend | Out-Null
             Export-CcTtsJson
         } else {
             Write-Warning 'TTS executable build failed; voice hooks were not enabled.'
             $ccTts.enabled = $false
             $ccTts.daemon.enabled = $false
-            Save-TsConfig -LeaderChord $leaderChord -ThemeMode $themeMode -Apps $selectedApps -WeztermMux $wizard.WezMux -WeztermRestore $wizard.WezRestore -CcTts $ccTts -HeadroomEnabled $wizard.Headroom -HeadroomCursorMode $wizard.HeadroomCursor -CavemanEnabled $wizard.Caveman -AgentmemoryEnabled $wizard.Agentmemory | Out-Null
+            Save-TsConfig -LeaderChord $leaderChord -ThemeMode $themeMode -Apps $selectedApps -WeztermMux $wizard.WezMux -WeztermRestore $wizard.WezRestore -CcTts $ccTts -HeadroomEnabled $wizard.Headroom -HeadroomCursorMode $wizard.HeadroomCursor -CavemanEnabled $wizard.Caveman -AgentmemoryEnabled $wizard.Agentmemory -MemoryBackend $wizard.MemoryBackend | Out-Null
             Export-CcTtsJson
         }
     }
