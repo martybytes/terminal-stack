@@ -6,6 +6,19 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Added
 
+- **`tstack doctor` reports a prompt preset that is not the prompt you are
+  running (08/28/2026).** `dot_config/starship.toml.tmpl` falls back to this
+  stack's own prompt when starship is not on PATH — deliberately, because a
+  bootstrap can render that template before starship is installed and chezmoi's
+  `output` on a missing binary aborts the *entire* apply. The cost of that safety
+  is a machine whose `starshipPreset` says one thing and whose prompt is another,
+  with nothing anywhere reporting it.
+
+  Silent on the default, which is the actual answer rather than a fallback. An
+  unknown preset name is also flagged, because `starship preset <nonsense>`
+  prints nothing and the rendered config would be **empty** — a working prompt
+  replaced by no prompt.
+
 - **`tstack ui` - every saved setting in one screen (08/27/2026).** The dashboard
   the revamp plan has carried as phase 8. It shows what each setting is, what its
   default is, and **which layer the value came from** - chezmoi `[data]`, the

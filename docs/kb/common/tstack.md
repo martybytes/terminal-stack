@@ -77,6 +77,11 @@ in a script: **0 healthy, 1 issues found**.
 | `tstack doctor --json` | one record per check: `check`, `status`, `message`, optional `hint` |
 | `tstack doctor --repair` | fix what is fixable, confirming each step |
 
+It also reports a **chosen Starship preset that is not the prompt you are
+running**: the template falls back to this stack's own prompt when starship is
+missing, so the setting and the deployed file can disagree with nothing else
+saying so.
+
 Three severities. `ok` is the only one `--quiet` drops. `!!` is a problem and counts
 toward the exit status. `note:` is worth telling you and never counts - a leftover
 clone, a legacy clone location, a dev-clone pin - and it survives `--quiet`,

@@ -367,3 +367,78 @@ def test_repair_points_at_the_cleanup_checklist(monkeypatch, tmp_path, capsys):
     (tmp_path / "bootstrap" / "_cleanup.sh").write_text("#!/bin/sh\n", encoding="utf-8")
     assert doctor.repair(tmp_path) == 0
     assert "cleanup checklist" in capsys.readouterr().out
+
+
+# ------------------------------------------------------- the prompt preset
+
+
+def _prompt_report(monkeypatch, preset: str, *, starship: str | None, presets: list[str]):
+    from tstack import checks as tschecks
+    from tstack import store as tsstore
+    from tstack.commands import doctor as doc
+
+    monkeypatch.setattr(
+        tsstore, "get", lambda k, d=None: preset if k == "starshipPreset" else (d or "")
+    )
+    monkeypatch.setattr(doc.shutil, "which", lambda name: starship)
+    monkeypatch.setattr(doc, "_starship_presets", lambda _s: presets)
+    report = tschecks.Report()
+    doc.check_prompt(report)
+    return report
+
+
+def test_the_default_prompt_is_not_reported_at_all(monkeypatch):
+    """`terminal-stack` is the actual answer, not a fallback. A check that says
+    "ok" for it adds a line to every run and tells nobody anything."""
+    report = _prompt_report(monkeypatch, "terminal-stack", starship="/s", presets=["tokyo-night"])
+    assert report.results == []
+
+
+def test_a_chosen_preset_with_no_starship_is_a_failure_not_a_note(monkeypatch):
+    """The template falls back to this stack's own prompt when starship is
+    missing -- deliberately, because a bootstrap can render it before starship
+    exists and chezmoi's `output` on a missing binary aborts the WHOLE apply.
+
+    The cost of that safety is a machine whose setting says one thing and whose
+    prompt is another, with nothing reporting it. That is what doctor is for.
+    """
+    report = _prompt_report(monkeypatch, "tokyo-night", starship=None, presets=[])
+    assert report.issues == 1
+    said = report.results[0].render()
+    assert "not on PATH" in said and "this stack's own" in said
+    assert "install starship" in said, "a failing check names the fix"
+
+
+def test_an_unknown_preset_is_reported_as_an_empty_config(monkeypatch):
+    """`starship preset nonsense` prints nothing and exits non-zero, so the
+    rendered config is EMPTY -- a working prompt replaced by no prompt. The set
+    check at save time is the guard; this catches a value that got in another
+    way, such as a hand-edited chezmoi.toml."""
+    report = _prompt_report(
+        monkeypatch, "nonsense", starship="/s", presets=["tokyo-night", "jetpack"]
+    )
+    assert report.issues == 1
+    assert "EMPTY config" in report.results[0].render()
+
+
+def test_a_valid_preset_reports_ok(monkeypatch):
+    report = _prompt_report(monkeypatch, "tokyo-night", starship="/s", presets=["tokyo-night"])
+    assert report.issues == 0
+    assert "tokyo-night" in report.results[0].render()
+
+
+def test_an_unlistable_starship_does_not_invent_a_failure(monkeypatch):
+    """If `starship preset --list` cannot be read, the honest answer is that the
+    name could not be checked -- not that it is wrong. Failing here would report
+    every preset as broken on a starship whose CLI changed."""
+    report = _prompt_report(monkeypatch, "tokyo-night", starship="/s", presets=[])
+    assert report.issues == 0
+
+
+def test_the_prompt_check_runs_in_collect():
+    """A check nothing calls is a check that does not exist."""
+    import inspect
+
+    from tstack.commands import doctor as doc
+
+    assert "check_prompt(report)" in inspect.getsource(doc.collect)

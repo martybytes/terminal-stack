@@ -251,6 +251,50 @@ def check_memory_backend(report: Report) -> None:
         )
 
 
+def check_prompt(report: Report) -> None:
+    """A chosen Starship preset that is not the prompt you are actually running.
+
+    `dot_config/starship.toml.tmpl` falls back to this stack's own prompt when
+    starship is not on PATH -- deliberately, because a bootstrap can render that
+    template before starship is installed and chezmoi's `output` on a missing
+    binary aborts the entire apply. The cost of that safety is a state where the
+    setting says one thing and the deployed file is another, with nothing
+    anywhere reporting it. That is precisely this command's job.
+
+    Silent on the default, which is not a fallback but the actual answer.
+    """
+    preset = store.get("starshipPreset", "terminal-stack")
+    if preset == "terminal-stack":
+        return
+
+    starship = shutil.which("starship")
+    if not starship:
+        report.fail(
+            "prompt-preset",
+            f"prompt is set to '{preset}' but starship is not on PATH, "
+            "so the deployed prompt is this stack's own",
+            "install starship, then: chezmoi apply",
+        )
+        return
+
+    known = _starship_presets(starship)
+    if known and preset not in known:
+        report.fail(
+            "prompt-preset",
+            f"no starship preset named '{preset}'; it renders an EMPTY config",
+            "fix: tstack config prompt list",
+        )
+        return
+    report.ok("prompt-preset", f"prompt: {preset}")
+
+
+def _starship_presets(starship: str) -> list[str]:
+    got = _run([starship, "preset", "--list"], timeout=10)
+    if got is None or got.returncode != 0:
+        return []
+    return [line.strip() for line in got.stdout.splitlines() if line.strip()]
+
+
 def check_tts(report: Report) -> None:
     """Only when the feature is on. An enabled-but-dead daemon is a failure: the
     hooks degrade silently to direct playback and the user chose otherwise."""
@@ -702,6 +746,7 @@ def collect() -> Report:
     check_tools_on_path(report)
     check_config_stores(report)
     check_memory_backend(report)
+    check_prompt(report)
     check_tts(report)
     check_agentmemory_wiring(report, src)
     check_agentmemory_secret(report, src)
