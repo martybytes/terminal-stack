@@ -4,6 +4,28 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+### Fixed
+
+- **A backup of a SOURCE file became a permanent managed target (08/28/2026).**
+  `.gitignore` carries `*.bak.*`, so a `dot_zshrc.bak.20260827204438` sitting in
+  the chezmoi source tree is invisible to `git status` -- and therefore to
+  `tstack update`'s dirty-clone refusal and to `run_before_05`, both of which
+  read it. `.chezmoiignore` had no matching rule, so chezmoi treated it as a
+  source entry and the next apply would have written
+  `~/.zshrc.bak.20260827204438` into `$HOME`, and kept writing it forever. Same
+  `$HOME`-pollution trap as `tests/**` and `services/**`, arriving by a different
+  door: not a file someone added, but one a backup helper left behind. Found by
+  reading `chezmoi status` before an apply, not by a test.
+
+- **The managed gitconfig's header had its own precedence backwards.** It claimed
+  user settings "always win, since includes resolve first". The bootstrap adds
+  the include with `git config --global --add`, which **appends**, so the
+  included file resolves LAST and its values win over anything set earlier in
+  `~/.gitconfig`. Verified both orders. `user.name` and `user.email` are
+  unaffected only because nothing in the included file sets them -- not because
+  of ordering. Corrected in the canonical copy and its byte-identical Windows
+  mirror.
+
 ### Added
 
 - **AGENTMEMORY_SECRET now reaches the processes that need it (08/28/2026).**

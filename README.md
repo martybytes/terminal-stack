@@ -23,6 +23,10 @@
   <img alt="Python, Bash, PowerShell, Docker, Lua, GitHub Actions" src="https://skillicons.dev/icons?i=py,bash,powershell,docker,lua,githubactions">
 </p>
 
+<p align="center">
+  <img alt="tstack listing its subcommands, then tstack doctor reporting every check passing" src="docs/demo.gif" width="760">
+</p>
+
 ---
 
 ## What it is
@@ -187,18 +191,20 @@ Where things live:
 
 ## Demo
 
-No recorded demo ships in this repo yet. [`docs/demo.tape`](docs/demo.tape) is a
-[Charm VHS](https://github.com/charmbracelet/vhs) script that records one from
-the real CLI:
+The recording at the top is real output, not a mock-up.
+[`docs/demo.tape`](docs/demo.tape) is the [Charm VHS](https://github.com/charmbracelet/vhs)
+script that produced it:
 
 ```sh
 brew install vhs ttyd ffmpeg
 vhs docs/demo.tape
 ```
 
-It writes `docs/demo.gif` and runs only read-only commands. Record it on a
-machine where the stack is actually installed — the tape drives the `tstack`
-shell function, which only exists after an apply.
+Every command in it is read-only. Re-record it after any change to
+`tstack --help`, which is rendered from `tstack/commands.conf` and so changes
+whenever the command surface does. It has to run on a machine where the stack is
+installed: the tape drives the `tstack` shell function, which only exists after
+an apply.
 
 ## Configuring
 
@@ -247,7 +253,7 @@ Other subcommands, each with `-h`:
 - **Disk and monitoring**: duf, ncdu, dust and btop by default; gdu, bottom, glances, bandwhich and gping are one tick away in the picker.
 - **Also in the catalog**: atuin — SQLite shell history, pre-ticked, and the wizard recommends letting it own `Ctrl+R` — plus yazi (file manager) and Zed, both unticked by default.
 - **Runtimes**: `fnm` plus current Node LTS, and a Python group — Python itself, uv, pipx, ruff and ipython by default, with httpie, poetry and pre-commit a tick away.
-- **Delta wired into git** through a managed gitconfig include — the installer adds one `include.path` line to your `~/.gitconfig` and owns nothing else in it. What the include sets (pager, `pull.ff`, six aliases) takes effect; put a setting of your own *below* that line if you want it to win.
+- **Delta wired into git** through a managed gitconfig include — the installer adds one `include.path` line to your `~/.gitconfig` and owns nothing else in it. Because `--add` appends, the include resolves **last** and its settings win — six aliases, the delta pager, `pull.ff = only`, `help.autocorrect` — so put a setting of your own *below* that line if you want yours to.
 </details>
 
 <details>

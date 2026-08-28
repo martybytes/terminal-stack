@@ -29,6 +29,10 @@ Set PlaybackSpeed 1.0
 # the demo show the same shell a user actually gets.
 Hide
 Type "source ~/.zshrc >/dev/null 2>&1" Enter
+# Record from $HOME, not from wherever vhs was invoked: the prompt shows the
+# working directory and the git branch, and a demo should not ship one
+# contributor's checkout path or an in-flight branch name.
+Type "cd ~" Enter
 Type "clear" Enter
 Show
 
