@@ -2997,3 +2997,93 @@ def test_the_windows_catalog_does_not_claim_a_winget_package_that_does_not_exist
         "'llmfit'"
         not in ps[ps.index("$script:TsWingetIds") : ps.index("$script:TsAppsRecommended")]
     )
+
+
+def test_a_running_local_runtime_is_offered_with_the_container_side_url(
+    tmp_path, monkeypatch, capsys
+):
+    """ "What do I even put there" is the question that stops people, and the
+    answer is usually a runtime already running on their machine.
+
+    The URL offered is the CONTAINER's, not the host's. Inside a container
+    `localhost` is the container, so copying `http://localhost:11434/v1` out of a
+    browser produces the silent dead-letter state -- which is precisely the shape
+    this whole command exists to keep people out of.
+    """
+    from tstack.commands import agents
+
+    _llm_env(tmp_path, monkeypatch, "")
+    monkeypatch.setattr(
+        agents, "local_llm_models", lambda port, **k: ["llama3.1:8b"] if port == 11434 else None
+    )
+    agents.Llm(ROOT, agents.Out()).run("status")
+    text = capsys.readouterr().out
+
+    assert "OPENAI_BASE_URL=http://host.docker.internal:11434/v1" in text
+    assert "OPENAI_MODEL=llama3.1:8b" in text
+    assert "localhost:11434" not in text, "the host URL must never be the one offered"
+
+
+def test_a_runtime_that_is_up_with_no_model_is_not_silently_treated_as_absent(
+    tmp_path, monkeypatch, capsys
+):
+    """An empty model list is a THIRD state. The endpoint would be right and the
+    configuration would still do nothing, so `None` and `[]` must not collapse."""
+    from tstack.commands import agents
+
+    _llm_env(tmp_path, monkeypatch, "")
+    monkeypatch.setattr(agents, "local_llm_models", lambda port, **k: [] if port == 1234 else None)
+    agents.Llm(ROOT, agents.Out()).run("status")
+    text = capsys.readouterr().out
+
+    assert "none loaded" in text
+    assert "<load a model first>" in text
+
+
+def test_local_runtime_detection_survives_whatever_is_actually_on_that_port(monkeypatch):
+    """The port is a hint; anything can listen there. HTML, a 500, a socket that
+    accepts and says nothing -- none of them may raise out of a status report.
+    """
+    import urllib.error
+
+    from tstack.commands import agents
+
+    class Fake:
+        def __init__(self, body: bytes) -> None:
+            self.body = body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return self.body
+
+    for body, want in (
+        (b"<html>not an api</html>", None),  # invalid JSON
+        (b'{"object":"list"}', []),  # valid JSON, no data key
+        (b'{"data":"not-a-list"}', []),
+        (b'{"data":[{"no":"id"}]}', []),
+        (b'{"data":[{"id":"m"}]}', ["m"]),
+    ):
+        monkeypatch.setattr(agents.urllib.request, "urlopen", lambda *a, _b=body, **k: Fake(_b))
+        assert agents.local_llm_models(11434) == want
+
+    def refuse(*a, **k):
+        raise urllib.error.URLError("refused")
+
+    monkeypatch.setattr(agents.urllib.request, "urlopen", refuse)
+    assert agents.local_llm_models(11434) is None
+
+
+def test_the_container_can_resolve_the_host_on_every_platform():
+    """`host.docker.internal` is free on Docker Desktop and does NOT exist on
+    native Linux unless it is mapped -- so the same OPENAI_BASE_URL that worked
+    on a Mac resolved to nothing on a server, and agentmemory dead-lettered
+    silently. Mapping it makes the one URL this command prints correct on all
+    three platforms; `host-gateway` is accepted (and redundant) on Desktop.
+    """
+    body = (ROOT / "services/stacks/agentmemory/docker-compose.yml").read_text(encoding="utf-8")
+    assert '"host.docker.internal:host-gateway"' in body

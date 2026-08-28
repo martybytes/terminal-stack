@@ -905,11 +905,45 @@ LLM_FEATURES = (
     ("consolidation", "the periodic reflect pass that turns observations into insights"),
 )
 
+# Where a chat model most plausibly already is on someone's machine. Probed only
+# when nothing is configured, because the answer to "what do I even put there" is
+# usually "the runtime you already have running".
+#
+# THE PORT IS A HINT, NOT A CLAIM. Anything can listen anywhere; the name is what
+# conventionally uses that port, and what gets reported is the endpoint, which is
+# checked.
+LLM_LOCAL_RUNTIMES = (
+    (11434, "Ollama"),
+    (1234, "LM Studio"),
+    (8000, "vLLM or text-generation-webui"),
+    (8080, "llama.cpp server"),
+)
+
 LLM_UNAFFECTED = (
     ("storage", "every observation is written either way"),
     ("search", "semantic search, over embeddings computed in the image"),
     ("embeddings", "local, on-device, no API key and no network"),
 )
+
+
+def local_llm_models(port: int, timeout: float = 1.5) -> list[str] | None:
+    """Model ids from an OpenAI-compatible /v1/models, or None if nothing answers.
+
+    An empty LIST is not None: a runtime that is up with no model loaded is a
+    different answer from no runtime at all, and it is the one worth saying out
+    loud, because the endpoint would be right and the config would still do
+    nothing.
+    """
+    url = f"http://127.0.0.1:{port}/v1/models"
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as response:
+            body = json.loads(response.read().decode("utf-8", "replace"))
+    except (urllib.error.URLError, OSError, ValueError):
+        return None
+    rows = body.get("data") if isinstance(body, dict) else None
+    if not isinstance(rows, list):
+        return []
+    return [str(r["id"]) for r in rows if isinstance(r, dict) and r.get("id")]
 
 
 class Llm:
@@ -952,13 +986,7 @@ class Llm:
             for name, what in LLM_UNAFFECTED:
                 self.out.good(f"{name} - {what}")
             print()
-            self.out.info(f"to switch the four on, set OPENAI_BASE_URL and OPENAI_MODEL in {path},")
-            self.out.info(
-                "OPENAI_API_KEY in services/.env, then tstack services restart agentmemory"
-            )
-            self.out.info(
-                "llmfit recommend --use-case coding sizes a local model for this computer"
-            )
+            self.suggest(path)
             return True
 
         self.out.good(f"endpoint {base}")
@@ -986,6 +1014,33 @@ class Llm:
             self.out.info('fail XML parsing, retry, and still log outcome:"success"')
         self.out.info("tstack services test agentmemory dials it from inside the container")
         return reachable and bool(model)
+
+    def suggest(self, path: Path) -> None:
+        """What to put in the file, preferring a runtime that is already running."""
+        found = []
+        for port, name in LLM_LOCAL_RUNTIMES:
+            models = local_llm_models(port)
+            if models is not None:
+                found.append((port, name, models))
+
+        for port, name, models in found:
+            listed = ", ".join(models[:6]) if models else "none loaded"
+            self.out.good(f"something answers on 127.0.0.1:{port} - likely {name}: {listed}")
+            # The trap these two lines exist for: inside a container `localhost`
+            # is the CONTAINER. The compose file maps host.docker.internal on
+            # every platform, so this one URL is correct on all three.
+            self.out.info(f"  OPENAI_BASE_URL=http://host.docker.internal:{port}/v1")
+            self.out.info(f"  OPENAI_MODEL={models[0] if models else '<load a model first>'}")
+        if not found:
+            self.out.info("nothing answers on the usual local ports (ollama, lm studio, vllm,")
+            self.out.info("llama.cpp) - a hosted endpoint works just as well, and the example")
+            self.out.info("file names three shapes to copy")
+            self.out.info("llmfit recommend --use-case coding sizes a local model for this machine")
+
+        print()
+        self.out.info(f"set OPENAI_BASE_URL and OPENAI_MODEL in {path},")
+        self.out.info("OPENAI_API_KEY in services/.env (any non-empty string for a local")
+        self.out.info("server that does not check it), then: tstack services restart agentmemory")
 
     def run(self, action: str) -> int:
         if action == "status":

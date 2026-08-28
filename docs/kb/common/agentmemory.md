@@ -155,6 +155,14 @@ Set the endpoint in `services/stacks/agentmemory/.env` and the credential in
 any OpenAI-compatible server (vLLM, LM Studio, llama.cpp), Ollama on
 `http://host.docker.internal:11434/v1`, or the OpenAI API itself.
 
+With no provider set, `tstack agents llm` probes the usual local ports (Ollama
+11434, LM Studio 1234, vLLM 8000, llama.cpp 8080) and, if one answers, prints the
+two lines to paste — **with the container's URL, not the host's**. Inside a
+container `localhost` is the container, so copying `http://localhost:11434/v1`
+out of a browser lands you straight in the silent state above. The compose file
+maps `host.docker.internal` on every platform, which is what makes one URL right
+on macOS, Windows and native Linux alike.
+
 Not sure what your machine can run? `llmfit recommend --use-case coding` sizes
 candidates against this computer's RAM and GPU and prints an ollama name — it is
 in the app catalog under **local model sizing** (`tstack config apps llmfit`),

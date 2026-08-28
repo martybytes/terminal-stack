@@ -18,6 +18,15 @@ services:
         III_VERSION: "0.11.2"
         III_SDK_VERSION: "0.11.2"
     restart: unless-stopped
+    # A chat model running on the HOST -- Ollama, LM Studio, llama.cpp -- is the
+    # most likely provider anyone here will have, and from inside a container
+    # `localhost` is the container. Docker Desktop resolves this name on its own;
+    # native Linux does NOT unless it is mapped, which is why the same
+    # OPENAI_BASE_URL that worked on a Mac silently 000'd on a server. Mapping it
+    # here makes one URL correct on all three platforms, and it is accepted (and
+    # redundant) on Desktop.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       # 3110 is agentmemory's own API, always published. When the optional
       # agent007memory console overlay (docker-compose.console.yml) is

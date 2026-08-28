@@ -22,6 +22,20 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
   `inferenceActive` is driven by the model, not the URL, so that configuration
   reads as done everywhere while every family stays off.
 
+- **Local-runtime detection, printing the container's URL rather than the
+  host's (08/27/2026).** With nothing configured, `tstack agents llm` probes
+  Ollama (11434), LM Studio (1234), vLLM (8000) and llama.cpp (8080) and prints
+  the two lines to paste for whichever answers. The URL it offers is
+  `host.docker.internal`, never `localhost` — inside a container `localhost` is
+  the container, and copying the host URL out of a browser lands squarely in the
+  silent dead-letter state described below.
+
+  `host.docker.internal` is free on Docker Desktop and does **not** exist on
+  native Linux unless it is mapped, so `extra_hosts: host.docker.internal:
+  host-gateway` is now on the agentmemory service. That makes the one printed URL
+  correct on all three platforms; it is accepted and redundant on Desktop
+  (verified against Docker Desktop on macOS).
+
 - **`llmfit` in the app catalog, under a new `models` group (08/27/2026).**
   "Which model fits this machine" is the question standing between someone and a
   working LLM configuration, and it was answerable only by a KB page for a tool
