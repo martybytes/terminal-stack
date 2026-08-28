@@ -6,6 +6,37 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Added
 
+- **The dashboard configures all of it now, not just the settings
+  (08/28/2026).** Three settings were blind text boxes and one was a
+  space-separated string, because their valid values are facts about the machine
+  rather than a fixed list. A `Setting` now names a **provider** and
+  `tstack/choices.py` is where one is asked: `options()` for what this machine
+  can offer, `preview()` for what it looks like, `sample()` for what it sounds
+  like. The CLI's probes moved behind that interface, so both front ends ask the
+  same question.
+
+  - `ccTtsKokoroVoice` / `ccTtsSayVoice` open a picker of the voices actually
+    served, with `s` to hear one.
+  - `starshipPreset` opens a picker that **renders each prompt** in a preview
+    pane.
+  - `apps` is a tick-list with `space`, `a` and `n`, saved in catalog order so
+    the stored value is stable and diffable.
+  - **AgentMemory's chat provider is editable too**, though it is not a saved
+    setting at all: `OPENAI_BASE_URL` and `OPENAI_MODEL` live in the stack's
+    `.env`. They appear as rows tagged with their own store, and a save routes
+    to `tstack/llmconfig.py` rather than to the settings writer.
+
+  `tstack agents llm set <url> <model>` and `tstack agents llm none` do the same
+  from the command line. Clearing the endpoint clears the model and the labels
+  with it -- the compose file defaults the labels to OpenAI, so a half-cleared
+  provider names one the machine no longer has.
+
+  Two traps the tests exist for. Escape needs a sentinel, because an unset
+  `ccTtsSayVoice` **means** "the system voice" and `""` cannot also mean
+  cancelled. And writing the `.env` normalises CRLF before matching and restores
+  it after: a line-anchored `^KEY=.*$` swallows the `\r`, silently converting
+  the one line it touched.
+
 - **`tstack doctor` reports a prompt preset that is not the prompt you are
   running (08/28/2026).** `dot_config/starship.toml.tmpl` falls back to this
   stack's own prompt when starship is not on PATH — deliberately, because a

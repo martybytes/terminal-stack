@@ -39,6 +39,97 @@ def elide(text: str, width: int) -> str:
     return text if len(text) <= width else text[: width - 2] + ".."
 
 
+class MultiPickScreen(ModalScreen[str]):
+    """Tick many. `apps` is the only setting shaped like this, and it is why the
+    dashboard needed more than a menu: editing 32 tool names as one
+    space-separated string is not editing, it is retyping.
+
+    Returns the selection as the space-separated string the store holds.
+    """
+
+    BINDINGS: ClassVar[list[Binding]] = [
+        Binding("escape", "cancel", "cancel"),
+        Binding("space", "toggle", "toggle"),
+        Binding("a", "all", "all"),
+        Binding("n", "none", "none"),
+        Binding("enter", "accept", "save", show=True),
+    ]
+
+    def __init__(self, row: model.Row, options: list[tuple[str, str, str]]) -> None:
+        super().__init__()
+        self.row = row
+        self.options = options
+        self.chosen: set[str] = model.selected(row)
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="pick-box"):
+            yield Label(f"{self.row.label}  [{self.row.key}]", id="pick-title")
+            yield DataTable(id="pick-table", cursor_type="row", zebra_stripes=True)
+            yield Static("", id="pick-preview")
+            yield Static(
+                "space toggle  -  a all  -  n none  -  Enter save  -  Esc cancel",
+                id="pick-help",
+            )
+
+    def on_mount(self) -> None:
+        table = self.query_one("#pick-table", DataTable)
+        table.add_column("", width=3)
+        table.add_column("tool", width=16)
+        table.add_column("what it is", width=52)
+        self.redraw()
+        table.focus()
+
+    def redraw(self) -> None:
+        table = self.query_one("#pick-table", DataTable)
+        keep = table.cursor_row
+        table.clear()
+        for value, label, note in self.options:
+            table.add_row("[x]" if value in self.chosen else "[ ]", label, elide(note, 50))
+        if self.options:
+            table.move_cursor(row=min(keep, len(self.options) - 1))
+        self.count()
+
+    def count(self) -> None:
+        self.query_one("#pick-preview", Static).update(
+            f"{len(self.chosen)} of {len(self.options)} selected. "
+            "Installs only -- nothing is ever uninstalled."
+        )
+
+    def action_toggle(self) -> None:
+        index = self.query_one("#pick-table", DataTable).cursor_row
+        if not (0 <= index < len(self.options)):
+            return
+        value = self.options[index][0]
+        self.chosen.symmetric_difference_update({value})
+        self.redraw()
+
+    def action_all(self) -> None:
+        self.chosen = {value for value, _l, _n in self.options}
+        self.redraw()
+
+    def action_none(self) -> None:
+        self.chosen = set()
+        self.redraw()
+
+    def on_data_table_row_selected(self, _: DataTable.RowSelected) -> None:
+        """Enter, when the table has focus.
+
+        The same trap as the settings table: DataTable binds `enter` to its own
+        select action and a focused widget's bindings beat the screen's, so the
+        `enter` binding above never fires here. It is kept so the footer
+        advertises it; this is the path that runs.
+        """
+        self.action_accept()
+
+    def action_accept(self) -> None:
+        # Catalog order, not tick order: the saved value should be stable and
+        # diffable rather than a record of the order someone clicked.
+        self.dismiss(" ".join(v for v, _l, _n in self.options if v in self.chosen))
+
+    def action_cancel(self) -> None:
+        self.dismiss(CANCELLED)
+
+
 class PickScreen(ModalScreen[str]):
     """Choose from what this machine can actually offer, having seen or heard it.
 
@@ -172,6 +263,7 @@ class SettingsApp(App[None]):
     #edit-note, #edit-options, #edit-default { color: $text-muted; }
     EditScreen { align: center middle; }
     PickScreen { align: center middle; }
+    MultiPickScreen { align: center middle; }
     #pick-box {
         width: 80%; height: 80%; padding: 1 2;
         background: $panel; border: thick $accent;
@@ -334,6 +426,9 @@ class SettingsApp(App[None]):
             self.commit(row.key, value)
 
         live = model.live_options(row)
+        if live and model.is_multi(row):
+            self.push_screen(MultiPickScreen(row, live), done)
+            return
         if live:
             self.push_screen(PickScreen(row, live), done)
             return
@@ -342,6 +437,8 @@ class SettingsApp(App[None]):
         self.push_screen(EditScreen(row), done)
 
     def commit(self, key: str, value: str) -> None:
-        ok, message = model.save(key, value)
+        row = next((r for r in self.shown if r.key == key), None)
+        writer = model.save_llm if row is not None and row.store == model.LLM else model.save
+        ok, message = writer(key, value)
         self.action_reload()
         self.show_detail(message if ok else f"refused: {message}")

@@ -112,7 +112,14 @@ SETTINGS: tuple[Setting, ...] = (
         options=("dark", "light"),
         flags=frozenset({DERIVED}),
     ),
-    Setting("apps", "Installed CLI tools", "list", "apps", note="installs only; never uninstalls"),
+    Setting(
+        "apps",
+        "Installed CLI tools",
+        "list",
+        "apps",
+        note="installs only; never uninstalls",
+        choices="apps",
+    ),
     Setting(
         "weztermMux",
         "WezTerm mux domain",

@@ -21,6 +21,14 @@ from dataclasses import dataclass
 
 from .. import schema
 
+# Which store a row lives in. Almost everything is a saved setting; AgentMemory's
+# chat provider is not -- it lives in the stack's .env, which is compose's own
+# interpolation source and is per-machine and gitignored. The dashboard shows
+# both because "configure all this" means all of it, and the difference is a
+# field rather than a second screen.
+SETTINGS = "settings"
+LLM = "llm"
+
 
 @dataclass(frozen=True)
 class Row:
@@ -37,6 +45,7 @@ class Row:
     options: tuple[str, ...]
     choices: str
     flags: frozenset[str]
+    store: str = SETTINGS
 
     @property
     def editable(self) -> bool:
@@ -95,6 +104,58 @@ def rows() -> list[Row]:
             flags=frozenset(_strings(r["flags"])),
         )
         for r in schema.snapshot()
+    ] + llm_rows()
+
+
+# AgentMemory's chat provider, as dashboard rows. The keys are the .env's own,
+# because that is what someone greps for and what every doc calls them.
+LLM_ROWS = (
+    (
+        "OPENAI_BASE_URL",
+        "Chat endpoint",
+        "the /v1 URL. Inside a container `localhost` is the container -- use "
+        "host.docker.internal for a runtime on this machine",
+    ),
+    (
+        "OPENAI_MODEL",
+        "Chat model",
+        "empty leaves every LLM feature off even with an endpoint set",
+    ),
+)
+
+
+def llm_rows() -> list[Row]:
+    """The provider, or nothing at all when there is no clone to read.
+
+    Not schema settings, so they carry their own store tag: a save routes to
+    `llmconfig` rather than to `config.set_value`.
+    """
+    from .. import llmconfig, paths
+
+    try:
+        source = paths.resolve_source_dir()
+    except paths.CloneNotFound:
+        return []
+    if not llmconfig.stack_env(source).is_file():
+        return []
+    provider = llmconfig.read(source)
+    values = {"OPENAI_BASE_URL": provider.base_url, "OPENAI_MODEL": provider.model}
+    return [
+        Row(
+            key=key,
+            label=label,
+            group="agentmemory",
+            kind="text",
+            value=values[key],
+            default="",
+            source="stack .env" if values[key] else "unset",
+            note=note,
+            options=(),
+            choices="",
+            flags=frozenset({schema.RESTART}),
+            store=LLM,
+        )
+        for key, label, note in LLM_ROWS
     ]
 
 
@@ -130,6 +191,32 @@ def changed(row: Row) -> bool:
     a saved value identical to the default is not a change worth flagging.
     """
     return row.value != row.default
+
+
+def save_llm(key: str, value: str) -> tuple[bool, str]:
+    """Write the chat provider into the stack's .env.
+
+    Clearing the endpoint clears the model and the labels with it: the console
+    assesses an unlabelled provider as paid, so a half-cleared state names one
+    this machine no longer has.
+    """
+    from .. import llmconfig, paths
+
+    try:
+        source = paths.resolve_source_dir()
+    except paths.CloneNotFound:
+        return (False, "cannot locate the clone (set TERMINAL_STACK_DIR)")
+    current = llmconfig.read(source)
+    base_url = value if key == "OPENAI_BASE_URL" else current.base_url
+    model = value if key == "OPENAI_MODEL" else current.model
+    try:
+        if not base_url:
+            llmconfig.clear(source)
+            return (True, "chat provider cleared; storage and search are unaffected")
+        llmconfig.configure(source, base_url, model, llmconfig.labels_for(base_url))
+    except OSError as exc:
+        return (False, f"{type(exc).__name__}: {exc}")
+    return (True, f"saved {key}; restart agentmemory to pick it up")
 
 
 def save(key: str, value: str) -> tuple[bool, str]:
@@ -173,6 +260,25 @@ def live_options(row: Row) -> list[tuple[str, str, str]]:
     from .. import choices as provider
 
     return [(c.value, c.display(), c.note) for c in provider.options(row.choices)]
+
+
+def is_multi(row: Row) -> bool:
+    """Does this setting hold many of its options? Only `apps` does, and it is
+    why the picker needs a tick-list rather than a menu."""
+    if not row.choices:
+        return False
+    from .. import choices as provider
+
+    return provider.is_multi(row.choices)
+
+
+def selected(row: Row) -> set[str]:
+    """The values currently held by a multi-select setting.
+
+    The store keeps `apps` as a space-separated string, which is what the
+    picker has to tick against.
+    """
+    return set(row.value.split())
 
 
 def can_sample(row: Row) -> bool:

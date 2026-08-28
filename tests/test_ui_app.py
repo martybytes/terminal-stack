@@ -294,3 +294,112 @@ def test_the_picker_advertises_hearing_only_where_there_is_something_to_hear(mon
             await pilot.pause()
 
     drive(script)
+
+
+def test_apps_is_a_tick_list_not_a_space_separated_string(monkeypatch):
+    """`apps` is the one setting that holds MANY of its options. Editing 32 tool
+    names as one string is not editing, it is retyping -- which is what the
+    dashboard asked of you before this."""
+    from tstack.ui import model
+    from tstack.ui.app import MultiPickScreen
+
+    monkeypatch.setattr(
+        model,
+        "live_options",
+        lambda row: [("eza", "eza", "shell: modern ls"), ("fzf", "fzf", "shell: fuzzy finder")],
+    )
+    monkeypatch.setattr(model, "is_multi", lambda row: True)
+    monkeypatch.setattr(model, "selected", lambda row: {"eza"})
+    saved: list[tuple[str, str]] = []
+    monkeypatch.setattr(model, "save", lambda k, v: (saved.append((k, v)), (True, "ok"))[1])
+
+    async def script():
+        app = SettingsApp()
+        async with app.run_test() as pilot:
+            app.query_one("#filter", Input).value = "apps"
+            await pilot.pause()
+            app.query_one("#table", DataTable).focus()
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            assert isinstance(app.screen, MultiPickScreen)
+            assert app.screen.chosen == {"eza"}, "pre-ticked from the saved value"
+
+            await pilot.press("down")  # onto fzf
+            await pilot.press("space")
+            await pilot.pause()
+            assert app.screen.chosen == {"eza", "fzf"}
+            await pilot.press("enter")
+            await pilot.pause()
+
+    drive(script)
+    assert saved == [("apps", "eza fzf")], "saved in CATALOG order, space separated"
+
+
+def test_the_tick_list_saves_in_catalog_order_not_click_order(monkeypatch):
+    """The stored value should be stable and diffable, not a record of the order
+    someone happened to click."""
+    from tstack.ui import model
+    from tstack.ui.app import MultiPickScreen
+
+    options = [("aaa", "aaa", ""), ("bbb", "bbb", ""), ("ccc", "ccc", "")]
+    monkeypatch.setattr(model, "live_options", lambda row: options)
+    monkeypatch.setattr(model, "is_multi", lambda row: True)
+    monkeypatch.setattr(model, "selected", lambda row: set())
+    saved: list[tuple[str, str]] = []
+    monkeypatch.setattr(model, "save", lambda k, v: (saved.append((k, v)), (True, "ok"))[1])
+
+    async def script():
+        app = SettingsApp()
+        async with app.run_test() as pilot:
+            app.query_one("#filter", Input).value = "apps"
+            await pilot.pause()
+            app.query_one("#table", DataTable).focus()
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            screen = app.screen
+            assert isinstance(screen, MultiPickScreen)
+            # Tick ccc, then aaa -- reverse of catalog order.
+            await pilot.press("down", "down", "space")
+            await pilot.pause()
+            await pilot.press("up", "up", "space")
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+
+    drive(script)
+    assert saved == [("apps", "aaa ccc")]
+
+
+def test_all_and_none_are_one_keystroke(monkeypatch):
+    """47 rows. Without them, "I want everything" is 47 keystrokes."""
+    from tstack.ui import model
+    from tstack.ui.app import MultiPickScreen
+
+    options = [(f"t{i}", f"t{i}", "") for i in range(5)]
+    monkeypatch.setattr(model, "live_options", lambda row: options)
+    monkeypatch.setattr(model, "is_multi", lambda row: True)
+    monkeypatch.setattr(model, "selected", lambda row: {"t0"})
+
+    async def script():
+        app = SettingsApp()
+        async with app.run_test() as pilot:
+            app.query_one("#filter", Input).value = "apps"
+            await pilot.pause()
+            app.query_one("#table", DataTable).focus()
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            screen = app.screen
+            assert isinstance(screen, MultiPickScreen)
+            await pilot.press("a")
+            await pilot.pause()
+            assert len(screen.chosen) == 5
+            await pilot.press("n")
+            await pilot.pause()
+            assert screen.chosen == set()
+            await pilot.press("escape")
+            await pilot.pause()
+
+    drive(script)

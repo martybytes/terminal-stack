@@ -45,6 +45,7 @@ Usage:
 
   <tool>         all (default) | headroom | caveman | agentmemory | llm
   <action>       status (default) | on | off | repair | uninstall | dashboard
+                 llm also takes: set <base-url> <model> | none
   <cursor-mode>  mcp (default) | byok | off      (headroom only)
 
   status     what is wired up, and what is missing
@@ -53,8 +54,15 @@ Usage:
   off        remove the client wiring; data, containers and secrets are untouched
   uninstall  also remove the terminal-stack-owned client pieces
 
-`llm` takes no action but `status`. It is a report: which AgentMemory features a
-chat model is switched on, which run without one, and where to set the endpoint.
+`llm` reports which AgentMemory features a chat model switches on and which run
+without one. It also SETS one, because that configuration is not a saved setting
+-- it lives in the stack's .env, which is compose's own interpolation source:
+
+  tstack agents llm set http://host.docker.internal:11434/v1 llama3.1:8b
+  tstack agents llm none
+
+`none` is a supported state, not a broken one: storage, search and embeddings are
+unaffected.
 
 Docker is out of scope here: this command probes a service and names the
 `tstack services` verb, it never starts or stops one."""
@@ -1042,6 +1050,46 @@ class Llm:
         self.out.info("OPENAI_API_KEY in services/.env (any non-empty string for a local")
         self.out.info("server that does not check it), then: tstack services restart agentmemory")
 
+    def set_provider(self, base_url: str, model: str) -> int:
+        """Point agentmemory at an endpoint, and label it honestly.
+
+        The labels are not cosmetic: the console assesses an unlabelled provider
+        as PAID, which is the safe direction to be wrong in and wrong for a local
+        runtime.
+        """
+        from .. import llmconfig
+
+        path = llmconfig.stack_env(self.source)
+        if not path.is_file():
+            self.out.bad(f"no stack .env at {path}")
+            self.out.info("tstack services bootstrap seeds it from .env.example")
+            return 1
+        labels = llmconfig.labels_for(base_url)
+        changed = llmconfig.configure(self.source, base_url, model, labels)
+        if not changed:
+            self.out.info("already set to exactly that")
+            return 0
+        self.out.good(f"endpoint {base_url}")
+        self.out.good(f"model {model}")
+        self.out.info(f"labelled {labels[0]} / {labels[1]}")
+        if not llmconfig.read(self.source).api_key_set:
+            print()
+            self.out.info(f"set OPENAI_API_KEY in {llmconfig.shared_env(self.source)}")
+            self.out.info("(any non-empty string for a local server that does not check it)")
+        self.out.info("then: tstack services restart agentmemory")
+        return 0
+
+    def clear_provider(self) -> int:
+        from .. import llmconfig
+
+        changed = llmconfig.clear(self.source)
+        if not changed:
+            self.out.info("no chat provider was configured")
+            return 0
+        self.out.good("chat provider cleared - storage, search and embeddings are unaffected")
+        self.out.info("then: tstack services restart agentmemory")
+        return 0
+
     def run(self, action: str) -> int:
         if action == "status":
             return 0 if self.status() else 1
@@ -1066,6 +1114,30 @@ def main(argv: list[str]) -> int:
     tool = argv[0] if argv else "all"
     action = argv[1] if len(argv) > 1 else "status"
     cursor_mode = argv[2] if len(argv) > 2 else "mcp"
+
+    # `llm` has its own grammar: it is the one tool whose configuration is a URL
+    # and a model rather than an on/off toggle, and it lives in a .env rather
+    # than the settings store.
+    if tool == "llm" and action in ("set", "none"):
+        try:
+            source = paths.resolve_source_dir()
+        except paths.CloneNotFound as exc:
+            print(f"tstack agents: {exc}", file=sys.stderr)
+            return 1
+        out = Out()
+        llm = Llm(source, out)
+        if action == "none":
+            return llm.clear_provider()
+        if len(argv) < 4:
+            print(
+                "usage: tstack agents llm set <base-url> <model>\n"
+                "   eg: tstack agents llm set http://host.docker.internal:11434/v1 llama3.1:8b",
+                file=sys.stderr,
+            )
+            return 2
+        rc = llm.set_provider(argv[2], argv[3])
+        return 1 if out.failures else rc
+
     if tool not in TOOLS:
         print(f"tstack agents: unknown tool '{tool}'", file=sys.stderr)
         return 2

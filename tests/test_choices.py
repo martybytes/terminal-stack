@@ -35,7 +35,7 @@ def test_every_declared_provider_exists():
     picker forever, and look exactly like a service being down."""
     declared = {s.choices for s in schema.SETTINGS if s.choices}
     assert declared, "at least one setting should declare live options"
-    known = {choices.STARSHIP, choices.KOKORO_VOICES, choices.SAY_VOICES}
+    known = {choices.STARSHIP, choices.KOKORO_VOICES, choices.SAY_VOICES, choices.APPS}
     assert declared <= known, f"unimplemented provider(s): {sorted(declared - known)}"
 
 

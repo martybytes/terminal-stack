@@ -26,6 +26,13 @@ from tstack.commands import ui as ui_cmd  # noqa: E402
 from tstack.ui import model  # noqa: E402
 
 
+def model_paths():
+    """The `paths` module as `ui/model.py` imported it, for monkeypatching."""
+    from tstack import paths
+
+    return paths
+
+
 @pytest.fixture(autouse=True)
 def _throwaway_home(monkeypatch, tmp_path):
     home = tmp_path / "home"
@@ -228,3 +235,73 @@ def test_ui_is_in_the_registry_on_both_platforms():
     assert row is not None, "tstack ui is missing from commands.conf"
     assert row.posix == "python" and row.windows == "python"
     assert row.summary
+
+
+# ------------------------------------------- the chat provider, which is not a setting
+
+
+def test_the_llm_rows_appear_only_when_there_is_a_stack_env(monkeypatch, tmp_path):
+    """AgentMemory's chat provider is not a saved setting -- it lives in the
+    stack's .env, compose's own interpolation source. The dashboard shows it
+    because "configure all this" means all of it, and a machine that has never
+    run `tstack services bootstrap` has no such file to show.
+    """
+    from tstack.ui import model
+
+    monkeypatch.setattr(model_paths(), "resolve_source_dir", lambda: tmp_path)
+    assert model.llm_rows() == [], "no clone contents, nothing to offer"
+
+    stack = tmp_path / "services" / "stacks" / "agentmemory"
+    stack.mkdir(parents=True)
+    (stack / ".env").write_text("OPENAI_BASE_URL=http://h:1/v1\n", encoding="utf-8")
+    monkeypatch.setenv("TS_STACK_ROOT", str(tmp_path / "services" / "stacks"))
+    rows = model.llm_rows()
+    assert [r.key for r in rows] == ["OPENAI_BASE_URL", "OPENAI_MODEL"]
+    assert all(r.store == model.LLM for r in rows), "they carry their own store tag"
+    assert rows[0].value == "http://h:1/v1"
+    assert rows[0].source == "stack .env"
+    assert rows[1].source == "unset", "an unset model is a state worth naming"
+
+
+def test_a_dashboard_save_of_the_endpoint_routes_to_the_env_not_the_store(monkeypatch, tmp_path):
+    """Two stores, one screen. Routing on the row's tag is what keeps the
+    settings writer the single writer for settings."""
+    from tstack import llmconfig
+    from tstack.ui import model
+
+    stack = tmp_path / "services" / "stacks" / "agentmemory"
+    stack.mkdir(parents=True)
+    (stack / ".env").write_text("# empty\n", encoding="utf-8")
+    monkeypatch.setattr(model_paths(), "resolve_source_dir", lambda: tmp_path)
+    monkeypatch.setenv("TS_STACK_ROOT", str(tmp_path / "services" / "stacks"))
+
+    ok, message = model.save_llm("OPENAI_BASE_URL", "http://host.docker.internal:11434/v1")
+    assert ok, message
+    assert "restart agentmemory" in message, "the setting is inert until it does"
+    provider = llmconfig.read(tmp_path)
+    assert provider.base_url == "http://host.docker.internal:11434/v1"
+    assert provider.provider_label == "Ollama", "labelled from the endpoint, not left blank"
+    assert not store.toml_path().exists(), "and nothing reached the settings store"
+
+
+def test_clearing_the_endpoint_clears_the_model_and_the_labels(monkeypatch, tmp_path):
+    """A half-cleared provider names one this machine no longer has: the compose
+    file defaults the labels to OpenAI, so leaving them is worse than wrong."""
+    from tstack import llmconfig
+    from tstack.ui import model
+
+    stack = tmp_path / "services" / "stacks" / "agentmemory"
+    stack.mkdir(parents=True)
+    (stack / ".env").write_text("# empty\n", encoding="utf-8")
+    monkeypatch.setattr(model_paths(), "resolve_source_dir", lambda: tmp_path)
+    monkeypatch.setenv("TS_STACK_ROOT", str(tmp_path / "services" / "stacks"))
+
+    model.save_llm("OPENAI_BASE_URL", "https://api.openai.com/v1")
+    model.save_llm("OPENAI_MODEL", "gpt-4o-mini")
+    assert llmconfig.read(tmp_path).complete
+
+    ok, message = model.save_llm("OPENAI_BASE_URL", "")
+    assert ok and "cleared" in message
+    provider = llmconfig.read(tmp_path)
+    assert provider.base_url == "" and provider.model == ""
+    assert provider.provider_label == llmconfig.UNCONFIGURED_PROVIDER

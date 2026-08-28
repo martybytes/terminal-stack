@@ -40,6 +40,7 @@ from . import platform as plat
 from . import store
 
 # Provider names. A Setting carries one of these strings; nothing else may.
+APPS = "apps"
 STARSHIP = "starship-presets"
 KOKORO_VOICES = "kokoro-voices"
 SAY_VOICES = "say-voices"
@@ -207,6 +208,22 @@ def say_voices() -> list[Choice]:
 # ------------------------------------------------------------------ the front
 
 
+def app_options() -> list[Choice]:
+    """The CLI tool catalog, filtered to what this machine can install.
+
+    Grouped in file order, which is picker order, with the group name as the
+    note -- so a 47-row list still reads as sections.
+    """
+    from . import apps as catalog
+
+    here = plat.kind()
+    return [
+        Choice(a.id, a.id, f"{a.group}: {a.description}")
+        for a in catalog.catalog()
+        if a.installable(here)
+    ]
+
+
 def options(provider: str) -> list[Choice]:
     """Every value this machine can offer for a provider, right now.
 
@@ -216,6 +233,8 @@ def options(provider: str) -> list[Choice]:
     if provider == STARSHIP:
         stack = Choice(STACK_PROMPT, STACK_PROMPT, "this stack's own two-line prompt")
         return [stack, *(Choice(p, p, "starship built-in") for p in starship_presets())]
+    if provider == APPS:
+        return app_options()
     if provider == KOKORO_VOICES:
         return [Choice(v, v, _voice_hint(v)) for v in kokoro_voices()]
     if provider == SAY_VOICES:
@@ -258,6 +277,15 @@ def can_sample(provider: str) -> bool:
 def can_preview(provider: str) -> bool:
     """Is there anything to SEE beyond the name?"""
     return provider == STARSHIP
+
+
+def is_multi(provider: str) -> bool:
+    """Does this setting hold MANY of its options rather than one?
+
+    `apps` is the only one, and it is why the picker needs a tick-list at all:
+    every other provider answers "which one", this one answers "which ones".
+    """
+    return provider == APPS
 
 
 def preview(provider: str, value: str) -> str | None:
