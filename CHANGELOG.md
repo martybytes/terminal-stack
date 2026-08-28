@@ -4,6 +4,70 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+### Added
+
+- **`tstack agents llm` — what a chat model switches on, and what runs without
+  one (08/27/2026).** AgentMemory needs no LLM for storage, semantic search or
+  embeddings; a chat model adds exactly four things (`compression`, `summary`,
+  `graph`, `consolidation`) and the command names all four either way. It reads
+  the stack's own `.env` — compose's authoritative interpolation source — so it
+  is correct while the stack is **down**, which is when someone is most likely to
+  be asking why nothing is being summarised.
+
+  Two things it will not do. It never reports a host probe as container
+  reachability: a container's DNS is Docker's embedded resolver and its egress a
+  separate path, so the success line says so and names
+  `tstack services test agentmemory` as the check that dials from inside. And an
+  endpoint set with an empty `OPENAI_MODEL` is called out rather than ticked —
+  `inferenceActive` is driven by the model, not the URL, so that configuration
+  reads as done everywhere while every family stays off.
+
+- **`llmfit` in the app catalog, under a new `models` group (08/27/2026).**
+  "Which model fits this machine" is the question standing between someone and a
+  working LLM configuration, and it was answerable only by a KB page for a tool
+  the installer never offered. brew on macOS, the release tarball on Debian/WSL
+  (there is no apt package). Deliberately **not** in the `ai` group:
+  `ts_app_is_ai` reads that group as the install *route*, so a packaged binary
+  put there is handed to `ts_install_ai_cli`, which has no branch for it and
+  prints "no agent-CLI installer defined" instead of installing anything.
+
+  Absent from the Windows catalog. It ships a windows-msvc binary but is in no
+  winget manifest, and that table takes verified ids only — the rule is "can this
+  platform install it", never "is it in winget".
+
+### Changed
+
+- **A fresh clone no longer ships a chat endpoint that resolves on one person's
+  network (08/27/2026).** `services/stacks/agentmemory/.env.example` had
+  `OPENAI_BASE_URL` and `OPENAI_MODEL` **active**, pointing at a private
+  Tailscale host, and `tstack services bootstrap` copies that file verbatim. Of
+  the three possible states that is the worst one: `ts-verify` treats an unset
+  base URL as a supported skip and a set-but-unreachable one as a failure,
+  because that is where every compression call returns empty, fails XML parsing,
+  retries and dead-letters while the log line still reads `outcome:"success"`.
+  52,570 jobs accumulated that way. Every clone but the author's booted into it.
+
+  `services/.env.example`'s `OPENAI_API_KEY` placeholder is commented out for a
+  related reason that is easier to miss: with a key set and no base URL the
+  client falls back to `api.openai.com` and sends it there, while `ts-verify`
+  still reports "skip" because it reads the container's `OPENAI_BASE_URL` and
+  that is empty. The machine looks cleanly unconfigured while quietly 401ing
+  against a service nobody chose.
+
+  In their place the file names three provider shapes anyone can copy — any
+  OpenAI-compatible server, Ollama (with the reminder that `localhost` inside a
+  container is the container), and the OpenAI API — and points at `llmfit` for
+  choosing a model. `LLM_PROVIDER_LABEL` / `LLM_ENDPOINT_LABEL` now say "none"
+  rather than inheriting the compose default of "OpenAI"/"OpenAI API", which is
+  wrong twice over on a machine with no provider. The compose *default* is
+  unchanged on purpose: an unlabelled provider is assessed as paid, and
+  over-reporting cost is the safe direction to be wrong in.
+
+  Also genericised in the same file: the embedding-provider warning and the
+  reasoning-effort note were written against one specific vLLM deployment, and
+  `LLM_HOST_BEARER_TOKEN` was a rollback credential for that host which nothing
+  in the repo has ever read.
+
 ### Fixed
 
 - **Windows had no synthesis floor, so "on" could still mean silence

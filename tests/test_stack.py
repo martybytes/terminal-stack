@@ -1152,3 +1152,41 @@ def test_seeding_kokoro_reports_the_profile_it_chose(tmp_path, monkeypatch, caps
     out = capsys.readouterr().out
     assert "kokoro profile B" in out
     assert "cu126" in (directory / ".env").read_text(encoding="utf-8")
+
+
+def test_a_fresh_clone_ships_no_active_llm_provider():
+    """`tstack services bootstrap` copies .env.example VERBATIM, so anything
+    active in it is every fresh machine's configuration.
+
+    ts-verify has three verdicts and they are not symmetric: an UNSET base URL is
+    a supported skip (storage, search and embeddings are unaffected), a SET but
+    unreachable one is a failure -- that is the state where every compression
+    call returns empty, fails XML parsing, retries and dead-letters while the log
+    still reads outcome:"success". 52,570 jobs accumulated that way.
+
+    Shipping `OPENAI_BASE_URL=http://100.x.y.z:8000/v1` put every clone but the
+    author's into the failure state on first boot.
+    """
+    import re as _re
+
+    for rel in ("services/stacks/agentmemory/.env.example", "services/.env.example"):
+        body = (ROOT / rel).read_text(encoding="utf-8")
+        active = [
+            ln for ln in body.splitlines() if _re.match(r"^OPENAI_(BASE_URL|MODEL|API_KEY)=", ln)
+        ]
+        assert not active, f"{rel} ships an active provider setting: {active}"
+
+    # And the console must not claim OpenAI on a machine with no provider: the
+    # compose defaults are "OpenAI"/"OpenAI API", so the example has to override.
+    stack = (ROOT / "services/stacks/agentmemory/.env.example").read_text(encoding="utf-8")
+    assert "LLM_PROVIDER_LABEL=none" in stack
+    assert "LLM_ENDPOINT_LABEL=no chat provider configured" in stack
+
+
+def test_the_example_names_a_provider_option_for_someone_who_is_not_the_author():
+    """The endpoint was a private Tailscale host with no alternative documented,
+    so a reader had nothing to copy. Three shapes cover essentially everyone."""
+    body = (ROOT / "services/stacks/agentmemory/.env.example").read_text(encoding="utf-8")
+    assert "host.docker.internal:11434" in body, "Ollama, and the container-localhost trap"
+    assert "api.openai.com" in body, "the hosted option"
+    assert "OpenAI-compatible" in body, "the generic case that covers vLLM and LM Studio"

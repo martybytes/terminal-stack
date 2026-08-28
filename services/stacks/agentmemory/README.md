@@ -863,8 +863,7 @@ every embedding request would 404 and writes would stop being searchable. Pin it
 The provider credential has one untracked source: repo-root `.env`. Compose loads `agentmemory/.env`
 first and `../.env` second, so the root `OPENAI_API_KEY` wins — which is why switching providers
 means editing that file, not the stack one. The console receives display-only provider metadata and
-masked key fingerprints, never the key itself. `LLM_HOST_BEARER_TOKEN` remains in the stack-local
-file only as an Ollama-era rollback credential and is unused while vLLM is serving.
+masked key fingerprints, never the key itself.
 
 ### Embedding dimension is a one-way door
 

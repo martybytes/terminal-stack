@@ -36,13 +36,14 @@ from pathlib import Path
 
 from .. import paths
 from .. import platform as plat
+from ..stacks import env_value, stack_dir
 
 HELP = """tstack agents - user-global Headroom, Caveman and AgentMemory wiring.
 
 Usage:
   tstack agents [<tool>] [<action>] [<cursor-mode>]
 
-  <tool>         all (default) | headroom | caveman | agentmemory
+  <tool>         all (default) | headroom | caveman | agentmemory | llm
   <action>       status (default) | on | off | repair | uninstall | dashboard
   <cursor-mode>  mcp (default) | byok | off      (headroom only)
 
@@ -52,10 +53,13 @@ Usage:
   off        remove the client wiring; data, containers and secrets are untouched
   uninstall  also remove the terminal-stack-owned client pieces
 
+`llm` takes no action but `status`. It is a report: which AgentMemory features a
+chat model is switched on, which run without one, and where to set the endpoint.
+
 Docker is out of scope here: this command probes a service and names the
 `tstack services` verb, it never starts or stops one."""
 
-TOOLS = ("all", "headroom", "caveman", "agentmemory")
+TOOLS = ("all", "headroom", "caveman", "agentmemory", "llm")
 ACTIONS = ("status", "on", "off", "repair", "uninstall", "dashboard")
 CURSOR_MODES = ("mcp", "byok", "off")
 
@@ -871,6 +875,7 @@ class AgentMemory:
             else:
                 self.out.bad("agent hook wiring incomplete - tstack agents agentmemory repair")
         self.out.info(f"pinned plugin version: {dig(self.body, 'agentmemory.version')}")
+        self.out.info("chat-model features: tstack agents llm")
         return ok
 
     def run(self, action: str) -> int:
@@ -884,6 +889,114 @@ class AgentMemory:
             self.remove(uninstall=action == "uninstall")
             return 0
         self.out.bad(f"AgentMemory has no '{action}' action")
+        return 2
+
+
+# ---------------------------------------------------------------------- llm
+
+
+# What a chat model actually buys, and what it does not. The list is short on
+# purpose: it is the answer to "is it worth configuring one", and every other
+# part of AgentMemory works without it.
+LLM_FEATURES = (
+    ("compression", "long observations condensed before they are stored"),
+    ("summary", "session summaries"),
+    ("graph", "entity and relation extraction into the knowledge graph"),
+    ("consolidation", "the periodic reflect pass that turns observations into insights"),
+)
+
+LLM_UNAFFECTED = (
+    ("storage", "every observation is written either way"),
+    ("search", "semantic search, over embeddings computed in the image"),
+    ("embeddings", "local, on-device, no API key and no network"),
+)
+
+
+class Llm:
+    """Whether AgentMemory has a chat model, and what that decides.
+
+    Reads the stack's own .env, which is compose's authoritative interpolation
+    source (`services/stacks/agentmemory/ts-envfiles` says the same thing from
+    the console's side) - a file read, no container required, and correct while
+    the stack is stopped.
+
+    THE HOST PROBE IS NOT PROOF. A container's DNS is Docker's embedded resolver
+    and its egress a separate path, so an endpoint this command reaches may still
+    be unreachable from inside the server. Reported as such, never as a pass;
+    `tstack services test agentmemory` is the check that dials from in there.
+    """
+
+    def __init__(self, source: Path, out: Out) -> None:
+        self.source = source
+        self.out = out
+
+    def env_file(self) -> Path:
+        return stack_dir(self.source, "agentmemory") / ".env"
+
+    def configured(self) -> tuple[str, str]:
+        path = self.env_file()
+        return (env_value(path, "OPENAI_BASE_URL") or "", env_value(path, "OPENAI_MODEL") or "")
+
+    def status(self) -> bool:
+        print("AgentMemory chat model:")
+        path = self.env_file()
+        if not path.is_file():
+            self.out.info(f"no stack .env yet at {path}")
+            self.out.info("tstack services bootstrap seeds it from .env.example")
+        base, model = self.configured()
+
+        if not base:
+            self.out.info("no chat provider configured - this is a supported state")
+            for name, what in LLM_FEATURES:
+                self.out.info(f"  off  {name} - {what}")
+            for name, what in LLM_UNAFFECTED:
+                self.out.good(f"{name} - {what}")
+            print()
+            self.out.info(f"to switch the four on, set OPENAI_BASE_URL and OPENAI_MODEL in {path},")
+            self.out.info(
+                "OPENAI_API_KEY in services/.env, then tstack services restart agentmemory"
+            )
+            self.out.info(
+                "llmfit recommend --use-case coding sizes a local model for this computer"
+            )
+            return True
+
+        self.out.good(f"endpoint {base}")
+        if model:
+            self.out.good(f"model {model}")
+        else:
+            # inferenceActive is driven by the model, not the URL: an endpoint
+            # with no model leaves every family switched off while the endpoint
+            # reads as configured.
+            self.out.bad("OPENAI_MODEL is empty - the four features below stay OFF")
+        for name, what in LLM_FEATURES:
+            if model:
+                self.out.good(f"{name} - {what}")
+            else:
+                self.out.info(f"  off  {name} - {what}")
+
+        reachable = http_answers(base.rstrip("/") + "/models", timeout=4)
+        if reachable:
+            self.out.good(
+                "answers from THIS HOST - which does not prove the container can reach it"
+            )
+        else:
+            self.out.bad("no answer from this host - compression will dead-letter silently")
+            self.out.info("an unreachable provider is worse than none: the calls return empty,")
+            self.out.info('fail XML parsing, retry, and still log outcome:"success"')
+        self.out.info("tstack services test agentmemory dials it from inside the container")
+        return reachable and bool(model)
+
+    def run(self, action: str) -> int:
+        if action == "status":
+            return 0 if self.status() else 1
+        # stderr and 2, not out.bad(): main() collapses any recorded failure to 1,
+        # and this is a usage error, which every other one here reports as 2.
+        print(
+            f"tstack agents: llm has no '{action}' action - it is a report.\n"
+            f"Set the endpoint in {self.env_file()} instead.",
+            file=sys.stderr,
+        )
         return 2
 
 
@@ -924,6 +1037,7 @@ def main(argv: list[str]) -> int:
         "headroom": lambda: Headroom(source, out, cursor_mode).run(action),
         "caveman": lambda: Caveman(source, out).run(action),
         "agentmemory": lambda: AgentMemory(source, out).run(action),
+        "llm": lambda: Llm(source, out).run(action),
     }
     if tool != "all":
         rc = runners[tool]()

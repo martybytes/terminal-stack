@@ -28,7 +28,7 @@
 #   TS_APPS_OPTIONAL    — unchecked by default (GUI editor, GPU/docker tools,
 #                         the agent CLIs — nothing here is installed unasked).
 TS_APPS_RECOMMENDED="tmux eza fzf bat fd tree delta ripgrep zoxide atuin glow micro neovim gh ghq lazygit duf ncdu dust btop fnm python uv pipx ruff ipython claude codex cursor-agent grok gemini pi"
-TS_APPS_OPTIONAL="zed tldr yazi nvtop lazydocker gdu bottom glances bandwhich gping rclone node httpie poetry pre-commit"
+TS_APPS_OPTIONAL="zed tldr yazi nvtop lazydocker gdu bottom glances bandwhich gping rclone node httpie poetry pre-commit llmfit"
 TS_APPS_ALL="$TS_APPS_RECOMMENDED $TS_APPS_OPTIONAL"
 
 # Groups exist for the picker only — the saved `apps` array stays flat, so this
@@ -36,7 +36,7 @@ TS_APPS_ALL="$TS_APPS_RECOMMENDED $TS_APPS_OPTIONAL"
 # one (CLAUDE.md, docs/decisions.md §§ at :236 and :325). Every catalog id must
 # appear in exactly one group or it is unreachable from the group picker; a test
 # asserts the union equals TS_APPS_ALL.
-TS_APP_GROUPS="shell search disk system network git editors runtimes python ai"
+TS_APP_GROUPS="shell search disk system network git editors runtimes python ai models"
 ts_app_group_desc() {
     case "$1" in
         shell)   echo "shell essentials" ;;
@@ -49,6 +49,7 @@ ts_app_group_desc() {
         runtimes) echo "language runtimes" ;;
         python)  echo "Python tooling" ;;
         ai)      echo "AI coding agents" ;;
+        models)  echo "local model sizing" ;;
         *)       echo "" ;;
     esac
 }
@@ -64,6 +65,7 @@ ts_app_group_members() {
         runtimes) echo "fnm node" ;;
         python)  echo "python uv pipx ruff ipython httpie poetry pre-commit" ;;
         ai)      echo "claude codex cursor-agent grok gemini pi" ;;
+        models)  echo "llmfit" ;;
         *)       echo "" ;;
     esac
 }
@@ -87,6 +89,7 @@ ts_app_desc() {
         ripgrep)    echo "fast recursive grep (rg)";;
         zoxide)     echo "smarter cd (z)";;
         atuin)      echo "SQLite shell history, better Ctrl+R (opt-in)";;
+        llmfit)     echo "which local LLM fits this machine's RAM and GPU";;
         glow)       echo "terminal markdown renderer";;
         micro)      echo "nano-like terminal editor";;
         neovim)     echo "neovim editor (nvim)";;
@@ -154,6 +157,10 @@ ts_app_bin() {
 # ts_install_ai_cli rather than brew/apt/winget. Kept out of the package-manager
 # paths on purpose: a curl-pipe installer that fails must not look like an apt
 # failure, and none of them belong in TS_APPS_RECOMMENDED.
+# NOTE the coupling: this reads the `ai` group as the install ROUTE, not merely
+# as a category. A packaged tool put in that group would be handed to
+# ts_install_ai_cli, which has no branch for it and would report "no agent-CLI
+# installer defined" -- which is why llmfit sits in `models` instead.
 ts_app_is_ai() {
     case " $(ts_app_group_members ai) " in *" $1 "*) return 0 ;; *) return 1 ;; esac
 }
@@ -399,6 +406,7 @@ ts_brew_install_apps() {
             eza)        formulae="$formulae eza" ;;
             zoxide)     formulae="$formulae zoxide" ;;
             atuin)      formulae="$formulae atuin" ;;
+            llmfit)     formulae="$formulae llmfit" ;;
             yazi)       formulae="$formulae yazi" ;;
             fzf)        formulae="$formulae fzf" ;;
             bat)        formulae="$formulae bat" ;;

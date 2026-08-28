@@ -195,6 +195,13 @@ common_install_selected_apps() {
             || common_install_github_binary "muesli/duf" "duf" "duf_.*_linux_$(common_arch_tag deb)\\.tar\\.gz$" \
             || echo "$WARN duf unavailable (not in apt and GitHub fallback failed)" ;;
     esac
+    # Not in apt on any release, and the upstream tarball is the only path. The
+    # "rust" arch style is the one the release names use (x86_64/aarch64).
+    case " $apps " in *" llmfit "*)
+        command -v llmfit >/dev/null 2>&1 \
+            || common_install_github_binary "AlexsJones/llmfit" "llmfit" "llmfit-.*-$(common_arch_tag rust)-unknown-linux-gnu\\.tar\\.gz$" \
+            || echo "$WARN llmfit unavailable (GitHub fallback failed)" ;;
+    esac
     ts_install_ai_clis "$apps"
 }
 

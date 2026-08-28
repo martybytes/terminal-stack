@@ -111,9 +111,57 @@ retrieval off deliberately.
 ## No LLM required
 
 Embeddings run on-device (`EMBEDDING_PROVIDER=local`), so capture, keyword search
-and vector search all work with no API key and no LLM host. An optional endpoint
-adds the *derived* layer: summaries, knowledge-graph extraction, consolidation.
-`services/stacks/agentmemory/README.md` covers pointing it at one.
+and vector search all work with no API key and no LLM host. A fresh clone ships
+with **no chat provider configured**, and that is a supported state rather than
+a half-finished install.
+
+```sh
+tstack agents llm      # what a chat model is switched on, and what runs without one
+```
+
+A chat model adds exactly four things:
+
+| feature | what it does |
+|---|---|
+| `compression` | long observations condensed before they are stored |
+| `summary` | session summaries |
+| `graph` | entity and relation extraction into the knowledge graph |
+| `consolidation` | the periodic reflect pass that turns observations into insights |
+
+Everything else — storage, semantic search, embeddings — is unaffected either
+way.
+
+### Configured-but-unreachable is worse than absent
+
+Unset is a clean skip that every check reports. An endpoint that is set and does
+not answer fails **silently**: the calls return empty, fail XML parsing, retry,
+and still log `outcome:"success"`. That asymmetry is why nothing ships
+uncommented, and why the probe to trust is the one that dials from *inside* the
+container:
+
+```sh
+tstack services test agentmemory
+```
+
+`tstack agents llm` probes from the host as well, and says so — a container's DNS
+is Docker's embedded resolver and its egress a separate path, so reaching an
+endpoint from your shell proves nothing about the server.
+
+### Pointing it at a provider
+
+Set the endpoint in `services/stacks/agentmemory/.env` and the credential in
+`services/.env` (they load in that order, so the root file wins), then
+`tstack services restart agentmemory`. The example file spells out three shapes:
+any OpenAI-compatible server (vLLM, LM Studio, llama.cpp), Ollama on
+`http://host.docker.internal:11434/v1`, or the OpenAI API itself.
+
+Not sure what your machine can run? `llmfit recommend --use-case coding` sizes
+candidates against this computer's RAM and GPU and prints an ollama name — it is
+in the app catalog under **local model sizing** (`tstack config apps llmfit`),
+and `doc llmfit` has the rest.
+
+Remember to update `LLM_PROVIDER_LABEL` / `LLM_ENDPOINT_LABEL` in the same file,
+or the console keeps reporting the machine as unconfigured.
 
 ## Where the data is
 

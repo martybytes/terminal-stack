@@ -75,6 +75,13 @@ $script:TsAppGroups = [ordered]@{
     runtimes = @{ Desc = 'language runtimes';  Members = @('fnm','node') }
     python  = @{ Desc = 'Python tooling';      Members = @('python','uv','pipx','ruff','ipython','httpie','poetry','pre-commit') }
     ai      = @{ Desc = 'AI coding agents';    Members = @('claude','codex','cursor-agent','grok','gemini','pi') }
+    # llmfit ships a windows-msvc binary but is in no winget manifest (checked:
+    # neither manifests/a/AlexsJones/llmfit nor manifests/l/llmfit exists), and
+    # this table takes verified ids only. It is therefore absent from
+    # $TsAppsAll, which makes the picker skip this group entirely on Windows --
+    # the same treatment tmux, tldr and ncdu already get. Listed so the two
+    # catalogs describe the same world rather than silently diverging.
+    models  = @{ Desc = 'local model sizing'; Members = @('llmfit') }
 }
 function Get-TsAppGroupOf([string]$id) {
     foreach ($g in $script:TsAppGroups.Keys) {

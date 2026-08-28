@@ -2850,3 +2850,150 @@ def test_windows_has_a_synthesis_floor_too():
     assert worker.count("Invoke-CcTtsSapiSpeak") == 2, (
         "every path that gave up before playing must reach the floor"
     )
+
+
+# --------------------------------------------------------------- tstack agents llm
+
+
+def _llm_env(tmp_path, monkeypatch, body: str | None):
+    """A throwaway stack root. TS_STACK_ROOT is what stacks.stack_root honours."""
+    root = tmp_path / "stacks" / "agentmemory"
+    root.mkdir(parents=True)
+    if body is not None:
+        (root / ".env").write_text(body, encoding="utf-8")
+    monkeypatch.setenv("TS_STACK_ROOT", str(tmp_path / "stacks"))
+    return root
+
+
+def test_no_chat_provider_is_reported_as_a_supported_state(tmp_path, monkeypatch, capsys):
+    """The point of the command. An absent LLM is a CHOICE with four named
+    consequences, not a fault -- storage, search and embeddings are unaffected,
+    and telling someone their memory server is broken because they never wired a
+    model to it is how a supported configuration reads as an outage.
+    """
+    from tstack.commands import agents
+
+    _llm_env(tmp_path, monkeypatch, "EMBEDDING_PROVIDER=local\n")
+    rc = agents.Llm(ROOT, agents.Out()).run("status")
+    text = capsys.readouterr().out
+
+    assert rc == 0, "no provider is not a failure"
+    assert "supported state" in text
+    for name, _ in agents.LLM_FEATURES:
+        assert f"off  {name}" in text, f"{name} must be named as switched off"
+    for name, _ in agents.LLM_UNAFFECTED:
+        assert f"ok  {name}" in text, f"{name} works without a model and must say so"
+    assert "llmfit" in text, "the way to pick a model that fits this machine"
+
+
+def test_an_endpoint_with_no_model_leaves_every_feature_off(tmp_path, monkeypatch, capsys):
+    """`inferenceActive` is driven by the MODEL, not the URL (see the console's
+    shared/llmEndpoint.ts). A base URL with an empty OPENAI_MODEL therefore reads
+    as configured everywhere while every family stays off -- the exact shape that
+    has to be called out rather than shown as a tick.
+    """
+    from tstack.commands import agents
+
+    _llm_env(tmp_path, monkeypatch, "OPENAI_BASE_URL=http://127.0.0.1:9/v1\nOPENAI_MODEL=\n")
+    rc = agents.Llm(ROOT, agents.Out()).run("status")
+    text = capsys.readouterr().out
+
+    assert rc == 1
+    assert "OPENAI_MODEL is empty" in text
+    for name, _ in agents.LLM_FEATURES:
+        assert f"off  {name}" in text
+
+
+def test_an_unreachable_provider_is_louder_than_no_provider(tmp_path, monkeypatch, capsys):
+    """The asymmetry this whole workstream exists for: unset is a clean skip,
+    set-but-unreachable dead-letters silently. Port 9 is discard -- nothing
+    answers, and nothing is dialled outside the machine.
+    """
+    from tstack.commands import agents
+
+    _llm_env(tmp_path, monkeypatch, "OPENAI_BASE_URL=http://127.0.0.1:9/v1\nOPENAI_MODEL=m\n")
+    out = agents.Out()
+    rc = agents.Llm(ROOT, out).run("status")
+    text = capsys.readouterr().out
+
+    assert rc == 1 and out.failures
+    assert "dead-letter" in text
+
+
+def test_a_host_probe_is_never_reported_as_container_reachability(tmp_path, monkeypatch, capsys):
+    """A container's DNS is Docker's embedded resolver and its egress a separate
+    path, so reaching an endpoint from here proves nothing about the server. The
+    success line has to say so, and name the check that does dial from inside.
+    """
+    from tstack.commands import agents
+
+    _llm_env(tmp_path, monkeypatch, "OPENAI_BASE_URL=http://example.invalid/v1\nOPENAI_MODEL=m\n")
+    monkeypatch.setattr(agents, "http_answers", lambda *a, **k: True)
+    agents.Llm(ROOT, agents.Out()).run("status")
+    text = capsys.readouterr().out
+
+    assert "does not prove the container can reach it" in text
+    assert "tstack services test agentmemory" in text
+
+
+def test_llm_has_no_action_but_status(tmp_path, monkeypatch, capsys):
+    """`on`/`off` are valid ACTIONS for the other tools, so main() lets them
+    through to here. Rejected as a usage error (2), not as a probe failure (1)."""
+    from tstack.commands import agents
+
+    _llm_env(tmp_path, monkeypatch, "")
+    assert agents.Llm(ROOT, agents.Out()).run("on") == 2
+    assert "is a report" in capsys.readouterr().err
+
+
+def test_the_llm_report_reads_the_env_file_rather_than_the_container(tmp_path, monkeypatch):
+    """It must be right while the stack is DOWN -- that is when someone is most
+    likely to be asking why nothing is being summarised. Reading compose's own
+    interpolation source keeps one copy of the truth and needs no engine.
+    """
+    from tstack.commands import agents
+
+    _llm_env(tmp_path, monkeypatch, "OPENAI_BASE_URL=http://h/v1\nOPENAI_MODEL=m\n")
+    assert agents.Llm(ROOT, agents.Out()).configured() == ("http://h/v1", "m")
+
+
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+def test_llmfit_is_offered_but_never_routed_through_the_agent_cli_installer():
+    """`llmfit recommend` is how someone picks a model AgentMemory's four
+    LLM-only features can actually run on, so it has to be installable rather
+    than merely documented.
+
+    It is NOT in the `ai` group, and that is load-bearing rather than tidiness:
+    `ts_app_is_ai` reads that group as the install ROUTE, so a packaged binary
+    put there is handed to ts_install_ai_cli, which has no branch for it and
+    prints "no agent-CLI installer defined" instead of installing anything.
+    """
+    all_ids = _sh_eval('echo "$TS_APPS_ALL"').split()
+    assert "llmfit" in all_ids
+    assert _sh_eval("ts_app_group_of llmfit") == "models"
+    assert _sh_eval("ts_app_is_ai llmfit && echo yes || echo no") == "no"
+    assert _sh_eval("ts_app_desc llmfit"), "an id with no description is blank in the picker"
+    # Optional, not recommended: it is a one-off sizing tool, not daily kit.
+    assert "llmfit" not in _sh_eval('echo "$TS_APPS_RECOMMENDED"').split()
+    # macOS installs the brew formula; Debian/WSL has no apt package at all, so
+    # the release tarball is the only path there.
+    cfg = (ROOT / "bootstrap/_config.sh").read_text(encoding="utf-8")
+    assert 'llmfit)     formulae="$formulae llmfit"' in cfg
+    deb = (ROOT / "bootstrap/_common-debian.sh").read_text(encoding="utf-8")
+    assert 'common_install_github_binary "AlexsJones/llmfit"' in deb
+
+
+def test_the_windows_catalog_does_not_claim_a_winget_package_that_does_not_exist():
+    """The rule is "can this platform install it", never "is it in winget" -- and
+    the answer for llmfit is no: it has a windows-msvc release but no manifest.
+    Listed in the group so the two catalogs describe the same world, absent from
+    $TsAppsAll so the picker skips it, exactly as tmux and ncdu are handled.
+    """
+    ps = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
+    assert "models  = @{ Desc = 'local model sizing'; Members = @('llmfit') }" in ps
+    body = ps[ps.index("$script:TsAppsOptional") :].splitlines()[0]
+    assert "llmfit" not in body, "no verified winget id, so it must not be offered on Windows"
+    assert (
+        "'llmfit'"
+        not in ps[ps.index("$script:TsWingetIds") : ps.index("$script:TsAppsRecommended")]
+    )
