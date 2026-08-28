@@ -229,7 +229,7 @@ Each is its own branch, `merge --no-ff` into `main`, with docs and a `CHANGELOG.
 | 5a `mux` | **done** - `ts-mux.sh` + `Invoke-TsMux` deleted |
 | 5b `wezterm` | **done** - `ts-wezterm.sh` deleted, `_wezterm.sh` reduced to 66 lines of shims |
 | 5c `agents` | **done** - both twins deleted, all four external callers repointed |
-| 4 `config` writes + wizard | not started |
+| 4 `config` writes + wizard | **in progress** - module built and tested (`tstack/commands/config.py`); row not flipped, `apps`/`ghostty`/`tts`/`wizard` still shell |
 | 5d `agentmemory`, 5e `smb` | not started |
 | 6 `wso` | not started |
 | 7 `update` / `rollback` | not started - **deliberately last**, see below |

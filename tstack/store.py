@@ -33,27 +33,26 @@ MISSING = "__missing__"
 # The keys worth rendering in one batch. A per-key `chezmoi execute-template`
 # spawn costs seconds on a combined WSL+Windows host -- bootstrap/_config.sh
 # measured 49 spawns at 229s -- so everything is fetched at once.
-DATA_KEYS = (
-    "leaderChord",
-    "themeMode",
-    "resolvedTheme",
-    "tmuxPrefix",
-    "weztermMux",
-    "weztermRestore",
-    "atuinEnabled",
-    "ghosttyConfig",
-    "memoryBackend",
-    "agentmemoryEnabled",
-    "headroomEnabled",
-    "headroomCursorMode",
-    "cavemanEnabled",
-    "playwrightEnabled",
-    "ccTtsEnabled",
-    "ccTtsDaemon",
-    "ccTtsEngine",
-    "ccTtsSummarizer",
-    "windowsUsername",
-)
+# Not a settings key: the Windows username the sync hook substitutes. It is in
+# `[data]` but is not a user choice, so the schema does not describe it.
+EXTRA_DATA_KEYS = ("windowsUsername",)
+
+
+@functools.cache
+def data_keys() -> tuple[str, ...]:
+    """Every `[data]` key worth reading, derived from the schema.
+
+    This was a hand-maintained tuple of 19 -- a FOURTH parallel key list beside
+    .chezmoi.toml.tmpl, TS_MIRROR_DATA_KEYS and the mirror heredoc. It omitted
+    `apps`, the four derived bindings and 37 of the 41 ccTts* keys, so
+    `chezmoi_data()` never saw them: `store.get("apps")` returned "" on a machine
+    whose chezmoi.toml listed 47 apps, and `schema.source_of()` reported
+    `default` for values that were plainly saved -- the exact "right value for
+    the wrong reason" the schema exists to make visible.
+    """
+    from . import schema
+
+    return tuple(s.key for s in schema.SETTINGS) + EXTRA_DATA_KEYS
 
 
 # Documented defaults, applied when a key has never been written. A machine that
@@ -113,10 +112,26 @@ def chezmoi_data() -> dict[str, str]:
     # Go template braces, so an f-string would need every one doubled. Kept as
     # explicit concatenation because the doubled form is unreadable and this text
     # has to stay diffable against bootstrap/_config.sh's ts_data_prefetch.
-    template = "".join(
-        '{{ if hasKey . "' + k + '" }}' + k + '=<<{{ index . "' + k + '" }}>>\n{{ end }}'
-        for k in DATA_KEYS
-    )
+    # A key stored as a TOML ARRAY needs `range`, not `index`: Go renders a slice
+    # as `[a b c]`, brackets included, so `apps` came back as a literal
+    # "[tmux eza ...]" the moment it was added to the key set.
+    #
+    # The test is the VALUE's kind, not the schema's. `ccTtsEvents` and
+    # `ccTtsVoicePool` are lists conceptually and `kind="list"` in the schema, but
+    # the store holds them as comma-separated STRINGS -- only `apps` is an actual
+    # array. Branching on the schema made `range` run over a string, which chezmoi
+    # rejects, and one bad key fails the whole template: the batch returned
+    # nothing and every value silently fell back to its default.
+    parts = []
+    for k in data_keys():
+        ref = 'index . "' + k + '"'
+        body = (
+            '{{ if kindIs "slice" (' + ref + ") }}"
+            "{{ range $i, $v := " + ref + " }}{{ if $i }} {{ end }}{{ $v }}{{ end }}"
+            "{{ else }}{{ " + ref + " }}{{ end }}"
+        )
+        parts.append('{{ if hasKey . "' + k + '" }}' + k + "=<<" + body + ">>\n{{ end }}")
+    template = "".join(parts)
     try:
         out = subprocess.run(
             [chezmoi, "execute-template", template],

@@ -6,6 +6,24 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **`chezmoi_data()` read 19 of the 59 saved keys (08/28/2026).** `DATA_KEYS` was
+  a hand-maintained tuple -- a FOURTH parallel key list beside
+  `.chezmoi.toml.tmpl`, `TS_MIRROR_DATA_KEYS` and the mirror heredoc -- and it
+  omitted `apps`, all four derived bindings and 37 of the 41 `ccTts*` keys. Those
+  keys were simply invisible to Python: `store.get("apps")` returned `""` on a
+  machine whose `chezmoi.toml` lists 47 apps, and `schema.source_of()` reported
+  `default` for values that were plainly saved -- the exact "right value for the
+  wrong reason" the schema exists to make visible, in the one field added to make
+  it visible. It now derives from `schema.SETTINGS`.
+
+  Two things fell out of actually reading those keys. A TOML **array** needs
+  `range`, not `index`: Go renders a slice as `[a b c]`, brackets included, so
+  `apps` arrived as the literal string `"[tmux eza ...]"`. And the branch has to
+  test the VALUE's kind, not the schema's -- `ccTtsEvents` and `ccTtsVoicePool`
+  are `kind="list"` but are stored as comma-separated STRINGS, and `range` over a
+  string makes chezmoi reject the whole template, so one wrong key returned
+  nothing for all 59 and every value fell back to its default.
+
 - **The commit gate reported "NOT RUN" for every gate and exited 0 (08/28/2026).**
   Both hooks probed for their tools with `python3 -c "import <tool>"` only, which
   is the one shape this stack does not produce: `TS_APPS_RECOMMENDED` installs
@@ -57,6 +75,41 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
   and the only one that was wrong.
 
 ### Added
+
+- **`tstack config`, phase II: the module, not yet the entry point (08/28/2026).**
+  `tstack/commands/config.py` implements `show` (prose, byte-identical to the
+  shell's, verified by diff), `show --json`, `get`, `set`, `leader`, `theme`,
+  `tmux`, `restore`, `atuin`, `memory` and `agents`. `apps`, `ghostty`, `tts` and
+  `wizard` stay with the shell for now.
+
+  The registry row is deliberately NOT flipped. Both columns flip together, and a
+  Python `config` that shelled out to `bootstrap/ts-config.sh` for its un-ported
+  verbs would leave Windows -- which has no bash -- with no implementation at
+  all. Half a subcommand cannot route.
+
+  Three behaviours differ from the shell on purpose:
+
+  - **argv is validated before the clone is resolved.** `tstack config theme`
+    is a usage error whether or not a clone exists. The two already-ported
+    comparators disagree on this (`mux` checks argv first, `services` does not),
+    so it is now pinned by a test.
+  - **`agents agentmemory on|off` is refused in both directions.** The shell
+    guarded only `on`, so `off` wrote the DERIVED `agentmemoryEnabled` directly
+    and produced the exact `memoryBackend=agentmemory` / `agentmemoryEnabled=off`
+    pair `tstack doctor` reports as drift.
+  - **`agents playwright` is routed.** The shell advertised it in its usage
+    string and had working branches for it, but the dispatch never reached them,
+    so the advertised command answered `unknown tool 'playwright'`.
+
+  Also: `show`'s ghostty row now prints wherever the Ghostty config path resolves
+  (macOS, WSL, Windows) rather than on Darwin alone, and `config atuin` works on
+  Windows -- it sets the key and says it affects WSL shells only, because the
+  pwsh save never wrote `atuinEnabled` and so STRIPPED it from the mirror.
+
+  One deliberate byte difference: `==> applying...` uses three periods where the
+  shell uses U+2026. `tests/test_tstack_cli.py` forbids non-ASCII anywhere under
+  `tstack/` because a Windows console on codepage 437 renders it as a
+  replacement glyph, and that gate is enforced where the shell's byte is not.
 
 - **The settings schema now covers all 41 `ccTts*` keys (08/28/2026).**
   It carried three. The rest were reachable only through the shell, which is why
