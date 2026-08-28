@@ -707,3 +707,37 @@ def test_no_review_skips_the_confirm_loop(monkeypatch, tmp_path):
     monkeypatch.setattr(cmd.flow, "confirm", lambda *a, **k: confirmed.append(1))
     assert cmd.main(["--no-review"]) == 0
     assert confirmed == []
+
+
+def test_every_variable_the_bootstraps_read_is_emitted():
+    """The contract between the wizard and its four callers, checked rather than
+    remembered.
+
+    The callers read several of these UNGUARDED, and every bootstrap runs
+    `set -euo pipefail` -- so a name they read and the wizard stopped emitting is
+    not a wrong answer, it is an aborted install. This is the whole reason
+    `to_sh` emits all of them unconditionally, empty where there is no value.
+    """
+    import re
+
+    read: set[str] = set()
+    for path in sorted((ROOT / "bootstrap").glob("*.sh")):
+        read |= set(re.findall(r"TS_WIZ_[A-Z_]+", path.read_text(encoding="utf-8")))
+    emitted = {name for name, _field in emit.SHELL_NAMES}
+    # Set by the shim to ask FOR the terminal question; never an answer.
+    read.discard("TS_WIZ_ASK_TERMINALS")
+
+    missing = sorted(read - emitted)
+    assert not missing, f"read by a bootstrap but never emitted: {missing}"
+
+
+def test_the_powershell_bootstrap_reads_only_keys_the_json_carries():
+    """Same contract on the other side. A `$w.X` that is not in the payload is
+    `$null`, which PowerShell will happily pass to a setter."""
+    import re
+
+    body = (ROOT / "bootstrap/windows-bootstrap.ps1").read_text(encoding="utf-8")
+    used = set(re.findall(r"\$w(?:izard)?\.([A-Za-z]+)", body))
+    carried = {name for name, _field in emit.JSON_NAMES}
+    missing = sorted(used - carried)
+    assert not missing, f"windows-bootstrap.ps1 reads {missing}, which the JSON does not carry"
