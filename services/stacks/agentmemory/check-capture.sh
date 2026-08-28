@@ -158,9 +158,16 @@ else
 
     # Guard against re-introducing a hardcoded copy. The .ps1 scans two files;
     # on Unix a shell rc is exactly where someone would paste it, so scan those too.
+    #
+    # The last two are terminal-stack's own: the ~/.zshenv block and the
+    # LaunchAgent both READ the cache rather than carrying the value, and this is
+    # what proves it stayed that way. They were the obvious place for a future
+    # "just inline it, it is simpler" change, and they were unscanned.
     for cfg in "$HOME/.claude/settings.json" "$HOME/.cursor/mcp.json" \
                "$HOME/.codex/config.toml" "$HOME/.zshenv" "$HOME/.zshrc" \
-               "$HOME/.zprofile" "$HOME/.bashrc" "$HOME/.profile"; do
+               "$HOME/.zprofile" "$HOME/.bashrc" "$HOME/.profile" \
+               "$HOME/.config/terminal-stack/atuin.zsh" \
+               "$HOME/Library/LaunchAgents/com.terminal-stack.agentmemory-secret.plist"; do
         [ -f "$cfg" ] || continue
         if grep -qF "$HMAC" "$cfg" 2>/dev/null; then
             fail "hardcoded secret in $cfg — remove it and reference the environment variable, or rotation will break this client silently."

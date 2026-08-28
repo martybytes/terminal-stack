@@ -4,6 +4,44 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+### Added
+
+- **AGENTMEMORY_SECRET now reaches the processes that need it (08/28/2026).**
+  The plugin's MCP clients expand `${AGENTMEMORY_SECRET}` from the environment.
+  Nothing set it on macOS -- there is no `HKCU\Environment` equivalent -- so
+  every MCP tool answered 401, silently, because retrieval discards a non-2xx
+  response. The hooks self-healed from the 0600 cache; the MCP server has no such
+  recovery.
+
+  Two carriers, because the three consumers reach differently. A spliced
+  `~/.zshenv` block covers terminal agents **and hook subprocesses**, which is
+  the reason it is `.zshenv` and not `.zshrc`: hooks are non-interactive, zsh
+  never sources `.zshrc` for them, and a variable exported there reaches nothing
+  and logs nothing. A `~/Library/LaunchAgents` plist covers GUI Cursor and Codex
+  Desktop, which are launched by launchd and read no shell file at all;
+  `launchctl setenv` alone is session-scoped and evaporates at logout, so the job
+  runs at every login.
+
+  `~/.zshenv` is **spliced, not owned**. It is where rustup writes
+  `. "$HOME/.cargo/env"`, where nvm and pyenv write their shims, and where a
+  person puts the one export they need everywhere -- a whole-file target would
+  delete all of it with no error and nothing in `chezmoi diff`, which is the
+  failure that removed every Claude TTS hook and emptied `~/.cursor/hooks.json`.
+
+  Both carriers READ the cache rather than embedding the value: the secret
+  rotates with the container's `/data/.hmac`, and a hardcoded copy works until it
+  does not and then 401s with the error swallowed -- 56 consecutive captures were
+  lost that way on 2026-08-21. `check-capture.sh`'s fixed-string scan now covers
+  both, since they were the obvious place for a future "just inline it" change
+  and were unscanned.
+
+  The block reads with `$(<file)`, a zsh builtin: `.zshenv` runs for every zsh
+  including every hook subprocess, and `$(cat file)` would be a process per
+  shell. Both carriers are removed when `agentmemoryEnabled` is off, and the
+  `.chezmoiignore` gates name the directory as well as its contents -- naming
+  only `Library/**` still creates an empty `~/Library/LaunchAgents` on machines
+  that opted out.
+
 ### Fixed
 
 - **`chezmoi_data()` read 19 of the 59 saved keys (08/28/2026).** `DATA_KEYS` was

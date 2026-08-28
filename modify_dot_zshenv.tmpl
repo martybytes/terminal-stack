@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+# modify_dot_zshenv — splice terminal-stack's block into ~/.zshenv, byte-preserving
+# everything else.
+#
+# chezmoi hands this script the CURRENT target on stdin and installs whatever it
+# writes to stdout. A `dot_zshenv` whole-file target would have been simpler and
+# wrong: ~/.zshenv is where rustup writes `. "$HOME/.cargo/env"`, where nvm and
+# pyenv write their shims, and where a person puts the one export they need
+# everywhere. Managing it outright deletes all of that with no error and nothing
+# in `chezmoi diff` -- the same failure that removed every Claude TTS hook and
+# emptied ~/.cursor/hooks.json, twice, which is why this repo splices part-owned
+# files instead of copying them.
+#
+# WHY .zshenv AND NOT .zshrc
+#
+# The agent hooks run as NON-INTERACTIVE subprocesses. zsh sources .zshrc only
+# for interactive shells, so a variable exported there reaches nothing a hook
+# does and logs nothing when it fails: agentmemory's hooks swallow errors
+# (`fetch(...).catch(() => {})` then `exit(0)`), so the symptom is silence.
+# .zshenv is sourced for EVERY zsh, which is exactly the reach required.
+# services/stacks/agentmemory/README.md says the same thing, and
+# check-capture.sh's own advice line names .zshenv explicitly.
+#
+# WHY IT READS A FILE RATHER THAN CARRYING THE VALUE
+#
+# The secret rotates whenever the container's /data/.hmac is regenerated. A
+# hardcoded copy works until it does not, and then fails silently -- 56
+# consecutive captures were lost that way on 2026-08-21. Reading the 0600 cache
+# means rotation is picked up by the next shell with no apply. It also keeps the
+# literal secret out of this file, which is what check-capture.sh's scan (a
+# fixed-string grep for the value itself) is looking for.
+#
+# COST: this runs for every zsh, including every hook subprocess, so it must not
+# fork. `$(<file)` is a zsh builtin read; `$(cat file)` would be a process per
+# shell.
+set -eu
+
+BEGIN='# ---- terminal-stack-agentmemory-start ----'
+END='# ---- terminal-stack-agentmemory-end ----'
+
+current="$(cat)"
+
+{{- if eq (index . "agentmemoryEnabled" | default "off") "on" }}
+block="$BEGIN
+# AGENTMEMORY_SECRET for hooks and MCP clients. Read, never embedded: the value
+# rotates, and a stale copy 401s on every request with the error swallowed.
+# Managed by terminal-stack: modify_dot_zshenv.tmpl in the clone owns this\n# block and rewrites it on every apply. Anything you add OUTSIDE it is kept.
+if [[ -z \${AGENTMEMORY_SECRET:-} ]]; then
+  _ts_am_secret=\"\${XDG_CONFIG_HOME:-\$HOME/.config}/terminal-stack/agentmemory.secret\"
+  [[ -r \$_ts_am_secret ]] && export AGENTMEMORY_SECRET=\"\$(<\$_ts_am_secret)\"
+  unset _ts_am_secret
+fi
+$END"
+{{- else }}
+# agentmemory is off on this machine: the block is removed rather than left
+# behind, so turning the feature off actually stops exporting the secret.
+block=""
+{{- end }}
+
+# Drop any existing block, then append the new one. Sed is not used: it is
+# line-oriented and would append a trailing newline to a file that lacked one,
+# and this file belongs to other tools.
+export TS_ZSHENV_CURRENT="$current" TS_ZSHENV_BLOCK="$block" TS_ZSHENV_BEGIN="$BEGIN" TS_ZSHENV_END="$END"
+python3 <<'PY'
+import os
+import sys
+
+begin = os.environ["TS_ZSHENV_BEGIN"]
+end = os.environ["TS_ZSHENV_END"]
+current = os.environ["TS_ZSHENV_CURRENT"]
+block = os.environ["TS_ZSHENV_BLOCK"]
+
+lines = current.split("\n")
+out, skipping = [], False
+for line in lines:
+    if line.strip() == begin:
+        skipping = True
+        continue
+    if line.strip() == end:
+        skipping = False
+        continue
+    if not skipping:
+        out.append(line)
+
+body = "\n".join(out)
+# Collapse the blank run a removed block leaves behind, without touching the
+# rest of the file's spacing.
+while body.endswith("\n\n"):
+    body = body[:-1]
+
+if block:
+    if body and not body.endswith("\n"):
+        body += "\n"
+    if body.strip():
+        body += "\n"
+    body += block + "\n"
+
+sys.stdout.write(body)
+PY

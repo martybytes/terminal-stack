@@ -69,6 +69,33 @@ Two failures worth knowing about, because both were silent:
   errors and retrieval discards non-2xx. That cost 56 consecutive captures once.
   The injected wrapper now re-reads the authoritative value on a 401 and retries.
 
+## Where the secret comes from
+
+`AGENTMEMORY_SECRET` is the container's `/data/.hmac`. Nothing in this stack
+writes it; the plugin's own setup owns that. What the stack does is get it to the
+three kinds of process that need it, which reach differently:
+
+| Consumer | Reads |
+|---|---|
+| terminal-launched agents | `~/.zshenv` |
+| agent **hook subprocesses** | `~/.zshenv` — they are non-interactive, so zsh never sources `~/.zshrc` for them |
+| GUI Cursor / Codex Desktop | the launchd environment — they read no shell file at all |
+
+So there are two carriers. `chezmoi apply` splices a block into `~/.zshenv`
+(part-owned: everything you or rustup or nvm put there is kept), and on macOS it
+installs `~/Library/LaunchAgents/com.terminal-stack.agentmemory-secret.plist`,
+which runs at login and does `launchctl setenv`. Both **read the 0600 cache at
+`~/.config/terminal-stack/agentmemory.secret`** rather than carrying the value:
+the secret rotates whenever the container regenerates `/data/.hmac`, and a
+hardcoded copy works until it does not and then 401s on every request with the
+error swallowed.
+
+Both disappear when `agentmemoryEnabled` is off, so turning the feature off
+actually stops exporting the secret.
+
+`tstack services` writes the cache; `check-capture.sh` verifies no config file
+holds a literal copy — including both carriers.
+
 ## Retrieval
 
 Every agent gets prompt-level retrieval (`/agentmemory/context` from
