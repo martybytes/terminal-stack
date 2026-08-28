@@ -61,6 +61,24 @@ $script:TsAppsRecommended = @('eza','fzf','bat','fd','delta','ripgrep','zoxide',
 $script:TsAppsOptional    = @('zed','yazi','gdu','bottom','glances','gping','rclone','node','httpie','poetry','pre-commit')
 $script:TsAppsAll         = $script:TsAppsRecommended + $script:TsAppsOptional
 
+# Two CLASSES, cutting across the groups. Twin of TS_APPS_SYSADMIN in
+# bootstrap/_config.sh, minus the ids Windows cannot install (tmux, tldr, ncdu,
+# nvtop, lazydocker, bandwhich) -- the same subtraction $TsAppsRecommended
+# already makes against its POSIX twin.
+#
+# The split is "does this only make sense if you write code here", not taste.
+# git tooling stays in BOTH: delta, gh and lazygit earn their place on a server
+# you deploy from. ghq, the runtimes, the Python tooling and the agent CLIs do
+# not. Picker-only, like the groups -- the saved `apps` array stays flat.
+$script:TsAppsSysadmin = @(
+    'eza','fzf','bat','fd','ripgrep','zoxide','atuin','glow','micro','neovim','prettymark','yazi',
+    'delta','gh','lazygit','duf','dust','gdu','btop','bottom','glances','gping','rclone'
+)
+function Get-TsAppsForClass([string]$Class) {
+    if ($Class -eq 'sysadmin') { return $script:TsAppsSysadmin }
+    return $script:TsAppsRecommended
+}
+
 # Groups exist for the picker only — the saved `apps` array stays flat, so this
 # adds no chezmoi [data] key. Twin of ts_app_group_* in bootstrap/_config.sh;
 # ids no route here can install are skipped by Test-TsAppInstallable.
@@ -150,6 +168,26 @@ function Test-TsAppInstalled([string]$id) {
 # machine configured before a tool joined the catalog would otherwise never get
 # it however many times tstack update ran, which is exactly how gh/ghq/lazygit would
 # have missed every existing install.
+# Which class this machine looks like, INFERRED from what it has chosen rather
+# than saved. The install profile is a wizard branch and deliberately not stored;
+# the class is needed on every update, so it comes from a predicate that cannot
+# drift: does the saved selection contain anything outside the sysadmin set?
+#
+# Without it a machine set up as a server is told on every update that it is
+# missing fnm, poetry and six agent CLIs it deliberately declined -- the same nag
+# Test-TsAppInstallable exists to end, in a new place.
+# Twin of ts_apps_saved_class in bootstrap/_config.sh.
+function Get-TsSavedAppClass {
+    $saved = @()
+    try { $saved = @((Get-TsConfig).apps) } catch {}
+    # Never configured: keep the old behaviour rather than guessing.
+    if (-not $saved.Count) { return 'developer' }
+    foreach ($id in $saved) {
+        if ($id -and $script:TsAppsSysadmin -notcontains $id) { return 'developer' }
+    }
+    return 'sysadmin'
+}
+
 function Get-TsAppsPending {
     # Refresh PATH from the persisted Machine+User values FIRST, the way the
     # POSIX twin calls ts_load_node_env. Without it this reads the PATH this
@@ -161,7 +199,7 @@ function Get-TsAppsPending {
     $saved = @()
     try { $saved = @((Get-TsConfig).apps) } catch {}
     $seen = @{}; $out = @()
-    foreach ($id in ($saved + $script:TsAppsRecommended)) {
+    foreach ($id in ($saved + (Get-TsAppsForClass (Get-TsSavedAppClass)))) {
         if (-not $id) { continue }
         if ($seen[$id]) { continue }
         $seen[$id] = $true
@@ -294,6 +332,7 @@ function Get-TsConfig {
         headroomEnabled = 'off'; headroomCursorMode = 'mcp'
         cavemanEnabled = 'off'; agentmemoryEnabled = 'off'
         memoryBackend = 'agentmemory'
+        starshipPreset = 'terminal-stack'; atuinEnabled = 'off'
     }
 }
 
@@ -373,7 +412,12 @@ function Save-TsConfig {
         [ValidateSet('on','off')][string]$CavemanEnabled = 'off',
         [ValidateSet('on','off')][string]$AgentmemoryEnabled = 'off',
         [ValidateSet('on','off')][string]$PlaywrightEnabled = 'off',
-        [ValidateSet('agentmemory','headroom','none')][string]$MemoryBackend = 'agentmemory'
+        [ValidateSet('agentmemory','headroom','none')][string]$MemoryBackend = 'agentmemory',
+        # No ValidateSet: `starship preset --list` is the authority and it grows,
+        # so a hardcoded set here would reject a preset the installed starship
+        # has. bootstrap/_config.sh's ts_starship_set asks starship instead.
+        [string]$StarshipPreset = 'terminal-stack',
+        [ValidateSet('on','off')][string]$AtuinEnabled = 'off'
     )
     $l = ConvertTo-TsLeader $LeaderChord
     $existing = Get-TsConfig
@@ -405,7 +449,16 @@ function Save-TsConfig {
         @{ Param = 'CavemanEnabled'; Name = 'cavemanEnabled'; Default = 'off' },
         @{ Param = 'AgentmemoryEnabled'; Name = 'agentmemoryEnabled'; Default = $(Get-TsAgentSetting agentmemoryEnabled) },
         @{ Param = 'PlaywrightEnabled'; Name = 'playwrightEnabled'; Default = 'off' },
-        @{ Param = 'MemoryBackend'; Name = 'memoryBackend'; Default = 'agentmemory' }
+        @{ Param = 'MemoryBackend'; Name = 'memoryBackend'; Default = 'agentmemory' },
+        # Both of these are written by the WSL side and read by the Windows sync,
+        # and neither was in this table -- so a Windows-side save STRIPPED them
+        # from config.json, silently, exactly as the ccTts comment above warns.
+        # starshipPreset decides which prompt sync-windows.ps1 deploys, so losing
+        # it visibly reverts the prompt; atuinEnabled has no pwsh consumer today
+        # but is the same bug and is fixed with it rather than left as the next
+        # one to find.
+        @{ Param = 'StarshipPreset'; Name = 'starshipPreset'; Default = 'terminal-stack' },
+        @{ Param = 'AtuinEnabled'; Name = 'atuinEnabled'; Default = 'off' }
     )) {
         if (-not $PSBoundParameters.ContainsKey($pair.Param)) {
             Set-Variable -Name $pair.Param -Value (Get-TsProp $existing $pair.Name $pair.Default)
@@ -430,6 +483,8 @@ function Save-TsConfig {
         agentmemoryEnabled = $AgentmemoryEnabled
         playwrightEnabled = $PlaywrightEnabled
         memoryBackend      = $MemoryBackend
+        starshipPreset     = $StarshipPreset
+        atuinEnabled       = $AtuinEnabled
     }
     $p = Get-TsConfigPath
     New-Item -ItemType Directory -Force -Path (Split-Path $p) | Out-Null
@@ -1120,9 +1175,11 @@ function Read-TsHeadroomCursorMode {
     )
 }
 function Read-TsApps {
+    $class = if ($script:TsWizAppClass) { $script:TsWizAppClass } else { 'developer' }
+    $recommended = Get-TsAppsForClass $class
     if ($env:TS_APPS) {
         switch ($env:TS_APPS) {
-            'recommended' { return $script:TsAppsRecommended }
+            'recommended' { return $recommended }
             'all'         { return $script:TsAppsAll }
             'none'        { return @() }
             default       { return ($env:TS_APPS -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
@@ -1130,10 +1187,10 @@ function Read-TsApps {
     }
     $choice = Read-TsChoice -Title 'Optional CLI tools (font, Starship, chezmoi — always installed):' -Default 'recommended' -Intro @(
         '  winget may prompt for administrator elevation.',
-        ('  recommended: ' + ($script:TsAppsRecommended -join ', ')),
-        ('  also available: ' + ($script:TsAppsOptional -join ', '))
+        ('  recommended: ' + ($recommended -join ', ')),
+        '  also available: everything else in the catalog'
     ) -Options @(
-        @{ Key = 'recommended'; Label = 'install the recommended set' },
+        @{ Key = 'recommended'; Label = 'install the recommended set'; Note = "the $class set for this machine" },
         @{ Key = 'all';         Label = 'install everything'; Note = 'recommended + ' + ($script:TsAppsOptional -join ', ') },
         @{ Key = 'groups';      Label = 'choose whole groups'; Note = ($script:TsAppGroups.Keys -join ', ') },
         @{ Key = 'customize';   Label = 'choose individual tools' },
@@ -1144,7 +1201,7 @@ function Read-TsApps {
         'none' { return @() }
         'groups'    { return (Read-TsAppGroups) }
         'customize' { return (Read-TsAppsCustom) }
-        default { return $script:TsAppsRecommended }
+        default { return $recommended }
     }
 }
 
@@ -1183,8 +1240,12 @@ function Read-TsAppsCustom {
         return $sel
     }
     # Thirty consecutive Y/n prompts is a lot to sit through, so the walk is a
-    # tick-list per group rather than one question per tool.
+    # tick-list per group rather than one question per tool. Pre-ticked = the
+    # recommended set FOR THIS MACHINE'S CLASS, so Enter through the lot lands
+    # somewhere sensible whether it is a laptop or a server; every tool stays
+    # individually tickable either way.
     # Twin of bootstrap/_wizard.sh ts_pick_apps_by_item.
+    $pretick = Get-TsAppsForClass $(if ($script:TsWizAppClass) { $script:TsWizAppClass } else { 'developer' })
     $sel = @()
     foreach ($g in $script:TsAppGroups.Keys) {
         $opts = @()
@@ -1194,7 +1255,7 @@ function Read-TsAppsCustom {
         }
         if (-not $opts.Count) { continue }
         $sel += Read-TsMulti -Title ('  ' + $script:TsAppGroups[$g].Desc + ':') -Options $opts `
-            -Preticked $script:TsAppsRecommended
+            -Preticked $pretick
     }
     return @($sel)
 }
@@ -1258,19 +1319,184 @@ function Save-TsWorkspaceOverride {
 # The whole install questionnaire, in one place so both the bootstrap and
 # `tstack config wizard` ask exactly the same questions in the same order. POSIX
 # twin: ts_wizard_ask / ts_wizard_collect in bootstrap/_wizard.sh.
+# The first question. Everything else in this wizard is downstream of it, which
+# is why it is first: asking about the leader key, the mux, voice notifications
+# and a memory backend BEFORE establishing that is fourteen questions aimed at
+# someone who wanted one thing.
+#
+# NOT a saved setting, deliberately -- it decides what the REST of the wizard
+# asks and what those answers default to, and every one of them is saved on its
+# own. A stored `profile` would be a second copy of state that can disagree with
+# the settings it produced. Twin of ts_prompt_profile in bootstrap/_wizard.sh.
+# ── which prompt ────────────────────────────────────────────────────────────────
+# Twins of ts_starship_* in bootstrap/_config.sh. "terminal-stack" (default) is
+# this repo's own prompt; any other value is one of Starship's built-in presets,
+# rendered over the mirrored starship.toml by scripts/sync-windows.ps1.
+function Get-TsStarshipPresets {
+    $starship = Get-Command starship -ErrorAction SilentlyContinue
+    if (-not $starship) { return @() }
+    # `--list` emits a trailing blank line; a bare pass-through turns it into an
+    # empty entry in every menu.
+    return @(& $starship.Source preset --list 2>$null |
+        Where-Object { $_ -and $_.Trim() } | ForEach-Object { $_.Trim() })
+}
+
+function Get-TsStarshipPreset {
+    $v = (Get-TsConfig).starshipPreset
+    if ($v) { return [string]$v }
+    return 'terminal-stack'
+}
+
+# Render one prompt exactly as it would look, without installing it.
+#
+# STARSHIP_SHELL must be EMPTY, not unset: with a shell name starship emits that
+# shell's escaping, which prints as literal punctuation rather than as colour.
+function Show-TsStarshipPreview([string]$Name) {
+    $starship = Get-Command starship -ErrorAction SilentlyContinue
+    if (-not $starship) { Write-Host '  (starship is not installed yet)'; return }
+    $cfg = $null
+    try {
+        if ($Name -eq 'terminal-stack') {
+            $cfg = Join-Path $env:USERPROFILE '.config\starship.toml'
+            if (-not (Test-Path -LiteralPath $cfg)) {
+                Write-Host '  (not deployed yet -- it appears after the first sync)'
+                return
+            }
+        } else {
+            # Redirect, never `-o`: that refuses to overwrite an existing file,
+            # which would leave the temp file empty and the preview silently blank.
+            $body = & $starship.Source preset $Name 2>$null
+            if (-not $body) { Write-Host "  (no preset named $Name)"; return }
+            $cfg = [IO.Path]::GetTempFileName()
+            Set-Content -LiteralPath $cfg -Value (($body -join "`n") + "`n") -NoNewline -Encoding UTF8
+        }
+        $savedShell = $env:STARSHIP_SHELL
+        $savedConfig = $env:STARSHIP_CONFIG
+        try {
+            $env:STARSHIP_SHELL = ''
+            $env:STARSHIP_CONFIG = $cfg
+            & $starship.Source prompt 2>$null
+            Write-Host ''
+        } finally {
+            $env:STARSHIP_SHELL = $savedShell
+            $env:STARSHIP_CONFIG = $savedConfig
+        }
+    } finally {
+        if ($cfg -and $Name -ne 'terminal-stack' -and (Test-Path -LiteralPath $cfg)) {
+            Remove-Item -LiteralPath $cfg -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+# Offered whenever someone is choosing a prompt at all. Rendering each option is
+# the entire value: a preset name tells you nothing, and this is a decision about
+# what you look at every day.
+function Read-TsStarshipPreset {
+    if ($env:TS_STARSHIP_PRESET) { return $env:TS_STARSHIP_PRESET }
+    $cur = Get-TsStarshipPreset
+    $presets = Get-TsStarshipPresets
+    # starship is installed by the bootstrap AFTER the wizard runs on a fresh
+    # machine, so an empty list is the normal first-install path, not an error.
+    if (-not $presets.Count) { return $cur }
+    Write-Host ''
+    Write-Host '  Every prompt, rendered here so you can see them:'
+    Write-Host ''
+    Write-Host '    terminal-stack'
+    Show-TsStarshipPreview 'terminal-stack'
+    foreach ($p in $presets) {
+        Write-Host "    $p"
+        Show-TsStarshipPreview $p
+    }
+    $opts = @(@{ Key = 'terminal-stack'; Label = 'terminal-stack'
+                 Note = "this stack's own two-line prompt, themed by tstack config theme" })
+    foreach ($p in $presets) { $opts += @{ Key = $p; Label = $p } }
+    return (Read-TsChoice -Title 'Which prompt?' -Default $cur -Options $opts)
+}
+
+function Read-TsProfile {
+    if ($env:TS_PROFILE) {
+        switch ($env:TS_PROFILE) {
+            'prompt' { return 'prompt' }
+            'shell'  { return 'shell' }
+            default  { return 'full' }
+        }
+    }
+    Write-Host ''
+    Write-Host '  This is what you would get:'
+    Write-Host ''
+    Show-TsStarshipPreview 'terminal-stack'
+    Read-TsChoice -Title 'How much of this do you want?' -Default 'full' -Intro @(
+        '  RECOMMENDATION: full on your own machine - the pieces are individually',
+        '  switchable afterwards with `tstack config`, and nothing here is hard to undo.',
+        '  Take prompt on a box that is not yours, or when you came for the prompt.'
+    ) -Options @(
+        @{ Key = 'prompt'; Label = 'just the prompt'; Note = 'Starship + a Nerd Font. Your shell config, aliases and terminal are left alone' },
+        @{ Key = 'shell';  Label = 'prompt and terminal'; Note = 'adds the managed PowerShell/WezTerm configs and the CLI tools' },
+        @{ Key = 'full';   Label = 'the whole stack'; Note = 'adds the agent wiring, the Docker services, voice notifications and memory' }
+    )
+}
+
+# The second question, and the one that decides which half of the app catalog is
+# offered. Twin of ts_prompt_development in bootstrap/_wizard.sh.
+function Read-TsDevelopment {
+    if ($env:TS_DEVELOPMENT) {
+        if ($env:TS_DEVELOPMENT -in @('yes','on','true')) { return 'yes' }
+        return 'no'
+    }
+    Read-TsChoice -Title 'Will you write code on this machine?' -Default 'yes' -Intro @(
+        '  Only decides which tools are pre-ticked and whether the agent and memory',
+        '  questions are asked at all. Everything stays individually selectable.'
+    ) -Options @(
+        @{ Key = 'yes'; Label = 'yes, this is a development machine'; Note = 'git tooling, language runtimes, Python tools, the AI agent CLIs' },
+        @{ Key = 'no';  Label = 'no, I administer it'; Note = 'monitors, disk and network tools, editors, search - no runtimes, no agents' }
+    )
+}
+
 function Read-TsWizard {
+    # Named $scope, not the obvious thing: PowerShell already has an automatic
+    # variable for the profile PATH, and shadowing it inside a function is the
+    # kind of thing that parses cleanly and then surprises the next reader.
+    $scope = Read-TsProfile
+    # Meaningless for `prompt`, which installs no tools.
+    $dev = if ($scope -eq 'prompt') { 'no' } else { Read-TsDevelopment }
+    $script:TsWizAppClass = if ($dev -eq 'yes') { 'developer' } else { 'sysadmin' }
+
+    if ($scope -eq 'prompt') {
+        # What it says: Starship and a Nerd Font, nothing else touched. Every
+        # remaining answer is pinned rather than asked, and the review shows them
+        # so it is visible rather than implied.
+        return [ordered]@{
+            Profile = 'prompt'; Development = 'no'; AppClass = 'sysadmin'
+            StarshipPreset = (Read-TsStarshipPreset)
+            Leader = 'ctrl-space'; Theme = (Read-TsTheme); Terminals = @()
+            WezMux = 'off'; WezRestore = 'off'; Apps = @()
+            CcTts = 'off'; CcTtsDaemon = 'off'
+            MemoryBackend = 'none'; Agentmemory = 'off'; Headroom = 'off'
+            HeadroomCursor = 'mcp'; Caveman = 'off'
+            Workspace = (Read-TsWorkspaceDir)
+        }
+    }
+
     $w = [ordered]@{
+        Profile   = $scope
+        Development = $dev
+        AppClass  = $script:TsWizAppClass
+        StarshipPreset = (Get-TsStarshipPreset)
         Leader    = (Read-TsLeader)
         Theme     = (Read-TsTheme)
         Terminals = (Read-TsTerminals)
         WezMux    = (Read-TsWeztermMux)
         WezRestore = (Read-TsWeztermRestore)
         Apps      = @(Read-TsApps)
-        CcTts     = (Read-TsCcTts)
-        MemoryBackend = (Read-TsMemoryBackend)
-        Caveman   = (Read-TsAgentToggle TS_CAVEMAN 'Caveman terse output for all projects?' @(
-            '  Installs the pinned user-scope plugin/skill; no project files are changed.'
-        ))
+        # Voice notifications announce what an AGENT is doing; without the agent
+        # wiring there is nothing to announce, so the question is not asked.
+        CcTts     = $(if ($scope -eq 'full') { Read-TsCcTts } else { 'off' })
+        MemoryBackend = $(if ($scope -eq 'full' -and $dev -eq 'yes') { Read-TsMemoryBackend } else { 'none' })
+        Caveman   = $(if ($scope -eq 'full' -and $dev -eq 'yes') {
+            Read-TsAgentToggle TS_CAVEMAN 'Caveman terse output for all projects?' @(
+                '  Installs the pinned user-scope plugin/skill; no project files are changed.'
+            )
+        } else { 'off' })
         Workspace = (Read-TsWorkspaceDir)
     }
     # Derived, never asked separately: that is what makes two memory systems

@@ -324,6 +324,44 @@ if (Get-Command Export-CcTtsJson -ErrorAction SilentlyContinue) {
     Write-Host "updated  $(Join-Path $env:USERPROFILE '.claude\tts\config.json')  (from config ccTts)"
 }
 
+# Which prompt. The mirror above has already written this stack's own
+# starship.toml with __THEME_RESOLVED__ substituted; if a starship PRESET is
+# chosen instead, replace it with the preset's own content.
+#
+# Twin of the block in run_after_90-sync-windows.sh, and it exists for the same
+# reason the mirror does: a combined machine showing tokyo-night in WSL and this
+# stack's prompt in PowerShell is exactly the split-brain the mirror prevents.
+#
+# `starship preset` writes to STDOUT here rather than through -o: -o refuses to
+# overwrite an existing file, and the destination almost always exists.
+$preset = if ($tsCfg.starshipPreset) { [string]$tsCfg.starshipPreset } else { 'terminal-stack' }
+if ($preset -ne 'terminal-stack') {
+    $starship = Get-Command starship -ErrorAction SilentlyContinue
+    if (-not $starship) {
+        Write-Warning "starship is not on PATH, so the '$preset' preset was not rendered; kept this stack's prompt."
+    } else {
+        $starDst = Join-Path $dstHome '.config\starship.toml'
+        $body = & $starship.Source preset $preset 2>$null
+        if ($LASTEXITCODE -ne 0 -or -not $body) {
+            Write-Warning "starship has no preset named '$preset'; kept this stack's prompt."
+        } else {
+            $text = ($body -join "`n") + "`n"
+            $current = if (Test-Path -LiteralPath $starDst) {
+                Get-Content -LiteralPath $starDst -Raw
+            } else { $null }
+            if ($current -ne $text) {
+                if ($null -ne $current) {
+                    Copy-Item -LiteralPath $starDst -Destination (Get-BackupPath $starDst (Get-Date -Format 'yyyyMMdd')) -Force
+                }
+                $dir = Split-Path -Parent $starDst
+                if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+                Set-Content -LiteralPath $starDst -Value $text -NoNewline -Encoding UTF8
+                Write-Host "updated  $starDst  (starship preset: $preset)"
+            }
+        }
+    }
+}
+
 $mergeHelper = Join-Path $SourceDir 'bootstrap\_merge_cursor_settings.ps1'
 if (Test-Path -LiteralPath $mergeHelper) {
     . $mergeHelper

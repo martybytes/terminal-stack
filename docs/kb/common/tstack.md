@@ -121,6 +121,7 @@ Run it bare for an interactive menu; `tstack config show` just prints the state.
 | `tstack config theme <dark\|light\|follow>` | palette; `follow` tracks the OS theme |
 | `tstack config tmux <chord>` | tmux prefix — see `doc common/tmux` |
 | `tstack config apps [recommended\|all\|none\|id,…]` | app catalog; no arg → picker. Installs, never uninstalls |
+| `tstack config prompt [status\|list\|<name>]` | which Starship prompt. `list` renders every option so you can see them |
 | `tstack config atuin <on\|off>` | atuin owns `Ctrl+R` — see `doc common/tools/atuin` |
 | `tstack config ghostty [on\|off\|status\|diff]` | managed Ghostty config, macOS — see `doc common/tools/ghostty` |
 | `tstack config tts …` | agent voice — see `doc common/tts` |

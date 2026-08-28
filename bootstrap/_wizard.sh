@@ -103,6 +103,82 @@ ts_prompt_choice() {
     printf '%s\n' "$def"
 }
 
+# ── the first question ───────────────────────────────────────────────────────
+# Everything else in this wizard is downstream of it, which is why it is first.
+#
+# Most people who find this repo want the prompt. Asking about the leader key,
+# the mux, voice notifications and a memory backend BEFORE establishing that is
+# fourteen questions aimed at someone who wanted one thing, and the honest answer
+# to "can I just have the prompt" has to be yes.
+#
+# NOT a saved setting, deliberately. It decides what the REST of this wizard asks
+# and what those answers default to, and every one of them is saved on its own -
+# so a stored `profile` would be a second copy of state that can disagree with
+# the settings it produced. Re-running the wizard asks again, which is correct:
+# the answer is about what you want now, not about what this machine is.
+ts_prompt_profile() {
+    local c
+    {
+        printf '\n  This is what you would get:\n\n'
+    } > /dev/tty 2>/dev/null
+    ts_starship_preview terminal-stack > /dev/tty 2>/dev/null || true
+
+    c="$(ts_prompt_choice full \
+        'How much of this do you want?' \
+        '  RECOMMENDATION: full on your own machine - the pieces are individually
+  switchable afterwards with `tstack config`, and nothing here is hard to undo.
+  Take prompt on a box that is not yours, or when you came for the prompt.' \
+        'prompt|just the prompt|Starship + a Nerd Font. Your shell config, aliases and terminal are left alone' \
+        'shell|prompt and terminal|adds the managed zsh/tmux/WezTerm configs and the CLI tools' \
+        'full|the whole stack|adds the agent wiring, the Docker services, voice notifications and memory')"
+    printf '%s\n' "$c"
+}
+
+# Offered whenever someone is choosing a prompt at all. Rendering each option is
+# the entire value: a preset name tells you nothing, and this is a decision about
+# what you look at every day.
+ts_prompt_starship_preset() {
+    local c opts=() p cur
+    cur="$(ts_starship_get 2>/dev/null || echo terminal-stack)"
+    if ! ts_starship_presets >/dev/null 2>&1; then
+        # starship is installed by the bootstrap AFTER the wizard runs on a fresh
+        # machine, so this is the normal first-install path rather than an error.
+        printf '%s\n' "$cur"
+        return 0
+    fi
+    {
+        printf '\n  Every prompt, rendered here so you can see them:\n\n'
+        printf '    terminal-stack\n'
+    } > /dev/tty 2>/dev/null
+    ts_starship_preview terminal-stack > /dev/tty 2>/dev/null || true
+    for p in $(ts_starship_presets); do
+        printf '    %s\n' "$p" > /dev/tty 2>/dev/null
+        ts_starship_preview "$p" > /dev/tty 2>/dev/null || true
+    done
+    opts=("terminal-stack|terminal-stack|this stack's own two-line prompt, themed by tstack config theme")
+    for p in $(ts_starship_presets); do
+        opts+=("$p|$p")
+    done
+    c="$(ts_prompt_choice "$cur" 'Which prompt?' '' ${opts[@]+"${opts[@]}"})"
+    printf '%s\n' "$c"
+}
+
+# ── are you going to write code here? ────────────────────────────────────────
+# The second question, and the one that decides which half of the app catalog is
+# offered. A file server and a development laptop want genuinely different sets:
+# nobody administering a box needs fnm, poetry or six agent CLIs, and offering
+# them is how a 30-item tick-list becomes something people skip past.
+ts_prompt_development() {
+    local c
+    c="$(ts_prompt_choice yes \
+        'Will you write code on this machine?' \
+        '  Only decides which tools are pre-ticked and whether the agent and memory
+  questions are asked at all. Everything stays individually selectable.' \
+        'yes|yes, this is a development machine|git tooling, language runtimes, Python tools, the AI agent CLIs' \
+        'no|no, I administer it|monitors, disk and network tools, editors, search - no runtimes, no agents')"
+    printf '%s\n' "$c"
+}
+
 ts_prompt_leader() {
     local c
     c="$(ts_prompt_choice ctrl-space \
@@ -479,16 +555,19 @@ _ts_app_options_for_group() {
     done
 }
 
-# Tier 3: walk the groups, tick-list within each. Pre-ticked = whatever is in
-# TS_APPS_RECOMMENDED, so Enter through the lot lands on the recommended set.
+# Tier 3: walk the groups, tick-list within each. Pre-ticked = the recommended
+# set FOR THIS MACHINE'S CLASS, so Enter through the lot lands somewhere sensible
+# whether you are setting up a laptop or a server. Every tool stays individually
+# tickable either way -- the class decides the defaults, never the menu.
 ts_pick_apps_by_item() {
-    local g selected="" chosen
+    local g selected="" chosen pretick
     local -a opts
+    pretick="$(ts_apps_for_class "${TS_WIZ_APP_CLASS:-developer}")"
     for g in $TS_APP_GROUPS; do
         opts=()
         while IFS= read -r line; do [ -n "$line" ] && opts+=("$line"); done < <(_ts_app_options_for_group "$g")
         [ ${#opts[@]} -eq 0 ] && continue
-        chosen="$(ts_prompt_multi "$TS_APPS_RECOMMENDED" "  $(ts_app_group_desc "$g"):" '' "${opts[@]}")"
+        chosen="$(ts_prompt_multi "$pretick" "  $(ts_app_group_desc "$g"):" '' "${opts[@]}")"
         [ -n "$chosen" ] && selected="$selected $chosen"
     done
     echo "${selected# }"
@@ -523,8 +602,8 @@ ts_prompt_apps() {
     # menu stays a single block.
     intro="$(ts_apps_install_note 2>/dev/null || true)"
     intro="${intro:+$intro
-}  recommended: $TS_APPS_RECOMMENDED
-  also available: $TS_APPS_OPTIONAL"
+}  recommended: $(ts_apps_for_class "${TS_WIZ_APP_CLASS:-developer}")
+  also available: everything else in the catalog"
     local opts=()
     def=recommended
     if [ -n "$saved" ]; then
@@ -536,7 +615,7 @@ ts_prompt_apps() {
     # `set -euo pipefail`. The empty case here is a machine with no saved apps,
     # i.e. a first install, so the bare form would break exactly the fresh run.
     opts=(${opts[@]+"${opts[@]}"}
-        'recommended|install the recommended set'
+        "recommended|install the recommended set|the ${TS_WIZ_APP_CLASS:-developer} set for this machine"
         "all|install everything|recommended + $(echo "$TS_APPS_OPTIONAL" | tr ' ' ',' | sed 's/,/, /g')"
         "groups|choose whole groups|$(echo "$TS_APP_GROUPS" | tr ' ' ',' | sed 's/,/, /g')"
         'customize|choose individual tools'
@@ -550,7 +629,7 @@ ts_prompt_apps() {
         none)      echo "" ;;
         groups)    ts_pick_app_groups ;;
         customize) ts_pick_apps ;;
-        *)         echo "$TS_APPS_RECOMMENDED" ;;
+        *)         ts_apps_for_class "${TS_WIZ_APP_CLASS:-developer}" ;;
     esac
 }
 
@@ -628,6 +707,17 @@ ts_wizard_review() {
         *)      theme_label="$TS_WIZ_THEME" ;;
     esac
     printf '\n%s Review\n' "$INFO"
+    printf '    Scope            %s\n' "${TS_WIZ_PROFILE:-full}"
+    printf '    Prompt           %s\n' "${TS_WIZ_STARSHIP:-terminal-stack}"
+    # `prompt` pins every remaining answer rather than asking. Showing them makes
+    # that visible instead of implied -- and a review that silently omits what it
+    # decided for you is how "I didn't choose that" happens.
+    if [ "${TS_WIZ_PROFILE:-full}" = prompt ]; then
+        printf '    Theme            %s\n' "$theme_label"
+        printf '    Everything else  left alone (no tools, no configs, no agents)\n'
+        return 0
+    fi
+    printf '    For development  %s\n' "${TS_WIZ_DEV:-yes}"
     printf '    Leader           %s\n' "$TS_WIZ_LEADER"
     printf '    Theme            %s\n' "$theme_label"
     [ "${TS_WIZ_ASK_TERMINALS:-0}" = "1" ] && printf '    Terminals        %s\n' "${TS_WIZ_TERMINALS:-<none>}"
@@ -657,6 +747,55 @@ ts_wizard_ask() {
     local _mem=""
     TS_WIZ_CC_TTS_MESSAGE="${TS_WIZ_CC_TTS_MESSAGE:-template}"
     TS_WIZ_ASKED=0
+
+    # ── first: how much of this do you want ────────────────────────────────
+    # Everything below is downstream of it. TS_PROFILE=prompt|shell|full skips.
+    if [ -n "${TS_PROFILE:-}" ]; then
+        case "$TS_PROFILE" in prompt|shell|full) TS_WIZ_PROFILE="$TS_PROFILE" ;; *) TS_WIZ_PROFILE=full ;; esac
+    elif command -v ts_is_headless >/dev/null 2>&1 && ts_is_headless; then
+        # A headless server has no GUI terminal to configure, but it does have a
+        # shell and it is exactly the machine someone administers. `shell` is the
+        # only profile whose questions all still mean something there.
+        TS_WIZ_PROFILE=shell
+    else TS_WIZ_PROFILE="$(ts_prompt_profile)"; TS_WIZ_ASKED=$((TS_WIZ_ASKED + 1)); fi
+
+    # ── second: is this a development machine ──────────────────────────────
+    # Decides which half of the catalog is pre-ticked, and whether the agent and
+    # memory questions are asked at all. Meaningless for `prompt`, which installs
+    # no tools.
+    if [ "$TS_WIZ_PROFILE" = prompt ]; then
+        TS_WIZ_DEV=no
+    elif [ -n "${TS_DEVELOPMENT:-}" ]; then
+        case "$TS_DEVELOPMENT" in yes|on|true) TS_WIZ_DEV=yes ;; *) TS_WIZ_DEV=no ;; esac
+    elif command -v ts_is_headless >/dev/null 2>&1 && ts_is_headless; then TS_WIZ_DEV=no
+    else TS_WIZ_DEV="$(ts_prompt_development)"; TS_WIZ_ASKED=$((TS_WIZ_ASKED + 1)); fi
+    case "$TS_WIZ_DEV" in yes) TS_WIZ_APP_CLASS=developer ;; *) TS_WIZ_APP_CLASS=sysadmin ;; esac
+
+    # Which prompt. Asked for every profile, because it is the one thing all
+    # three have in common -- and for `prompt` it is very nearly the whole
+    # install. ts_prompt_starship_preset returns the current value untouched when
+    # starship is not installed yet, which on a fresh machine it is not: the
+    # bootstrap installs it after this runs.
+    if [ -n "${TS_STARSHIP_PRESET:-}" ]; then TS_WIZ_STARSHIP="$TS_STARSHIP_PRESET"
+    elif [ "$TS_WIZ_PROFILE" = prompt ]; then
+        TS_WIZ_STARSHIP="$(ts_prompt_starship_preset)"; TS_WIZ_ASKED=$((TS_WIZ_ASKED + 1))
+    else TS_WIZ_STARSHIP="$(ts_starship_get 2>/dev/null || echo terminal-stack)"; fi
+
+    # `prompt` means what it says: Starship and a Nerd Font, and nothing else
+    # touched. Every remaining answer is pinned to its off/default value rather
+    # than asked, and the review screen shows them so it is visible rather than
+    # implied.
+    if [ "$TS_WIZ_PROFILE" = prompt ]; then
+        TS_WIZ_LEADER=ctrl-space; TS_WIZ_TMUX=ctrl-b
+        TS_WIZ_THEME="${TS_THEME:-}"
+        [ -n "$TS_WIZ_THEME" ] || { TS_WIZ_THEME="$(ts_prompt_theme)"; TS_WIZ_ASKED=$((TS_WIZ_ASKED + 1)); }
+        TS_WIZ_APPS=""
+        TS_WIZ_WEZ_MUX=off; TS_WIZ_WEZ_RESTORE=off; TS_WIZ_ATUIN=off
+        TS_WIZ_CC_TTS=off; TS_WIZ_CC_TTS_DAEMON=off; TS_WIZ_CC_TTS_MESSAGE=template
+        TS_WIZ_HEADROOM=off; TS_WIZ_CAVEMAN=off; TS_WIZ_AGENTMEMORY=off
+        TS_WIZ_MEMORY_BACKEND=none; TS_WIZ_HEADROOM_CURSOR=mcp
+        return 0
+    fi
 
     # The leader key only matters for WezTerm (a GUI app). On a headless server
     # there's no WezTerm to drive, so skip the question and keep the default.
@@ -709,6 +848,10 @@ ts_wizard_ask() {
     # screen and the saved config should say on/off, not the user's "skip".
     if [ -n "${TS_CC_TTS:-}" ]; then
         case "$TS_CC_TTS" in on) TS_WIZ_CC_TTS=on ;; *) TS_WIZ_CC_TTS=off ;; esac
+    elif [ "$TS_WIZ_PROFILE" != full ]; then
+        # Voice notifications announce what an AGENT is doing. Without the agent
+        # wiring there is nothing to announce, so the question is not asked.
+        TS_WIZ_CC_TTS=off
     else
         TS_WIZ_CC_TTS="$(ts_prompt_cc_tts)"; TS_WIZ_ASKED=$((TS_WIZ_ASKED + 1))
     fi
@@ -737,7 +880,13 @@ ts_wizard_ask() {
         TS_WIZ_CC_TTS_DAEMON=off
     fi
 
-    if command -v ts_is_headless >/dev/null 2>&1 && ts_is_headless; then
+    # `shell` is the prompt and the terminal, and a machine that is not for
+    # writing code has no agents to wire: in both cases the memory and caveman
+    # questions are about something that is not being installed. Skipped rather
+    # than asked-and-defaulted, so the wizard is shorter for the people it is
+    # shorter for.
+    if [ "$TS_WIZ_PROFILE" != full ] || [ "$TS_WIZ_DEV" != yes ] \
+        || { command -v ts_is_headless >/dev/null 2>&1 && ts_is_headless; }; then
         TS_WIZ_HEADROOM="${TS_HEADROOM:-off}"; TS_WIZ_CAVEMAN="${TS_CAVEMAN:-off}"; TS_WIZ_AGENTMEMORY="${TS_AGENTMEMORY:-off}"
         TS_WIZ_MEMORY_BACKEND="${TS_MEMORY_BACKEND:-none}"
         [ "$TS_WIZ_AGENTMEMORY" = on ] && TS_WIZ_MEMORY_BACKEND=agentmemory
@@ -784,6 +933,7 @@ ts_wizard_collect() {
         esac
     done
 
+    export TS_WIZ_PROFILE TS_WIZ_DEV TS_WIZ_APP_CLASS TS_WIZ_STARSHIP
     export TS_WIZ_LEADER TS_WIZ_THEME TS_WIZ_APPS TS_WIZ_TMUX TS_WIZ_CC_TTS TS_WIZ_CC_TTS_DAEMON TS_WIZ_CC_TTS_MESSAGE TS_WIZ_TERMINALS TS_WIZ_WEZ_MUX TS_WIZ_WEZ_RESTORE TS_WIZ_HEADROOM TS_WIZ_HEADROOM_CURSOR TS_WIZ_CAVEMAN TS_WIZ_AGENTMEMORY TS_WIZ_MEMORY_BACKEND TS_WIZ_ATUIN
     # These two lines summarise the CHOICES. They are printed before anything is
     # written, and used to read exactly like a save confirmation — which is how a

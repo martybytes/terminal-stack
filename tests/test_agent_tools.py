@@ -3162,3 +3162,262 @@ def test_the_engine_advisor_derives_its_recommendation_rather_than_hard_coding_o
     # runs kokoro on the CPU rather than emulating an x86 GPU.
     assert "Neural Engine" not in fn
     assert "emulated CPU" not in fn
+
+
+# ------------------------------------------------------------- which prompt
+
+
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+def test_the_prompt_is_a_setting_and_presets_are_not_vendored():
+    """`starship preset <name>` is run at apply time rather than twelve TOML
+    files being copied into this repo. Vendored copies freeze at whatever
+    upstream shipped the day they were taken, and the entire point of a preset is
+    that it is Starship's rather than ours.
+    """
+    assert _sh_eval("ts_starship_get") == "terminal-stack"
+    tmpl = (ROOT / "dot_config/starship.toml.tmpl").read_text(encoding="utf-8")
+    assert 'output "starship" "preset" $preset' in tmpl
+    # lookPath is the load-bearing half: during a bootstrap this template can be
+    # rendered BEFORE starship is installed, and `output` on a missing binary
+    # aborts the whole apply -- not just this file.
+    assert 'lookPath "starship"' in tmpl
+    assert "{{- else -}}" in tmpl, "and it must fall back to this stack's own prompt"
+    for name in ("bracketed-segments", "tokyo-night", "gruvbox-rainbow"):
+        assert name not in tmpl, f"{name} must not be vendored into the template"
+
+
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+def test_an_unknown_preset_name_is_refused_at_set_time_not_at_apply_time():
+    """`starship preset nonsense` prints NOTHING and exits non-zero, so a name
+    that slipped through would deploy an EMPTY config: a working prompt replaced
+    by no prompt, with nothing in the diff to explain it. The name is therefore
+    checked against `starship preset --list` before it is saved.
+    """
+    cfg = (ROOT / "bootstrap/_config.sh").read_text(encoding="utf-8")
+    body = cfg[cfg.index("ts_starship_set()") : cfg.index("ts_starship_preview()")]
+    assert "ts_starship_presets | grep -qxF" in body
+    # ...and `terminal-stack` must not need starship present to select, or a
+    # machine whose starship is broken could never get back to a working prompt.
+    assert 'if [ "$name" != terminal-stack ]' in body
+
+
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+def test_the_preview_uses_the_plain_ansi_path_and_never_a_shell_dialect():
+    """With STARSHIP_SHELL set, starship emits that shell's escaping (zsh's
+    %{...%}), which a preview prints as literal punctuation instead of colour.
+    Empty selects the plain-ANSI path, which is what a terminal actually shows.
+    """
+    cfg = (ROOT / "bootstrap/_config.sh").read_text(encoding="utf-8")
+    body = cfg[cfg.index("ts_starship_preview()") :]
+    body = body[: body.index("\n# ── Ghostty")]
+    assert "STARSHIP_SHELL= STARSHIP_CONFIG=" in body
+    # -o refuses to overwrite, and mktemp has already created the file: the
+    # command fails, the temp file stays empty, and the preview silently shows
+    # nothing at all.
+    assert 'starship preset "$name" > "$cfg"' in body
+    assert '-o "$cfg"' not in body
+
+
+def test_the_windows_side_gets_the_same_prompt_as_wsl():
+    """A combined machine showing tokyo-night in WSL and this stack's prompt in
+    PowerShell is exactly the split-brain the config mirror exists to prevent, so
+    both sync paths render the preset over the mirrored starship.toml.
+    """
+    sh = (ROOT / "run_after_90-sync-windows.sh").read_text(encoding="utf-8")
+    ps = (ROOT / "scripts/sync-windows.ps1").read_text(encoding="utf-8")
+    assert 'STARSHIP_PRESET="$(cfg starshipPreset ' in sh
+    assert 'starship preset "$preset" > "$rendered"' in sh
+    assert "starshipPreset" in ps and "preset $preset" in ps
+    # Both take a backup before overwriting - the repo-wide rule.
+    assert 'bak="$star_dst.bak.$today"' in sh
+    assert "Get-BackupPath $starDst" in ps
+
+
+def test_a_windows_save_no_longer_strips_keys_the_wsl_side_wrote():
+    """Save-TsConfig rebuilds config.json from a fixed set of properties, so a
+    key missing from that set is DELETED on any Windows-side save. starshipPreset
+    decides which prompt the Windows sync deploys, so losing it visibly reverts
+    the prompt; atuinEnabled had the same hole and is fixed with it rather than
+    left as the next one to find.
+    """
+    ps = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
+    start = ps.index("$obj = [ordered]@{")
+    obj = ps[start : ps.index("$p = Get-TsConfigPath", start)]
+    for key in ("starshipPreset", "atuinEnabled", "memoryBackend", "weztermMux"):
+        assert key in obj, f"a Windows save would strip {key}"
+    # Carried forward when the caller does not pass it, or every unrelated save
+    # resets it to the default.
+    assert "@{ Param = 'StarshipPreset'; Name = 'starshipPreset'" in ps
+    assert "@{ Param = 'AtuinEnabled'; Name = 'atuinEnabled'" in ps
+    # No ValidateSet: `starship preset --list` is the authority and it grows.
+    assert "[string]$StarshipPreset = 'terminal-stack'" in ps
+
+
+# ------------------------------------------------- the first two install questions
+
+
+def _wizard(env: dict) -> dict:
+    """Run ts_wizard_ask headlessly and read the TS_WIZ_* it produced."""
+    script = """
+set -euo pipefail
+. bootstrap/_config.sh >/dev/null 2>&1
+. bootstrap/_wizard.sh >/dev/null 2>&1
+ts_wizard_ask >/dev/null 2>&1
+for v in PROFILE DEV APP_CLASS STARSHIP LEADER THEME APPS CC_TTS MEMORY_BACKEND \
+         CAVEMAN WEZ_MUX WEZ_RESTORE ATUIN; do
+    eval "printf '%s=%s\\n' \\"$v\\" \\"\\${TS_WIZ_$v:-}\\""
+done
+"""
+    base = {
+        "TERMINAL_STACK_DIR": str(ROOT),
+        "TS_THEME": "dark",
+        "TS_LEADER": "ctrl-space",
+        "TS_APPS": "recommended",
+        "TS_ASSUME_YES": "1",
+        "TS_STARSHIP_PRESET": "terminal-stack",
+        "TS_HEADROOM_CURSOR": "mcp",
+    }
+    r = subprocess.run(
+        [BASH, "-c", script],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        # Both are repo rules and both matter here: the wizard prompts on
+        # /dev/tty, so without a new session an unanswered question blocks the
+        # whole suite instead of falling through to its default.
+        timeout=60,
+        start_new_session=True,
+        env={**os.environ, **base, **env},
+    )
+    assert r.returncode == 0, r.stderr
+    return dict(line.split("=", 1) for line in r.stdout.strip().splitlines() if "=" in line)
+
+
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+def test_just_the_prompt_really_means_just_the_prompt():
+    """The honest answer to "can I only have the prompt" has to be yes, and the
+    wizard has to stop asking after it. Fourteen questions aimed at someone who
+    wanted one thing is how people close the tab.
+    """
+    w = _wizard({"TS_PROFILE": "prompt"})
+    assert w["PROFILE"] == "prompt"
+    assert w["APPS"] == "", "no CLI tools"
+    assert w["CC_TTS"] == "off"
+    assert w["MEMORY_BACKEND"] == "none"
+    assert w["CAVEMAN"] == "off"
+    assert w["WEZ_MUX"] == "off" and w["WEZ_RESTORE"] == "off" and w["ATUIN"] == "off"
+    # The theme still applies: it is what the prompt's palette is built from.
+    assert w["THEME"] == "dark"
+
+
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+def test_the_development_answer_picks_which_half_of_the_catalog_is_offered():
+    """A file server and a development laptop want genuinely different sets.
+    Nobody administering a box needs fnm, poetry or six agent CLIs."""
+    dev = _wizard({"TS_PROFILE": "full", "TS_DEVELOPMENT": "yes"})
+    ops = _wizard({"TS_PROFILE": "full", "TS_DEVELOPMENT": "no"})
+    assert dev["APP_CLASS"] == "developer"
+    assert ops["APP_CLASS"] == "sysadmin"
+
+    sysadmin = set(_sh_eval("ts_apps_for_class sysadmin").split())
+    developer = set(_sh_eval("ts_apps_for_class developer").split())
+    catalog = set(_sh_eval('echo "$TS_APPS_ALL"').split())
+
+    # NOT a subset either way: they are two different DEFAULTS. A server's
+    # recommended set includes the monitors and network tools that are merely
+    # optional on a laptop, and drops the runtimes and agents entirely.
+    assert sysadmin <= catalog, f"not in the catalog: {sorted(sysadmin - catalog)}"
+    assert developer <= catalog
+    assert sysadmin != developer
+    for monitor in ("glances", "bottom", "gdu"):
+        assert monitor in sysadmin and monitor not in developer, (
+            f"{monitor} is default kit on a server and optional on a laptop"
+        )
+    # git tooling is in BOTH: delta, gh and lazygit earn their place on a server
+    # you deploy from. What is development-only is what needs a compiler or an
+    # agent.
+    for shared in ("delta", "gh", "lazygit", "btop", "ripgrep"):
+        assert shared in sysadmin, f"{shared} is useful without writing code"
+    for dev_only in ("fnm", "poetry", "claude", "codex", "ghq", "llmfit"):
+        assert dev_only not in sysadmin, f"{dev_only} only makes sense if you write code"
+
+
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+def test_the_agent_questions_are_skipped_when_there_are_no_agents():
+    """Voice notifications announce what an AGENT is doing, and a memory backend
+    stores what one learned. Asked on a machine getting neither, they are
+    questions about something that is not being installed."""
+    shell = _wizard({"TS_PROFILE": "shell", "TS_DEVELOPMENT": "yes"})
+    assert shell["CC_TTS"] == "off"
+    assert shell["MEMORY_BACKEND"] == "none"
+
+    ops = _wizard({"TS_PROFILE": "full", "TS_DEVELOPMENT": "no"})
+    assert ops["MEMORY_BACKEND"] == "none"
+    assert ops["CAVEMAN"] == "off"
+
+
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+def test_the_profile_is_not_a_saved_setting():
+    """It decides what the REST of the wizard asks and what those answers default
+    to, and every one of THOSE is saved on its own. A stored `profile` would be a
+    second copy of state that can disagree with the settings it produced -- and
+    re-running the wizard should ask again, because the answer is about what you
+    want now, not about what this machine is.
+    """
+    from tstack import schema
+
+    assert "profile" not in schema.BY_KEY
+    assert "installProfile" not in schema.BY_KEY
+    toml = (ROOT / ".chezmoi.toml.tmpl").read_text(encoding="utf-8")
+    assert "TS_WIZ_PROFILE" not in toml and "installProfile" not in toml
+    # ...whereas the prompt IS saved, because it is a setting rather than a
+    # branch in a questionnaire.
+    assert "starshipPreset" in schema.BY_KEY
+    assert "starshipPreset" in toml
+
+
+def test_the_two_wizards_ask_the_same_two_questions():
+    """Every wizard prompt exists twice. A question added to one side only is how
+    a Windows install and a WSL install stop producing the same machine."""
+    sh = (ROOT / "bootstrap/_wizard.sh").read_text(encoding="utf-8")
+    ps = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
+    assert "ts_prompt_profile()" in sh and "function Read-TsProfile" in ps
+    assert "ts_prompt_development()" in sh and "function Read-TsDevelopment" in ps
+    assert "ts_prompt_starship_preset()" in sh and "function Read-TsStarshipPreset" in ps
+    assert "ts_apps_for_class" in (ROOT / "bootstrap/_config.sh").read_text(encoding="utf-8")
+    assert "Get-TsAppsForClass" in ps
+    # Same env-var escape hatches on both, or a scripted install diverges.
+    for var in ("TS_PROFILE", "TS_DEVELOPMENT", "TS_STARSHIP_PRESET"):
+        assert var in sh, f"{var} missing from the bash wizard"
+        assert var in ps, f"{var} missing from the pwsh wizard"
+
+
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+def test_a_server_is_never_nagged_about_tools_it_declined():
+    """`ts_apps_pending` offers the saved selection PLUS anything since added to
+    the recommended set -- which is the point, or a machine configured before a
+    tool joined the catalog would never get it.
+
+    With two classes that second half turns into a permanent nag: a box set up as
+    a server would be told on every `tstack update` that it is missing fnm,
+    poetry and six agent CLIs it deliberately declined. The class is therefore
+    INFERRED from the saved selection -- a predicate that cannot drift, unlike a
+    stored copy -- and a server that later installs `claude` flips to developer,
+    which is the right answer.
+    """
+    server = _sh_eval(
+        'ts_data_get_apps() { echo "eza fzf bat btop glances rclone"; }; ts_apps_saved_class'
+    )
+    laptop = _sh_eval('ts_data_get_apps() { echo "eza fzf bat claude fnm"; }; ts_apps_saved_class')
+    fresh = _sh_eval('ts_data_get_apps() { echo ""; }; ts_apps_saved_class')
+    assert (server, laptop, fresh) == ("sysadmin", "developer", "developer")
+
+    pending = _sh_eval(
+        'ts_data_get_apps() { echo "eza fzf bat btop glances rclone"; }; ts_apps_pending'
+    ).split()
+    for dev_only in ("fnm", "poetry", "claude", "codex", "ghq", "llmfit"):
+        assert dev_only not in pending, f"a server must not be nagged about {dev_only}"
+
+    ps = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
+    assert "function Get-TsSavedAppClass" in ps, "the same inference is needed on Windows"
+    assert "Get-TsAppsForClass (Get-TsSavedAppClass)" in ps

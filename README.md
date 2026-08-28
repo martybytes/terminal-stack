@@ -142,18 +142,32 @@ headless server reached over SSH.
 
 ### 2. Answer the wizard
 
-A short set of questions — leader key, theme, terminal emulator, which CLI
-tools, and whether you want voice notifications. Every menu marks its default
-and takes it on Enter; the single-choice menus accept an option's name as well
-as its number, and the tick-lists take numbers plus `a`, `n` and `s`. It ends
-with a review screen you can edit or abandon before any of your choices are
-installed or saved — base prerequisites (Homebrew, git, the apt base set) land
-before the questions.
+**The first question is how much of this you want**, and it opens by rendering
+the prompt you would get:
 
-Scripted installs skip each prompt with its own env var — `TS_LEADER`,
-`TS_THEME`, `TS_TERMINALS`, `TS_APPS`, `TS_TMUX`, `TS_WEZ_MUX`,
-`TS_WEZ_RESTORE`, `TS_ATUIN`, `TS_MEMORY_BACKEND`, `TS_CC_TTS`, `TS_HEADLESS`
-(bash only) — plus `TS_ASSUME_YES=1` to accept the review. Full list in
+| | what it installs |
+|---|---|
+| **just the prompt** | Starship and a Nerd Font. Your shell config, aliases and terminal are left alone |
+| **prompt and terminal** | adds the managed zsh/tmux/WezTerm configs and the CLI tools |
+| **the whole stack** | adds the agent wiring, the Docker services, voice notifications and memory |
+
+Then: will you write code on this machine? That decides which half of the CLI
+tool catalog is pre-ticked — a server wants monitors, disk and network tools; a
+laptop wants runtimes, git tooling and the agent CLIs — and whether the agent
+and memory questions are asked at all.
+
+After that it is leader key, theme, terminal emulator and the tool picker. Every
+menu marks its default and takes it on Enter; the single-choice menus accept an
+option's name as well as its number, and the tick-lists take numbers plus `a`,
+`n` and `s`. It ends with a review screen you can edit or abandon before any of
+your choices are installed or saved — base prerequisites (Homebrew, git, the apt
+base set) land before the questions.
+
+Scripted installs skip each prompt with its own env var — `TS_PROFILE`,
+`TS_DEVELOPMENT`, `TS_STARSHIP_PRESET`, `TS_LEADER`, `TS_THEME`,
+`TS_TERMINALS`, `TS_APPS`, `TS_TMUX`, `TS_WEZ_MUX`, `TS_WEZ_RESTORE`,
+`TS_ATUIN`, `TS_MEMORY_BACKEND`, `TS_CC_TTS`, `TS_HEADLESS` (bash only) — plus
+`TS_ASSUME_YES=1` to accept the review. Full list in
 [INSTALL.md § Scripted](INSTALL.md#scripted-fastest).
 
 ### 3. Verify
@@ -213,6 +227,7 @@ an apply.
 
 ```sh
 tstack config theme follow      # dark / light / follow the OS
+tstack config prompt list       # every Starship prompt, rendered, then pick one
 tstack config leader ctrl-a     # the WezTerm leader key
 tstack config apps              # re-open the CLI tool picker
 tstack config tts on            # voice notifications

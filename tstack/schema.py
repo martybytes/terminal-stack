@@ -127,6 +127,18 @@ SETTINGS: tuple[Setting, ...] = (
         flags=frozenset({STANDALONE}),
     ),
     Setting(
+        "starshipPreset",
+        "Prompt",
+        "text",
+        "appearance",
+        "terminal-stack",
+        note=(
+            "terminal-stack is this repo's own prompt; any other value is one of "
+            "starship's built-in presets. `tstack config prompt list` renders each"
+        ),
+        flags=frozenset({SHELL}),
+    ),
+    Setting(
         "atuinEnabled",
         "atuin owns Ctrl+R",
         "choice",

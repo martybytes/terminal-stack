@@ -100,6 +100,7 @@ TMUX_PREFIX="$(cfg tmuxPrefixResolved 'C-b')"
 WEZ_MUX="$(cfg weztermMux 'off')"
 WEZ_RESTORE="$(cfg weztermRestore 'off')"
 GHOSTTY_CFG_ON="$(cfg ghosttyConfig 'on')"
+STARSHIP_PRESET="$(cfg starshipPreset 'terminal-stack')"
 # Ghostty's config format has no conditionals and Windows mirror files get token
 # substitution, not Go templates - so the themeMode -> theme mapping is resolved
 # here, exactly as tmuxPrefixResolved is. A split `dark:...,light:...` theme always
@@ -447,6 +448,44 @@ if cz="$(resolve_cz)" && [ -f "$stack_root/dot_claude/tts/config.json.tmpl" ]; t
       cp -- "$rendered" "$tts_dst"
       printf 'updated  %s  (chezmoi tts config)\n' "$tts_dst"
     fi
+  fi
+fi
+
+# Which prompt the WINDOWS side gets. The mirror above already wrote this
+# stack's own starship.toml with __THEME_RESOLVED__ substituted; if a starship
+# PRESET is chosen instead, that file is replaced with the preset's own content.
+#
+# Done here as well as in dot_config/starship.toml.tmpl because the two sides are
+# separate deployments of the same setting -- and a combined machine showing
+# tokyo-night in WSL and this stack's prompt in PowerShell is exactly the kind of
+# split-brain the mirror exists to prevent.
+#
+# `starship preset` is run on the WSL side, which is where this script runs and
+# where CLAUDE.md says the authoritative apply happens. The output is plain TOML
+# with no host-specific paths in it, so which side renders it does not matter.
+preset="$STARSHIP_PRESET"
+if [ -n "$preset" ] && [ "$preset" != terminal-stack ] && command -v starship >/dev/null 2>&1; then
+  star_dst="$dst_home/.config/starship.toml"
+  if starship preset "$preset" > "$rendered" 2>/dev/null && [ -s "$rendered" ]; then
+    if [ -e "$star_dst" ] && cmp -s "$rendered" "$star_dst"; then
+      : # unchanged
+    else
+      if [ -e "$star_dst" ]; then
+        bak="$star_dst.bak.$today"
+        if [ -e "$bak" ]; then
+          n=1
+          while [ -e "$star_dst.bak.$today.$n" ]; do n=$((n + 1)); done
+          bak="$star_dst.bak.$today.$n"
+        fi
+        cp -p -- "$star_dst" "$bak"
+      fi
+      mkdir -p "$(dirname "$star_dst")"
+      cp -- "$rendered" "$star_dst"
+      printf 'updated  %s  (starship preset: %s)\n' "$star_dst" "$preset"
+    fi
+  else
+    printf 'terminal-stack: starship has no preset named %s; kept this stack\x27s prompt on the Windows side.\n' \
+      "$preset" >&2
   fi
 fi
 

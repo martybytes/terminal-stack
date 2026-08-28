@@ -31,6 +31,28 @@ TS_APPS_RECOMMENDED="tmux eza fzf bat fd tree delta ripgrep zoxide atuin glow mi
 TS_APPS_OPTIONAL="zed tldr yazi nvtop lazydocker gdu bottom glances bandwhich gping rclone node httpie poetry pre-commit llmfit"
 TS_APPS_ALL="$TS_APPS_RECOMMENDED $TS_APPS_OPTIONAL"
 
+# Two CLASSES, cutting across the groups. A file server and a development laptop
+# want genuinely different sets: nobody administering a box needs fnm, poetry or
+# six agent CLIs, and offering them is how a 30-item tick-list becomes something
+# people skip past without reading.
+#
+# The split is by "does this only make sense if you write code here", not by
+# taste. git tooling stays in BOTH -- delta, gh and lazygit earn their place on a
+# server you deploy from -- while ghq (clone into a workspace tree) is
+# development-only, and so are the runtimes, the Python tooling, the agent CLIs
+# and llmfit.
+#
+# Like the groups, this exists only for the PICKER. The saved `apps` array stays
+# flat, so no chezmoi [data] key is involved and there is nothing that can drift.
+TS_APPS_SYSADMIN="tmux eza fzf bat fd tree ripgrep zoxide atuin glow micro neovim tldr yazi \
+delta gh lazygit duf ncdu dust gdu btop bottom glances nvtop lazydocker bandwhich gping rclone"
+ts_apps_for_class() {
+    case "${1:-developer}" in
+        sysadmin) echo "$TS_APPS_SYSADMIN" ;;
+        *)        echo "$TS_APPS_RECOMMENDED" ;;
+    esac
+}
+
 # Groups exist for the picker only — the saved `apps` array stays flat, so this
 # adds no chezmoi [data] key and none of the 7-step blast radius that comes with
 # one (CLAUDE.md, docs/decisions.md §§ at :236 and :325). Every catalog id must
@@ -197,11 +219,34 @@ ts_app_installable() {
     return 0
 }
 
+# Which class this machine looks like, INFERRED from what it has chosen rather
+# than saved. The install profile is a wizard branch and is deliberately not
+# stored; the class, though, is needed on every `tstack update` -- so it is
+# derived from a predicate that cannot drift: does the saved selection contain
+# anything outside the sysadmin set?
+#
+# Without this, a machine set up as a server would be told on every single update
+# that it is missing fnm, poetry and six agent CLIs it deliberately declined --
+# which is the exact nag ts_app_installable was added to end, in a new place.
+# A server that later installs `claude` flips to developer, which is correct.
+ts_apps_saved_class() {
+    local saved id
+    saved="$(ts_data_get_apps 2>/dev/null || true)"
+    # Never configured: keep the old behaviour rather than guessing.
+    [ -n "$saved" ] || { echo developer; return 0; }
+    for id in $saved; do
+        case " $TS_APPS_SYSADMIN " in *" $id "*) continue ;; esac
+        echo developer; return 0
+    done
+    echo sysadmin
+}
+
 ts_apps_pending() {
-    local saved id seen="" out=""
+    local saved id seen="" out="" expected
     ts_load_node_env
     saved="$(ts_data_get_apps 2>/dev/null || true)"
-    for id in $saved $TS_APPS_RECOMMENDED; do
+    expected="$(ts_apps_for_class "$(ts_apps_saved_class)")"
+    for id in $saved $expected; do
         case " $seen " in *" $id "*) continue ;; esac
         seen="$seen $id"
         command -v "$(ts_app_bin "$id")" >/dev/null 2>&1 && continue
@@ -798,7 +843,7 @@ TS_MIRROR_DATA_KEYS="
     ccTtsPrefixCodex ccTtsPrefixCodexEnabled ccTtsPrefixCursor ccTtsPrefixCursorEnabled 
     ccTtsSummarizer ccTtsTemplateError ccTtsTemplatePermission ccTtsTemplateQuestion 
     ccTtsTemplateWaiting ccTtsVoicePool leaderChord tmuxPrefix windowsUsername
-    weztermMux weztermRestore atuinEnabled headroomEnabled headroomCursorMode
+    weztermMux weztermRestore atuinEnabled starshipPreset headroomEnabled headroomCursorMode
     cavemanEnabled agentmemoryEnabled playwrightEnabled memoryBackend
 "
 
@@ -1042,6 +1087,83 @@ ts_atuin_set() {
     ts_mirror_windows_config
 }
 
+# ── Which prompt ────────────────────────────────────────────────────────────────
+# "terminal-stack" (default) is this repo's own two-line Starship config; any
+# other value is one of Starship's built-in presets, rendered by
+# `starship preset <name>` inside dot_config/starship.toml.tmpl at apply time.
+#
+# Not vendored, deliberately: twelve copied TOML files would freeze at whatever
+# upstream shipped the day they were copied, and the point of a preset is that it
+# is Starship's rather than ours. The template falls back to our config when
+# starship is not on PATH, because during a bootstrap it can be rendered before
+# starship is installed and `output` on a missing binary aborts the WHOLE apply.
+#
+# The name is NOT validated against a hardcoded list here: `starship preset
+# --list` is the authority and it grows. An unknown name renders as an empty
+# config, which is why ts_starship_set asks starship first.
+ts_starship_presets() {
+    command -v starship >/dev/null 2>&1 || return 1
+    # `--list` emits a trailing blank line, which a bare pass-through turns into
+    # an empty entry in every menu and an empty "available" row on a refusal.
+    starship preset --list 2>/dev/null | sed '/^[[:space:]]*$/d'
+}
+
+ts_starship_get() {
+    local v; v="$(ts_data_get starshipPreset 2>/dev/null || true)"
+    [ -n "$v" ] && echo "$v" || echo terminal-stack
+}
+
+# ts_starship_set <name> — persist, regenerate derived keys, mirror to Windows.
+ts_starship_set() {
+    local name="${1:-}"
+    [ -n "$name" ] || { echo "ts_starship_set: expected a preset name" >&2; return 2; }
+    if [ "$name" != terminal-stack ]; then
+        if ! ts_starship_presets >/dev/null 2>&1; then
+            echo "!! starship is not installed, so its presets cannot be listed." >&2
+            echo "   Only 'terminal-stack' can be set without it." >&2
+            return 1
+        fi
+        # Checked here rather than at apply time, because an unknown name makes
+        # `starship preset` print nothing and the deployed config would be EMPTY
+        # -- a working prompt replaced by no prompt, with nothing in the diff to
+        # explain it.
+        if ! ts_starship_presets | grep -qxF "$name"; then
+            echo "!! no starship preset named '$name'. Available:" >&2
+            ts_starship_presets | sed 's/^/     /' >&2
+            echo "     terminal-stack   (this stack's own prompt)" >&2
+            return 2
+        fi
+    fi
+    ts_data_set starshipPreset "$name"
+    local cz; if cz="$(ts_chezmoi_bin)"; then "$cz" init >/dev/null 2>&1 || true; fi
+    ts_mirror_windows_config
+}
+
+# Render one prompt exactly as it would look, without installing it.
+#
+# STARSHIP_SHELL must be EMPTY, not unset: with a shell name starship emits that
+# shell's escaping (zsh %{...%}), which prints as literal punctuation rather than
+# as colour. Empty selects the plain-ANSI path, which is what a terminal shows.
+ts_starship_preview() {
+    local name="${1:-terminal-stack}" cfg rc=0
+    command -v starship >/dev/null 2>&1 || { echo "  (starship is not installed yet)"; return 1; }
+    if [ "$name" = terminal-stack ]; then
+        cfg="$HOME/.config/starship.toml"
+        [ -r "$cfg" ] || { echo "  (not deployed yet -- it appears after the first apply)"; return 1; }
+    else
+        cfg="$(mktemp -t ts-preset)" || return 1
+        # Redirect, never `-o`: mktemp CREATES the file, and `starship preset -o`
+        # refuses to overwrite an existing one ("use --force"). It fails, the
+        # temp file stays empty, and the preview silently shows nothing.
+        starship preset "$name" > "$cfg" 2>/dev/null || { rm -f "$cfg"; echo "  (no preset named $name)"; return 1; }
+        [ -s "$cfg" ] || { rm -f "$cfg"; echo "  (no preset named $name)"; return 1; }
+    fi
+    STARSHIP_SHELL= STARSHIP_CONFIG="$cfg" starship prompt 2>/dev/null || rc=1
+    echo
+    [ "$name" = terminal-stack ] || rm -f "$cfg"
+    return $rc
+}
+
 # ── Ghostty config ──────────────────────────────────────────────────────────────
 # "on"  (default) -> chezmoi renders ~/.config/ghostty/config and the custom
 #                    light theme.
@@ -1179,6 +1301,7 @@ EOF
   "weztermMux": "$(ts_wez_mux_get)",
   "weztermRestore": "$(ts_wez_restore_get)",
   "atuinEnabled": "$(ts_atuin_get)",
+  "starshipPreset": "$(ts_starship_get)",
   "headroomEnabled": "$(ts_agent_get headroomEnabled)",
   "headroomCursorMode": "$(ts_agent_get headroomCursorMode)",
   "cavemanEnabled": "$(ts_agent_get cavemanEnabled)",

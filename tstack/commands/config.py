@@ -81,13 +81,17 @@ NATIVE = (
     "memory",
     "agents",
 )
-DEFERRED = ("apps", "ghostty", "tts", "wizard", "reconfigure", "mux", "wezterm")
+# `prompt` stays here rather than becoming a generic `set starshipPreset`: the
+# value has to be checked against `starship preset --list`, which is the
+# authority and grows, and an unknown name renders an EMPTY config -- a working
+# prompt replaced by no prompt, with nothing in the diff to explain it.
+DEFERRED = ("apps", "ghostty", "tts", "wizard", "reconfigure", "mux", "wezterm", "prompt")
 
 # The unknown-verb hint. ONE list, and it must be complete: the bash hint omits
 # `memory`, which it implements, and the pwsh one omits `atuin` instead.
 KNOWN = (
     "show, get, set, leader, theme, tmux, apps, tts, mux, restore, atuin, "
-    "ghostty, memory, agents, wezterm, wizard"
+    "prompt, ghostty, memory, agents, wezterm, wizard"
 )
 
 
@@ -191,6 +195,13 @@ def show(out: Out) -> int:
     out.say(_row("apps", store.get("apps", "")))
     out.say(_row("wezmux", store.get("weztermMux", "off"), "tstack mux on|off|status"))
     out.say(_row("wezrestore", store.get("weztermRestore", "off"), "tstack config restore on|off"))
+    out.say(
+        _row(
+            "prompt",
+            store.get("starshipPreset", "terminal-stack"),
+            "tstack config prompt list",
+        )
+    )
     out.say(_row("atuin", store.get("atuinEnabled", "off"), "tstack config atuin on|off"))
     # Ghostty is printed wherever its config path resolves -- macOS, WSL and
     # Windows. The shell gated this on Darwin alone, so a WSL user's Ghostty

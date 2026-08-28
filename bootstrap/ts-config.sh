@@ -135,6 +135,7 @@ run_wizard() {
     ts_wez_mux_set "${TS_WIZ_WEZ_MUX:-off}"
     ts_wez_restore_set "${TS_WIZ_WEZ_RESTORE:-off}"
     ts_atuin_set "${TS_WIZ_ATUIN:-off}"
+    ts_starship_set "${TS_WIZ_STARSHIP:-terminal-stack}" || true
     ts_cc_tts_apply_wizard_choice "${TS_WIZ_CC_TTS:-off}" off "${TS_WIZ_CC_TTS_MESSAGE:-}"
 
     install_apps "${TS_WIZ_APPS:-}" || ts_note_failure "optional apps" "retry: tstack config apps"
@@ -342,6 +343,56 @@ ghostty_on() {
     ts_ghostty_set on
     finish
     echo "==> ghostty config on. $(ghostty_reload_hint)"
+}
+
+# ── which prompt ─────────────────────────────────────────────────────────────
+# `terminal-stack` (default) is this repo's prompt; anything else is one of
+# Starship's built-in presets, rendered at apply time. See ts_starship_* in
+# bootstrap/_config.sh for why they are not vendored.
+prompt_status() {
+    local cur; cur="$(ts_starship_get)"
+    echo "prompt: $cur"
+    if [ "$cur" = terminal-stack ]; then
+        echo "  this stack's own two-line prompt, themed by \`tstack config theme\`"
+    else
+        echo "  Starship's built-in \"$cur\" preset, re-rendered on every apply"
+        echo "  back to ours: tstack config prompt terminal-stack"
+    fi
+    echo
+    ts_starship_preview "$cur"
+    echo "  tstack config prompt list      every option, each one rendered"
+    echo "  tstack config prompt <name>    switch to it"
+}
+
+# Every option, each rendered. Seeing them is the entire point: a preset name
+# tells you nothing, and this is a decision about what you look at all day.
+prompt_list() {
+    local cur p
+    cur="$(ts_starship_get)"
+    if ! ts_starship_presets >/dev/null 2>&1; then
+        echo "starship is not installed, so its presets cannot be listed." >&2
+        return 1
+    fi
+    printf '%s %-22s\n' "$([ "$cur" = terminal-stack ] && echo '*' || echo ' ')" "terminal-stack"
+    ts_starship_preview terminal-stack
+    for p in $(ts_starship_presets); do
+        printf '%s %-22s\n' "$([ "$cur" = "$p" ] && echo '*' || echo ' ')" "$p"
+        ts_starship_preview "$p"
+    done
+    echo "  * is what you have now.  Switch: tstack config prompt <name>"
+}
+
+prompt_preview() {
+    local name="${1:-}"
+    [ -n "$name" ] || { echo "usage: tstack config prompt preview <name>" >&2; return 2; }
+    ts_starship_preview "$name"
+}
+
+prompt_set() {
+    ts_starship_set "$1" || return $?
+    echo "==> prompt: $1"
+    finish
+    ts_starship_preview "$1"
 }
 
 # The mux has its own verbs (kill/restart/reset), so tstack config just hands off.
@@ -569,6 +620,13 @@ case "${1:-}" in
         case "${2:-}" in on|off) ;; *)
             echo "usage: tstack config atuin <on|off>" >&2; exit 2 ;; esac
         set_atuin "$2" ;;
+    prompt)
+        case "${2:-status}" in
+            status|show|"")  prompt_status ;;
+            list)            prompt_list ;;
+            preview)         prompt_preview "${3:-}" ;;
+            *)               prompt_set "$2" ;;
+        esac ;;
     ghostty)
         case "${2:-status}" in
             on)     ghostty_on ;;
@@ -592,6 +650,7 @@ case "${1:-}" in
         echo "  mux status|on|off|list|kill|restart|reset  (see: tstack mux -h)"
         echo "  restore on|off   reopen the last WezTerm session at startup"
         echo "  atuin on|off     atuin shell history; when on it owns Ctrl+R (fzf keeps Ctrl+T/Alt+C)"
+        echo "  prompt [status|list|<name>|preview <name>]   which Starship prompt; list renders every option"
         echo "  ghostty [on|off|status|diff]   managed Ghostty config (macOS only; off restores your backup)"
         echo "  memory [agentmemory|headroom|none|status]   which memory system runs — only ever one"
         echo "  agents [show|<headroom|caveman|agentmemory> on|off|status|repair|uninstall]"

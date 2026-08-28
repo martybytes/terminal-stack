@@ -82,6 +82,9 @@ _ts_persist_wizard() {
         ts_wez_mux_set "${TS_WIZ_WEZ_MUX:-off}"
         ts_wez_restore_set "${TS_WIZ_WEZ_RESTORE:-off}"
         ts_atuin_set "${TS_WIZ_ATUIN:-off}"
+        # Same shape as the three above: its own writer, so choosing a prompt
+        # does not have to re-state every other answer.
+        ts_starship_set "${TS_WIZ_STARSHIP:-terminal-stack}" || true
         ts_cc_tts_apply_wizard_choice "${TS_WIZ_CC_TTS:-off}" "${TS_WIZ_CC_TTS_DAEMON:-off}" "${TS_WIZ_CC_TTS_MESSAGE:-}"
         ts_cc_tts_finish
         echo "$INFO Saved terminal-stack config to $TOML [data]"

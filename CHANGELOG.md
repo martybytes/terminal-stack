@@ -152,6 +152,15 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **A Windows-side save silently deleted `starshipPreset` and `atuinEnabled`
+  (08/27/2026).** `Save-TsConfig` rebuilds config.json from a fixed set of
+  properties, so a key missing from that set is dropped on any save - the same
+  failure its own `ccTts` comment warns about, one level up. `atuinEnabled` has
+  had this hole since it was added and has no pwsh consumer, so nothing showed;
+  `starshipPreset` decides which prompt the Windows sync deploys, so losing it
+  would visibly revert the prompt. Both are now parameters, carried forward when
+  the caller does not pass them.
+
 - **Windows had no synthesis floor, so "on" could still mean silence
   (08/28/2026).** `Invoke-CcTtsSynth`'s ladder ended at edge-tts and returned
   `$false`: a native-Windows host with the daemon off, kokoro down and edge-tts
