@@ -2549,3 +2549,128 @@ down; `ts_probe_http_ok` is the strict variant, for genuine readiness endpoints
 like Headroom's `/readyz`. When a probe fails, `ts_docker_ports` reports what
 docker *is* publishing, so the warning names the real port rather than repeating
 the expected one.
+
+## Why the app catalog became a data file
+
+There were two catalogs -- `bootstrap/_config.sh` and `bootstrap/_config.ps1` --
+carrying the same ids, group membership, descriptions and two default sets each.
+They had already drifted in a way that mattered: the pwsh side kept a **second id
+list** to express "Windows cannot install this", doing by omission what
+`Test-TsAppInstallable` was supposed to do by rule. That is the exact drift
+CLAUDE.md warns about, in the file it warns about it in.
+
+A third reader forced the issue. The settings dashboard, the wizard port and
+`tstack config apps` all need the catalog, and only one of those is bash.
+
+`bootstrap/apps.conf` is whitespace-delimited for the same reason
+`workspace.conf` and `commands.conf` are: bash cannot parse JSON without `jq`,
+and this stays diffable. Two columns replace four lists:
+
+- **`classes`** -- `both | dev | sys | none`. The recommended and sysadmin sets
+  are DERIVED from it, so they cannot drift apart. Neither is a subset of the
+  other: a server's default kit includes the monitors that are merely optional on
+  a laptop, and drops the runtimes and agents entirely.
+- **`platforms`** -- `all | posix | linux | windows`. "Can this platform install
+  it", never "is it in winget", and it is what replaced the second id list.
+
+Verified by construction rather than by eye: every derived set was dumped from
+bash and pwsh before the change and reproduced exactly after, and
+`tests/test_apps_catalog.py` now runs all three readers and compares them.
+
+Two fixes fell out. macOS no longer offers `nvtop` in the picker at all, rather
+than offering it and then refusing to install it. And the catalog is ASCII,
+because Python prints these descriptions now and a Windows console on codepage
+437 renders an em dash as mojibake.
+
+## Why the wizard's answers travel in a file
+
+The questionnaire is one Python implementation, and the four bootstraps that call
+it are shell. The answers reach them by writing a file the caller sources, never
+by printing to stdout.
+
+That removes a whole class of failure by construction. The bash wizard routed
+every prompt to `/dev/tty` precisely because it was called inside `$( )`, and a
+single `printf` that forgot the redirect would have been captured as part of an
+answer. With a file there is no capture boundary to corrupt: menus go to the
+terminal, answers go to the path the caller passed, and the two cannot mix.
+
+Three details are load-bearing under `set -euo pipefail`:
+
+- **Every variable is emitted unconditionally**, empty where there is no value.
+  The callers read several of them unguarded, and `set -u` aborts on a missing
+  one.
+- **`export`, not assignment.** `ts_agents_apply_wizard` reads `TS_WIZ_HEADROOM`
+  and friends from the ENVIRONMENT of a child `tstack agents` process; a bare
+  assignment would silently turn the agent wiring off.
+- **Written whole, then renamed.** A crashed wizard cannot leave half a file for
+  the caller to source -- and it is never reached anyway, because the exit code
+  is non-zero and the call is the condition of an `if`.
+
+Windows gets the same answers as JSON, keyed by the PascalCase names the old
+PowerShell hashtable already used, so every `$w.X` call site downstream is
+unchanged.
+
+**Exit 3 means the user quit at the review**, which each caller already handled
+as cancelled and which has to stay distinguishable from a failure.
+
+## Why `tstack config` flipped only its POSIX column
+
+`tstack/commands.conf` has two implementation columns per row, and `config` is
+the row that uses them differently on purpose.
+
+POSIX runs the ported Python. Windows stays on `Set-TerminalStackConfig` until it
+can be exercised on a Windows machine: `tstack config` is the most-used command
+in the stack, the delegation there would have to reach a function that lives
+inside `$PROFILE`, and flipping it blind is how you find out on someone else's
+morning.
+
+Three verbs are **delegated**, not unported. `apps` ends in a package-manager
+install, `tts` is twenty-five sub-verbs over the daemon, and `reconfigure` is the
+bootstrap's own save sequence -- and `REVAMP-PLAN.md` lists the installer entry
+points as never ported. They are unportable by the plan's own rule, so Python
+routes them to `bootstrap/ts-config.sh`, which survives as the delegate target
+rather than as the entry point. "Delete ts-config.sh" was never achievable and
+the checklist that said so was wrong.
+
+`mux`, `wezterm`, `ghostty` and `wizard` are handed to their ported commands
+**in-process**: they are in the same program, and spawning a second interpreter
+to reach one would double the startup cost for nothing.
+
+Two divergences from the shell are recorded in the characterization harness
+rather than papered over: an unknown verb and a missing argument are exit 2 now,
+on every platform, where `ts-config.sh` returned 1. A caller that keys off the
+exit code should see one answer for one kind of mistake.
+
+## How each kind of tool actually gets installed
+
+The catalog says *what*; these are the *hows*, and each exists because the
+obvious route failed.
+
+**Agent CLIs never come from a package manager.** `ts_install_ai_cli` /
+`Install-TsAiCli` handle them instead of brew/apt/winget: claude, grok and
+cursor-agent ship native installers that need no Node, while codex (npm, Node
+16+) and gemini (npm, Node 20+) are gated on the Node version and *say what to
+do* rather than failing. There is **no brew fallback for gemini** -- that formula
+is deprecated upstream, so installing from it would hand you a dead end.
+
+**grok's installer appends a PATH line to `~/.zshrc`**, which this stack owns
+whole-file, so the next apply would wipe it. `GROK_BIN_DIR="$HOME/.local/bin"`
+routes the symlink onto the already-managed PATH instead, and `dot_zshrc` carries
+its completions `fpath` itself.
+
+**Node is fnm, not nvm** -- roughly 10ms of shell startup against 200-500ms --
+wired into both shells with `--use-on-cd`. Because fnm's PATH entry is created
+per-shell, `ts_apps_pending` and `ts_report_installed_apps` call
+`ts_load_node_env` first, or they nag about npm-installed CLIs forever.
+
+**The Python group is the same shape as the agent one.** `pipx`, `poetry`,
+`glances`, `ipython`, `httpie` and `pre-commit` have no winget package (three
+were carried as ids that do not resolve), so Windows routes them through
+`Install-TsPyTool` -- `uv tool install`, else `py -m pip install --user` -- after
+the winget pass and before the agent CLIs, in **both** `Install-TsApps` and
+`windows-bootstrap.ps1`'s own loop.
+
+**Binary names can differ from the id** (`btop` becomes `btop4win` on Windows),
+and a new winget id is verified with `winget show --id <id> --exact` before it is
+written down. An id that always fails is worse than an honest "not available on
+this platform".
