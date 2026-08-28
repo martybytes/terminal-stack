@@ -306,3 +306,58 @@ def test_no_verb_opens_the_menu_rather_than_printing_show(monkeypatch):
     # No stray empty argument: the shell reads `case "${1:-}"` and "" IS the menu,
     # but an explicit "" would also match `show`'s neighbours by accident.
     assert seen[0][-1].endswith("ts-config.sh"), seen[0]
+
+
+def test_switching_the_memory_backend_moves_the_wiring_and_restarts_headroom(monkeypatch):
+    """Two things the shell did that the port had dropped.
+
+    The agent WIRING is what actually captures, so it moves with the setting --
+    writing only the key leaves the hooks pointed at a store that is no longer
+    the one in use. And headroom is restarted rather than being told about: a
+    headroom still running the old compose file is exactly the silent mismatch
+    this setting exists to remove.
+    """
+    agent_calls: list[list[str]] = []
+    service_calls: list[list[str]] = []
+    monkeypatch.setattr(
+        config.store, "get", lambda k, d=None: "agentmemory" if k == "memoryBackend" else (d or "")
+    )
+    monkeypatch.setattr(config.store, "set", lambda k, v: None)
+    monkeypatch.setattr(config.shutil, "which", lambda name: "/usr/bin/docker")
+    # Every write verb resolves the clone first; the suite runs with a
+    # throwaway HOME where the installed one is not found.
+    monkeypatch.setattr(config.paths, "resolve_source_dir", lambda: ROOT)
+
+    from tstack.commands import agents as agents_cmd
+    from tstack.commands import services as services_cmd
+
+    monkeypatch.setattr(agents_cmd, "main", lambda argv: (agent_calls.append(argv), 0)[1])
+    monkeypatch.setattr(services_cmd, "main", lambda argv: (service_calls.append(argv), 0)[1])
+
+    assert config.main(["memory", "headroom"]) == 0
+    assert agent_calls == [["agentmemory", "off"]], "leaving agentmemory unwires it"
+    assert service_calls == [["restart", "headroom"]]
+
+    agent_calls.clear()
+    service_calls.clear()
+    monkeypatch.setattr(
+        config.store, "get", lambda k, d=None: "none" if k == "memoryBackend" else (d or "")
+    )
+    assert config.main(["memory", "agentmemory"]) == 0
+    assert agent_calls == [["agentmemory", "on"]], "choosing it wires it"
+
+
+def test_a_missing_docker_says_what_to_run_later_rather_than_failing(monkeypatch):
+    """The setting is still saved. A machine with no engine is not a broken one."""
+    monkeypatch.setattr(
+        config.store, "get", lambda k, d=None: "none" if k == "memoryBackend" else (d or "")
+    )
+    monkeypatch.setattr(config.store, "set", lambda k, v: None)
+    monkeypatch.setattr(config.shutil, "which", lambda name: None)
+    # Every write verb resolves the clone first; the suite runs with a
+    # throwaway HOME where the installed one is not found.
+    monkeypatch.setattr(config.paths, "resolve_source_dir", lambda: ROOT)
+    from tstack.commands import agents as agents_cmd
+
+    monkeypatch.setattr(agents_cmd, "main", lambda argv: 0)
+    assert config.main(["memory", "headroom"]) == 0

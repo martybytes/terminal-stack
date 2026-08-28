@@ -25,11 +25,16 @@ commands any more, and no aliases for them.
 A subcommand reported as "not available on <platform>" is deliberate, not a
 broken install: `smb` has no PowerShell implementation.
 
-`doctor`, `services`, `mux`, `wezterm`, `agents`, `ghostty`, `wizard` and `ui` are one Python program
-that runs identically on Windows, WSL, Linux and macOS. `config`, `update`,
-`rollback`, `smb` and `agentmemory` are still shell, and `tstack` routes to
-whichever the registry (`tstack/commands.conf`) says - so the command you type
-never changes as each one is ported.
+`doctor`, `services`, `mux`, `wezterm`, `agents`, `ghostty`, `wizard`, `ui` and (on POSIX) `config` are one Python program
+that runs identically on Windows, WSL, Linux and macOS. `update`, `rollback`,
+`smb` and `agentmemory` are still shell, as is `config` on **Windows** -- that
+row's two columns differ deliberately until it can be exercised there. `tstack`
+routes to whichever the registry (`tstack/commands.conf`) says, so the command
+you type never changes as each one is ported.
+
+On POSIX, `tstack config apps`, `tts` and `reconfigure` hand back to
+`bootstrap/ts-config.sh`: they end in a package-manager install or the
+bootstrap's own save sequence, which the port deliberately never covers.
 
 ## `tstack ui`
 

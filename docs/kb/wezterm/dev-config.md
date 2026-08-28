@@ -37,7 +37,7 @@ against it (the canonical install at `%LOCALAPPDATA%\terminal-stack\stack` needs
 no pin), and a tier path is exempt from the installers' refusal to put the runtime
 clone inside a workspace root. If you later move or delete the dev clone, the pin
 goes stale: the resolvers warn and fall back to the canonical install rather than
-breaking, and `tstack doctor -Repair` removes the dead line. Set once in
+breaking, and `tstack doctor --repair` removes the dead line. Set once in
 `Documents\PowerShell\profile.local.ps1`:
 
 ```powershell

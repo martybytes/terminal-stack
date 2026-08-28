@@ -849,7 +849,7 @@ function Resolve-TsSourceDir([string]$SourceDir) {
             return $env:TERMINAL_STACK_DIR
         }
         Write-Warning "stale `$env:TERMINAL_STACK_DIR pin: no clone at $($env:TERMINAL_STACK_DIR) — searching the usual locations."
-        Write-Host   "  Clear it with 'tstack doctor -Repair', or delete the line from $(Join-Path (Split-Path $PROFILE) 'profile.local.ps1')."
+        Write-Host   "  Clear it with 'tstack doctor --repair', or delete the line from $(Join-Path (Split-Path $PROFILE) 'profile.local.ps1')."
         $stalePin = $true
     }
     $clones = Get-TsClones
@@ -865,7 +865,7 @@ function Resolve-TsSourceDir([string]$SourceDir) {
             Write-Host ("  {0} {1}" -f $mark, $c.Path)
             Write-Host ("       {0}  |  {1}" -f $c.Origin, $c.Short)
         }
-        Write-Host "  Consolidate with 'tstack doctor -Repair' (or pin one: Set-TsSourceDirPersisted '<path>')"
+        Write-Host "  Consolidate with 'tstack doctor --repair' (or pin one: Set-TsSourceDirPersisted '<path>')"
     }
     return $clones[0].Path
 }
@@ -911,7 +911,7 @@ function Update-TerminalStack {
     # Location notice only — moving is tstack doctor's job, never a side effect of updating.
     $canon = Get-TsCanonicalCloneDir
     if ($SourceDir.TrimEnd('\') -ne $canon.TrimEnd('\') -and -not (Test-TsDevClone $SourceDir)) {
-        Write-Host "tstack update: note — clone is at a legacy location; run 'tstack doctor -Repair' to move it to $canon."
+        Write-Host "tstack update: note — clone is at a legacy location; run 'tstack doctor --repair' to move it to $canon."
     }
     # A second clone is not just untidy: whichever one tstack update picks is the one
     # that overwrites $PROFILE, so an unnoticed leftover silently reinstates an

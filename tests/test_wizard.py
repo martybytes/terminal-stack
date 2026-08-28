@@ -834,3 +834,46 @@ def test_a_probe_that_cannot_reach_anything_is_not_an_error(monkeypatch):
     assert probes.headroom()[0] is False
     best, lines = probes.voice()
     assert best in ("on", "off") and lines
+
+
+def test_ts_assume_yes_works_on_the_direct_path_too(monkeypatch, tmp_path):
+    """Documented as "takes every default without prompting". The shim passes
+    --assume-yes when it is set, so reading it only there made the variable work
+    on the one path nobody types."""
+    from tstack.commands import wizard as cmd
+
+    seen: list[bool] = []
+    monkeypatch.setattr(cmd.flow, "collect", lambda c, ask_terminals=False: flow.Answers(asked=3))
+    monkeypatch.setattr(
+        cmd.flow, "confirm", lambda c, a, assume_yes: (seen.append(assume_yes), a)[1]
+    )
+    monkeypatch.delenv("TS_ASSUME_YES", raising=False)
+    cmd.main([])
+    assert seen == [False]
+
+    seen.clear()
+    monkeypatch.setenv("TS_ASSUME_YES", "1")
+    cmd.main([])
+    assert seen == [True]
+
+    # An explicit falsey value must not turn it on.
+    seen.clear()
+    monkeypatch.setenv("TS_ASSUME_YES", "0")
+    cmd.main([])
+    assert seen == [False]
+
+
+def test_config_agents_repair_reaches_the_command_that_does_it(monkeypatch):
+    """`repair` and `uninstall` used to answer "not ported yet; use the shell" --
+    a dead end the moment `config` stopped being the shell on POSIX."""
+    from tstack.commands import agents as agents_cmd
+    from tstack.commands import config as config_cmd
+
+    calls: list[list[str]] = []
+    monkeypatch.setattr(agents_cmd, "main", lambda argv: (calls.append(argv), 0)[1])
+    assert config_cmd.main(["agents", "headroom", "repair"]) == 0
+    assert calls == [["headroom", "repair"]]
+
+    calls.clear()
+    assert config_cmd.main(["agents", "headroom", "on", "byok"]) == 0
+    assert calls == [["headroom", "on", "byok"]], "the Cursor mode is a third argument"

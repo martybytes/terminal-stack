@@ -19,10 +19,11 @@
 | `chezmoi re-add ~/.zshrc` | capture a hand-edit of a managed file back into the repo |
 | `scripts\sync-windows.ps1 -SourceDir <clone>` | Windows-side deploy — see `doc wezterm/dev-config` |
 
-Ported subcommands (`doctor`, `services`, `mux`) run the same Python on every
-platform. What is left in pwsh is what has not been ported yet:
-`Update-TerminalStack`, `Restore-TerminalStack`, `Set-TerminalStackConfig` - and
-they are reached through `tstack <name>`, never by their own names.
+Ported subcommands run the same Python on every platform: `doctor`, `services`,
+`mux`, `wezterm`, `agents`, `ghostty`, `wizard`, `ui`, and `config` on POSIX.
+What is left in pwsh is what has not been ported: `Update-TerminalStack`,
+`Restore-TerminalStack`, and `Set-TerminalStackConfig` (Windows `config` only) -
+and they are reached through `tstack <name>`, never by their own names.
 
 ## Clone locations
 
@@ -109,11 +110,13 @@ cleanup checklist never lists the canonical path. It also repoints chezmoi's
 sourceDir at the real clone, fixes stale pins, can normalize an old-account origin
 URL, re-applies, then offers an interactive checklist to
 remove old clones and leftover files (per-machine files — `profile.local.ps1`,
-`~/.doc.local`, rollback state — are never listed). On Windows the same pair is
-`Test-TerminalStack` / `Repair-TerminalStack`: checks the clone,
-`%LOCALAPPDATA%\terminal-stack\config.json`, and the `$PROFILE` marker block;
-repair offers the same canonical move and re-syncs (a pin is written to
-`profile.local.ps1` only when the clone stays at a non-canonical path).
+`~/.doc.local`, rollback state — are never listed). `tstack doctor` is the same Python on Windows -- the
+`Test-TerminalStack` / `Repair-TerminalStack` pair it used to be went with the
+port, and only `bootstrap/_cleanup.ps1`'s own messages still name them. It checks
+the clone, `%LOCALAPPDATA%\terminal-stack\config.json` and the `$PROFILE` marker
+block there, and `--repair` offers the same canonical move and re-sync (a pin is
+written to `profile.local.ps1` only when the clone stays at a non-canonical
+path).
 
 ## `tstack config`
 

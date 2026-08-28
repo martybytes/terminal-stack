@@ -8,6 +8,7 @@ that can fail.
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -80,6 +81,13 @@ def main(argv: list[str]) -> int:
     if emit_as and out is None:
         print("tstack wizard: --emit needs --out", file=sys.stderr)
         return 2
+
+    # Documented everywhere as "takes every default without prompting", and the
+    # shell shim passes --assume-yes when it is set. Reading it here too means
+    # `TS_ASSUME_YES=1 tstack wizard` behaves the same as through the shim --
+    # otherwise the flag works only on the path nobody types.
+    if os.environ.get("TS_ASSUME_YES", "").strip() not in ("", "0", "no", "false"):
+        assume_yes = True
 
     console = Console.open()
     try:

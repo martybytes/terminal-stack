@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 
@@ -444,9 +445,34 @@ def set_memory(backend: str, out: Out, dry_run: bool) -> int:
     if dry_run:
         out.say(f"==> would set memoryBackend = {backend}")
         return 0
+    before = store.get("memoryBackend", "agentmemory")
     store.set("memoryBackend", backend)
     store.set("agentmemoryEnabled", "on" if backend == "agentmemory" else "off")
     out.say(f"saved: memoryBackend = {backend}")
+
+    # The agent WIRING is what actually captures, so it moves with the setting.
+    # `tstack agents` refuses to persist a state it cannot verify, which is why
+    # this runs it rather than only writing the key.
+    from . import agents as agents_cmd
+
+    if backend == "agentmemory":
+        if agents_cmd.main(["agentmemory", "on"]) != 0:
+            out.bad("AgentMemory wiring failed; retry: tstack config agents agentmemory repair")
+    elif before == "agentmemory":
+        agents_cmd.main(["agentmemory", "off"])
+        out.say("  AgentMemory hooks removed from Claude/Codex/Cursor.")
+
+    # Restart rather than print the command: the setting and the running state
+    # must not disagree, and a headroom still running the old compose file is
+    # exactly the silent mismatch this setting exists to remove.
+    if shutil.which("docker"):
+        out.say("  restarting headroom so the change takes effect...")
+        from . import services as services_cmd
+
+        if services_cmd.main(["restart", "headroom"]) != 0:
+            out.bad("headroom restart failed - run: tstack services restart headroom")
+    else:
+        out.say("  no docker on PATH; apply it later with: tstack services restart headroom")
     return 0
 
 
@@ -501,7 +527,7 @@ def show_agents(out: Out) -> int:
     return 0
 
 
-def set_agents(tool: str, action: str, out: Out, dry_run: bool) -> int:
+def set_agents(tool: str, action: str, out: Out, dry_run: bool, cursor: str = "") -> int:
     """Per-machine agent toggles.
 
     agentmemory is refused in BOTH directions, not just `on`. The shell guarded
@@ -517,13 +543,24 @@ def set_agents(tool: str, action: str, out: Out, dry_run: bool) -> int:
         )
     if action == "status":
         return show_agents(out)
+    if cursor:
+        # `agents headroom cursor <mcp|byok|off>` in the shell. Only headroom has
+        # a Cursor mode, and only `tstack agents` knows how to rewire it.
+        from . import agents as agents_cmd
+
+        return int(agents_cmd.main([tool, action, cursor]))
     if tool == "agentmemory" and action in ("on", "off"):
         return _usage(
             "tstack config agents: agentmemoryEnabled is derived from memoryBackend "
             "- use: tstack config memory agentmemory|headroom|none"
         )
     if action in ("repair", "uninstall"):
-        return _usage(f"tstack config agents {tool} {action}: not ported yet; use the shell")
+        # `tstack agents` owns the client wiring and does exactly this. Saying
+        # "use the shell" became a dead end the moment `config` stopped being the
+        # shell on POSIX.
+        from . import agents as agents_cmd
+
+        return int(agents_cmd.main([tool, action]))
     if dry_run:
         out.say(f"==> would set {AGENT_KEYS[tool]} = {action}")
         return 0
@@ -638,7 +675,13 @@ def main(argv: list[str]) -> int:
     if verb == "agents":
         if not args or args[0] in ("show",):
             return show_agents(out)
-        return set_agents(args[0], args[1] if len(args) > 1 else "status", out, dry_run)
+        return set_agents(
+            args[0],
+            args[1] if len(args) > 1 else "status",
+            out,
+            dry_run,
+            cursor=args[2] if len(args) > 2 else "",
+        )
 
     key, _usage_line = simple[verb]
     rc = set_value(key, args[0], out, dry_run)
