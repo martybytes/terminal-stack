@@ -42,6 +42,9 @@
     "temperature": {{ index . "ccTtsChatterboxTemperature" | default "0.6" }},
     "timeoutSec": {{ index . "ccTtsChatterboxTimeout" | default "60" }}
   },
+  "say": {
+    "voice": {{ index . "ccTtsSayVoice" | default "" | quote }}
+  },
   "edge": {
     "enabled": {{ if eq (index . "ccTtsEdgeEnabled" | default "true") "true" }}true{{ else }}false{{ end }},
     "voice": {{ index . "ccTtsEdgeVoice" | default "en-US-AndrewMultilingualNeural" | quote }}

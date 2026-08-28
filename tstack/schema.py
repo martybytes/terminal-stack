@@ -226,10 +226,10 @@ SETTINGS: tuple[Setting, ...] = (
         "choice",
         "tts",
         "kokoro",
-        options=("kokoro", "chatterbox", "auto"),
+        options=("kokoro", "chatterbox", "say", "auto"),
         mirror="ccTts.engine",
-        note="auto tries kokoro then chatterbox; edge-tts and the say floor are "
-        "fallbacks, not choices",
+        note="auto tries kokoro then chatterbox; say is macOS-only and is also "
+        "the floor every other engine falls back to; edge-tts is a fallback only",
         flags=frozenset({STANDALONE}),
     ),
     Setting(
@@ -401,6 +401,16 @@ SETTINGS: tuple[Setting, ...] = (
         "tts-voice",
         "60",
         mirror="ccTts.chatterbox.timeoutSec",
+        flags=frozenset({STANDALONE}),
+    ),
+    Setting(
+        "ccTtsSayVoice",
+        "macOS system voice",
+        "text",
+        "tts-voice",
+        "",
+        mirror="ccTts.say.voice",
+        note="empty means the system voice; `tstack config tts voices` lists and samples them",
         flags=frozenset({STANDALONE}),
     ),
     Setting(

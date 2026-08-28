@@ -553,17 +553,36 @@ cc_tts_synth_edge() {
 # format from the EXTENSION and only really writes AIFF, so synthesise to a
 # .aiff and move it into place — afplay sniffs content, not the name.
 cc_tts_synth_say() {
-    local text="$1" out="$2" tmp
+    # $3 is "chosen" when `say` is the configured engine rather than the floor.
+    # It changes two things and neither is cosmetic: the daily notice explains an
+    # UNEXPECTED fallback, so firing it for a deliberate choice is a nag about a
+    # decision already made; and the log line should say which of the two
+    # happened, because "why is it using say" is the question this rung creates.
+    local text="$1" out="$2" chosen="${3:-}" tmp voice
     [ "$(uname -s 2>/dev/null)" = Darwin ] || return 1
     command -v say >/dev/null 2>&1 || return 1
     tmp="${out%.*}.say.aiff"
-    say -o "$tmp" -- "$text" >/dev/null 2>&1 || { rm -f "$tmp"; return 1; }
+
+    # An unset voice means the SYSTEM voice, which is what the floor has always
+    # used and what a user who never chose one expects. `say -v ""` is an error,
+    # not a synonym, so the flag is omitted rather than passed empty.
+    voice="$(cc_tts_json .say.voice "")"
+    if [ -n "$voice" ]; then
+        say -v "$voice" -o "$tmp" -- "$text" >/dev/null 2>&1 || { rm -f "$tmp"; return 1; }
+    else
+        say -o "$tmp" -- "$text" >/dev/null 2>&1 || { rm -f "$tmp"; return 1; }
+    fi
+
     # Guard the junk-file case explicitly rather than trusting the exit code.
     [ -s "$tmp" ] && [ "$(wc -c < "$tmp" 2>/dev/null || echo 0)" -gt 1024 ] || {
         rm -f "$tmp"; return 1; }
     mv -f "$tmp" "$out" || { rm -f "$tmp"; return 1; }
-    cc_tts_log "synth say (fallback: no Kokoro/Chatterbox/edge-tts)"
-    cc_tts_say_notice
+    if [ "$chosen" = chosen ]; then
+        cc_tts_log "synth say (engine: say${voice:+, voice $voice})"
+    else
+        cc_tts_log "synth say (fallback: no Kokoro/Chatterbox/edge-tts)"
+        cc_tts_say_notice
+    fi
     return 0
 }
 
@@ -585,6 +604,10 @@ cc_tts_synth() {
     case "$engine" in
         kokoro)     cc_tts_synth_kokoro "$text" "$out" && ok=0 ;;
         chatterbox) cc_tts_synth_chatterbox "$text" "$out" && ok=0 ;;
+        # Chosen, so tried FIRST -- and it still falls through to edge and to
+        # itself-as-floor below if `say` is somehow unavailable, which keeps the
+        # "on never means silence" property that the floor exists for.
+        say)        cc_tts_synth_say "$text" "$out" chosen && ok=0 ;;
         auto)
             cc_tts_synth_kokoro "$text" "$out" && ok=0
             [ "$ok" -ne 0 ] && cc_tts_synth_chatterbox "$text" "$out" && ok=0

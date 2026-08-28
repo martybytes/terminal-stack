@@ -4,6 +4,36 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+### Added
+
+- **`say` is a real engine, and voices can be listed and heard (08/28/2026).**
+  macOS's `say` was the floor of the ladder and nothing else: not a legal
+  `ccTtsEngine` value, and no way to pick which of the machine's 184 voices it
+  used -- it passed no `-v` at all, so it always spoke the system default. It is
+  now selectable, with `ccTtsSayVoice` beside it, refused off Darwin at set time
+  rather than saved as a choice that can never take effect.
+
+  Choosing it is distinguishable from falling back to it, which matters for two
+  reasons: the once-a-day "using the system voice" notice explains an
+  *unexpected* fallback and would otherwise nag about a decision already made,
+  and the log line should say which of the two happened. The floor is unchanged
+  -- `say` stays last in the fallback chain, and the test that pinned that now
+  scopes itself to the chain rather than the whole function.
+
+  `tstack config tts voices` lists what the ACTIVE engine can produce, and
+  `voices <name>` plays a sample. Both ask the engine: kokoro over
+  `GET /v1/audio/voices`, which nothing in this repo had ever called, and macOS
+  with `say -v '?'`. No list is checked in -- kokoro ships 68 and the set moves
+  with the image, and a Mac has 184 with more downloadable, so a table here would
+  be wrong on somebody's machine the week it was written. When the saved engine
+  is kokoro but the container is down, the macOS list is shown instead.
+
+  `voices` previously set the daemon's per-session rotation pool -- unrelated to
+  picking a voice, and read only by the Windows daemon. That is `voice-pool`
+  now. The old comma-separated form is redirected with the new spelling rather
+  than silently honoured; a voice name never contains a comma, so the two stay
+  distinguishable.
+
 ### Fixed
 
 - **A backup of a SOURCE file became a permanent managed target (08/28/2026).**

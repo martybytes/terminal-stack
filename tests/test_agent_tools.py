@@ -2661,9 +2661,22 @@ def test_macos_has_a_synthesis_floor():
     assert "cc_tts_synth_say" in lib
     synth = lib[lib.index("\ncc_tts_synth() {") :]
     synth = synth[: synth.index("\n}\n")]
-    # say must be the LAST rung, after edge.
-    assert synth.index("cc_tts_synth_edge") < synth.index("cc_tts_synth_say"), (
+    # say must be the LAST rung of the FALLBACK chain, after edge.
+    #
+    # The anchor moved when `say` became a selectable engine: it now also appears
+    # in the `case` above, where being first is the whole point of choosing it.
+    # The rule did not move -- say must never be preferred over a real engine
+    # that was NOT chosen -- so the assertion is scoped to the chain after the
+    # case rather than to the whole function.
+    chain = synth[synth.index("esac") :]
+    assert chain.index("cc_tts_synth_edge") < chain.index("cc_tts_synth_say"), (
         "say must be the floor, not preferred over a real engine"
+    )
+    # And being chosen has to be distinguishable from falling through, or the
+    # daily "using the system voice" notice nags about a deliberate decision.
+    case = synth[: synth.index("esac")]
+    assert "cc_tts_synth_say" in case and "chosen" in case, (
+        "the chosen path must pass a marker the fallback path does not"
     )
     say = lib[lib.index("cc_tts_synth_say() {") :]
     say = say[: say.index("\n}\n")]
@@ -2738,3 +2751,73 @@ def test_wizard_does_not_reset_tuned_tts_keys():
     assert '[ -n "$configured" ] || ts_cc_tts_reset_defaults' in fn, (
         "defaults must only be seeded on a never-configured host"
     )
+
+
+def test_say_is_a_selectable_engine_and_is_macos_gated():
+    """`say` was the floor and nothing else: not a legal `engine` value, and no
+    way to pick which of the Mac's 184 voices it used. It is now both, and the
+    setter refuses it off Darwin rather than saving a choice that can never take
+    effect -- Windows falls back to SAPI and Linux has no floor at all."""
+    sh = repo_file("bootstrap/_cc_tts.sh").read_text(encoding="utf-8")
+    assert "kokoro|chatterbox|say|auto" in sh, "the engine enum must accept say"
+    arm = sh[sh.index("        engine)") :]
+    arm = arm[: arm.index("        message)")]
+    assert "Darwin" in arm, "say must be refused off macOS at set time"
+
+
+def test_the_engine_enum_agrees_across_every_copy_that_can_serve_it():
+    """Three copies existed and one was wrong (the Python schema said `edge`,
+    which the setter refuses). The daemon's list is DELIBERATELY different and
+    stays that way: it is Windows-only, and `say` is macOS-only."""
+    sh = repo_file("bootstrap/_cc_tts.sh").read_text(encoding="utf-8")
+    schema_py = repo_file("tstack/schema.py").read_text(encoding="utf-8")
+    assert '"kokoro", "chatterbox", "say", "auto"' in schema_py
+    assert "kokoro|chatterbox|say|auto" in sh
+    daemon = repo_file("bootstrap/tts-daemon/ttsd/settings_schema.py").read_text(encoding="utf-8")
+    assert '("kokoro", "chatterbox", "auto")' in daemon, (
+        "the daemon is Windows-only, so it must NOT offer the macOS say engine"
+    )
+
+
+def test_the_say_voice_reaches_the_runtime_config():
+    """A setting the reader never sees is a setting that does nothing. The
+    reader is cc-tts-lib.sh's `.say.voice`, rendered by config.json.tmpl and
+    mirrored by ts_cc_tts_json_for_mirror."""
+    assert '"voice": {{ index . "ccTtsSayVoice"' in repo_file(
+        "dot_claude/tts/config.json.tmpl"
+    ).read_text(encoding="utf-8")
+    assert "ccTtsSayVoice" in repo_file(".chezmoi.toml.tmpl").read_text(encoding="utf-8")
+    sh = repo_file("bootstrap/_cc_tts.sh").read_text(encoding="utf-8")
+    assert '"say": {' in sh, "the Windows mirror must carry the say block"
+    lib = repo_file("dot_claude/hooks/cc-tts-lib.sh").read_text(encoding="utf-8")
+    assert "cc_tts_json .say.voice" in lib, "nothing reads it"
+    # `say -v ""` is an error, not a synonym for the system voice, so an unset
+    # value must omit the flag rather than pass it empty.
+    say = lib[lib.index("cc_tts_synth_say() {") :]
+    say = say[: say.index("\n}\n")]
+    assert 'say -o "$tmp"' in say, "an unset voice must omit -v entirely"
+
+
+def test_listing_voices_asks_the_engine_rather_than_a_hardcoded_table():
+    """kokoro ships 68 and the set moves with the image; a Mac has 184 with more
+    downloadable. Any list checked in here would be wrong on somebody's machine
+    the week it was written."""
+    sh = repo_file("bootstrap/_cc_tts.sh").read_text(encoding="utf-8")
+    fn = sh[sh.index("ts_cc_tts_list_voices() {") :]
+    fn = fn[: fn.index("\n}\n")]
+    assert "/v1/audio/voices" in fn, "kokoro's own list endpoint"
+    assert "say -v '?'" in fn, "the macOS list"
+    assert "am_adam" not in fn and "af_heart" not in fn, "no hardcoded voice names"
+
+
+def test_the_voice_pool_moved_out_of_the_way_of_listing():
+    """`voices` used to set the daemon's per-session rotation pool -- unrelated
+    to picking a voice, and read only on Windows. It lists now; the pool is
+    `voice-pool`. The old CSV form is redirected rather than silently honoured,
+    which a voice name can never be mistaken for because it has no comma."""
+    sh = repo_file("bootstrap/_cc_tts.sh").read_text(encoding="utf-8")
+    assert "        voice-pool)" in sh
+    arm = sh[sh.index("        voices)") :]
+    arm = arm[: arm.index("        voice-pool)")]
+    assert "*,*)" in arm, "a CSV must be routed to voice-pool, not treated as a name"
+    assert "ts_cc_tts_list_voices" in arm

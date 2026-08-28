@@ -30,6 +30,7 @@ ts_cc_tts_default() {
         ccTtsChatterboxCfgWeight)  echo 0.5 ;;
         ccTtsChatterboxTemperature) echo 0.6 ;;
         ccTtsChatterboxTimeout)    echo 60 ;;
+        ccTtsSayVoice)             echo "" ;;
         ccTtsEdgeEnabled)          echo true ;;
         ccTtsEdgeVoice)            echo en-US-AndrewMultilingualNeural ;;
         ccTtsTemplateWaiting)      echo "Done in {project}. I'm waiting for you." ;;
@@ -61,7 +62,7 @@ ts_cc_tts_keys() {
         ccTtsKokoroUrl ccTtsKokoroVoice ccTtsKokoroSpeed ccTtsKokoroFormat ccTtsKokoroTimeout \
         ccTtsChatterboxUrl ccTtsChatterboxVoice ccTtsChatterboxEnergy \
         ccTtsChatterboxCfgWeight ccTtsChatterboxTemperature ccTtsChatterboxTimeout \
-        ccTtsEdgeEnabled ccTtsEdgeVoice \
+        ccTtsSayVoice ccTtsEdgeEnabled ccTtsEdgeVoice \
         ccTtsTemplateWaiting ccTtsTemplateError ccTtsTemplateQuestion ccTtsTemplatePermission \
         ccTtsMaxChars ccTtsDebounceSec ccTtsPlayer \
         ccTtsDaemon ccTtsDaemonPort ccTtsSummarizer ccTtsHaikuModel \
@@ -240,6 +241,9 @@ ts_cc_tts_json_for_mirror() {
       "cfgWeight": $(ts_cc_tts_get ccTtsChatterboxCfgWeight),
       "temperature": $(ts_cc_tts_get ccTtsChatterboxTemperature),
       "timeoutSec": $(ts_cc_tts_get ccTtsChatterboxTimeout)
+    },
+    "say": {
+      "voice": "$(ts_cc_tts_get ccTtsSayVoice)"
     },
     "edge": {
       "enabled": $([ "$(ts_cc_tts_get ccTtsEdgeEnabled)" = true ] && echo true || echo false),
@@ -607,6 +611,82 @@ ts_cc_tts_apply_wizard_choice() {
 }
 
 # tstack config tts subcommands (requires $CZ and finish() from ts-config.sh caller).
+# List the voices the ACTIVE engine can actually produce, from the engine
+# itself. Nothing here is a hardcoded table: kokoro ships 68 and the set moves
+# with the image, and a Mac has 184 with more downloadable from System Settings,
+# so any list checked into this repo would be wrong on somebody's machine the
+# week it was written.
+#
+# `tstack config tts voices <name>` speaks a sample in that voice. Hearing one is
+# the only way to choose, and until now the only way to hear one was to set it
+# and wait for an announcement.
+ts_cc_tts_list_voices() {
+    local want="${1:-}" engine url
+    engine="$(ts_cc_tts_get ccTtsEngine)"
+
+    if [ "$engine" = say ] || { [ "$engine" != chatterbox ] && [ "$(uname -s 2>/dev/null)" = Darwin ] && ! ts_cc_tts_kokoro_up; }; then
+        command -v say >/dev/null 2>&1 || { echo "say is not available here." >&2; return 1; }
+        if [ -n "$want" ]; then
+            say -v '?' 2>/dev/null | awk '{print $1}' | grep -qxF "$want" || {
+                echo "no installed voice named '$want'" >&2; return 1; }
+            echo "==> $want"
+            say -v "$want" "Hello, I am $want. This is how I sound."
+            return 0
+        fi
+        echo "macOS system voices (say). English shown; $(say -v '?' 2>/dev/null | wc -l | tr -d ' ') installed in all languages."
+        echo "More: System Settings -> Accessibility -> Spoken Content -> Manage Voices."
+        say -v '?' 2>/dev/null | awk '$2 ~ /^en/ {printf "  %-16s %s\n", $1, $2}'
+        echo
+        echo "Hear one:  tstack config tts voices <name>"
+        echo "Choose it: tstack config tts voice-say <name>"
+        return 0
+    fi
+
+    url="$(ts_cc_tts_get ccTtsKokoroUrl)"
+    command -v curl >/dev/null 2>&1 || { echo "curl is required to ask the engine." >&2; return 1; }
+    local body
+    body="$(curl -fsS --max-time 5 "${url%/}/v1/audio/voices" 2>/dev/null || true)"
+    [ -n "$body" ] || {
+        echo "$WARN kokoro is not answering at $url, so its voice list is unavailable." >&2
+        echo "  start it with: tstack services up kokoro" >&2
+        return 1; }
+    if [ -n "$want" ]; then
+        printf '%s' "$body" | grep -qF "\"$want\"" || {
+            echo "no voice named '$want' on $url" >&2; return 1; }
+        echo "==> $want"
+        ts_cc_tts_say_sample_kokoro "$url" "$want"
+        return 0
+    fi
+    echo "kokoro voices at $url. First letter is the language (a=American,"
+    echo "b=British, e/f/h/i/j/p/z=other), second is f=female or m=male."
+    printf '%s' "$body" | tr ',' '\n' | sed -n 's/.*"\([a-z][a-z]_[a-z0-9]*\)".*/  \1/p' | sort -u
+    echo
+    echo "Hear one:  tstack config tts voices <name>"
+    echo "Choose it: tstack config tts voice <name>"
+}
+
+# Is kokoro answering? Used to pick which engine's list to show when the saved
+# engine is kokoro but the container is down -- offering a list you cannot hear
+# is worse than offering the one you can.
+ts_cc_tts_kokoro_up() {
+    command -v curl >/dev/null 2>&1 || return 1
+    curl -fsS --max-time 2 -o /dev/null "$(ts_cc_tts_get ccTtsKokoroUrl | sed 's:/*$::')/v1/models" 2>/dev/null
+}
+
+# Synthesise one sample and play it through the same path an announcement uses.
+ts_cc_tts_say_sample_kokoro() {
+    local url="$1" voice="$2" tmp
+    tmp="$(mktemp -t ts-voice).mp3"
+    curl -fsS --max-time 20 -X POST "${url%/}/v1/audio/speech" \
+        -H 'content-type: application/json' \
+        -d "{\"model\":\"kokoro\",\"input\":\"Hello, I am $voice. This is how I sound.\",\"voice\":\"$voice\",\"response_format\":\"mp3\"}" \
+        -o "$tmp" 2>/dev/null || { rm -f "$tmp"; echo "synthesis failed" >&2; return 1; }
+    if command -v afplay >/dev/null 2>&1; then afplay "$tmp"
+    elif command -v ffplay >/dev/null 2>&1; then ffplay -nodisp -autoexit -loglevel quiet "$tmp"
+    else echo "no player available; wrote $tmp" >&2; return 0; fi
+    rm -f "$tmp"
+}
+
 ts_config_tts() {
     local sub="${1:-}" arg="${2:-}" arg2="${3:-}"
     case "$sub" in
@@ -632,9 +712,16 @@ ts_config_tts() {
             finish
             ;;
         engine)
-            [ -n "$arg" ] || { echo "usage: tstack config tts engine kokoro|chatterbox|auto" >&2; return 2; }
-            case "$arg" in kokoro|chatterbox|auto) ;; *)
-                echo "tstack config tts engine: expected kokoro, chatterbox, or auto" >&2; return 2 ;; esac
+            [ -n "$arg" ] || { echo "usage: tstack config tts engine kokoro|chatterbox|say|auto" >&2; return 2; }
+            case "$arg" in kokoro|chatterbox|say|auto) ;; *)
+                echo "tstack config tts engine: expected kokoro, chatterbox, say, or auto" >&2; return 2 ;; esac
+            # `say` is the macOS system voice. It has always been the FLOOR of
+            # the ladder; choosing it here moves it to the front. Refuse it
+            # elsewhere rather than saving a setting that can never take effect.
+            if [ "$arg" = say ] && [ "$(uname -s 2>/dev/null)" != Darwin ]; then
+                echo "tstack config tts engine: 'say' is macOS-only (Windows has SAPI, Linux has neither)" >&2
+                return 2
+            fi
             ts_cc_tts_set ccTtsEngine "$arg"
             ts_cc_tts_finish
             finish
@@ -650,6 +737,21 @@ ts_config_tts() {
         voice)
             [ -n "$arg" ] || { echo "usage: tstack config tts voice <kokoro-voice>" >&2; return 2; }
             ts_cc_tts_set ccTtsKokoroVoice "$arg"
+            ts_cc_tts_finish
+            finish
+            ;;
+        voice-say)
+            [ -n "$arg" ] || { echo "usage: tstack config tts voice-say <name|system>" >&2; return 2; }
+            # "system" clears it: `say -v ""` is an error rather than a synonym
+            # for the default, so the empty value is what the lib checks for.
+            case "$arg" in system|default) arg="" ;; esac
+            if [ -n "$arg" ] && command -v say >/dev/null 2>&1 \
+               && ! say -v '?' 2>/dev/null | awk '{print $1}' | grep -qxF "$arg"; then
+                echo "tstack config tts voice-say: no installed voice named '$arg'" >&2
+                echo "  list them with: tstack config tts voices" >&2
+                return 2
+            fi
+            ts_cc_tts_set ccTtsSayVoice "$arg"
             ts_cc_tts_finish
             finish
             ;;
@@ -831,6 +933,32 @@ ts_config_tts() {
             finish
             ;;
         voices)
+            # `voices` now LISTS what you can pick, which is what the word means
+            # to someone reading the help. It used to set the daemon's
+            # per-session rotation pool -- a genuine collision: the two have
+            # nothing to do with each other, and the pool is read only by the
+            # Windows daemon. That is `voice-pool` now; `voices show|<csv>`
+            # still works so an existing script does not break.
+            # A voice name never contains a comma and the pool always does when
+            # it means anything, so the two old forms stay distinguishable. The
+            # CSV form is refused rather than silently honoured: it used to be
+            # THIS verb, and a user who types it deserves to be pointed at the
+            # new one instead of wondering why nothing was sampled.
+            case "$arg" in
+                show)
+                    echo "voice pool: $(ts_cc_tts_get ccTtsVoicePool)"
+                    echo "  (that is the daemon rotation pool; it moved to 'tstack config tts voice-pool')" >&2
+                    ;;
+                *,*)
+                    echo "tstack config tts voices: this sets the daemon rotation pool now:" >&2
+                    echo "  tstack config tts voice-pool $arg" >&2
+                    echo "'voices' lists what you can pick, and 'voices <name>' plays a sample." >&2
+                    return 2
+                    ;;
+                *)  ts_cc_tts_list_voices "$arg" ;;
+            esac
+            ;;
+        voice-pool)
             if [ -z "$arg" ] || [ "$arg" = show ]; then
                 echo "voice pool: $(ts_cc_tts_get ccTtsVoicePool)"
             else
@@ -893,7 +1021,7 @@ tstack config tts — agent local TTS (Kokoro / Chatterbox / edge-tts)
   summarizer template|self|haiku|ollama   (self also installs the CLAUDE.md block)
   haiku-model <model> | ollama <url> [<model>]
   music duck|smart|pause|off | duck-level <0-100>
-  voices show|<v1,v2,...> | port <n>
+  voices [<name>] | voice-say <name|system> | voice-pool show|<v1,v2,...> | port <n>
   history [<n>] | history --dupes [<sec>]  (what was said, and what was suppressed)
   (to go quiet right now use ccmute — instant, no apply; tray icon and hotkey share it)
 EOF

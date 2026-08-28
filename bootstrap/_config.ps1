@@ -1525,6 +1525,11 @@ function Get-CcTtsDefaults {
             url = 'http://127.0.0.1:8881'; voice = 'adam'; energy = 0.25
             cfgWeight = 0.5; temperature = 0.6; timeoutSec = 60
         }
+        # macOS-only, and carried here anyway: a combined Windows+WSL machine
+        # writes this store from the WSL side, and a key the pwsh table omits is
+        # STRIPPED from config.json on the next Windows save. That is how
+        # atuinEnabled kept disappearing.
+        say         = [ordered]@{ voice = '' }
         edge        = [ordered]@{ enabled = $true; voice = 'en-US-AndrewMultilingualNeural' }
         templates   = [ordered]@{
             waiting    = "Done in {project}. I'm waiting for you."
@@ -1573,6 +1578,7 @@ function ConvertTo-CcTtsRuntimeJson {
         excitement = [double]$Tts.excitement
         kokoro = $Tts.kokoro
         chatterbox = $Tts.chatterbox
+        say = $Tts.say
         edge = $Tts.edge
         maxChars = [int]$Tts.maxChars
         debounceSec = [int]$Tts.debounceSec

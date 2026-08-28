@@ -33,7 +33,11 @@ save happily on a Mac and do nothing.
 | `tstack config tts` / `show` | effective config (config.json + local.json) |
 | `cctts` / `cctts on` / `cctts off` | quick status and toggle |
 | `tstack config tts test [--source claude\|cursor\|codex]` | speak a fixed line. **Ignores any text you pass** |
-| `tstack config tts engine kokoro\|chatterbox\|auto` | which synthesiser to try first |
+| `tstack config tts engine kokoro\|chatterbox\|say\|auto` | which synthesiser to try first (`say` is macOS-only) |
+| `tstack config tts voices` | list what the active engine can produce |
+| `tstack config tts voices <name>` | play a sample in that voice |
+| `tstack config tts voice-say <name\|system>` | the macOS system voice |
+| `tstack config tts voice-pool <v1,v2,…>` | the daemon's per-session rotation (Windows) |
 | `tstack config tts voice <name>` / `voice-chatter <name>` | per-engine voice |
 | `tstack config tts excitement <0-1>` | speaking rate |
 | `tstack config tts events waiting,error,question,permission` | when it speaks |
@@ -74,6 +78,25 @@ the agent is waiting on you.
 `haiku` and `ollama` send the final message to a model for a one-sentence
 summary. Both need the daemon; `haiku` also needs an API key, `ollama` a local
 server. On a host without a daemon they are refused.
+
+## Choosing a voice
+
+```sh
+tstack config tts voices              # what the active engine can produce
+tstack config tts voices af_heart     # hear it
+tstack config tts voice af_heart      # kokoro
+tstack config tts voice-say Samantha  # macOS system voice
+```
+
+Nothing is hardcoded: kokoro is asked over `GET /v1/audio/voices` (68 in the
+v0.8.0 image, and the set moves with the image) and macOS is asked with
+`say -v '?'` (184 installed here, more from System Settings → Accessibility →
+Spoken Content → Manage Voices). If the saved engine is kokoro but the container
+is down, the macOS list is shown instead — offering a list you cannot hear is
+worse than offering the one you can.
+
+`voices` used to set the daemon's rotation pool. That is `voice-pool` now; the
+old comma-separated form redirects rather than silently doing the wrong thing.
 
 ## Which engine actually speaks
 
