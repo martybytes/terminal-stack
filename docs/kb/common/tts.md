@@ -93,6 +93,15 @@ a fallback — Kokoro is probably down. A once-a-day notice says so.
 
 - **`~/.claude/tts/local.json` with `"enabled": false`** overrides everything and
   is the most common silent killer. `tstack config tts` shows the effective value.
+- **A Windows-standalone install reporting a setting you never chose.** The two
+  stores spell the TTS block differently: chezmoi `[data]` is flat
+  (`ccTtsKokoroVoice`), the mirror nests (`ccTts.kokoro.voice`) because the daemon
+  reads that file too. Until 08/28/2026 the reader derived the nested name wrongly
+  for every key below the top level, missed, and served the default instead — so a
+  voice, URL, template or timeout set on Windows read back as the shipped default
+  with nothing reporting a problem. `tstack config show` now names the layer each
+  value came from, which is what makes this visible rather than merely fixed.
+
 - **A `chezmoi apply` from the wrong side.** On combined WSL+Windows, run
   `tstack config tts …` from **WSL** — a pwsh save writes only the `config.json`
   mirror, so the next WSL apply renders the setting back off. This removed all

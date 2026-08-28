@@ -55,23 +55,26 @@ DATA_KEYS = (
     "windowsUsername",
 )
 
+
 # Documented defaults, applied when a key has never been written. A machine that
 # never answered a question must read as the old behaviour, not as empty.
-DEFAULTS: dict[str, str] = {
-    "themeMode": "dark",
-    "weztermMux": "off",
-    "weztermRestore": "off",
-    "atuinEnabled": "off",
-    "ghosttyConfig": "on",
-    "memoryBackend": "agentmemory",
-    "headroomEnabled": "off",
-    "headroomCursorMode": "mcp",
-    "cavemanEnabled": "off",
-    "playwrightEnabled": "off",
-    "ccTtsEnabled": "false",
-    "ccTtsDaemon": "off",
-    "ccTtsEngine": "kokoro",
-}
+@functools.cache
+def defaults() -> dict[str, str]:
+    """Every setting's default, read from the schema.
+
+    Declared once, in schema.py, because two default tables drift and the one
+    that loses is the one nobody is reading. `tests/test_store.py` pins that the
+    schema and the shell's own `ts_cc_tts_default` still agree, which is the
+    drift that can actually happen now: bash and Python, not Python and Python.
+
+    Cached but deliberately absent from clear_cache(): that list is the reads
+    whose answer depends on the machine, and this one depends only on a module
+    constant. A test injecting a store has nothing to invalidate here.
+    """
+    from . import schema
+
+    return {s.key: s.default for s in schema.SETTINGS if s.default}
+
 
 TRUTHY = {"on", "true", "yes", "1", "enabled"}
 FALSEY = {"off", "false", "no", "0", "disabled", ""}
@@ -183,6 +186,13 @@ def mirror_key(key: str) -> str:
     notifications very much on. Found by running the command through the pwsh shim
     rather than by a test, because every test injects a store.
     """
+    # The schema is the declaration; this is only the lookup. Late import because
+    # schema imports this module, and the cycle is one-directional by design.
+    from . import schema
+
+    setting = schema.BY_KEY.get(key)
+    if setting is not None and setting.mirror:
+        return setting.mirror
     explicit = dict(DIVERGENCE_PAIRS)
     if key in explicit:
         return explicit[key]
@@ -205,7 +215,7 @@ def get(key: str, default: str | None = None) -> str:
         return from_mirror
     if default is not None:
         return default
-    return DEFAULTS.get(key, "")
+    return defaults().get(key, "")
 
 
 # chezmoi [data] key -> dotted path in the Windows mirror. Only the keys whose

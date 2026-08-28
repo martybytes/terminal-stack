@@ -60,7 +60,7 @@ Ordered by what is worth opening it for.
 
 Deliberately absent:
 
-- **The 43 `ccTts*` keys.** The daemon already has a full web dashboard for them
+- **The 41 `ccTts*` keys.** The daemon already has a full web dashboard for them
   (`ttsd/webui.py`), including override display and restart-required labels.
   Link to it rather than rebuilding it.
 - **`update` and `rollback` as in-app actions.** Both are interactive multi-stage

@@ -2,9 +2,42 @@
 
 All notable changes captured here. Format loosely follows [Keep a Changelog](https://keepachangelog.com/). Dates are MM/DD/YYYY for display, `git log` is authoritative.
 
-## [Unreleased]
+### Fixed
+
+- **Every nested TTS key read the wrong place in the Windows mirror (08/28/2026).**
+  The two stores spell the TTS block differently on purpose - chezmoi `[data]` is
+  flat (`ccTtsKokoroVoice`), the mirror nests (`ccTts.kokoro.voice`) because the
+  daemon reads that file too - and `mirror_key` derived the nested name by
+  lowercasing one character, producing `ccTts.kokoroVoice`. That path does not
+  exist, so the lookup MISSED and fell through to the shipped default: on a
+  Windows-standalone install every voice, URL, template, timeout and summarizer
+  setting read back as the default with nothing reporting a problem. The same
+  class of bug as the one `mirror_key` was written to fix, one level deeper.
+
+  The path now lives on the setting itself, so there is one declaration rather
+  than a lookup table beside a derivation rule. `tests/test_store.py` asserts the
+  schema's path is the one `get` reads through, for every key that declares one.
+
+- **`tstack config tts engine` advertised a value it would refuse.** The new
+  schema listed `kokoro`, `chatterbox`, `edge`; the setter accepts `kokoro`,
+  `chatterbox`, `auto`, and so do `docs/kb/common/tts.md` and the daemon's own
+  schema. `edge-tts` is a fallback rung, never a choice. Third copy of an enum,
+  and the only one that was wrong.
 
 ### Added
+
+- **The settings schema now covers all 41 `ccTts*` keys (08/28/2026).**
+  It carried three. The rest were reachable only through the shell, which is why
+  the mirror bug above could not be seen from Python at all. Each declares its
+  type, allowed values, default, group and mirror path, so `tstack config show`
+  and the future dashboard describe the whole TTS surface from one place.
+
+  `store.defaults()` is now built FROM the schema instead of a second literal
+  table, and the test that guarded those two against each other has been
+  repointed at the drift that can still happen: Python against `ts_cc_tts_default`
+  in `bootstrap/_cc_tts.sh`, which is still what the shell TTS path reads. Also
+  corrects a count repeated through the docs - the daemon has 72 runtime fields
+  and chezmoi has 41 `ccTts*` keys; "43" was neither.
 
 - **The macOS regression fixes, carried forward into the Python (08/27/2026).**
   `e969c30f` landed on `main` while the `tstack` port was in flight, fixing four
