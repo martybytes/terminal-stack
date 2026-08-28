@@ -3421,3 +3421,17 @@ def test_a_server_is_never_nagged_about_tools_it_declined():
     ps = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
     assert "function Get-TsSavedAppClass" in ps, "the same inference is needed on Windows"
     assert "Get-TsAppsForClass (Get-TsSavedAppClass)" in ps
+
+
+def test_the_prompt_template_preserves_the_trailing_newline():
+    """`{{- end -}}` at the end of a wrapped file trims the newline the wrapped
+    content ended with, so the rendered config loses its final byte and chezmoi
+    reports a diff on a file nobody edited. Caught by rendering it and comparing
+    against the deployed copy; pinned here so the whitespace control cannot be
+    "tidied" back.
+    """
+    body = (ROOT / "dot_config/starship.toml.tmpl").read_text(encoding="utf-8")
+    assert body.endswith("{{ end -}}\n"), (
+        "the closing action must not trim the content's own trailing newline"
+    )
+    assert 'black  = "#616161"\n{{ end -}}\n' in body
