@@ -268,6 +268,24 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **`Get-TsConfigPath` threw on every non-Windows pwsh (08/28/2026).**
+  `Join-Path $env:LOCALAPPDATA …` is a terminating error when that variable is
+  unset, so dot-sourcing `_config.ps1` and calling `Get-TsConfig` died before
+  returning anything on macOS and Linux. Found by running the strict-mode repro
+  that `docs/powershell-quirks.md` gives for checking this exact class of bug —
+  the repro itself failed. It returns `$null` there now, matching
+  `tstack/store.py`'s `mirror_path`, and callers fall through to the defaults
+  they already carry. Windows always sets the variable, so nothing changes there.
+
+- **The `FileSystemWatcher` snippet in `docs/developing-wezterm.md` could never
+  have run (08/28/2026).** `New-Object` has no `-PropertyName`, and
+  `-IncludeSubdirectories` is a property of the watcher rather than a parameter,
+  so the line threw before anything was watched; the `-Action` scriptblock also
+  referenced outer variables it cannot see from the event runspace, so every
+  change would have invoked `$null`. Rewritten, and verified by running it. Found
+  by parsing every PowerShell block in the docs — which also caught a `$EDITOR
+  .env` in a `powershell` fence in the agentmemory README.
+
 - **`tstack services up <stack> --build` was documented and rejected
   (08/28/2026).** The agentmemory stack's README named it as the way to rebuild
   the console after editing `services/console/`; the parser answered `unknown

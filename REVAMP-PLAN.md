@@ -6,6 +6,10 @@ it does not disturb the working tree.
 
 Baseline: `terminal-stack` @ `f67ed5f` (main, clean).
 
+**`file:line` citations below are snapshots taken at that baseline**, kept because
+they record what was found and where. Several have since drifted, and a few name
+files this plan has already deleted. Search for the quoted text, not the line.
+
 ---
 
 ## 1. Why

@@ -732,7 +732,12 @@ From the repository root, create the untracked key file if bootstrap has not alr
 
 ```powershell
 Copy-Item .env.example .env
-$EDITOR .env        # Windows: notepad .env
+notepad .env
+```
+
+```sh
+cp .env.example .env
+"${EDITOR:-nano}" .env
 ```
 
 Replace the placeholder with `OPENAI_API_KEY=sk-proj-...`, then rebuild or recreate AgentMemory.

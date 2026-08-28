@@ -25,7 +25,11 @@ So: resolve names statically, the way neither interpreter will.
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -162,3 +166,59 @@ def test_the_windows_wizard_runner_has_exactly_one_implementation():
     assert "Save-TsWorkspaceOverride (Read-TsWorkspaceDir)" in ps
     code = [ln for ln in ps.splitlines() if not ln.lstrip().startswith("#")]
     assert "$w.Workspace" not in "\n".join(code), "reading a key the wizard JSON does not emit"
+
+
+@pytest.mark.skipif(not shutil.which("pwsh"), reason="PowerShell 7 is unavailable")
+def test_the_config_helper_loads_where_there_is_no_windows_side():
+    """`docs/powershell-quirks.md` gives a strict-mode repro for checking the
+    `tstack config` path. The repro itself threw.
+
+    `Get-TsConfigPath` was `Join-Path $env:LOCALAPPDATA ...`, and pwsh runs on
+    macOS and Linux where that variable is unset -- `Join-Path -Path $null` is a
+    terminating error, so dot-sourcing the helper and calling `Get-TsConfig` died
+    before returning anything. Python's twin (`tstack/store.py` `mirror_path`)
+    already returns None when there is no Windows side; this now matches, and
+    `Get-TsConfig` falls through to the defaults it already carries.
+
+    On Windows LOCALAPPDATA is always set, so none of this changes behaviour there.
+    """
+    script = (
+        "Set-StrictMode -Version Latest; "
+        f". '{ROOT / 'bootstrap/_config.ps1'}'; "
+        "$env:LOCALAPPDATA = ''; "
+        "if ($null -ne (Get-TsConfigPath)) { throw 'expected $null with no LOCALAPPDATA' }; "
+        "(Get-TsConfig).leaderChord"
+    )
+    got = subprocess.run(
+        [shutil.which("pwsh"), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        start_new_session=True,
+    )
+    assert got.returncode == 0, got.stdout + got.stderr
+    assert "ctrl-space" in got.stdout
+
+
+@pytest.mark.skipif(not shutil.which("pwsh"), reason="PowerShell 7 is unavailable")
+def test_the_restored_choice_prompt_is_strict_mode_safe():
+    """The trap `powershell-quirks.md` records against this exact function: an
+    option with no `Note` must not crash the first question of the wizard. It
+    reads `$o['Note']`, which is `$null` for a missing key under any strictness;
+    `$o.Note` throws."""
+    script = (
+        "Set-StrictMode -Version Latest; "
+        f". '{ROOT / 'bootstrap/_config.ps1'}'; "
+        "Read-TsChoice -Title 'Leader key:' -Default 'ctrl-space' "
+        "-Options @(@{Key='ctrl-space';Label='Ctrl+Space'},"
+        "@{Key='ctrl-a';Label='Ctrl+A';Note='tmux muscle memory'})"
+    )
+    got = subprocess.run(
+        [shutil.which("pwsh"), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        start_new_session=True,
+    )
+    assert got.returncode == 0, got.stdout + got.stderr
+    assert got.stdout.strip().splitlines()[-1] == "ctrl-space"

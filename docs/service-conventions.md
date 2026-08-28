@@ -153,11 +153,10 @@ anything not here is drift.
 | Exits non-zero when problems were found | `check-capture.sh` | The house rule for anything usable in a pipeline or a hook. The `.ps1` always exits 0. |
 | Probe sessions tracked and cleaned from an `EXIT` trap | `check-capture.sh` | Fixes a real bug: the `.ps1`'s `$probeSessions` is never initialised and section D's probe is never added to it. |
 | Backup root defaults under `$HOME` XDG state | `reconcile-llm-queue.sh`, `migrate-durable-llm.sh` | There is no Unix `C:\DATA`, and Docker Desktop for Mac only bind-mounts from `$HOME`, `/tmp`, `/private`, `/Volumes`. |
-
 | Refuses the GPU path on macOS instead of falling back to CPU | `setup-kokoro-docker.sh` | Docker Desktop for Mac has no passthrough of any kind. A silent switch is the failure mode `kokoro`'s Blackwell section exists to warn about. |
 | CPU image pinned to `v0.8.0`, not `:latest` | `setup-kokoro-docker.sh` | A new file should not inherit the `.ps1`'s violation of the pin rule. Bring the `.ps1` into line the next time it is touched. |
-| agentmemory image derived, not hardcoded | `migrate-durable-llm.sh` | `.ps1:56` hardcodes `agentmemory-agentmemory:latest`, correct only because the compose project name happens to match the directory name. |
-| Secret resolution has a fallback chain and a 0600 mode check | `check-capture.sh`, `_stack.sh` | `.ps1:79` reads the Windows User env var with *no* fallback, so that check fails on any machine where it is unset. There is no Unix equivalent of `HKCU\Environment`. |
+| agentmemory image derived, not hardcoded | `migrate-durable-llm.sh` | The `.ps1` hardcodes `agentmemory-agentmemory:latest`, correct only because the compose project name happens to match the directory name. |
+| Secret resolution has a fallback chain and a 0600 mode check | `check-capture.sh`, `_stack.sh` | The `.ps1` reads the Windows User env var with *no* fallback, so that check fails on any machine where it is unset. There is no Unix equivalent of `HKCU\Environment`. |
 | Upstream-source version check | `bootstrap.sh` | New capability; `bootstrap.ps1` gains it the next time it is touched. |
 | No `wsl` probe | `bootstrap.sh` | No WSL on Unix; replaced by an OS-conditional engine check that stays quiet on native Linux. |
 | `_stack.sh` and `_json.mjs` have no `.ps1` twin | repo root | PowerShell has these built in — dot-sourcing helpers and `ConvertTo/FromJson`. |

@@ -332,11 +332,21 @@ function Install-TsGitHooks {
     Write-Host '  git hooks: core.hooksPath -> .githooks (pre-commit and pre-push gates active)'
 }
 
-function Get-TsConfigPath { Join-Path $env:LOCALAPPDATA 'terminal-stack\config.json' }
+# $null when there is no Windows side, rather than a throw. pwsh runs on macOS
+# and Linux, where $env:LOCALAPPDATA is unset and Join-Path -Path $null is a
+# terminating error -- so dot-sourcing this file and calling Get-TsConfig died
+# there, including in the strict-mode repro docs/powershell-quirks.md gives for
+# checking exactly this class of bug. Python's twin (tstack/store.py
+# mirror_path) already returns None; the callers below fall through to the
+# defaults. On Windows LOCALAPPDATA is always set, so nothing changes there.
+function Get-TsConfigPath {
+    if (-not $env:LOCALAPPDATA) { return $null }
+    Join-Path $env:LOCALAPPDATA 'terminal-stack\config.json'
+}
 
 function Get-TsConfig {
     $p = Get-TsConfigPath
-    if (Test-Path $p) {
+    if ($p -and (Test-Path $p)) {
         try { return (Get-Content $p -Raw | ConvertFrom-Json) } catch {}
     }
     return [pscustomobject]@{
@@ -500,6 +510,9 @@ function Save-TsConfig {
         atuinEnabled       = $AtuinEnabled
     }
     $p = Get-TsConfigPath
+    # No Windows side means nowhere to mirror to. Return the object anyway --
+    # the caller uses it -- rather than throwing on Split-Path -Path $null.
+    if (-not $p) { return $obj }
     New-Item -ItemType Directory -Force -Path (Split-Path $p) | Out-Null
     ($obj | ConvertTo-Json) | Set-Content -Encoding UTF8 $p
     return $obj
