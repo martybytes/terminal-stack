@@ -14,6 +14,7 @@ commands any more, and no aliases for them.
 | `tstack mux` | the WezTerm multiplexer domain |
 | `tstack wezterm` | WezTerm channel and updates |
 | `tstack ghostty` | the managed Ghostty config; `status`, `diff`, `on`, `off` |
+| `tstack wizard` | the install questionnaire; every question has a `TS_*` skip |
 | `tstack smb` | SMB shares over rclone (POSIX only) - see `doc smb-shares` |
 | `tstack agents` | agent CLI wiring - see `doc agentmemory`, `doc headroom` |
 | `tstack agentmemory` | the agentmemory hook harness; `--check` reports reverted edits |
@@ -24,7 +25,7 @@ commands any more, and no aliases for them.
 A subcommand reported as "not available on <platform>" is deliberate, not a
 broken install: `smb` has no PowerShell implementation.
 
-`doctor`, `services`, `mux`, `wezterm`, `agents`, `ghostty` and `ui` are one Python program
+`doctor`, `services`, `mux`, `wezterm`, `agents`, `ghostty`, `wizard` and `ui` are one Python program
 that runs identically on Windows, WSL, Linux and macOS. `config`, `update`,
 `rollback`, `smb` and `agentmemory` are still shell, and `tstack` routes to
 whichever the registry (`tstack/commands.conf`) says - so the command you type

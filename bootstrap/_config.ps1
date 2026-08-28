@@ -574,198 +574,12 @@ function Set-TsMemoryBackend([ValidateSet('agentmemory','headroom','none')][stri
 # probe in _wizard.sh ts_tty_prompt.
 function Test-TsInteractive { -not [Console]::IsInputRedirected }
 
-# Map one typed answer onto an option Key; $null when it matches nothing.
-# Split out from the prompt loop so the matching rules are testable without a
-# terminal.
-function Resolve-TsChoiceAnswer {
-    param([Parameter(Mandatory)][object[]]$Options, [string]$Answer)
-    $a = "$Answer".Trim()
-    if (-not $a) { return $null }
-    if ($a -match '^\d+$' -and [int]$a -ge 1 -and [int]$a -le $Options.Count) {
-        return $Options[[int]$a - 1].Key
-    }
-    $named = @($Options | Where-Object { $_.Key -ieq $a })
-    if ($named.Count) { return $named[0].Key }
-    return $null
-}
-
-# $Options is an ordered list of @{ Key; Label; Note }. Returns the chosen Key.
-# Twin of bootstrap/_wizard.sh ts_prompt_choice — keep the rendered output
-# identical (parse-time isolation forces the copy).
-function Read-TsChoice {
-    param(
-        [Parameter(Mandatory)][string]$Title,
-        [Parameter(Mandatory)][object[]]$Options,
-        [Parameter(Mandatory)][string]$Default,
-        [string[]]$Intro = @()
-    )
-    Write-Host ''
-    Write-Host $Title
-    foreach ($line in $Intro) { Write-Host $line }
-    for ($i = 0; $i -lt $Options.Count; $i++) {
-        $o = $Options[$i]
-        $note = $o['Note']   # index, not dot: Note is optional and dot access throws under strictness
-        $suffix = if ($note) { "  ($note)" } else { '' }
-        $mark = ' '
-        if ($o.Key -eq $Default) { $mark = '>'; $suffix += '  [default — press Enter]' }
-        Write-Host (" {0}  {1}) {2}{3}" -f $mark, ($i + 1), $o.Label, $suffix)
-    }
-    $range = "1-$($Options.Count)"
-    if (-not (Test-TsInteractive)) {
-        Write-Host "Choose [$range, Enter=default]: (non-interactive — taking the default)"
-        return $Default
-    }
-    for ($try = 0; $try -lt 3; $try++) {
-        $ans = "$(Read-Host "Choose [$range, Enter=default]")".Trim()
-        if (-not $ans) { return $Default }
-        $key = Resolve-TsChoiceAnswer -Options $Options -Answer $ans
-        if ($key) { return $key }
-        Write-Host "  '$ans' is not one of the choices — enter $range, a name, or press Enter for the default."
-    }
-    Write-Host '  three invalid answers — taking the default.'
-    return $Default
-}
-
-# Map one typed answer onto a set of 1-based indices to toggle; $null when it
-# matches nothing. Split out from the prompt loop for the same reason as
-# Resolve-TsChoiceAnswer — the matching rules stay testable without a terminal.
-# Note it splits on whitespace AND commas: "1 3" and "1,3" both toggle two items.
-# Deliberately NOT ts_prompt_choice's strip-all-whitespace, which would fuse them.
-function Resolve-TsMultiAnswer {
-    param([Parameter(Mandatory)][int]$Count, [string]$Answer)
-    $tokens = @("$Answer" -split '[,\s]+' | Where-Object { $_ })
-    if (-not $tokens) { return $null }
-    $out = @()
-    foreach ($t in $tokens) {
-        if ($t -notmatch '^\d+$') { return $null }
-        $i = [int]$t
-        if ($i -lt 1 -or $i -gt $Count) { return $null }
-        $out += $i
-    }
-    return $out
-}
-
-# The tick-list prompt for questions with more than one answer. $Options is an
-# ordered list of @{ Key; Label; Note }; $Preticked is the list of Keys that
-# start ticked. Returns the selected Keys.
-# Twin of bootstrap/_wizard.sh ts_prompt_multi — keep the rendered output
-# identical (parse-time isolation forces the copy).
-function Read-TsMulti {
-    param(
-        [Parameter(Mandatory)][string]$Title,
-        [Parameter(Mandatory)][object[]]$Options,
-        [string[]]$Preticked = @(),
-        [string[]]$Intro = @(),
-        # Mutually exclusive keys: ticking one visibly unticks the others, so the
-        # screen can never show a combination the caller will refuse. POSIX twin
-        # takes this as the TS_MULTI_EXCLUSIVE global (bash has no named params);
-        # the RENDERED OUTPUT is unchanged either way, which is what the
-        # byte-identical rule constrains.
-        [string[]]$Exclusive = @()
-    )
-    $ticks = @($Options | ForEach-Object { [bool]($Preticked -contains $_.Key) })
-    # Keep at most one group member ticked. $keep is the index that just won;
-    # -1 means no winner, in which case the FIRST ticked member survives —
-    # matching Get-TsTerminalsChannel's nightly-wins tie-break.
-    #
-    # NOT $exclusive. PowerShell variable names are case-insensitive, so that
-    # name IS the $Exclusive parameter — and a parameter keeps its type
-    # converter, so assigning a scriptblock to it silently coerces the block to
-    # a one-element [string[]] holding its own source text. `& $exclusive -1`
-    # then tries to run that text as a command name, which killed every
-    # Read-TsMulti call (the whole Windows wizard) until it was renamed. Any
-    # local here must not collide with a parameter, whatever the casing.
-    $applyExclusive = {
-        param($keep)
-        if (-not $Exclusive) { return }
-        # A winner only wins its OWN group. Ticking an option outside the group
-        # used to collapse it anyway — $keep was an index no member could equal,
-        # so every ticked member failed the `$j -ne $keep` test and was cleared.
-        # On macOS that meant ticking Ghostty silently unticked WezTerm.
-        if ($keep -ge 0 -and ($Exclusive -notcontains $Options[$keep].Key)) { return }
-        $first = -1
-        for ($j = 0; $j -lt $Options.Count; $j++) {
-            if ($Exclusive -notcontains $Options[$j].Key) { continue }
-            if (-not $ticks[$j]) { continue }
-            if ($keep -ge 0) {
-                if ($j -ne $keep) { $ticks[$j] = $false }
-            } elseif ($first -lt 0) { $first = $j }
-            else { $ticks[$j] = $false }
-        }
-    }
-    & $applyExclusive -1
-    $render = {
-        Write-Host ''
-        Write-Host $Title
-        foreach ($line in $Intro) { Write-Host $line }
-        for ($i = 0; $i -lt $Options.Count; $i++) {
-            $o = $Options[$i]
-            $note = $o['Note']   # index, not dot: Note is optional and dot access throws under strictness
-            $suffix = if ($note) { "  ($note)" } else { '' }
-            $mark = if ($ticks[$i]) { 'x' } else { ' ' }
-            Write-Host ("  [{0}] {1,2}) {2}{3}" -f $mark, ($i + 1), $o.Label, $suffix)
-        }
-    }
-    $emit = { @(for ($i = 0; $i -lt $Options.Count; $i++) { if ($ticks[$i]) { $Options[$i].Key } }) }
-
-    & $render
-    if (-not (Test-TsInteractive)) {
-        Write-Host 'Toggle a number, [a]ll, [n]one, Enter to continue, [s]kip: (non-interactive — keeping the defaults)'
-        return (& $emit)
-    }
-    while ($true) {
-        $ans = "$(Read-Host 'Toggle a number, [a]ll, [n]one, Enter to continue, [s]kip')".Trim()
-        if (-not $ans) { break }
-        if ($ans -imatch '^(s|skip)$') {
-            for ($i = 0; $i -lt $Options.Count; $i++) { $ticks[$i] = $false }
-            break
-        }
-        if ($ans -imatch '^(a|all)$') {
-            for ($i = 0; $i -lt $Options.Count; $i++) { $ticks[$i] = $true }
-            & $applyExclusive -1
-            & $render; continue
-        }
-        if ($ans -imatch '^(n|no|none)$') {
-            for ($i = 0; $i -lt $Options.Count; $i++) { $ticks[$i] = $false }
-            & $render; continue
-        }
-        $picks = Resolve-TsMultiAnswer -Count $Options.Count -Answer $ans
-        if ($picks) {
-            foreach ($i in $picks) {
-                $ticks[$i - 1] = -not $ticks[$i - 1]
-                if ($ticks[$i - 1]) { & $applyExclusive ($i - 1) }
-            }
-        } else {
-            Write-Host "  ? enter a number 1-$($Options.Count) (several are fine), a, n, s, or Enter"
-        }
-        & $render
-    }
-    return (& $emit)
-}
 
 
-function Read-TsLeader {
-    if ($env:TS_LEADER) { return $env:TS_LEADER }
-    $c = Read-TsChoice -Title 'Leader key (WezTerm) — prefix for pane / tab / workspace commands:' -Default 'ctrl-space' -Options @(
-        @{ Key = 'ctrl-space'; Label = 'Ctrl+Space' },
-        @{ Key = 'ctrl-a';     Label = 'Ctrl+A';     Note = 'tmux muscle memory' },
-        @{ Key = 'ctrl-b';     Label = 'Ctrl+B';     Note = 'tmux default' },
-        @{ Key = 'alt-space';  Label = 'Alt+Space' },
-        @{ Key = 'custom';     Label = 'custom chord' }
-    )
-    if ($c -ne 'custom') { return $c }
-    $chord = Read-Host 'Enter chord (mod-key, e.g. ctrl-x or alt-space)'
-    if ($chord) { $chord.Trim() } else { 'ctrl-space' }
-}
 
-function Read-TsTheme {
-    if ($env:TS_THEME) { return $env:TS_THEME }
-    Read-TsChoice -Title 'Theme:' -Default 'dark' -Options @(
-        @{ Key = 'dark';   Label = 'dark';   Note = 'Catppuccin Mocha' },
-        @{ Key = 'light';  Label = 'light';  Note = 'VS Code Light Modern' },
-        @{ Key = 'follow'; Label = 'follow OS appearance'; Note = 'WezTerm switches live' }
-    )
-}
+
+
+
 
 
 # ── WezTerm channel facts ───────────────────────────────────────────────────────
@@ -1020,258 +834,13 @@ function Get-TsGhosttyExe {
     ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
 }
 
-function Read-TsTerminals {
-    # TS_TERMINALS=wezterm-nightly,ghostty | wezterm-stable | none.
-    # TS_WEZTERM is the older spelling and still maps across, so an unattended
-    # install neither breaks nor silently gets a channel it did not ask for.
-    $value = $env:TS_TERMINALS
-    if (-not $value -and $env:TS_WEZTERM) {
-        switch -Regex ($env:TS_WEZTERM) {
-            '^(skip|none)$' { $value = 'none' }
-            '^stable$'      { $value = 'wezterm-stable' }
-            default         { $value = 'wezterm-nightly' }
-        }
-    }
-    if ($value) {
-        if ($value -ieq 'none') { return @() }
-        # `wezterm` on its own has never named a channel; take the default one.
-        $envSel = @($value -split '[,\s]+' | Where-Object { $_ } |
-                    ForEach-Object { if ($_ -eq 'wezterm') { 'wezterm-nightly' } else { $_ } })
-        # The same one-channel rule the picker enforces. This path returned early
-        # without it, so TS_TERMINALS=wezterm-nightly,wezterm-stable put BOTH
-        # keys in the saved list.
-        if (($envSel -contains 'wezterm-nightly') -and ($envSel -contains 'wezterm-stable')) {
-            Write-Warning 'both WezTerm channels requested — installing nightly (they cannot coexist).'
-            $envSel = @($envSel | Where-Object { $_ -ne 'wezterm-stable' })
-        }
-        return $envSel
-    }
 
-    # NIGHTLY is pre-selected, including on a machine that already has stable.
-    # This used to pre-tick whatever was installed, so a stable box saw nightly
-    # unticked and Enter kept a February 2024 build that this stack's WezTerm
-    # config is not written for. The one exception is `unknown`: a WezTerm
-    # installed outside a package manager is not ours to replace.
-    # POSIX twin: the same case in ts_prompt_terminals.
-    # @( ) around the switch is load-bearing: a switch unrolls a one-element
-    # array to a SCALAR, and `+=` on a scalar string concatenates instead of
-    # appending — which silently produced the single key 'wezterm-nightlyghostty'
-    # and left the whole list unticked.
-    $preticked = @(switch (Get-TsWezChannel) {
-        'unknown' { @() }
-        default   { @('wezterm-nightly') }
-    })
-    # Twin of `command -v ghostty` in ts_prompt_terminals: an installed one
-    # comes up ticked so Enter keeps it, rather than silently dropping it.
-    $ghosttyExe = Get-TsGhosttyExe
-    if ($ghosttyExe) { $preticked += 'ghostty' }
 
-    $intro = @()
-    $inst = Get-TsWezInstalled
-    if ($inst) { $intro += "  Installed: WezTerm $($inst.Version) ($(Get-TsWezChannel), $(Format-TsWezDate $inst.Date))" }
-    $st = Get-TsWezLatestStable
-    $ni = Get-TsWezLatestNightly
-    if ($st -or $ni) {
-        $line = '  Latest:   '
-        if ($ni) { $line += " nightly built $ni" }
-        if ($st -and $ni) { $line += '  |' }
-        if ($st) { $line += " stable $($st.Tag) ($($st.Date))" }
-        $intro += $line
-    }
-    if ($inst) {
-        $tally = Get-TsWezChangesTally $inst.Version
-        if ($tally) { $intro += "  Since your build: $tally" }
-    }
 
-    if ($ghosttyExe) {
-        $gv = (& $ghosttyExe --version 2>$null | Select-Object -First 1)
-        $intro += "  Ghostty:  $gv"
-    }
 
-    # The two WezTerm channels are mutually exclusive, so the tick-list enforces
-    # it live: ticking nightly visibly unticks stable. Before this, the screen
-    # showed [x] [x] and the choice was silently corrected only after Enter.
-    $chosen = @(Read-TsMulti -Title 'Terminal emulator:' -Options $script:TsTerminalCandidates `
-        -Preticked $preticked -Intro $intro -Exclusive @('wezterm-nightly', 'wezterm-stable'))
 
-    # Belt to the tick-list's braces: the live constraint should make this
-    # unreachable, but a non-interactive run keeps whatever was pre-ticked.
-    if (($chosen -contains 'wezterm-nightly') -and ($chosen -contains 'wezterm-stable')) {
-        Write-Warning 'both WezTerm channels ticked — installing nightly (they cannot coexist).'
-        $chosen = @($chosen | Where-Object { $_ -ne 'wezterm-stable' })
-    }
-    return $chosen
-}
 
-# The multiplexer domain (tstack mux). Default off: it changes how every pane is
-# hosted and how a config reload behaves, which is a decision to make once at
-# install rather than inherit.
-# Twin of bootstrap/_wizard.sh ts_prompt_wezterm_mux — keep the rendering identical.
-function Read-TsWeztermMux {
-    if ($env:TS_WEZ_MUX) { if ($env:TS_WEZ_MUX -eq 'on') { return 'on' } else { return 'off' } }
-    Read-TsChoice -Title 'WezTerm multiplexer (keeps panes alive when the GUI dies):' -Default 'off' -Intro @(
-        '  On: your shells run in wezterm-mux-server, so a GUI crash leaves every',
-        '  pane alive and relaunching WezTerm reattaches. Cost: config changes then',
-        '  need "tstack mux restart" (kills every pane) and mux panes lose the Claude tint.'
-    ) -Options @(
-        @{ Key = 'off'; Label = 'off'; Note = 'panes are spawned by the GUI' },
-        @{ Key = 'on';  Label = 'on';  Note = 'panes survive a GUI crash' }
-    )
-}
 
-# Reopen the last session at WezTerm start (resurrect's gui-startup restore).
-# Default off: a terminal that silently reopens yesterday's shells is a surprise,
-# and the autosave runs either way so Leader+L can restore on demand.
-# Twin of bootstrap/_wizard.sh ts_prompt_wezterm_restore — keep the rendering identical.
-function Read-TsWeztermRestore {
-    if ($env:TS_WEZ_RESTORE) { if ($env:TS_WEZ_RESTORE -eq 'on') { return 'on' } else { return 'off' } }
-    Read-TsChoice -Title 'WezTerm session restore (reopen the last session at startup):' -Default 'off' -Intro @(
-        '  On: WezTerm reopens the tabs, panes and scrollback you had when you last',
-        '  closed it. Off: it starts clean, and Leader+L still restores a session on',
-        '  demand from the same autosaved state.'
-    ) -Options @(
-        @{ Key = 'off'; Label = 'off'; Note = 'start clean every time' },
-        @{ Key = 'on';  Label = 'on';  Note = 'reopen the last session' }
-    )
-}
-
-function Read-TsAgentToggle([string]$EnvName, [string]$Title, [string[]]$Intro) {
-    $override = [Environment]::GetEnvironmentVariable($EnvName, 'Process')
-    if ($override) { return $(if ($override -eq 'on') { 'on' } else { 'off' }) }
-    Read-TsChoice -Title $Title -Default 'off' -Intro $Intro -Options @(
-        @{ Key = 'off'; Label = 'off'; Note = 'configure later with tstack config agents' },
-        @{ Key = 'on'; Label = 'on'; Note = 'user-global on this computer' }
-    )
-}
-
-# ONE question, replacing the two independent 'Headroom?' / 'AgentMemory?'
-# toggles. They ask about two things that do the same job, so every combination
-# was reachable -- including the one nobody wants: two memory systems, each
-# holding half the story. POSIX twin: ts_prompt_memory_backend in _wizard.sh;
-# keep the option labels aligned, they are what the reader compares.
-function Read-TsMemoryBackend {
-    $override = [Environment]::GetEnvironmentVariable('TS_MEMORY_BACKEND', 'Process')
-    if ($override -in 'agentmemory','headroom','none') { return $override }
-    # A pre-merge unattended install only knew the two booleans. Honour them
-    # rather than ignoring them, so an old script cannot land on a combination
-    # this menu will not offer.
-    $am = [Environment]::GetEnvironmentVariable('TS_AGENTMEMORY', 'Process')
-    $hr = [Environment]::GetEnvironmentVariable('TS_HEADROOM', 'Process')
-    if ($am -or $hr) { return $(if ($am -eq 'on') { 'agentmemory' } else { 'none' }) }
-
-    Read-TsChoice -Title 'Memory and compression:' -Default 'agentmemory' -Intro @(
-        '  RECOMMENDATION: AgentMemory remembers, Headroom compresses.',
-        '  Only ONE memory system runs. They overlap, and two stores means two',
-        '  half-filled ones with no way to tell which holds the answer you want.',
-        '',
-        '  Compression is not a memory feature and is unaffected by this: Headroom',
-        '  compresses by trimming tool schemas and code, and calls no model of its own.',
-        "  Headroom's memory additionally runs Qdrant and Neo4j (about 940 MB); the",
-        '  other answers never pull those images.'
-    ) -Options @(
-        @{ Key = 'agentmemory'; Label = 'AgentMemory remembers, Headroom compresses'; Note = 'the default' },
-        @{ Key = 'headroom'; Label = 'Headroom does both'; Note = 'AgentMemory is not installed' },
-        @{ Key = 'none'; Label = 'Headroom compresses only'; Note = 'no memory at all' },
-        @{ Key = 'off'; Label = 'Neither'; Note = 'no proxy, no memory' }
-    )
-}
-
-function Read-TsHeadroomCursorMode {
-    if ($env:TS_HEADROOM_CURSOR -in 'mcp','byok','off') { return $env:TS_HEADROOM_CURSOR }
-    Read-TsChoice -Title 'Cursor Headroom mode:' -Default 'mcp' -Intro @(
-        '  MCP keeps Cursor subscription model traffic direct. BYOK routes model traffic',
-        '  through Headroom but requires a provider API key and separate provider billing.'
-    ) -Options @(
-        @{ Key = 'mcp'; Label = 'MCP only'; Note = 'recommended for Cursor subscriptions' },
-        @{ Key = 'byok'; Label = 'BYOK proxy'; Note = 'provider API key required' },
-        @{ Key = 'off'; Label = 'off' }
-    )
-}
-function Read-TsApps {
-    $class = if ($script:TsWizAppClass) { $script:TsWizAppClass } else { 'developer' }
-    $recommended = Get-TsAppsForClass $class
-    if ($env:TS_APPS) {
-        switch ($env:TS_APPS) {
-            'recommended' { return $recommended }
-            'all'         { return $script:TsAppsAll }
-            'none'        { return @() }
-            default       { return ($env:TS_APPS -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
-        }
-    }
-    $choice = Read-TsChoice -Title 'Optional CLI tools (font, Starship, chezmoi — always installed):' -Default 'recommended' -Intro @(
-        '  winget may prompt for administrator elevation.',
-        ('  recommended: ' + ($recommended -join ', ')),
-        '  also available: everything else in the catalog'
-    ) -Options @(
-        @{ Key = 'recommended'; Label = 'install the recommended set'; Note = "the $class set for this machine" },
-        @{ Key = 'all';         Label = 'install everything'; Note = 'recommended + ' + ($script:TsAppsOptional -join ', ') },
-        @{ Key = 'groups';      Label = 'choose whole groups'; Note = ($script:TsAppGroups.Keys -join ', ') },
-        @{ Key = 'customize';   Label = 'choose individual tools' },
-        @{ Key = 'none';        Label = 'skip all optional apps' }
-    )
-    switch ($choice) {
-        'all'  { return $script:TsAppsAll }
-        'none' { return @() }
-        'groups'    { return (Read-TsAppGroups) }
-        'customize' { return (Read-TsAppsCustom) }
-        default { return $recommended }
-    }
-}
-
-# Tier 2: tick whole groups; every member of a ticked group is selected. Ids this
-# platform cannot install are filtered out at the end rather than hidden from the
-# menu, so the two platforms' group listings stay the same shape.
-# Twin of bootstrap/_wizard.sh ts_pick_app_groups.
-function Read-TsAppGroups {
-    $opts = @()
-    $preticked = @()
-    foreach ($g in $script:TsAppGroups.Keys) {
-        $opts += @{ Key = $g; Label = $script:TsAppGroups[$g].Desc; Note = ($script:TsAppGroups[$g].Members -join ' ') }
-        # Every group starts ticked, the agent CLIs included — they are still a
-        # question, and every tool inside is still individually untickable.
-        $preticked += $g
-    }
-    $chosen = Read-TsMulti -Title '  Tool groups:' -Options $opts -Preticked $preticked
-    $sel = @()
-    foreach ($g in $chosen) { $sel += $script:TsAppGroups[$g].Members }
-    return @($sel | Where-Object { $script:TsAppsAll -contains $_ })
-}
-
-# Customize: a single comma-separated line, or Enter to walk the list one by
-# one. Fourteen consecutive Y/n prompts is a lot to sit through when you already
-# know you want three of them.
-function Read-TsAppsCustom {
-    Write-Host ''
-    Write-Host ('  Available: ' + ($script:TsAppsAll -join ', '))
-    $csv = Read-Host '  Type a comma-separated list, or Enter to pick from a list'
-    if ($csv) {
-        $want = @($csv -split ',' | ForEach-Object { $_.Trim().ToLower() } | Where-Object { $_ })
-        $sel = @($script:TsAppsAll | Where-Object { $want -contains $_.ToLower() })
-        $unknown = @($want | Where-Object { $script:TsAppsAll -notcontains $_ })
-        if ($unknown.Count) { Write-Warning ('not in the catalog, ignored: ' + ($unknown -join ', ')) }
-        Write-Host ('  Selected: ' + $(if ($sel.Count) { $sel -join ', ' } else { '<none>' }))
-        return $sel
-    }
-    # Thirty consecutive Y/n prompts is a lot to sit through, so the walk is a
-    # tick-list per group rather than one question per tool. Pre-ticked = the
-    # recommended set FOR THIS MACHINE'S CLASS, so Enter through the lot lands
-    # somewhere sensible whether it is a laptop or a server; every tool stays
-    # individually tickable either way.
-    # Twin of bootstrap/_wizard.sh ts_pick_apps_by_item.
-    $pretick = Get-TsAppsForClass $(if ($script:TsWizAppClass) { $script:TsWizAppClass } else { 'developer' })
-    $sel = @()
-    foreach ($g in $script:TsAppGroups.Keys) {
-        $opts = @()
-        foreach ($id in $script:TsAppGroups[$g].Members) {
-            if ($script:TsAppsAll -notcontains $id) { continue }
-            $opts += @{ Key = $id; Label = $id; Note = (Get-TsAppDesc $id) }
-        }
-        if (-not $opts.Count) { continue }
-        $sel += Read-TsMulti -Title ('  ' + $script:TsAppGroups[$g].Desc + ':') -Options $opts `
-            -Preticked $pretick
-    }
-    return @($sel)
-}
 
 # Install the selected toggleable apps via winget (catalog id -> winget id).
 # Workspace root for the ws/wsp/wspu profile functions. Same contract as the
@@ -1284,6 +853,33 @@ function Get-TsDetectedWorkspace {
     )) { if (Test-Path $d) { return $d } }
     return $null
 }
+
+# The interpreter the questionnaire and the rest of tstack run on. Same probe as
+# bootstrap/tts-daemon/build.ps1's Find-Python, and the same floor: 3.10.
+# Returns $null rather than throwing -- the caller says what it needed it for.
+function Get-TsPython {
+    foreach ($candidate in @('python', 'python3', 'py')) {
+        $command = Get-Command $candidate -CommandType Application -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+        if (-not $command) { continue }
+        try {
+            $version = & $command.Source -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>$null
+            if ($version -and ([version]$version.Trim() -ge [version]'3.10')) { return $command.Source }
+        } catch {}
+    }
+    return $null
+}
+
+# ── The install questionnaire ───────────────────────────────────────────────────
+# Every Read-Ts* prompt that used to live here is gone. The questionnaire is one
+# Python implementation, tstack/wizard/, shared with the bash bootstraps -- two
+# implementations of fourteen questions had to be kept in agreement by hand, and
+# had not been: this side rejected a whole multi-answer where bash applied the
+# valid tokens and warned about the rest.
+#
+# windows-bootstrap.ps1 runs `tstack wizard --emit json` and reads the object.
+# The JSON keys are the PascalCase names the old hashtable used, so every $w.X
+# downstream is unchanged.
 
 function Read-TsWorkspaceDir {
     if ($env:WORKSPACE_DIR) {
@@ -1401,130 +997,9 @@ function Show-TsStarshipPreview([string]$Name) {
     }
 }
 
-# Offered whenever someone is choosing a prompt at all. Rendering each option is
-# the entire value: a preset name tells you nothing, and this is a decision about
-# what you look at every day.
-function Read-TsStarshipPreset {
-    if ($env:TS_STARSHIP_PRESET) { return $env:TS_STARSHIP_PRESET }
-    $cur = Get-TsStarshipPreset
-    $presets = Get-TsStarshipPresets
-    # starship is installed by the bootstrap AFTER the wizard runs on a fresh
-    # machine, so an empty list is the normal first-install path, not an error.
-    if (-not $presets.Count) { return $cur }
-    Write-Host ''
-    Write-Host '  Every prompt, rendered here so you can see them:'
-    Write-Host ''
-    Write-Host '    terminal-stack'
-    Show-TsStarshipPreview 'terminal-stack'
-    foreach ($p in $presets) {
-        Write-Host "    $p"
-        Show-TsStarshipPreview $p
-    }
-    $opts = @(@{ Key = 'terminal-stack'; Label = 'terminal-stack'
-                 Note = "this stack's own two-line prompt, themed by tstack config theme" })
-    foreach ($p in $presets) { $opts += @{ Key = $p; Label = $p } }
-    return (Read-TsChoice -Title 'Which prompt?' -Default $cur -Options $opts)
-}
 
-function Read-TsProfile {
-    if ($env:TS_PROFILE) {
-        switch ($env:TS_PROFILE) {
-            'prompt' { return 'prompt' }
-            'shell'  { return 'shell' }
-            default  { return 'full' }
-        }
-    }
-    Write-Host ''
-    Write-Host '  This is what you would get:'
-    Write-Host ''
-    Show-TsStarshipPreview 'terminal-stack'
-    Read-TsChoice -Title 'How much of this do you want?' -Default 'full' -Intro @(
-        '  RECOMMENDATION: full on your own machine - the pieces are individually',
-        '  switchable afterwards with `tstack config`, and nothing here is hard to undo.',
-        '  Take prompt on a box that is not yours, or when you came for the prompt.'
-    ) -Options @(
-        @{ Key = 'prompt'; Label = 'just the prompt'; Note = 'Starship + a Nerd Font. Your shell config, aliases and terminal are left alone' },
-        @{ Key = 'shell';  Label = 'prompt and terminal'; Note = 'adds the managed PowerShell/WezTerm configs and the CLI tools' },
-        @{ Key = 'full';   Label = 'the whole stack'; Note = 'adds the agent wiring, the Docker services, voice notifications and memory' }
-    )
-}
 
-# The second question, and the one that decides which half of the app catalog is
-# offered. Twin of ts_prompt_development in bootstrap/_wizard.sh.
-function Read-TsDevelopment {
-    if ($env:TS_DEVELOPMENT) {
-        if ($env:TS_DEVELOPMENT -in @('yes','on','true')) { return 'yes' }
-        return 'no'
-    }
-    Read-TsChoice -Title 'Will you write code on this machine?' -Default 'yes' -Intro @(
-        '  Only decides which tools are pre-ticked and whether the agent and memory',
-        '  questions are asked at all. Everything stays individually selectable.'
-    ) -Options @(
-        @{ Key = 'yes'; Label = 'yes, this is a development machine'; Note = 'git tooling, language runtimes, Python tools, the AI agent CLIs' },
-        @{ Key = 'no';  Label = 'no, I administer it'; Note = 'monitors, disk and network tools, editors, search - no runtimes, no agents' }
-    )
-}
 
-function Read-TsWizard {
-    # Named $scope, not the obvious thing: PowerShell already has an automatic
-    # variable for the profile PATH, and shadowing it inside a function is the
-    # kind of thing that parses cleanly and then surprises the next reader.
-    $scope = Read-TsProfile
-    # Meaningless for `prompt`, which installs no tools.
-    $dev = if ($scope -eq 'prompt') { 'no' } else { Read-TsDevelopment }
-    $script:TsWizAppClass = if ($dev -eq 'yes') { 'developer' } else { 'sysadmin' }
-
-    if ($scope -eq 'prompt') {
-        # What it says: Starship and a Nerd Font, nothing else touched. Every
-        # remaining answer is pinned rather than asked, and the review shows them
-        # so it is visible rather than implied.
-        return [ordered]@{
-            Profile = 'prompt'; Development = 'no'; AppClass = 'sysadmin'
-            StarshipPreset = (Read-TsStarshipPreset)
-            Leader = 'ctrl-space'; Theme = (Read-TsTheme); Terminals = @()
-            WezMux = 'off'; WezRestore = 'off'; Apps = @()
-            CcTts = 'off'; CcTtsDaemon = 'off'
-            MemoryBackend = 'none'; Agentmemory = 'off'; Headroom = 'off'
-            HeadroomCursor = 'mcp'; Caveman = 'off'
-            Workspace = (Read-TsWorkspaceDir)
-        }
-    }
-
-    $w = [ordered]@{
-        Profile   = $scope
-        Development = $dev
-        AppClass  = $script:TsWizAppClass
-        StarshipPreset = (Get-TsStarshipPreset)
-        Leader    = (Read-TsLeader)
-        Theme     = (Read-TsTheme)
-        Terminals = (Read-TsTerminals)
-        WezMux    = (Read-TsWeztermMux)
-        WezRestore = (Read-TsWeztermRestore)
-        Apps      = @(Read-TsApps)
-        # Voice notifications announce what an AGENT is doing; without the agent
-        # wiring there is nothing to announce, so the question is not asked.
-        CcTts     = $(if ($scope -eq 'full') { Read-TsCcTts } else { 'off' })
-        MemoryBackend = $(if ($scope -eq 'full' -and $dev -eq 'yes') { Read-TsMemoryBackend } else { 'none' })
-        Caveman   = $(if ($scope -eq 'full' -and $dev -eq 'yes') {
-            Read-TsAgentToggle TS_CAVEMAN 'Caveman terse output for all projects?' @(
-                '  Installs the pinned user-scope plugin/skill; no project files are changed.'
-            )
-        } else { 'off' })
-        Workspace = (Read-TsWorkspaceDir)
-    }
-    # Derived, never asked separately: that is what makes two memory systems
-    # unrepresentable rather than merely discouraged.
-    switch ($w.MemoryBackend) {
-        'agentmemory' { $w.Agentmemory = 'on';  $w.Headroom = 'on' }
-        'headroom'    { $w.Agentmemory = 'off'; $w.Headroom = 'on' }
-        'none'        { $w.Agentmemory = 'off'; $w.Headroom = 'on' }
-        default       { $w.Agentmemory = 'off'; $w.Headroom = 'off'; $w.MemoryBackend = 'none' }
-    }
-    # Tray daemon follow-up only makes sense when TTS itself was enabled.
-    $w.CcTtsDaemon = if ($w.CcTts -eq 'on') { Read-TsCcTtsDaemon } else { 'off' }
-    $w.HeadroomCursor = if ($w.Headroom -eq 'on') { Read-TsHeadroomCursorMode } else { 'mcp' }
-    return $w
-}
 
 function Install-TsTerminals {
     param([string[]]$Selected)
@@ -1915,21 +1390,6 @@ function Show-CcTtsConfig {
     if (Get-Command edge-tts -ErrorAction SilentlyContinue) { Write-Host 'edge-tts: installed' }
 }
 
-function Read-TsCcTts {
-    if ($env:TS_CC_TTS) { return $env:TS_CC_TTS }
-    # Reachable Kokoro means enabling it actually does something now, so that
-    # becomes the default; otherwise enabling is opt-in.
-    $reachable = Test-CcTtsKokoroProbe
-    $probe = if ($reachable) { '  Kokoro probe: OK' } else { '  Kokoro probe: not reachable' }
-    Read-TsChoice -Title 'Claude Code voice notifications (local Kokoro TTS, am_adam)?' `
-        -Default $(if ($reachable) { 'on' } else { 'off' }) -Intro @(
-            '  Requires Kokoro on http://127.0.0.1:8880 (Docker). Does not install containers.',
-            $probe
-        ) -Options @(
-            @{ Key = 'on';  Label = 'Enable'; Note = 'am_adam, waiting+error' },
-            @{ Key = 'off'; Label = 'Skip' }
-        )
-}
 
 function Set-CcTtsWizardChoice {
     param([string]$Choice)
@@ -1938,17 +1398,6 @@ function Set-CcTtsWizardChoice {
     return $tts
 }
 
-function Read-TsCcTtsDaemon {
-    if ($env:TS_CC_TTS_DAEMON) { return $(if ($env:TS_CC_TTS_DAEMON -eq 'on') { 'on' } else { 'off' }) }
-    Read-TsChoice -Title 'Route voice notifications through the tray daemon?' `
-        -Default 'off' -Intro @(
-            '  Queues/coalesces announcements, per-session voices, ducks music while speaking.',
-            '  Builds one console-free EXE under %LOCALAPPDATA%\terminal-stack. Python is build-time only.'
-        ) -Options @(
-            @{ Key = 'off'; Label = 'Direct EXE playback' },
-            @{ Key = 'on';  Label = 'Tray daemon'; Note = 'installs now, autostarts at login' }
-        )
-}
 
 function Invoke-TsCcTtsDaemonInstaller {
     param([string[]]$Arguments = @())

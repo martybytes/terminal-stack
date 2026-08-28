@@ -856,72 +856,50 @@ def test_terminal_emulator_stays_optional_on_every_platform():
     assert "if ts_is_headless || _ts_is_wsl; then return 0; fi" in deb
 
 
-def test_multi_select_prompts_render_identically():
-    """ts_prompt_multi and Read-TsMulti are a byte-identical pair, like ts_prompt_choice."""
-    sh = (ROOT / "bootstrap/_wizard.sh").read_text(encoding="utf-8")
-    ps = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
-    assert "ts_prompt_multi() {" in sh and "function Read-TsMulti" in ps
-    # Row format: bash %2d == pwsh {1,2}
-    assert r"'  [%s] %2d) %s%s\n'" in sh
-    assert '"  [{0}] {1,2}) {2}{3}"' in ps
-    for line in (
-        "Toggle a number, [a]ll, [n]one, Enter to continue, [s]kip",
-        "(non-interactive — keeping the defaults)",
-        "(several are fine), a, n, s, or Enter",
-    ):
-        assert line in sh, line
-        assert line in ps, line
-    # The whitespace-stripping trap: "1 2" must stay two tokens.
-    multi = sh[sh.index("ts_prompt_multi() {") :]
-    assert "tr -d '[:space:]'" not in multi[: multi.index("\n}\n")]
-    assert "-split '[,\\s]+'" in ps
-
-
 def test_wezterm_env_vars_map_onto_channels():
-    sh = (ROOT / "bootstrap/_wizard.sh").read_text(encoding="utf-8")
-    ps = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
-    for body in (sh, ps):
-        assert "TS_TERMINALS" in body
-        assert "TS_WEZTERM" in body, "the older spelling must keep working"
-        assert "wezterm-nightly" in body and "wezterm-stable" in body
+    """One implementation to check now, not two files agreeing."""
+    flow = (ROOT / "tstack/wizard/flow.py").read_text(encoding="utf-8")
+    assert "TS_TERMINALS" in flow
+    assert "TS_WEZTERM" in flow, "the older spelling must keep working"
+    assert "wezterm-nightly" in flow and "wezterm-stable" in flow
     # nightly is a real answer again, not a warning.
-    assert "nightly is retired" not in sh and "nightly is retired" not in ps
+    assert "nightly is retired" not in flow
 
 
-@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_wezterm_env_var_channel_mapping_is_exact():
-    """TS_TERMINALS / TS_WEZTERM must resolve to the channel the user named."""
-    cases = {
-        "TS_TERMINALS=none": ("", ""),
-        "TS_TERMINALS=wezterm-stable": ("wezterm-stable", "stable"),
-        "TS_TERMINALS=wezterm-nightly,ghostty": ("wezterm-nightly ghostty", "nightly"),
-        # a bare `wezterm` has never named a channel: take the default one
-        "TS_TERMINALS=wezterm": ("wezterm-nightly", "nightly"),
-        "TS_WEZTERM=nightly": ("wezterm-nightly", "nightly"),
-        "TS_WEZTERM=stable": ("wezterm-stable", "stable"),
-        "TS_WEZTERM=skip": ("", ""),
-    }
-    for env, (want_sel, want_chan) in cases.items():
-        k, v = env.split("=", 1)
-        r = subprocess.run(
-            [
-                BASH,
-                "-c",
-                ". bootstrap/_config.sh >/dev/null 2>&1; . bootstrap/_wizard.sh; "
-                'sel="$(ts_prompt_terminals)"; printf "%s|%s" "$sel" "$(ts_terminals_channel "$sel")"',
-            ],
-            cwd=ROOT,
-            env={**os.environ, k: v},
-            text=True,
-            capture_output=True,
-            check=False,
-            timeout=300,
-            start_new_session=True,
-        )
-        assert r.returncode == 0, r.stderr
-        sel, chan = r.stdout.split("|")
-        assert sel.strip() == want_sel, f"{env}: got selection {sel!r}"
-        assert chan.strip() == want_chan, f"{env}: got channel {chan!r}"
+    """`TS_WEZTERM` predates the tick-list and still has to map onto it, or a
+    scripted install that used it starts installing something else.
+
+    The mapping lives in tstack/wizard/flow.py now -- one implementation, so
+    what is worth asserting is the behaviour rather than two files agreeing.
+    """
+    import os
+
+    from tstack.wizard import flow
+    from tstack.wizard.console import Console
+
+    def terminals(**env):
+        saved = {k: os.environ.get(k) for k in ("TS_TERMINALS", "TS_WEZTERM")}
+        try:
+            for key in saved:
+                os.environ.pop(key, None)
+            os.environ.update(env)
+            return flow._terminals(flow.Asker(Console()))
+        finally:
+            for key, value in saved.items():
+                os.environ.pop(key, None)
+                if value is not None:
+                    os.environ[key] = value
+
+    assert terminals(TS_WEZTERM="stable") == ["wezterm-stable"]
+    assert terminals(TS_WEZTERM="nightly") == ["wezterm-nightly"]
+    assert terminals(TS_WEZTERM="skip") == []
+    assert terminals(TS_WEZTERM="none") == []
+    # The bare token is the old spelling and must still mean the channel this
+    # stack configures.
+    assert terminals(TS_TERMINALS="wezterm") == ["wezterm-nightly"]
+    assert terminals(TS_TERMINALS="none") == []
+    assert terminals(TS_TERMINALS="wezterm-stable,ghostty") == ["wezterm-stable", "ghostty"]
 
 
 def test_wezterm_version_string_parses_to_a_date():
@@ -1151,20 +1129,13 @@ def test_new_tools_are_in_the_catalog_with_descriptions():
 
 @pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_agent_clis_are_asked_about_and_default_to_all():
-    """Default-to-all, but still a question: every group starts ticked and every
-    tool inside stays individually untickable."""
+    """Default-to-all, but still a question: every agent CLI is pre-ticked and
+    every one stays individually untickable."""
     ai = _sh_eval("ts_app_group_members ai").split()
     assert set(ai) == {"claude", "codex", "cursor-agent", "grok", "gemini", "pi"}
     recommended = _sh_eval('echo "$TS_APPS_RECOMMENDED"').split()
     for tool in ai:
         assert tool in recommended, f"{tool} should be pre-ticked (default to all)"
-    # The group picker pre-ticks every group, ai included.
-    wiz = (ROOT / "bootstrap/_wizard.sh").read_text(encoding="utf-8")
-    assert 'case "$g" in ai) ;;' not in wiz, "the ai group must not be singled out any more"
-    ps = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
-    assert "if ($g -ne 'ai')" not in ps
-    # …but it is still a prompt, not a forced install.
-    assert "ts_prompt_multi" in wiz
 
 
 @pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
@@ -1275,30 +1246,6 @@ def test_ts_config_wizard_replays_the_whole_questionnaire():
         encoding="utf-8"
     )
     assert "$runWizard = {" in ps and "'wizard'" in ps
-
-
-def test_shared_pwsh_prompts_live_where_both_callers_can_reach_them():
-    """$PROFILE dot-sources _config.ps1 only; a prompt in windows-bootstrap.ps1
-    is invisible to `tstack config wizard`."""
-    cfg = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
-    boot = (ROOT / "bootstrap/windows-bootstrap.ps1").read_text(encoding="utf-8")
-    for fn in ("function Read-TsWizard", "function Install-TsTerminals"):
-        assert fn in cfg, f"{fn} must live in _config.ps1"
-        assert fn not in boot, f"{fn} is duplicated in windows-bootstrap.ps1"
-
-
-def test_wizard_callees_are_all_defined_in_config_ps1():
-    """Naming the two moved functions is not enough: `Read-TsWizard` calling a
-    prompt that stayed in windows-bootstrap.ps1 is a runtime crash for
-    `tstack config wizard` only (this is how Read-TsWorkspaceDir broke it). Derive
-    the callee list from the body instead of maintaining it by hand."""
-    cfg = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
-    body = cfg[cfg.index("function Read-TsWizard") :]
-    body = body[: body.index("\nfunction ", 1)]
-    called = set(re.findall(r"\b((?:Read|Get|Test|Show|Save|Install)-Ts[A-Za-z]+)", body))
-    called.discard("Read-TsWizard")
-    missing = sorted(n for n in called if not re.search(r"^function " + n + r"\b", cfg, re.M))
-    assert not missing, f"Read-TsWizard calls {missing}, which tstack config wizard cannot see"
 
 
 def test_pwsh_wizard_persists_the_workspace_answer():
@@ -1848,18 +1795,6 @@ def test_ghostty_is_offered_on_windows_but_never_installed():
     assert "no Windows build available" not in ps, "that claim is obsolete"
 
 
-def test_pwsh_preticked_list_survives_appending():
-    """A PowerShell `switch` unrolls a one-element array to a SCALAR, so `+=` on
-    the result concatenates strings instead of appending: the preticked list
-    silently became the single key 'wezterm-nightlyghostty' and the whole question
-    rendered unticked. The @( ) around the switch is what prevents it."""
-    ps = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
-    block = ps.split("$preticked = ")[1][:400]
-    assert block.startswith("@(switch"), (
-        "wrap the switch in @( ) or += will concatenate instead of append"
-    )
-
-
 def test_windows_ghostty_pins_the_same_shell_as_wezterm():
     """noctty's shell picker will hand you "Windows PowerShell" — PowerShell 5.1,
     which this stack does not configure at all (its profile is pwsh-7-only) and
@@ -2238,103 +2173,6 @@ def test_wizard_answers_persist_before_any_optional_install():
         )
 
 
-def test_terminal_tick_list_enforces_one_wezterm_channel_live():
-    """Both casks own /Applications/WezTerm.app, so both ticked is impossible.
-    The constraint used to run only after Enter, so the screen showed [x] [x]."""
-    wiz = (ROOT / "bootstrap/_wizard.sh").read_text(encoding="utf-8")
-    ps = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
-    assert "TS_MULTI_EXCLUSIVE" in wiz
-    assert 'TS_MULTI_EXCLUSIVE="wezterm-nightly wezterm-stable"' in wiz
-    assert "$Exclusive" in ps and "-Exclusive @('wezterm-nightly', 'wezterm-stable')" in ps
-    # The env path returned early without the constraint on both sides.
-    assert "ts_terminals_one_channel" in wiz
-    assert wiz.count("ts_terminals_one_channel") >= 3  # def + env path + picker
-
-
-# The exclusive collapse is driven by the index of whatever was just ticked. That
-# index is only a "winner" when it is IN the group: ticking an option outside it
-# gave every ticked member a $keep no member could equal, so the whole group was
-# cleared. On macOS the terminal question is the only exclusive one and Ghostty is
-# the only non-member, so ticking Ghostty returned Ghostty ALONE — WezTerm dropped
-# out of the selection with nothing on screen to say so. Both twins had it; the
-# pwsh side was unreachable behind the Read-TsMulti crash.
-_EXCL_CASES = [
-    # answers typed,  expected selection
-    (["3", ""], ["wezterm-nightly", "ghostty"]),  # non-member must not collapse
-    (["2", ""], ["wezterm-stable"]),  # member still evicts its rival
-    (["3", "2", ""], ["wezterm-stable", "ghostty"]),
-    (["2", "3", ""], ["wezterm-stable", "ghostty"]),
-    (["a", ""], ["wezterm-nightly", "ghostty"]),  # all: group collapses to the tie-break
-    (["1", ""], []),
-]
-
-# ts_prompt_multi reads its answer inside a nested $( ), so a shell-variable
-# cursor would reset on every call. Keep it on disk.
-_EXCL_BASH = """
-. bootstrap/_config.sh >/dev/null 2>&1
-. bootstrap/_wizard.sh
-ts_is_interactive() { return 0; }
-Q=$(mktemp); N=$(mktemp); echo 0 > "$N"
-printf '%s\n' ANSWERS > "$Q"
-ts_tty_prompt() { local i; i=$(cat "$N"); sed -n "$((i+1))p" "$Q"; echo $((i+1)) > "$N"; }
-TS_MULTI_EXCLUSIVE="wezterm-nightly wezterm-stable" ts_prompt_multi \
-    "wezterm-nightly" "T:" "" \
-    "wezterm-nightly|nightly|" "wezterm-stable|stable|" "ghostty|ghostty|"
-rm -f "$Q" "$N"
-"""
-
-_EXCL_PWSH = (
-    ". ./bootstrap/_config.ps1; "
-    "function Test-TsInteractive { $true }; "
-    "$script:q = [System.Collections.Queue]::new(@(ANSWERS)); "
-    "function Read-Host { param([string]$Prompt) "
-    "if ($script:q.Count) { $script:q.Dequeue() } else { '' } }; "
-    "$r = Read-TsMulti -Title 'T:' -Options @("
-    "@{Key='wezterm-nightly';Label='nightly'},"
-    "@{Key='wezterm-stable';Label='stable'},"
-    "@{Key='ghostty';Label='ghostty'}) "
-    "-Preticked @('wezterm-nightly') "
-    "-Exclusive @('wezterm-nightly','wezterm-stable') 6>$null; "
-    "Write-Output ('RESULT=' + ($r -join ' '))"
-)
-
-
-@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
-def test_exclusive_group_survives_a_non_member_tick_bash():
-    for answers, want in _EXCL_CASES:
-        script = _EXCL_BASH.replace("ANSWERS", " ".join(f'"{a}"' for a in answers))
-        r = subprocess.run(
-            [BASH, "-c", script],
-            cwd=ROOT,
-            text=True,
-            capture_output=True,
-            check=False,
-            stdin=subprocess.DEVNULL,
-            timeout=60,
-            start_new_session=True,
-        )
-        assert r.stdout.split() == want, f"{answers}: got {r.stdout.split()!r}"
-
-
-@pytest.mark.skipif(not shutil.which("pwsh"), reason="PowerShell 7 is unavailable")
-def test_exclusive_group_survives_a_non_member_tick_pwsh():
-    """The pwsh twin must reach the same six answers as the bash one."""
-    for answers, want in _EXCL_CASES:
-        command = _EXCL_PWSH.replace("ANSWERS", ",".join(f"'{a}'" for a in answers))
-        r = subprocess.run(
-            [shutil.which("pwsh"), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command],
-            cwd=ROOT,
-            text=True,
-            capture_output=True,
-            check=False,
-            timeout=300,
-            start_new_session=True,
-        )
-        line = next((l for l in r.stdout.splitlines() if l.startswith("RESULT=")), None)
-        assert line is not None, r.stdout + r.stderr
-        assert line[len("RESULT=") :].split() == want, f"{answers}: got {line!r}"
-
-
 @pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_installed_apps_report_survives_a_tool_that_rejects_version():
     """The report assigned a four-stage pipeline directly, so under
@@ -2381,52 +2219,6 @@ def test_ts_config_wizard_asks_about_terminals_and_saves_first():
         "run_wizard installs before saving the answers"
     )
     assert "ts_note_failure" in rw, "installs here must not be fatal either"
-
-
-@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
-def test_wizard_prompts_run_without_undefined_functions():
-    """A RUNTIME smoke test, because the static text checks around it missed two
-    real regressions: `exclusive -1` was called before its function was defined,
-    and ts-config.sh called ts_is_headless without sourcing _detect.sh. Both
-    printed 'command not found' in a live run and silently skipped their work."""
-    script = (
-        'SRC="$PWD"\n'
-        '. "$SRC/bootstrap/_config.sh" >/dev/null 2>&1\n'
-        '. "$SRC/bootstrap/_wizard.sh"\n'
-        '. "$SRC/bootstrap/_detect.sh"\n'
-        # every function ts-config.sh / the bootstraps call on the wizard path
-        "for f in ts_is_headless ts_is_interactive ts_prompt_multi ts_prompt_choice \\\n"
-        "         ts_prompt_terminals ts_terminals_one_channel ts_wizard_collect \\\n"
-        "         ts_note_failure ts_report_failures; do\n"
-        '  command -v "$f" >/dev/null || echo "UNDEFINED: $f"\n'
-        "done\n"
-        # and actually drive the picker, which is where the ordering bug lived
-        'TS_MULTI_EXCLUSIVE="a b" ts_prompt_multi "a b" "T:" "" "a|A|" "b|B|" "c|C|"\n'
-    )
-    # start_new_session detaches the child from the controlling terminal, so
-    # opening /dev/tty fails - which is the state this test already says it
-    # expects ("legitimately absent under pytest"). stdin=DEVNULL is not enough:
-    # ts_prompt_multi reads from /dev/tty, not stdin, so wherever a tty exists
-    # the prompt blocks forever. It does under WSL and it does not under Git
-    # Bash, which is why this passed on Windows and hung on Linux.
-    # The timeout turns any future regression of that shape into a failure
-    # rather than a hang.
-    r = subprocess.run(
-        [BASH, "-c", script],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        stdin=subprocess.DEVNULL,
-        start_new_session=True,
-        timeout=120,
-    )
-    assert "UNDEFINED:" not in r.stdout, r.stdout
-    # /dev/tty is legitimately absent under pytest; anything else is a real fault.
-    noise = [l for l in r.stderr.splitlines() if l.strip() and "/dev/tty" not in l]
-    assert not noise, "wizard emitted errors: " + "; ".join(noise)
-    # The exclusive group must have collapsed a pre-tick of BOTH a and b.
-    picked = r.stdout.replace("UNDEFINED:", "").split()
-    assert picked == ["a"], f"exclusive group not applied: {picked!r}"
 
 
 def test_ts_config_sources_what_it_calls():
@@ -2476,46 +2268,18 @@ def test_service_probes_treat_any_http_response_as_up(monkeypatch):
 
 
 def test_wizard_recommends_and_probes_before_offering():
-    """Blind on/off questions let a machine be wired to a service that is not
-    running — which then fails later and silently, because the agentmemory hooks
-    swallow errors and exit 0. Probe first, default from what was found."""
-    wiz = (ROOT / "bootstrap/_wizard.sh").read_text(encoding="utf-8")
-    for fn in ("ts_prompt_wezterm_mux", "ts_prompt_wezterm_restore", "ts_prompt_atuin"):
-        body = wiz[wiz.index(f"{fn}() {{") :]
-        body = body[: body.index("\n}\n")]
-        assert "RECOMMENDATION:" in body, f"{fn} has no recommendation"
-    # atuin now defaults to ON; the other two stay off.
-    at = wiz[wiz.index("ts_prompt_atuin() {") :]
-    at = at[: at.index("\n}\n")]
-    assert "ts_prompt_choice on " in at, "atuin should default to on"
-    for fn in ("ts_prompt_wezterm_mux", "ts_prompt_wezterm_restore"):
-        b = wiz[wiz.index(f"{fn}() {{") :]
-        b = b[: b.index("\n}\n")]
-        assert "ts_prompt_choice off " in b, f"{fn} should default to off"
-    # Headroom and AgentMemory are no longer two independent toggles -- that is
-    # what made "both memory systems on" reachable -- but the reason for probing
-    # them is unchanged: a machine wired to a service that is not running fails
-    # later and silently. Both probes run inside the one memory question, and
-    # their output is in what the question prints.
-    mem = wiz[wiz.index("ts_prompt_memory_backend() {") :]
-    mem = mem[: mem.index("\n}\n")]
-    assert "ts_probe_agentmemory" in mem and "ts_probe_headroom" in mem, (
-        "the memory question must probe both services before offering"
-    )
-    assert mem.index("ts_probe_agentmemory") < mem.index("ts_prompt_choice"), (
-        "probe before offering, not after"
-    )
-    assert "${am_report}" in mem and "${hr_report}" in mem, (
-        "the probe output must reach the question the user reads"
-    )
-    assert "RECOMMENDATION:" in mem
-    # The default is a CHOICE, not a probe result. Deriving it from the probe
-    # would recommend "none" on a first install -- where nothing is running yet,
-    # by definition -- and talk a newcomer out of the feature they came for.
-    assert "ts_prompt_choice agentmemory " in mem, "the recommended answer must be agentmemory"
-    # And the two blind toggles must not come back.
-    assert 'TS_WIZ_HEADROOM="$(ts_prompt_agent_toggle' not in wiz
-    assert 'TS_WIZ_AGENTMEMORY="$(ts_prompt_agent_toggle' not in wiz
+    """Every behaviour question opens with a RECOMMENDATION saying which way to
+    go AND what it costs. A default with no reasoning is one people override at
+    random."""
+    body = (ROOT / "tstack/wizard/flow.py").read_text(encoding="utf-8")
+    assert body.count("RECOMMENDATION:") >= 3
+    # mux off and restore off both have to say what they cost.
+    assert "tstack mux restart" in body and "kills every pane" in body
+    assert "autosave means Leader+L still restores" in body
+    # atuin is recommended ON, and is asked even on a headless host: unlike the
+    # WezTerm questions it is a shell binding, and a server has a shell.
+    atuin = body[body.index("atuin shell history") :]
+    assert "Reversible" in atuin[:600]
 
 
 def test_platform_impossible_apps_are_not_offered_forever():
@@ -2526,57 +2290,6 @@ def test_platform_impossible_apps_are_not_offered_forever():
     pend = cfg[cfg.index("ts_apps_pending() {") :]
     pend = pend[: pend.index("\n}\n")]
     assert "ts_app_installable" in pend, "pending list must filter impossible ids"
-
-
-@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
-def test_nightly_is_preticked_even_when_stable_is_installed():
-    """Pre-ticking 'whatever is installed' meant a stable box saw nightly
-    unticked, so pressing Enter — the thing everyone does — silently kept a
-    February 2024 build that this stack's WezTerm config is not written for.
-    Nightly is pre-selected regardless; only a hand-installed WezTerm
-    ('unknown', not ours to replace) leaves both unticked."""
-    wiz = (ROOT / "bootstrap/_wizard.sh").read_text(encoding="utf-8")
-    body = wiz[wiz.index("ts_prompt_terminals() {") :]
-    body = body[: body.index("\n}\n")]
-    assert 'stable)  preticked="wezterm-stable"' not in body, "installed-wins pre-tick is back"
-    assert "RECOMMENDATION: nightly" in body
-
-    def pretick(channel):
-        script = (
-            ". bootstrap/_config.sh >/dev/null 2>&1\n"
-            ". bootstrap/_wizard.sh\n"
-            f"ts_wezterm_channel() {{ echo {channel}; }}\n"
-            # Stub the intro: it fetches upstream release data over the network,
-            # which makes this test slow and dependent on being online.
-            "ts_wezterm_prompt_intro() { :; }\n"
-            # non-interactive keeps the pre-ticks, so the answer IS the pre-tick
-            "ts_prompt_terminals 2>/dev/null\n"
-        )
-        r = subprocess.run(
-            [BASH, "-c", script],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-            stdin=subprocess.DEVNULL,
-            timeout=300,
-            start_new_session=True,
-        )
-        return r.stdout.split()
-
-    for ch in ("stable", "nightly", "none"):
-        assert "wezterm-nightly" in pretick(ch), f"{ch}: nightly not pre-ticked"
-        assert "wezterm-stable" not in pretick(ch), f"{ch}: stable pre-ticked"
-    # A hand-placed WezTerm is left alone.
-    got = pretick("unknown")
-    assert "wezterm-nightly" not in got and "wezterm-stable" not in got, got
-
-    ps = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
-    assert "'stable'  { @('wezterm-stable') }" not in ps, "pwsh twin still installed-wins"
-
-
-# ── TTS on macOS: self summarizer + the say floor ──────────────────────────────
-
-CC_TTS_LIB = ROOT / "dot_claude/hooks/cc-tts-lib.sh"
 
 
 def _self_summary_sh(text):
@@ -2658,6 +2371,9 @@ def test_ghostty_preserves_standard_macos_window_cycle_shortcut():
     assert "toggle_quick_terminal" not in cfg
     assert "quick-terminal-" not in cfg
     assert "global:cmd+grave_accent" not in cfg
+
+
+CC_TTS_LIB = ROOT / "dot_claude/hooks/cc-tts-lib.sh"
 
 
 @pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
@@ -3327,67 +3043,32 @@ done
     return dict(line.split("=", 1) for line in r.stdout.strip().splitlines() if "=" in line)
 
 
-@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_just_the_prompt_really_means_just_the_prompt():
-    """The honest answer to "can I only have the prompt" has to be yes, and the
-    wizard has to stop asking after it. Fourteen questions aimed at someone who
-    wanted one thing is how people close the tab.
-    """
-    w = _wizard({"TS_PROFILE": "prompt"})
-    assert w["PROFILE"] == "prompt"
-    assert w["APPS"] == "", "no CLI tools"
-    assert w["CC_TTS"] == "off"
-    assert w["MEMORY_BACKEND"] == "none"
-    assert w["CAVEMAN"] == "off"
-    assert w["WEZ_MUX"] == "off" and w["WEZ_RESTORE"] == "off" and w["ATUIN"] == "off"
-    # The theme still applies: it is what the prompt's palette is built from.
-    assert w["THEME"] == "dark"
+    """Moved to tests/test_wizard.py against the one implementation. Kept here as
+    a pointer, because this is where someone looks for it."""
 
 
-@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_the_development_answer_picks_which_half_of_the_catalog_is_offered():
-    """A file server and a development laptop want genuinely different sets.
-    Nobody administering a box needs fnm, poetry or six agent CLIs."""
-    dev = _wizard({"TS_PROFILE": "full", "TS_DEVELOPMENT": "yes"})
-    ops = _wizard({"TS_PROFILE": "full", "TS_DEVELOPMENT": "no"})
-    assert dev["APP_CLASS"] == "developer"
-    assert ops["APP_CLASS"] == "sysadmin"
+    """The catalog half of this is now tests/test_apps_catalog.py, and the
+    question half tests/test_wizard.py."""
+    import os
 
-    sysadmin = set(_sh_eval("ts_apps_for_class sysadmin").split())
-    developer = set(_sh_eval("ts_apps_for_class developer").split())
-    catalog = set(_sh_eval('echo "$TS_APPS_ALL"').split())
+    from tstack import apps
 
-    # NOT a subset either way: they are two different DEFAULTS. A server's
-    # recommended set includes the monitors and network tools that are merely
-    # optional on a laptop, and drops the runtimes and agents entirely.
-    assert sysadmin <= catalog, f"not in the catalog: {sorted(sysadmin - catalog)}"
-    assert developer <= catalog
+    # The catalog reads from the clone; without the pin it resolves to whatever
+    # is installed, which on a fresh CI runner is nothing.
+    os.environ["TERMINAL_STACK_DIR"] = str(ROOT)
+    apps.clear_cache()
+    sysadmin, developer = set(apps.sysadmin()), set(apps.recommended())
     assert sysadmin != developer
-    for monitor in ("glances", "bottom", "gdu"):
-        assert monitor in sysadmin and monitor not in developer, (
-            f"{monitor} is default kit on a server and optional on a laptop"
-        )
-    # git tooling is in BOTH: delta, gh and lazygit earn their place on a server
-    # you deploy from. What is development-only is what needs a compiler or an
-    # agent.
     for shared in ("delta", "gh", "lazygit", "btop", "ripgrep"):
         assert shared in sysadmin, f"{shared} is useful without writing code"
     for dev_only in ("fnm", "poetry", "claude", "codex", "ghq", "llmfit"):
         assert dev_only not in sysadmin, f"{dev_only} only makes sense if you write code"
 
 
-@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_the_agent_questions_are_skipped_when_there_are_no_agents():
-    """Voice notifications announce what an AGENT is doing, and a memory backend
-    stores what one learned. Asked on a machine getting neither, they are
-    questions about something that is not being installed."""
-    shell = _wizard({"TS_PROFILE": "shell", "TS_DEVELOPMENT": "yes"})
-    assert shell["CC_TTS"] == "off"
-    assert shell["MEMORY_BACKEND"] == "none"
-
-    ops = _wizard({"TS_PROFILE": "full", "TS_DEVELOPMENT": "no"})
-    assert ops["MEMORY_BACKEND"] == "none"
-    assert ops["CAVEMAN"] == "off"
+    """Covered against the one implementation in tests/test_wizard.py."""
 
 
 @pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
@@ -3410,20 +3091,20 @@ def test_the_profile_is_not_a_saved_setting():
     assert "starshipPreset" in toml
 
 
-def test_the_two_wizards_ask_the_same_two_questions():
-    """Every wizard prompt exists twice. A question added to one side only is how
-    a Windows install and a WSL install stop producing the same machine."""
+def test_there_is_only_one_wizard_to_keep_in_agreement():
+    """This used to assert the bash and pwsh wizards asked the same questions.
+    There is one implementation now, so the invariant is that neither shell has
+    grown a prompt back."""
     sh = (ROOT / "bootstrap/_wizard.sh").read_text(encoding="utf-8")
     ps = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
-    assert "ts_prompt_profile()" in sh and "function Read-TsProfile" in ps
-    assert "ts_prompt_development()" in sh and "function Read-TsDevelopment" in ps
-    assert "ts_prompt_starship_preset()" in sh and "function Read-TsStarshipPreset" in ps
-    assert "ts_apps_for_class" in (ROOT / "bootstrap/_config.sh").read_text(encoding="utf-8")
-    assert "Get-TsAppsForClass" in ps
-    # Same env-var escape hatches on both, or a scripted install diverges.
-    for var in ("TS_PROFILE", "TS_DEVELOPMENT", "TS_STARSHIP_PRESET"):
-        assert var in sh, f"{var} missing from the bash wizard"
-        assert var in ps, f"{var} missing from the pwsh wizard"
+    for gone in ("ts_prompt_choice", "ts_prompt_multi", "ts_prompt_profile"):
+        assert gone not in sh, f"{gone} came back into the shell"
+    for gone in ("function Read-TsChoice", "function Read-TsMulti", "function Read-TsProfile"):
+        assert gone not in ps, f"{gone} came back into PowerShell"
+    # ...and every env-var escape hatch still works, from the one place.
+    flow = (ROOT / "tstack/wizard/flow.py").read_text(encoding="utf-8")
+    for var in ("TS_PROFILE", "TS_DEVELOPMENT", "TS_STARSHIP_PRESET", "TS_APPS", "TS_THEME"):
+        assert var in flow, var
 
 
 @pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
@@ -3469,3 +3150,30 @@ def test_the_prompt_template_preserves_the_trailing_newline():
         "the closing action must not trim the content's own trailing newline"
     )
     assert 'black  = "#616161"\n{{ end -}}\n' in body
+
+
+# ---------------------------------------------------------------------------
+# The install questionnaire moved to tstack/wizard/, one Python implementation
+# replacing bootstrap/_wizard.sh and the Read-Ts* half of bootstrap/_config.ps1.
+# The tests that compared those two, or asserted one existed, are gone with
+# them -- their invariants are in tests/test_wizard.py now, against the single
+# implementation, which is the point of having one:
+#
+#   test_multi_select_prompts_render_identically
+#     -> the two renderers are one renderer; tests/test_wizard.py asserts its output
+#   test_shared_pwsh_prompts_live_where_both_callers_can_reach_them
+#     -> there is no pwsh prompt left to place
+#   test_wizard_callees_are_all_defined_in_config_ps1
+#     -> Read-TsWizard is gone; a Python call cannot reference an undefined function
+#   test_pwsh_preticked_list_survives_appending
+#     -> one tick-list, covered by test_a_non_interactive_tick_list_keeps_the_pre_ticks
+#   test_terminal_tick_list_enforces_one_wezterm_channel_live
+#     -> covered by test_ticking_inside_the_group_collapses_it
+#   test_exclusive_group_survives_a_non_member_tick_bash
+#     -> covered by test_ticking_outside_an_exclusive_group_leaves_it_alone
+#   test_exclusive_group_survives_a_non_member_tick_pwsh
+#     -> same test, same implementation, no second side to check
+#   test_wizard_prompts_run_without_undefined_functions
+#     -> a Python module either imports or does not; mypy and the suite cover it
+#   test_nightly_is_preticked_even_when_stable_is_installed
+#     -> covered by test_both_preticked_collapses_before_the_first_render

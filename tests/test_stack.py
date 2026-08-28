@@ -770,17 +770,16 @@ def test_the_memory_backend_is_one_slot_with_three_values():
 
 def test_the_wizard_asks_once_and_derives_the_rest():
     """The two independent Headroom/AgentMemory toggles are what made a
-    two-memory-system machine one keystroke away, so they must not come back."""
-    sh = (ROOT / "bootstrap" / "_wizard.sh").read_text(encoding="utf-8")
-    ps = (ROOT / "bootstrap" / "_config.ps1").read_text(encoding="utf-8")
-    assert "ts_prompt_memory_backend()" in sh
-    assert "function Read-TsMemoryBackend" in ps
-    assert "TS_AGENTMEMORY 'AgentMemory for all projects?'" not in sh
-    assert "Read-TsAgentToggle TS_AGENTMEMORY" not in ps
-    assert "TS_HEADROOM 'Headroom prompt compression" not in sh
-    # Both twins offer the same four answers.
+    two-memory-system machine one keystroke away, so they must not come back.
+
+    One implementation to check now: the questions moved to tstack/wizard/.
+    """
+    flow = (ROOT / "tstack/wizard/flow.py").read_text(encoding="utf-8")
+    assert "Memory and compression:" in flow, "the one question"
+    assert "TS_AGENTMEMORY 'AgentMemory for all projects?'" not in flow
+    assert "Headroom prompt compression" not in flow
     for key in ("agentmemory", "headroom", "none", "off"):
-        assert key in sh and key in ps
+        assert f'"{key}"' in flow, key
 
 
 def test_ts_envfiles_paths_are_interpolation_sources_only():
@@ -1019,55 +1018,54 @@ def test_every_bootstrap_persists_the_memory_backend():
 
 
 def test_the_wizard_does_not_reset_saved_choices_on_a_re_run():
-    """This wizard is also what `ts-config reconfigure` and a repeat bootstrap
+    """This wizard is also what `tstack config wizard` and a repeat bootstrap
     run. Defaulting to `recommended` shrank a larger saved app list, and the tmux
-    prefix was forced back to ctrl-b unconditionally -- both silently, on Enter."""
-    wiz = (ROOT / "bootstrap" / "_wizard.sh").read_text(encoding="utf-8")
+    prefix was forced back to ctrl-b unconditionally -- both silently, on Enter.
 
-    apps = _sh_function(wiz, "ts_prompt_apps")
-    assert "ts_data_get_apps" in apps, "the app prompt must know what is already saved"
-    assert "keep|" in apps and "def=keep" in apps, (
-        "an existing selection must be offered, and be the default"
-    )
-
-    assert 'TS_WIZ_TMUX="${TS_TMUX:-ctrl-b}"' not in wiz, (
-        "a bare default resets a prefix the machine already had"
-    )
-    assert "ts_data_get tmuxPrefix" in wiz
-
-    # bash 3.2 -- the only bash on macOS -- treats an EMPTY array as unbound
-    # under `set -u`, and every bootstrap runs `set -euo pipefail`. The empty
-    # case is a machine with nothing saved, so the bare form breaks the FIRST
-    # install and nothing else, which is the hardest kind to notice.
-    assert 'opts=(${opts[@]+"${opts[@]}"}' in apps, (
-        'expand a possibly-empty array as ${opts[@]+"${opts[@]}"}, not "${opts[@]}"'
-    )
+    The bash 3.2 empty-array clause is gone with the bash: an empty Python list
+    is just an empty list. What replaced it is the behaviour test below.
+    """
+    flow = (ROOT / "tstack/wizard/flow.py").read_text(encoding="utf-8")
+    assert 'store.get("apps"' in flow, "the app prompt must know what is already saved"
+    assert '"keep"' in flow, "an existing selection must be offered..."
+    assert '"keep" if saved else "recommended"' in flow, "...and be the default"
+    assert 'store.get("tmuxPrefix"' in flow, "a bare default resets a prefix the machine had"
 
 
-@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_the_app_prompt_runs_on_a_fresh_machine_under_set_u():
-    """The static check above, actually executed: source the wizard under the
-    same flags a bootstrap uses and take the default on an empty selection."""
+    """The static check above, actually executed -- through the shell shim the
+    bootstraps call, under the same flags they use.
+
+    A fresh machine has nothing saved, which is the case a bare `${arr[@]}`
+    broke under bash 3.2 and `set -u`. The shim is small now, but it is still
+    sourced by four scripts that all run `set -euo pipefail`.
+    """
+    out = ROOT / "tests" / ".wizard-smoke.sh"
     script = (
         "set -euo pipefail\n"
         f"cd {bash_path(ROOT)}\n"
         "source bootstrap/_config.sh >/dev/null 2>&1\n"
         "source bootstrap/_wizard.sh >/dev/null 2>&1\n"
-        'ts_data_get_apps() { printf ""; }\n'
-        'printf "\\n" | ts_prompt_apps 2>/dev/null\n'
+        "export TS_PROFILE=full TS_DEVELOPMENT=yes TS_THEME=dark TS_LEADER=ctrl-space\n"
+        "export TS_APPS=recommended TS_CC_TTS=off TS_MEMORY_BACKEND=none TS_CAVEMAN=off\n"
+        "export TS_ATUIN=off TS_WEZ_MUX=off TS_WEZ_RESTORE=off TS_HEADROOM_CURSOR=mcp\n"
+        "export TS_STARSHIP_PRESET=terminal-stack TS_TMUX=ctrl-b\n"
+        "ts_wizard_collect >/dev/null\n"
+        'printf "%s" "$TS_WIZ_APPS"\n'
     )
     r = subprocess.run(
         [BASH, "-c", script],
         capture_output=True,
         text=True,
         encoding="utf-8",
-        timeout=60,
-        # ts_prompt_choice reads /dev/tty, not stdin, so stdin=DEVNULL does not
-        # stop it: without a new session there is no controlling terminal to read.
+        timeout=120,
+        # The wizard reads /dev/tty, not stdin, so stdin=DEVNULL does not stop
+        # it: without a new session there is no controlling terminal to read.
         start_new_session=True,
     )
-    assert r.returncode == 0, f"fresh-machine app prompt failed: {r.stderr}"
+    assert r.returncode == 0, f"fresh-machine wizard failed: {r.stderr}"
     assert len(r.stdout.split()) > 0, "the default produced no apps at all"
+    assert not out.exists(), "the wizard must not leave files in the tree"
 
 
 def test_kokoro_is_seeded_for_this_machine_not_for_a_blackwell_box(monkeypatch, tmp_path):

@@ -143,6 +143,36 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Changed
 
+- **The install questionnaire is one implementation (08/28/2026).**
+  `bootstrap/_wizard.sh` was 944 lines and the `Read-Ts*` half of
+  `bootstrap/_config.ps1` about 800 more -- two implementations of the same
+  fourteen questions, kept in agreement by hand and **already drifted**: the
+  PowerShell tick-list rejected a whole multi-answer where bash applied the valid
+  tokens and warned about the rest. Someone typing `1 3 9` at a six-row list
+  means the first two, and throwing that away is how people stop reading menus.
+  The bash behaviour is the one that survived.
+
+  It is `tstack/wizard/` now, behind a `tstack wizard` command. What is left in
+  the shell is a 50-line hand-off, because the four bootstraps are shell and need
+  the answers as variables.
+
+  **The answers travel in a file, not on stdout.** The wizard writes its menus to
+  the terminal and its answers to a path the caller passed, so there is no `$( )`
+  boundary for a stray line to corrupt -- the failure the bash version guarded
+  against by routing every prompt to `/dev/tty`, now impossible by construction.
+  Every variable is emitted unconditionally (the callers read some unguarded, and
+  `set -u` aborts on a missing one), as `export` rather than assignment (the
+  agent wiring reads them from a child process's environment), and the file is
+  renamed into place so a crash cannot leave half of one to source. Windows gets
+  the same answers as JSON, keyed by the PascalCase names the old hashtable used,
+  so every `$w.X` downstream is unchanged.
+
+  The behaviours that had to survive are pinned by tests rather than by reading:
+  the three-try cap on a choice, the default returned verbatim and unvalidated
+  (the prompt question depends on it), numbers splitting on space or comma
+  without fusing `1 2` into `12`, and the exclusive-group collapse whose guard
+  is why ticking Ghostty no longer unticks WezTerm.
+
 - **The managed Ghostty config is one implementation instead of three
   (08/28/2026).** `bootstrap/ts-config.sh` covered macOS and the WSL view of the
   Windows side (~160 lines), `$PROFILE`'s `Set-TerminalStackConfig` covered

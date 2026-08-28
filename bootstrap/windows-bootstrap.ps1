@@ -100,19 +100,31 @@ function Show-TsWizardReview($w) {
     Write-Host ("    Workspace        {0}" -f $(if ($w.Workspace) { $w.Workspace } else { '<none detected>' }))
 }
 
-# Plain if/else, not switch: `break`/`continue` inside a PowerShell switch bind
-# to the switch, not the enclosing loop, which would make "edit" fall straight
-# through to the install.
-$wizard = Read-TsWizard
-while ($true) {
-    Show-TsWizardReview $wizard
-    if (-not (Test-TsInteractive)) { Write-Host '  (non-interactive — proceeding)'; break }
-    $a = (Read-Host '  [P]roceed / [e]dit / [q]uit').Trim()
-    if ($a -match '^(e|edit)$') { $wizard = Read-TsWizard; continue }
-    if ($a -match '^(q|quit)$') { Write-Host '==> quit — nothing was installed or changed.'; return }
-    if (-not $a -or $a -match '^(p|proceed|y|yes)$') { break }
-    Write-Host "  '$a' is not one of the choices — Enter to proceed, 'e' to edit, 'q' to quit."
+# The questionnaire is tstack/wizard/, shared with the bash bootstraps. It runs
+# its own review and edit loop, so the one that used to be here is gone with the
+# prompts -- keeping a second one would be a second place for "edit" to behave
+# differently from the other three installers.
+#
+# Exit 3 is "the user quit at the review".
+# Windows always has a GUI to configure, so the terminal question is always
+# asked here -- unlike the POSIX bootstraps, which skip it on a headless host.
+$askTerminals = $true
+$wizardJson = Join-Path ([IO.Path]::GetTempPath()) ("tswiz-" + [guid]::NewGuid() + ".json")
+$pythonExe  = Get-TsPython
+if (-not $pythonExe) {
+    throw 'Python 3.10+ is required to run the install questionnaire. winget install Python.Python.3.13'
 }
+$wizardArgs = @((Join-Path $SourceDir 'tstack\main.py'), 'wizard', '--emit', 'json', '--out', $wizardJson)
+if ($askTerminals) { $wizardArgs += '--ask-terminals' }
+if ($env:TS_ASSUME_YES) { $wizardArgs += '--assume-yes' }
+& $pythonExe @wizardArgs
+$wizardRc = $LASTEXITCODE
+if ($wizardRc -eq 3) { Write-Host '==> quit - nothing was installed or changed.'; return }
+if ($wizardRc -ne 0 -or -not (Test-Path -LiteralPath $wizardJson)) {
+    throw "The install questionnaire failed (exit $wizardRc)."
+}
+$wizard = Get-Content -LiteralPath $wizardJson -Raw | ConvertFrom-Json
+Remove-Item -LiteralPath $wizardJson -Force -ErrorAction SilentlyContinue
 
 $leaderChord  = $wizard.Leader
 $themeMode    = $wizard.Theme
