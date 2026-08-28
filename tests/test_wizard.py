@@ -206,10 +206,16 @@ def test_the_collapse_guard_directly():
 # ------------------------------------------------------------------- the flow
 
 
-def test_just_the_prompt_stops_asking():
+def test_just_the_prompt_stops_asking(monkeypatch):
     """The honest answer to "can I only have the prompt" has to be yes, and the
-    wizard has to stop after it."""
-    answers = flow.collect(Console.scripted(["1", "", "2"]))
+    wizard has to stop after it.
+
+    The prompt question is pinned: it only RENDERS where starship is installed,
+    so a scripted answer list that assumes it does passes on a developer's Mac
+    and consumes the wrong answers in a container.
+    """
+    monkeypatch.setenv("TS_STARSHIP_PRESET", "terminal-stack")
+    answers = flow.collect(Console.scripted(["1", "2"]))
     assert answers.profile == "prompt"
     assert answers.apps == [] and answers.terminals == []
     assert answers.cc_tts == "off" and answers.memory_backend == "none"
@@ -281,10 +287,11 @@ def test_asked_counts_only_what_actually_rendered(monkeypatch):
     monkeypatch.setenv("TS_STARSHIP_PRESET", "terminal-stack")
     assert flow.collect(Console()).asked == 0, "every answer came from the environment"
 
-    # ...and with nothing pre-answered, the same three questions do tally.
-    for name in ("TS_PROFILE", "TS_THEME", "TS_STARSHIP_PRESET"):
-        monkeypatch.delenv(name, raising=False)
-    assert flow.collect(Console.scripted(["1", "", "2"])).asked > 0
+    # ...and with the profile unanswered, it does tally. The prompt question is
+    # left pinned: whether it renders depends on starship being installed.
+    monkeypatch.delenv("TS_PROFILE", raising=False)
+    monkeypatch.delenv("TS_THEME", raising=False)
+    assert flow.collect(Console.scripted(["1", "2"])).asked > 0
 
 
 def test_the_review_lists_the_answers_the_prompt_scope_pinned():
@@ -432,7 +439,13 @@ def test_the_app_picker_offers_keeping_what_is_already_chosen(monkeypatch):
     monkeypatch.setattr(store, "chezmoi_data", lambda: {"apps": "eza fzf bat"})
     store.clear_cache()
     monkeypatch.setenv("TS_PROFILE", "shell")
-    console = Console.scripted([""])  # Enter takes the default
+    monkeypatch.setenv("TS_STARSHIP_PRESET", "terminal-stack")
+    monkeypatch.setenv("TS_THEME", "dark")
+    monkeypatch.setenv("TS_LEADER", "ctrl-space")
+    monkeypatch.setenv("TS_ATUIN", "off")
+    monkeypatch.setenv("TS_WEZ_MUX", "off")
+    monkeypatch.setenv("TS_WEZ_RESTORE", "off")
+    console = Console.scripted([""])  # Enter takes the default: keep
     answers = flow.collect(console)
     assert answers.apps == ["eza", "fzf", "bat"]
     assert any("keep this machine's current selection" in line for line in console.captured)
@@ -544,7 +557,7 @@ def test_editing_at_the_review_asks_again():
     """`e` must re-run the questions, not fall through to the install. In the
     PowerShell version a `switch` made `continue` bind to the switch rather than
     the loop, which did exactly that."""
-    console = Console.scripted(["e", "1", "", "2", ""])
+    console = Console.scripted(["e", "1", "2", ""])
     answers = flow.confirm(console, flow.Answers(asked=1, profile="full"), assume_yes=False)
     assert answers is not None
     assert answers.profile == "prompt", "the second pass replaced the first"
@@ -615,3 +628,82 @@ def test_a_console_write_that_fails_does_not_take_the_wizard_down(tmp_path):
     console.say("into the void")
     assert console.ask("q: ") is None
     console.close()
+
+
+# ------------------------------------------------------------- the entry point
+
+
+def _cmd(argv, monkeypatch, answers=None, quit_it=False):
+    """Run the command with the questions stubbed out."""
+    from tstack.commands import wizard as cmd
+
+    monkeypatch.setattr(
+        cmd.flow, "collect", lambda console, ask_terminals=False: answers or flow.Answers()
+    )
+    monkeypatch.setattr(cmd.flow, "collect_apps", lambda console: answers or flow.Answers())
+    monkeypatch.setattr(cmd.flow, "review", lambda console, a: None)
+    monkeypatch.setattr(cmd.flow, "confirm", lambda console, a, assume_yes: None if quit_it else a)
+    return cmd.main(argv)
+
+
+def test_the_command_rejects_bad_arguments(monkeypatch, capsys):
+    assert _cmd(["--emit"], monkeypatch) == 2
+    assert "takes sh or json" in capsys.readouterr().err
+    assert _cmd(["--emit", "toml"], monkeypatch) == 2
+    assert _cmd(["--out"], monkeypatch) == 2
+    assert "needs a path" in capsys.readouterr().err
+    assert _cmd(["--only", "leader"], monkeypatch) == 2
+    assert _cmd(["--nonsense"], monkeypatch) == 2
+    assert "unknown option" in capsys.readouterr().err
+
+
+def test_emitting_without_a_destination_is_a_usage_error(monkeypatch, capsys):
+    """Silently discarding the answers would look like it worked."""
+    assert _cmd(["--emit", "sh"], monkeypatch) == 2
+    assert "needs --out" in capsys.readouterr().err
+
+
+def test_quitting_at_the_review_exits_three(monkeypatch, tmp_path):
+    """Each caller already handles 3 as cancelled, and it has to be
+    distinguishable from a failure."""
+    out = tmp_path / "a.sh"
+    assert _cmd(["--emit", "sh", "--out", str(out)], monkeypatch, quit_it=True) == 3
+    assert not out.exists(), "a quit writes nothing"
+
+
+def test_help_and_a_plain_run(monkeypatch, capsys):
+    from tstack.commands import wizard as cmd
+
+    assert cmd.main(["-h"]) == 0
+    assert "tstack wizard -" in capsys.readouterr().out
+    # No --emit is a dry run: it collects, reviews and writes nothing.
+    assert _cmd([], monkeypatch) == 0
+
+
+def test_only_apps_skips_the_review_entirely(monkeypatch, tmp_path):
+    """The caller asked for the picker, not the questionnaire."""
+    from tstack.commands import wizard as cmd
+
+    reviewed: list[int] = []
+    monkeypatch.setattr(cmd.flow, "collect_apps", lambda console: flow.Answers(apps=["eza"]))
+    monkeypatch.setattr(cmd.flow, "confirm", lambda *a, **k: reviewed.append(1))
+    out = tmp_path / "a.sh"
+    assert cmd.main(["--only", "apps", "--emit", "sh", "--out", str(out)]) == 0
+    assert reviewed == [], "no review for a single question"
+    assert "export TS_WIZ_APPS=eza\n" in out.read_text(encoding="utf-8")
+
+
+def test_an_unwritable_destination_is_reported_not_swallowed(monkeypatch, tmp_path, capsys):
+    assert _cmd(["--emit", "sh", "--out", str(tmp_path / "no" / "such" / "a.sh")], monkeypatch) == 1
+    assert "could not write" in capsys.readouterr().err
+
+
+def test_no_review_skips_the_confirm_loop(monkeypatch, tmp_path):
+    from tstack.commands import wizard as cmd
+
+    confirmed: list[int] = []
+    monkeypatch.setattr(cmd.flow, "collect", lambda c, ask_terminals=False: flow.Answers())
+    monkeypatch.setattr(cmd.flow, "review", lambda c, a: None)
+    monkeypatch.setattr(cmd.flow, "confirm", lambda *a, **k: confirmed.append(1))
+    assert cmd.main(["--no-review"]) == 0
+    assert confirmed == []

@@ -443,3 +443,91 @@ def test_the_command_needs_a_clone_and_says_which_variable_fixes_it(monkeypatch,
     monkeypatch.setattr(cmd.paths, "resolve_source_dir", missing)
     assert cmd.main(["status"]) == 1
     assert "TERMINAL_STACK_DIR" in capsys.readouterr().err
+
+
+# ------------------------------------------------------------------ the apply
+
+
+class Ran:
+    """A stand-in for CompletedProcess.
+
+    Patching `subprocess.run` patches the shared module, so anything else that
+    runs a command during the test sees this too -- returning None made
+    paths.py trip over `.returncode`.
+    """
+
+    returncode = 0
+    stdout = ""
+    stderr = ""
+
+
+def test_the_apply_route_differs_by_platform(monkeypatch, tmp_path):
+    """On Windows there is no chezmoi: `scripts/sync-windows.ps1` IS the apply,
+    and it is what writes the Ghostty files on that side. Running `chezmoi
+    apply` there would do nothing and report success."""
+    from tstack.commands import ghostty as cmd
+
+    ran: list[list[str]] = []
+    monkeypatch.setattr(cmd.store, "chezmoi_init", lambda: None)
+    monkeypatch.setattr(cmd.subprocess, "run", lambda argv, **kw: (ran.append(argv), Ran())[1])
+    monkeypatch.setattr(cmd.paths, "resolve_source_dir", lambda: ROOT)
+
+    monkeypatch.setattr(cmd.plat, "kind", lambda: cmd.plat.MACOS)
+    monkeypatch.setattr(cmd.plat, "find_chezmoi", lambda: "/usr/bin/chezmoi")
+    cmd._apply()
+    assert ran and ran[-1][:2] == ["/usr/bin/chezmoi", "apply"]
+
+    ran.clear()
+    monkeypatch.setattr(cmd.plat, "kind", lambda: cmd.plat.WINDOWS)
+    monkeypatch.setattr(cmd.plat, "find_pwsh", lambda: "pwsh")
+    cmd._apply()
+    assert ran, "the Windows apply is the sync script"
+    assert ran[-1][0] == "pwsh"
+    assert any("sync-windows.ps1" in str(a) for a in ran[-1])
+
+
+def test_the_apply_is_a_no_op_rather_than_a_crash_when_the_tool_is_missing(monkeypatch, tmp_path):
+    """A machine mid-bootstrap has neither yet. Failing here would abort a `off`
+    that has already restored the backup, which is the half-done state."""
+    from tstack.commands import ghostty as cmd
+
+    ran: list[list[str]] = []
+    monkeypatch.setattr(cmd.store, "chezmoi_init", lambda: None)
+    monkeypatch.setattr(cmd.subprocess, "run", lambda argv, **kw: (ran.append(argv), Ran())[1])
+
+    def applied() -> list[list[str]]:
+        # `resolve_source_dir` shells out to git, and the stub above patches the
+        # shared module, so it lands in `ran` too. What matters is that no APPLY
+        # was attempted.
+        # Match the COMMAND, not the argv text: resolve_source_dir probes a
+        # chezmoi source directory, so `git -C <...chezmoi...>` matches a
+        # substring search and is not an apply.
+        return [a for a in ran if a and a[0] != "git"]
+
+    monkeypatch.setattr(cmd.plat, "kind", lambda: cmd.plat.MACOS)
+    monkeypatch.setattr(cmd.plat, "find_chezmoi", lambda: None)
+    cmd._apply()
+    assert applied() == []
+
+    monkeypatch.setattr(cmd.plat, "kind", lambda: cmd.plat.WINDOWS)
+    monkeypatch.setattr(cmd.plat, "find_pwsh", lambda: None)
+    cmd._apply()
+    assert applied() == []
+
+
+def test_the_windows_apply_needs_a_clone_and_says_nothing_when_there_is_none(monkeypatch):
+    from tstack import paths as tspaths
+    from tstack.commands import ghostty as cmd
+
+    ran: list[list[str]] = []
+    monkeypatch.setattr(cmd.store, "chezmoi_init", lambda: None)
+    monkeypatch.setattr(cmd.subprocess, "run", lambda argv, **kw: (ran.append(argv), Ran())[1])
+    monkeypatch.setattr(cmd.plat, "kind", lambda: cmd.plat.WINDOWS)
+    monkeypatch.setattr(cmd.plat, "find_pwsh", lambda: "pwsh")
+
+    def missing():
+        raise tspaths.CloneNotFound("nope")
+
+    monkeypatch.setattr(cmd.paths, "resolve_source_dir", missing)
+    cmd._apply()
+    assert [a for a in ran if a and a[0] != "git"] == []

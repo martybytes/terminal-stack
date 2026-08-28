@@ -77,7 +77,12 @@ exclude_lines = [
     "if TYPE_CHECKING:",
     "raise NotImplementedError",
 ]
-# RATCHET: raise this with each phase, never lower it. Phase 0 ships the
+# RATCHET: raise this with each phase, never lower it. Phase 0 shipped the
 # dispatcher, the registry and clone resolution; the number goes up as the shell
 # ports land, because every ported subsystem arrives with its own tests.
-fail_under = 80
+#
+# 81, not the 81.4 measured, because coverage MOVES BETWEEN PLATFORMS: the pwsh
+# tests skip on Linux and the starship-dependent paths skip where it is not
+# installed. Measured at the time of raising: macOS 81.82, debian13 81.43. A
+# floor set to the best number is a floor that fails on the platform nobody ran.
+fail_under = 81
