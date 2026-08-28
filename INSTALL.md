@@ -33,7 +33,7 @@ Two guards on that choice, both there because the alternative bit us:
 
 **Cleaning up old installs.** After cloning, the installer scans for **old terminal-stack clones at other paths** and **retired leftover files** (`command-reference.{md,txt,html}`, `~/.local/bin/wzr`, `~/.wezterm-ref`) and offers a checklist — safe items pre-ticked, one confirmation before anything is removed, your per-machine files (`~/.zshrc.local`/`profile.local.ps1`, `~/.doc.local`, `*.local.md`) never touched. Preview without deleting via `TS_DRY_RUN=1`. This is also what prevents the "I re-installed but `doc` still isn't found" trap: a stale `chezmoi sourceDir` pointing at an old clone is repointed automatically.
 
-**Install wizard.** The bootstraps run a short wizard, each prompt skippable via an env var (so scripted installs stay non-interactive — the bash prompts read `/dev/tty` directly and degrade to their defaults when no terminal is attached). Your answers are **saved** (chezmoi `[data]` on WSL/Linux/macOS; `%LOCALAPPDATA%\terminal-stack\config.json` on Windows) so `tstack update` keeps honoring them and `tstack config` can change them later.
+**Install wizard.** The bootstraps run a short wizard, each prompt skippable via an env var (so scripted installs stay non-interactive — the questionnaire reads `/dev/tty` directly -- never stdin, which on a piped installer IS the script -- and degrades to its defaults when no terminal is attached). Your answers are **saved** (chezmoi `[data]` on WSL/Linux/macOS; `%LOCALAPPDATA%\terminal-stack\config.json` on Windows) so `tstack update` keeps honoring them and `tstack config` can change them later.
 
 Every question works the same way: the default is **marked with `>` and captioned "press Enter"**, an option's **name works wherever its number does** (`dark`, `stable`, `none`), and anything it doesn't recognise **asks again** rather than quietly taking the default — after three tries it gives up and takes the default, so an automated caller can't hang.
 
@@ -65,8 +65,9 @@ Every question works the same way: the default is **marked with `>` and captione
   Skip with `TS_DEVELOPMENT=yes|no`.
 - **Which prompt** — `terminal-stack` (default) is this repo's own two-line
   Starship config; any other value is one of Starship's twelve built-in presets.
-  Asked when you chose `prompt`, and available any time afterwards with
-  **`tstack config prompt list`**, which renders every option live — a preset
+  Asked on every scope -- it is the one thing all three have in common, and on
+  `prompt` it is very nearly the whole install. Available any time afterwards
+  with **`tstack config prompt list`**, which renders every option live — a preset
   name tells you nothing, and this is a decision about what you look at all day.
   Skip with `TS_STARSHIP_PRESET=tokyo-night`.
 
@@ -114,7 +115,7 @@ Every question works the same way: the default is **marked with `>` and captione
 
   **choose whole groups** ticks groups — *all* of them start ticked, `ai` included; **choose individual tools** walks the groups one tick-list at a time, or takes a comma-separated list if you already know what you want. Anything in the recommended set starts ticked, so pressing Enter through the walk lands exactly on the recommended set.
 
-  **The `ai` group defaults to all five and is still a question** — every agent CLI starts ticked, and every one stays individually untickable. None of them come from a package manager:
+  **The `ai` group defaults to all six and is still a question** — every agent CLI starts ticked, and every one stays individually untickable. None of them come from a package manager:
 
   | CLI | How it installs | Needs Node? |
   |---|---|---|
@@ -137,13 +138,13 @@ Every question works the same way: the default is **marked with `>` and captione
 - **TTS tray daemon** (asked only when voice notifications were enabled, on Windows/WSL, never headless) — route announcements through a small native daemon that names the session ("terminal-stack finished — added the retry logic"), queues and coalesces simultaneous completions, and ducks (or pauses) your music while speaking. Defaults to **direct EXE playback**; enabling voice builds one console-free `terminal-stack-tts.exe` using a temporary Python venv, while choosing the daemon also adds autostart and the tray/session features. Python 3.10+ is a build dependency only — no persistent venv or Python runtime remains under `%LOCALAPPDATA%\terminal-stack\tts-daemon`. Change later with `tstack config tts daemon on|off`; hooks launch a detached direct worker in the same EXE whenever the daemon is unreachable. Skip with `TS_CC_TTS_DAEMON=on|off`. The daemon also hosts the dashboard (tray: Open dashboard, or `http://127.0.0.1:8890/ui`) for live activity, the log, and settings. Details: `doc windows/tts-daemon`.
 - **Workspace directory** — pre-filled with the autodetected candidate (`C:\DATA\Workspace` / `~/Documents/Workspace` / `~/workspace` / `~/Workspace`). Press Enter to accept. Persisted to `~/.zshrc.local` (zsh) or `Documents\PowerShell\profile.local.ps1` (pwsh) *only* when it differs from the autodetect. Skip with `WORKSPACE_DIR=/path` / `$env:WORKSPACE_DIR`.
 
-Then a **review** — every answer listed, with `[P]roceed / [e]dit / [q]uit`. Nothing has been installed or written at that point, so `e` re-asks the questions and `q` leaves the machine untouched. The review is skipped when there is nothing to review (every answer came from an env var) or with `TS_ASSUME_YES=1` (bash).
+Then a **review** — every answer listed, with `[P]roceed / [e]dit / [q]uit`. Nothing has been installed or written at that point, so `e` re-asks the questions and `q` leaves the machine untouched. The review is skipped when there is nothing to review (every answer came from an env var) or with `TS_ASSUME_YES=1`, which works on every platform now.
 
 **Headless servers.** On a host with no graphical session (a server reached over ssh/PuTTY), the bootstrap auto-detects "headless", tells you so, and lets you confirm or flip it; force it with `TS_HEADLESS=1` (or `=0` for a desktop). Headless mode **skips the Nerd Font download and the WezTerm leader-key prompt** — there's no GUI terminal to use them — while still installing tmux, Starship, zsh, and the CLI tools. (WSL is treated as a desktop: it renders in a Windows GUI terminal.)
 
 Change any of these later with **`tstack config`** (interactive menu) or one-shot — `tstack config theme follow`, `tstack config leader ctrl-a`, `tstack config apps`, `tstack config restore on`, `tstack config show`. In a combined Windows+WSL setup, run `tstack config` from WSL (its `chezmoi apply` is authoritative for the Windows-side files).
 
-**If something looks wrong** — `doc: command not found` after an update, a clone you moved, leftover old clones — run **`tstack doctor`** (read-only health check) and **`tstack doctor --repair`** (pwsh: `tstack doctor -Repair`) to repoint chezmoi's `sourceDir`, move a legacy-path clone to the canonical location, re-apply, and clean up. If the canonical location is *already* occupied, `--repair` switches to the clone that lives there and offers the other one for removal — a case that used to have no way forward. The installers run the same check automatically at the end.
+**If something looks wrong** — `doc: command not found` after an update, a clone you moved, leftover old clones — run **`tstack doctor`** (read-only health check) and **`tstack doctor --repair`** to repoint chezmoi's `sourceDir`, move a legacy-path clone to the canonical location, re-apply, and clean up. If the canonical location is *already* occupied, `--repair` switches to the clone that lives there and offers the other one for removal — a case that used to have no way forward. The installers run the same check automatically at the end.
 
 If you want to walk through each step instead (recommended for first-time inspection, or when chezmoi would clobber an existing hand-edited dotfile), keep reading.
 
@@ -569,7 +570,7 @@ tstack doctor          # the install's own health check
 
 `tstack --help` failing means the shell shim did not load; re-open the shell.
 A subcommand reported as "not available on <platform>" is correct and deliberate
-(`smb` and `wezterm` are POSIX-only), not a broken install. There are no `ts-*`
+(`smb` is the POSIX-only one), not a broken install. There are no `ts-*`
 commands any more; `ts-config`, `ts-update` and friends are gone, without aliases.
 
 ```powershell

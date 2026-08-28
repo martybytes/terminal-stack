@@ -17,7 +17,7 @@ We could run chezmoi twice — once on each side, with its own source repo. That
 ```
 terminal-stack/
 ├── dot_zshrc                       → ~/.zshrc (WSL)
-├── dot_tmux.conf                   → ~/.tmux.conf (WSL)
+├── dot_tmux.conf.tmpl              → ~/.tmux.conf (WSL/Linux/macOS)
 ├── dot_config/starship.toml        → ~/.config/starship.toml (WSL)
 ├── dot_claude/modify_settings.json.tmpl → ~/.claude/settings.json (spliced per key, not replaced)
 ├── dot_claude/hooks/...            → ~/.claude/hooks/... (WSL)

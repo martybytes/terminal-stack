@@ -287,3 +287,22 @@ def test_a_sub_commands_help_is_forwarded_not_swallowed(capsys):
 
     assert config.main(["ghostty", "-h"]) == 0
     assert "tstack ghostty -" in capsys.readouterr().out
+
+
+def test_no_verb_opens_the_menu_rather_than_printing_show(monkeypatch):
+    """Every doc says "run it bare for a menu", and the shell has always opened
+    one. Quietly turning that into a one-shot print is the kind of regression a
+    port makes and nobody reports, because it still prints something plausible.
+    """
+    seen: list[list[str]] = []
+
+    class Done:
+        returncode = 0
+
+    monkeypatch.setattr(config.paths, "resolve_source_dir", lambda: ROOT)
+    monkeypatch.setattr(config.subprocess, "run", lambda argv, **kw: (seen.append(argv), Done())[1])
+    assert config.main([]) == 0
+    assert seen, "bare config was answered in-process instead of opening the menu"
+    # No stray empty argument: the shell reads `case "${1:-}"` and "" IS the menu,
+    # but an explicit "" would also match `show`'s neighbours by accident.
+    assert seen[0][-1].endswith("ts-config.sh"), seen[0]

@@ -338,8 +338,11 @@ def _delegate(verb: str, args: list[str]) -> int:
     script = source / "bootstrap" / "ts-config.sh"
     if not script.is_file():
         return _fail(f"{script} is missing from the clone")
+    # An empty verb is the bare invocation: the shell's `case "${1:-}"` reads ""
+    # as the menu, so it must not receive a stray empty argument either.
+    argv = ["bash", str(script), *([verb] if verb else []), *args]
     got = subprocess.run(
-        ["bash", str(script), verb, *args],
+        argv,
         check=False,
         timeout=3600,
         env={**os.environ, "TERMINAL_STACK_DIR": str(source)},
@@ -565,7 +568,15 @@ def main(argv: list[str]) -> int:
         else:
             rest.append(item)
 
-    verb = rest[0] if rest else "show"
+    # NO VERB IS THE INTERACTIVE MENU, not `show`. The shell has always opened
+    # one, every doc says "run it bare for a menu", and quietly turning that into
+    # a one-shot print is the kind of regression a port makes and nobody reports
+    # -- it still prints something plausible. The menu itself is shell: it drives
+    # the same delegated verbs, so reimplementing it here would fork the loop.
+    if not rest:
+        return _delegate("", [])
+
+    verb = rest[0]
     args = rest[1:]
 
     if verb in HANDOFF:

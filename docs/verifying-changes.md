@@ -15,11 +15,14 @@ a change you just made.
 
 **On a macOS development clone, install pwsh.** `brew install powershell` (the
 formula; the `powershell` *cask* no longer exists and `powershell@preview` is not
-what you want). Five gates key off `shutil.which("pwsh")` and skip silently
-without it - the AST scan for a local shadowing a typed parameter, the two
-`_config.ps1` store tests, the wizard's exclusive-group twin, and the lone-dash
-splatting regression. Every one of them runs pure PowerShell with `USERPROFILE`
-and `LOCALAPPDATA` overridden, so macOS pwsh satisfies them; none needs Windows.
+what you want). Five test files gate on pwsh being present and skip
+silently without it - the AST scan for a local shadowing a typed parameter, the
+`_config.ps1` store and catalog tests, the Ghostty target tests, and the
+lone-dash splatting regression. (The wizard's exclusive-group twin was one of
+them until the questionnaire became a single implementation; that rule is now
+`test_ticking_outside_an_exclusive_group_leaves_it_alone`, which needs no shell
+at all.) Every one runs pure PowerShell with `USERPROFILE` and `LOCALAPPDATA`
+overridden, so macOS pwsh satisfies them; none needs Windows.
 Skipping is the failure mode that matters here, because the defects those gates
 exist for - a literal TAB in a `Join-Path`, a `$foo`/`$Foo` collision that coerced
 a scriptblock - all parse cleanly and are invisible to every other check.
@@ -217,71 +220,55 @@ ls -t ~/.local/share/wezterm/wezterm-gui.exe-log-*.txt | head -1 | xargs grep 'l
 `wezterm.log_info` from config *or plugin* Lua lands there prefixed `lua:`. That log
 is what identified `resurrect: restoring workspace '…' on gui-startup`.
 
-## 3. Parallel implementations must render identically
+## 3. Prompts: drive them, do not read them
 
-`ts_prompt_choice` (bash) and `Read-TsChoice` (pwsh) are required to produce
-byte-identical menus, as are the `wso` and `tstack mux` `-h` texts. Eyeballing them
-misses a single space or an em dash. Diff the bytes.
+The install questionnaire used to exist twice -- `ts_prompt_choice` in bash and
+`Read-TsChoice` in pwsh -- and this section was about diffing their menus byte
+for byte. There is one implementation now (`tstack/wizard/`), so that comparison
+is gone with the duplication, and what is left is exercising the real prompt
+loops.
 
-The bash side needs a pty — `ts_prompt_choice` writes the menu to `/dev/tty` and it
-is silently discarded when there is none:
-
-```sh
-printf "\n" | timeout 20 script -qec "bash -c '. bootstrap/_wizard.sh; ts_prompt_<name> >/dev/null'" /dev/null | tr -d '\r'
-```
-
-Wrap the payload in `bash -c`. `script` runs `$SHELL`, which is zsh here, and zsh's
-`read -p` means "read from the coprocess" — the prompt helper errors out under it.
-
-**That recipe is util-linux `script`, and it is Linux-only.** macOS/BSD `script`
-takes `script [-q] <file> <cmd>...` and does **not** forward piped stdin into
-the pty. It fails *silently and wrongly*: the prompt renders, the keystrokes go
-nowhere, every run takes the default, and a check of "does option 2 work?"
-passes-looking with the option-1 answer. Verified 2026-08-23 — five different
-inputs all returned the default. On macOS drive the pty directly instead:
+**Use the scripted console.** `Console.scripted([...])` replays answers and
+records everything written, so the suite drives the actual loops with no terminal
+and no pty:
 
 ```python
-import os, pty, select, time
-pid, fd = pty.fork()
-if pid == 0:
-    os.execvp("bash", ["bash", "-c", ". bootstrap/_wizard.sh; ts_prompt_<name> > /tmp/_answer"])
-time.sleep(0.5); os.write(fd, b"2\r")      # then drain fd until EOF
+from tstack.wizard.console import Console
+from tstack.wizard.prompts import Option, choice
+
+console = Console.scripted(["2"])
+value, asked = choice(console, "Theme:", [Option("dark"), Option("light")], "dark")
+assert value == "light"
+assert any("light" in line for line in console.captured)
 ```
 
-Assert on two things, not one: the **answer**, and how many times the prompt was
-rendered — a bogus input must render it **twice** (re-prompt), which is the
-documented rule that a `default:` catch-all would silently break.
+Assert on two things, not one: the **answer**, and what was rendered. A bogus
+input must re-render the menu, which is the rule a `default:` catch-all silently
+breaks.
 
-The pwsh side just needs the helper dot-sourced:
+**Three behaviours are worth driving explicitly**, because each was a bug once:
 
-```powershell
-. bootstrap/_config.ps1; Read-Ts<Name>
+- A choice gives up after **three** wrong answers and takes the default, so an
+  automated caller feeding rubbish cannot spin.
+- A multi answer applies its **valid** tokens and warns about the rest. `1 3 9`
+  at a three-row list means the first two.
+- The exclusive-group collapse fires **only for a member of the group** --
+  without that guard, ticking Ghostty cleared WezTerm.
+
+**The end-to-end path is the emitted file**, not stdout. The wizard writes menus
+to the terminal and answers to a path the caller passes, so there is no `$( )`
+boundary to corrupt. To check the whole contract:
+
+```sh
+out=$(mktemp)
+TS_PROFILE=full TS_THEME=dark TS_APPS=none python3 tstack/main.py wizard --emit sh --out "$out"
+bash -c 'set -euo pipefail; . "'"$out"'"; echo "$TS_WIZ_PROFILE $TS_WIZ_APPS"'
 ```
 
-Then strip ANSI and blank lines, drop the trailing `Choose …` line (it differs
-legitimately: a live prompt vs `(non-interactive — taking the default)`), and
-`Compare-Object`.
-
-A pwsh prompt must also be **reachable from the `tstack config wizard` path**, which
-dot-sources `bootstrap/_config.ps1` and nothing else. A prompt that lives in
-`windows-bootstrap.ps1` works during install and dies mid-questionnaire on a
-re-run, discarding every answer already given. Resolve the whole callee list from
-a clean shell:
-
-```powershell
-pwsh -NoLogo -NoProfile -Command @'
-. bootstrap/_config.ps1
-$b = (Get-Content -Raw bootstrap/_config.ps1)
-$b = $b.Substring($b.IndexOf('function Read-TsWizard'))
-$b = $b.Substring(0, $b.IndexOf("`nfunction ", 1))
-[regex]::Matches($b, '\b(?:Read|Get|Test|Save)-Ts[A-Za-z]+') |
-  ForEach-Object { $_.Value } | Sort-Object -Unique |
-  Where-Object { -not (Get-Command $_ -ErrorAction SilentlyContinue) }
-'@
-```
-
-Anything it prints is a prompt `tstack config wizard` cannot see.
-`test_wizard_callees_are_all_defined_in_config_ps1` pins the same rule.
+`set -euo pipefail` is the point: the callers read several `TS_WIZ_*` unguarded,
+so a name the wizard stopped emitting is an aborted install rather than a wrong
+answer. `test_every_variable_the_bootstraps_read_is_emitted` pins it, and its
+PowerShell twin pins the JSON keys `windows-bootstrap.ps1` reads.
 
 ## 4. Config-store changes — use a throwaway store
 
@@ -462,9 +449,9 @@ Duck-restore drill (music playing): trigger speech, kill the daemon mid-duck
 `tstack doctor --repair` (or restart the daemon) — volumes must come back and
 `state\duck-snapshot.json` must be gone.
 
-New wizard/menu text (`ts_prompt_cc_tts_daemon` ↔ `Read-TsCcTtsDaemon`,
-`tstack config tts -h` both shells, both TTS submenus) goes through the §3
-byte-diff like everything else.
+New wizard text goes through §3: drive it with a scripted console and assert on
+what was rendered, not on two files agreeing. `tstack config tts -h` is still
+shell on both sides and is still worth diffing by eye.
 
 ## 4c. Sync changes — run the whole sync against a throwaway profile
 

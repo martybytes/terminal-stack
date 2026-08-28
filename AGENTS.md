@@ -60,7 +60,7 @@ stack installs - `TS_APPS_RECOMMENDED` carries `ruff` and `uv` as formulae, and
 "NOT RUN" for every gate and exited 0. If you add a gate, resolve it through
 `gate_runner` rather than a bare `import` probe; `tests/test_githooks.py` pins it.
 
-**On macOS, `brew install powershell`.** Five gates key off `shutil.which("pwsh")`
+**On macOS, `brew install powershell`.** 5 test files gate on pwsh being present
 and skip silently without it, including the AST scan for the `$foo`/`$Foo`
 collision that once killed the entire Windows wizard. They run pure PowerShell
 with `USERPROFILE`/`LOCALAPPDATA` overridden, so macOS pwsh satisfies all five.

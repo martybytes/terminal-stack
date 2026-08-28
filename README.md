@@ -357,7 +357,7 @@ pytest tests/
 ```
 
 `.githooks/pre-commit` runs those four; `pre-push` re-runs the suite with the
-coverage floor (`--cov`, `fail_under = 80`) and adds the characterization
+coverage floor (`--cov`, `fail_under = 81`) and adds the characterization
 replay, once the clone has `core.hooksPath=.githooks` set.
 
 ```sh

@@ -293,7 +293,9 @@ Both were live. `Resolve-TsSourceDir` assigned `$stalePin` only inside the dangl
 branch and then read it unconditionally, so **`tstack update` and `tstack config` failed outright**
 in a strict session — before doing anything, with an error naming an internal variable.
 `Read-TsChoice` rendered its optional `Note` column with `$o.Note`, so the install wizard
-died on the very first question (leader key), whose options have no `Note`. `Get-CcTtsConfig`
+died on the very first question (leader key), whose options have no `Note`. (That
+function is gone -- the questionnaire is one Python implementation now -- but the
+trap it demonstrates is not, and any `$obj.Maybe` on the `tstack config` path has it.) `Get-CcTtsConfig`
 was worse: it *probed* for missing members with the syntax that throws on missing members.
 
 The rules:
@@ -314,7 +316,7 @@ Reproducing is a one-liner, and worth doing for anything on the `tstack config` 
 wizard path:
 
 ```powershell
-pwsh -NoProfile -Command "Set-StrictMode -Version Latest; . .\bootstrap\_config.ps1; Read-TsChoice -Title t -Default a -Options @(@{Key='a';Label='A'})"
+pwsh -NoProfile -Command "Set-StrictMode -Version Latest; . .\bootstrap\_config.ps1; Get-TsConfig; Get-TsAppsForClass developer"
 ```
 
 ## `| Set-Content` silently no-ops when the pipeline is empty
