@@ -93,6 +93,7 @@ server-side record is evidence, because the hook always exits 0.
 tstack services                     # status: one line per stack
 tstack services bootstrap           # first run: .env files, generated secrets, volumes
 tstack services up | down | restart
+tstack services up <stack> --build  # rebuild a locally built image first
 tstack services logs <stack>
 tstack services test                # down, up, and prove the whole chain works
 tstack services doctor
@@ -183,4 +184,6 @@ Add a stack and it registers itself by having them.
   match. Capture first, match in the shell.
 - **The console builds from `../../console`**, this repo's own tree. It used to be
   a pinned SHA of a separate repo, so a dirty working tree now builds a dirty
-  image: `git status` before `tstack services up` is the whole discipline.
+  image: `git status` before `tstack services up` is the whole discipline. And
+  `up` on its own reuses the image it already has, so an edit to `console/`
+  shows up only with `--build`.

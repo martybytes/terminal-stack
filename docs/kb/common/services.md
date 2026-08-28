@@ -30,6 +30,7 @@ Everything binds `127.0.0.1` only — none of these services authenticate.
 | `tstack services` | one line per stack: state, health, published ports |
 | `tstack services bootstrap` | first run here: `.env` files, generated secrets, volumes |
 | `tstack services up [<stack>]` | start (only the stacks your settings enable) |
+| `tstack services up <stack> --build` | …rebuilding its image first — for the two stacks built from this repo's own source |
 | `tstack services down [<stack>]` | stop. Every volume is kept |
 | `tstack services restart [<stack>]` | down then up, so a changed `.env` is picked up |
 | `tstack services logs <stack> [-n N] [-f]` | tail one stack |

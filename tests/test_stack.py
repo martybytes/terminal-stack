@@ -1191,3 +1191,61 @@ def test_the_example_names_a_provider_option_for_someone_who_is_not_the_author()
     assert "host.docker.internal:11434" in body, "Ollama, and the container-localhost trap"
     assert "api.openai.com" in body, "the hosted option"
     assert "OpenAI-compatible" in body, "the generic case that covers vLLM and LM Studio"
+
+
+def test_up_can_rebuild_a_locally_built_image(monkeypatch, tmp_path):
+    """`--build` was in a stack README before it was in the parser.
+
+    Only two stacks here build an image from this repo's own source (the console,
+    and headroom's gateway), and after editing that source `up` reuses the image
+    it already has -- so the edit appears to have done nothing. The documented
+    fix was `tstack services up <stack> --build`, which the parser rejected with
+    "unknown option".
+    """
+    from tstack.commands import services
+
+    args = services.parse(["up", "--build"])
+    assert args.build is True
+    assert services.parse(["up"]).build is False
+
+
+def test_build_never_reaches_the_verbs_that_prove_a_clean_bring_up():
+    """`test` takes a stack down and brings it back up to prove the chain works.
+
+    Rebuilding inside that would change what is being proved -- a green run would
+    then mean "it works with the image I just built from a possibly dirty tree",
+    which is the opposite of the guarantee. So the flag is read by cmd_up and
+    cmd_restart, and the argv in the test/reset paths stays literal.
+    """
+    src = (ROOT / "tstack/commands/services.py").read_text(encoding="utf-8")
+    body = src[src.index("def _up_argv") :]
+    assert body.count('["up", "-d", "--build"] if svc.args.build') == 1
+
+    # Every other `up -d` in the file is a literal two-element argv.
+    for verb in ("def cmd_test", "def cmd_reset"):
+        if verb not in src:
+            continue
+        section = src[src.index(verb) :][:4000]
+        assert "--build" not in section, f"{verb} grew a rebuild"
+
+
+def test_the_documented_services_flags_are_all_accepted():
+    """The whole class of bug: a flag that exists in prose and not in the parser."""
+    from tstack.commands import services
+
+    helptext = services.HELP if hasattr(services, "HELP") else ""
+    if not helptext:
+        import contextlib
+        import io
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.suppress(SystemExit):
+            services.main(["-h"])
+        helptext = buf.getvalue()
+
+    documented = set(re.findall(r"^\s{2}(--[a-z][\w-]*)", helptext, re.M))
+    assert documented, "the help page listed no flags"
+    for flag in sorted(documented):
+        if flag in ("--no-color",):  # the alias, listed as --no-colour
+            continue
+        services.parse([flag] if flag != "--tail" else [flag, "10"])

@@ -268,6 +268,17 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **`tstack services up <stack> --build` was documented and rejected
+  (08/28/2026).** The agentmemory stack's README named it as the way to rebuild
+  the console after editing `services/console/`; the parser answered `unknown
+  option: --build`. Only two stacks here build an image from this repo's own
+  source, and without it `up` reuses the image it already has, so the edit
+  appears to have done nothing. Deliberately not wired into `test`, which proves
+  a clean bring-up — rebuilding mid-proof changes what is being proved.
+
+  Found by sweeping every `tstack <verb> --flag` in the docs against what the
+  parsers accept, the same way the dangling-function sweep works.
+
 - **The wizard port deleted three prompt primitives that six non-wizard callers
   used (08/28/2026).** Moving the install questionnaire into `tstack/wizard/`
   correctly deleted 21 bash prompt functions and the `Read-Ts*` half of

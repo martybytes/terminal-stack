@@ -1970,7 +1970,7 @@ no edit anywhere:
   asserts no path appears in both.
 
 - **A pinned network name.** `ts-agentmemory-net`, not the project-derived
-  `tstack agentmemory_default`. Anything that reaches across projects has to be
+  `ts-agentmemory_default`. Anything that reaches across projects has to be
   pinned, or it changes under the other side the day that project is renamed.
   For the same reason the console addresses `ts-agentmemory-server` by container
   name rather than the `agentmemory` service alias.
