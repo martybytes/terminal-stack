@@ -1477,11 +1477,12 @@ def test_smb_exists_and_is_not_claimed_for_pwsh():
 
 
 def test_rclone_is_in_the_catalog_with_a_description():
-    cfg = (ROOT / "bootstrap/_config.sh").read_text(encoding="utf-8")
-    assert "rclone" in cfg
+    conf = (ROOT / "bootstrap/apps.conf").read_text(encoding="utf-8")
+    row = [ln for ln in conf.splitlines() if ln.split()[:1] == ["rclone"]]
+    assert len(row) == 1, "rclone must be in the catalog exactly once"
+    assert len(row[0].split(None, 4)) == 5, "and carry a description"
     ps = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
-    assert "rclone     = 'Rclone.Rclone'" in ps
-    assert "'rclone'" in ps
+    assert "rclone     = 'Rclone.Rclone'" in ps, "the winget id still lives in the pwsh table"
 
 
 def test_guided_rclone_only_intercepts_exact_bare_config():
@@ -3018,18 +3019,18 @@ def test_llmfit_is_offered_but_never_routed_through_the_agent_cli_installer():
 
 def test_the_windows_catalog_does_not_claim_a_winget_package_that_does_not_exist():
     """The rule is "can this platform install it", never "is it in winget" -- and
-    the answer for llmfit is no: it has a windows-msvc release but no manifest.
-    Listed in the group so the two catalogs describe the same world, absent from
-    $TsAppsAll so the picker skips it, exactly as tmux and ncdu are handled.
+    the answer for llmfit is no: it ships a windows-msvc release but is in no
+    manifest.
+
+    That used to be expressed by leaving it out of a second hand-maintained id
+    list on the pwsh side. It is a column now, so there is one place to be wrong
+    instead of two.
     """
+    conf = (ROOT / "bootstrap/apps.conf").read_text(encoding="utf-8")
+    row = next(ln for ln in conf.splitlines() if ln.split()[:1] == ["llmfit"])
+    assert row.split()[3] == "posix", "llmfit is not installable on Windows"
     ps = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
-    assert "models  = @{ Desc = 'local model sizing'; Members = @('llmfit') }" in ps
-    body = ps[ps.index("$script:TsAppsOptional") :].splitlines()[0]
-    assert "llmfit" not in body, "no verified winget id, so it must not be offered on Windows"
-    assert (
-        "'llmfit'"
-        not in ps[ps.index("$script:TsWingetIds") : ps.index("$script:TsAppsRecommended")]
-    )
+    assert "'llmfit'" not in ps, "and no winget id may claim otherwise"
 
 
 def test_a_running_local_runtime_is_offered_with_the_container_side_url(

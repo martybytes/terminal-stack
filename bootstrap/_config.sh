@@ -21,44 +21,66 @@
 . "$(dirname -- "${BASH_SOURCE[0]}")/_wezterm.sh"
 
 # ── App catalog ────────────────────────────────────────────────────────────────
-# Toggleable apps the wizard/picker offers. Required prerequisites (zsh, git,
-# curl, unzip, fontconfig, the Nerd Font, Starship, chezmoi) are always installed
-# by the common_* steps and are NOT listed here.
-#   TS_APPS_RECOMMENDED — pre-checked in the picker / installed by "recommended".
-#   TS_APPS_OPTIONAL    — unchecked by default (GUI editor, GPU/docker tools,
-#                         the agent CLIs — nothing here is installed unasked).
-TS_APPS_RECOMMENDED="tmux eza fzf bat fd tree delta ripgrep zoxide atuin glow micro neovim gh ghq lazygit duf ncdu dust btop fnm python uv pipx ruff ipython claude codex cursor-agent grok gemini pi"
-TS_APPS_OPTIONAL="zed tldr yazi nvtop lazydocker gdu bottom glances bandwhich gping rclone node httpie poetry pre-commit llmfit"
-TS_APPS_ALL="$TS_APPS_RECOMMENDED $TS_APPS_OPTIONAL"
+# The toggleable apps the wizard/picker offers, read from bootstrap/apps.conf.
+# Required prerequisites (zsh, git, curl, unzip, fontconfig, the Nerd Font,
+# Starship, chezmoi) are always installed by the common_* steps and are NOT in it.
+#
+# The catalog used to live here AND in bootstrap/_config.ps1, two hand-maintained
+# copies of the same ids, groups, descriptions and default sets. A third reader
+# is what forced it into data: the settings dashboard, the wizard and
+# `tstack config apps` all need it, and only one of those is bash.
+#
+# Everything below is DERIVED from that file's `classes` column, so the two
+# default sets cannot drift apart the way two lists did:
+#   both -> a laptop and a server      dev  -> only where you write code
+#   sys  -> only where you administer  none -> offered, never pre-ticked
+TS_APPS_CONF="${TS_APPS_CONF:-$(dirname -- "${BASH_SOURCE[0]}")/apps.conf}"
 
-# Two CLASSES, cutting across the groups. A file server and a development laptop
-# want genuinely different sets: nobody administering a box needs fnm, poetry or
-# six agent CLIs, and offering them is how a 30-item tick-list becomes something
-# people skip past without reading.
-#
-# The split is by "does this only make sense if you write code here", not by
-# taste. git tooling stays in BOTH -- delta, gh and lazygit earn their place on a
-# server you deploy from -- while ghq (clone into a workspace tree) is
-# development-only, and so are the runtimes, the Python tooling, the agent CLIs
-# and llmfit.
-#
-# Like the groups, this exists only for the PICKER. The saved `apps` array stays
-# flat, so no chezmoi [data] key is involved and there is nothing that can drift.
-TS_APPS_SYSADMIN="tmux eza fzf bat fd tree ripgrep zoxide atuin glow micro neovim tldr yazi \
-delta gh lazygit duf ncdu dust gdu btop bottom glances nvtop lazydocker bandwhich gping rclone"
-ts_apps_for_class() {
-    case "${1:-developer}" in
-        sysadmin) echo "$TS_APPS_SYSADMIN" ;;
-        *)        echo "$TS_APPS_RECOMMENDED" ;;
+# Loaded once per shell: the picker calls ts_app_desc once per app, and a file
+# read per call would be 48 reads to draw one menu.
+TS_APPS_ROWS=""
+ts_apps_load() {
+    [ -n "$TS_APPS_ROWS" ] && return 0
+    if [ ! -r "$TS_APPS_CONF" ]; then
+        echo "!! $TS_APPS_CONF is missing; the app catalog is empty." >&2
+        return 1
+    fi
+    # Only a FULL-LINE comment is a comment: `#` is legal inside a description,
+    # which is the rest of the line by definition.
+    TS_APPS_ROWS="$(grep -v '^[[:space:]]*#' "$TS_APPS_CONF" | grep -v '^[[:space:]]*$')"
+    # Only what THIS platform can install. The filter used to be a second
+    # hand-maintained id list on the pwsh side; it is a column now.
+    local _plat
+    case "$(uname -s 2>/dev/null)" in
+        Darwin) _plat=macos ;;
+        *)      if [ -d /mnt/c/Users ]; then _plat=wsl; else _plat=linux; fi ;;
     esac
+    TS_APPS_ROWS="$(printf '%s\n' "$TS_APPS_ROWS" | awk -v p="$_plat" '
+        $4=="all" { print; next }
+        $4=="posix" && (p=="macos" || p=="linux" || p=="wsl") { print; next }
+        $4=="linux" && p=="linux" { print; next }
+    ')"
+    TS_APPS_ALL="$(printf '%s\n' "$TS_APPS_ROWS" | awk '{print $1}' | tr '\n' ' ')"
+    TS_APPS_ALL="${TS_APPS_ALL% }"
+    TS_APPS_RECOMMENDED="$(printf '%s\n' "$TS_APPS_ROWS" \
+        | awk '$3=="both"||$3=="dev"{print $1}' | tr '\n' ' ')"
+    TS_APPS_RECOMMENDED="${TS_APPS_RECOMMENDED% }"
+    TS_APPS_SYSADMIN="$(printf '%s\n' "$TS_APPS_ROWS" \
+        | awk '$3=="both"||$3=="sys"{print $1}' | tr '\n' ' ')"
+    TS_APPS_SYSADMIN="${TS_APPS_SYSADMIN% }"
+    TS_APPS_OPTIONAL=""
+    local id
+    for id in $TS_APPS_ALL; do
+        case " $TS_APPS_RECOMMENDED " in *" $id "*) ;; *) TS_APPS_OPTIONAL="$TS_APPS_OPTIONAL $id" ;; esac
+    done
+    TS_APPS_OPTIONAL="${TS_APPS_OPTIONAL# }"
+    # File order, deduplicated: that is picker order, grouped.
+    TS_APP_GROUPS="$(printf '%s\n' "$TS_APPS_ROWS" | awk '!seen[$2]++{print $2}' | tr '\n' ' ')"
+    TS_APP_GROUPS="${TS_APP_GROUPS% }"
+    return 0
 }
+ts_apps_load || true
 
-# Groups exist for the picker only — the saved `apps` array stays flat, so this
-# adds no chezmoi [data] key and none of the 7-step blast radius that comes with
-# one (CLAUDE.md, docs/decisions.md §§ at :236 and :325). Every catalog id must
-# appear in exactly one group or it is unreachable from the group picker; a test
-# asserts the union equals TS_APPS_ALL.
-TS_APP_GROUPS="shell search disk system network git editors runtimes python ai models"
 ts_app_group_desc() {
     case "$1" in
         shell)   echo "shell essentials" ;;
@@ -75,83 +97,33 @@ ts_app_group_desc() {
         *)       echo "" ;;
     esac
 }
+
 ts_app_group_members() {
-    case "$1" in
-        shell)   echo "tmux eza bat tree zoxide fzf atuin" ;;
-        search)  echo "ripgrep fd" ;;
-        disk)    echo "duf ncdu dust gdu" ;;
-        system)  echo "btop bottom glances nvtop lazydocker" ;;
-        network) echo "bandwhich gping rclone" ;;
-        git)     echo "delta gh ghq lazygit" ;;
-        editors) echo "micro neovim glow zed tldr yazi" ;;
-        runtimes) echo "fnm node" ;;
-        python)  echo "python uv pipx ruff ipython httpie poetry pre-commit" ;;
-        ai)      echo "claude codex cursor-agent grok gemini pi" ;;
-        models)  echo "llmfit" ;;
-        *)       echo "" ;;
-    esac
+    ts_apps_load || return 0
+    printf '%s\n' "$TS_APPS_ROWS" | awk -v g="$1" '$2==g{print $1}' | tr '\n' ' ' | sed 's/ $//'
 }
+
 # The group an id belongs to (empty when uncategorised).
 ts_app_group_of() {
-    local g
-    for g in $TS_APP_GROUPS; do
-        case " $(ts_app_group_members "$g") " in *" $1 "*) echo "$g"; return 0 ;; esac
-    done
-    echo ""
+    ts_apps_load || return 0
+    printf '%s\n' "$TS_APPS_ROWS" | awk -v id="$1" '$1==id{print $2; exit}'
 }
 
 # Human-readable one-liners for the picker.
 ts_app_desc() {
-    case "$1" in
-        tmux)       echo "terminal multiplexer (ssht, persistent sessions)";;
-        eza)        echo "modern ls (icons, git status)";;
-        fzf)        echo "fuzzy finder (Ctrl+R, Ctrl+T)";;
-        bat)        echo "cat with syntax highlighting";;
-        delta)      echo "git diff pager";;
-        ripgrep)    echo "fast recursive grep (rg)";;
-        zoxide)     echo "smarter cd (z)";;
-        atuin)      echo "SQLite shell history, better Ctrl+R (opt-in)";;
-        llmfit)     echo "which local LLM fits this machine's RAM and GPU";;
-        glow)       echo "terminal markdown renderer";;
-        micro)      echo "nano-like terminal editor";;
-        neovim)     echo "neovim editor (nvim)";;
-        gh)         echo "GitHub CLI (org enumeration for wso)";;
-        ghq)        echo "clone into the derived workspace path";;
-        lazygit)    echo "git TUI (the wso status hand-off)";;
-        zed)        echo "Zed GUI editor";;
-        tldr)       echo "concise command examples";;
-        yazi)       echo "terminal file manager (y to cd on exit)";;
-        nvtop)      echo "GPU process monitor (NVIDIA hosts)";;
-        lazydocker) echo "docker TUI (docker hosts)";;
-        fd)         echo "fast, friendly find (the WezTerm sessionizer needs it)";;
-        tree)       echo "directory tree as text";;
-        duf)        echo "modern df — colourful disk free";;
-        ncdu)       echo "interactive disk usage TUI";;
-        dust)       echo "du with a tree view, sorted by size";;
-        gdu)        echo "very fast disk usage TUI (ncdu alternative)";;
-        btop)       echo "resource monitor (CPU, memory, disk, net, procs)";;
-        bottom)     echo "alternative system monitor (btm)";;
-        glances)    echo "cross-platform system monitor";;
-        bandwhich)  echo "which process is using the bandwidth";;
-        gping)      echo "ping with a live graph";;
-        rclone)     echo "sync/mount 70+ storage backends, SMB shares included (tstack smb)";;
-        claude)     echo "Claude Code CLI (cc/ccd wrappers drive it)";;
-        codex)      echo "OpenAI Codex CLI (cx/cy wrappers drive it)";;
-        cursor-agent) echo "Cursor's CLI agent";;
-        grok)       echo "xAI Grok CLI (standalone binary; no Node needed)";;
-        gemini)     echo "Google Gemini CLI";;
-        pi)         echo "Pi coding agent (earendil-works; needs Node 22+)";;
-        fnm)        echo "fast Node version manager (reads .nvmrc; ~10ms shell cost)";;
-        node)       echo "Node.js itself, without a version manager";;
-        python)     echo "Python 3 interpreter";;
-        uv)         echo "fast Python package/project manager";;
-        pipx)       echo "install Python CLI tools in isolated envs";;
-        ruff)       echo "Python linter + formatter, one fast binary";;
-        ipython)    echo "a far better Python REPL";;
-        httpie)     echo "friendly HTTP client (readable curl)";;
-        poetry)     echo "Python project/dependency manager";;
-        pre-commit) echo "run git hooks before every commit";;
-        *)          echo "";;
+    ts_apps_load || return 0
+    printf '%s\n' "$TS_APPS_ROWS" \
+        | awk -v id="$1" '$1==id{$1="";$2="";$3="";$4="";sub(/^ +/,"");print;exit}'
+}
+
+# The ids pre-ticked for a machine class. Neither set is a subset of the other:
+# a server's default kit includes the monitors and network tools that are merely
+# optional on a laptop, and drops the runtimes and agent CLIs entirely.
+ts_apps_for_class() {
+    ts_apps_load || return 0
+    case "${1:-developer}" in
+        sysadmin) echo "$TS_APPS_SYSADMIN" ;;
+        *)        echo "$TS_APPS_RECOMMENDED" ;;
     esac
 }
 
@@ -209,14 +181,17 @@ ts_load_node_env() {
 # actually install" in Get-TsAppsPending); POSIX did not, so a macOS user who
 # picked "install everything" was told nvtop was missing on every single
 # tstack update, accepted, and watched it print "Linux-only; skipping" forever.
+# Can this platform install <id>? Reads the `platforms` column, so an id that is
+# impossible here is never offered and never nags. It used to be a hardcoded case
+# on the bash side and a SECOND id list on the pwsh side -- the drift that meant a
+# Windows box missing grok/gemini/pi/cursor-agent was never once told so.
+#
+# ts_apps_load has already filtered TS_APPS_ROWS to this platform, so membership
+# in the loaded catalog IS the answer.
 ts_app_installable() {
-    case "$(uname -s 2>/dev/null)" in
-        Darwin)
-            case "$1" in
-                nvtop) return 1 ;;   # NVIDIA/Linux only; no macOS build exists
-            esac ;;
-    esac
-    return 0
+    ts_apps_load || return 0
+    case " $TS_APPS_ALL " in *" $1 "*) return 0 ;; esac
+    return 1
 }
 
 # Which class this machine looks like, INFERRED from what it has chosen rather

@@ -57,50 +57,78 @@ $script:TsWingetIds = @{
     # tools that simply do not come from winget; $TsPyTools routes them through
     # Install-TsPyTool instead.
 }
-$script:TsAppsRecommended = @('eza','fzf','bat','fd','delta','ripgrep','zoxide','atuin','glow','micro','neovim','gh','ghq','lazygit','prettymark','duf','dust','btop','fnm','python','uv','pipx','ruff','ipython','claude','codex','cursor-agent','grok','gemini','pi')
-$script:TsAppsOptional    = @('zed','yazi','gdu','bottom','glances','gping','rclone','node','httpie','poetry','pre-commit')
-$script:TsAppsAll         = $script:TsAppsRecommended + $script:TsAppsOptional
-
-# Two CLASSES, cutting across the groups. Twin of TS_APPS_SYSADMIN in
-# bootstrap/_config.sh, minus the ids Windows cannot install (tmux, tldr, ncdu,
-# nvtop, lazydocker, bandwhich) -- the same subtraction $TsAppsRecommended
-# already makes against its POSIX twin.
+# ── App catalog ────────────────────────────────────────────────────────────────
+# Read from bootstrap/apps.conf, the same file bootstrap/_config.sh and
+# tstack/apps.py read. There used to be TWO hand-maintained catalogs -- this one
+# and the bash one -- with different id lists, different group membership and
+# their own copies of the descriptions and the two default sets. A third reader
+# forced the issue: the settings dashboard, the wizard and `tstack config apps`
+# all need the catalog, and only one of those is bash.
 #
-# The split is "does this only make sense if you write code here", not taste.
-# git tooling stays in BOTH: delta, gh and lazygit earn their place on a server
-# you deploy from. ghq, the runtimes, the Python tooling and the agent CLIs do
-# not. Picker-only, like the groups -- the saved `apps` array stays flat.
-$script:TsAppsSysadmin = @(
-    'eza','fzf','bat','fd','ripgrep','zoxide','atuin','glow','micro','neovim','prettymark','yazi',
-    'delta','gh','lazygit','duf','dust','gdu','btop','bottom','glances','gping','rclone'
-)
+# The platform column replaces the second id list this file used to be. It says
+# "can this platform install it", NOT "is it in winget" -- conflating the two is
+# why a Windows box missing grok/gemini/pi/cursor-agent was never once told so.
+function Get-TsAppsConfPath {
+    Join-Path $PSScriptRoot 'apps.conf'
+}
+
+function Read-TsAppsCatalog {
+    $path = Get-TsAppsConfPath
+    if (-not (Test-Path -LiteralPath $path)) {
+        Write-Warning "$path is missing; the app catalog is empty."
+        return @()
+    }
+    $rows = @()
+    foreach ($line in (Get-Content -LiteralPath $path)) {
+        $trimmed = $line.Trim()
+        # Only a FULL-LINE comment is a comment: `#` is legal inside a
+        # description, which is the rest of the line by definition.
+        if (-not $trimmed -or $trimmed.StartsWith('#')) { continue }
+        $parts = $trimmed -split '\s+', 5
+        if ($parts.Count -lt 5) { Write-Warning "apps.conf: malformed row: $trimmed"; continue }
+        # Windows here, always: this file is only ever loaded on the Windows side.
+        $plat = $parts[3]
+        if ($plat -ne 'all' -and $plat -ne 'windows') { continue }
+        $rows += [pscustomobject]@{
+            Id = $parts[0]; Group = $parts[1]; Classes = $parts[2]
+            Platforms = $plat; Description = $parts[4]
+        }
+    }
+    return $rows
+}
+
+$script:TsAppCatalog      = @(Read-TsAppsCatalog)
+$script:TsAppsAll         = @($script:TsAppCatalog | ForEach-Object { $_.Id })
+$script:TsAppsRecommended = @($script:TsAppCatalog |
+    Where-Object { $_.Classes -in @('both', 'dev') } | ForEach-Object { $_.Id })
+$script:TsAppsSysadmin    = @($script:TsAppCatalog |
+    Where-Object { $_.Classes -in @('both', 'sys') } | ForEach-Object { $_.Id })
+$script:TsAppsOptional    = @($script:TsAppsAll | Where-Object { $script:TsAppsRecommended -notcontains $_ })
+
+# Neither default set is a subset of the other: a server's kit includes the
+# monitors that are merely optional on a laptop, and drops the runtimes and
+# agent CLIs entirely.
 function Get-TsAppsForClass([string]$Class) {
     if ($Class -eq 'sysadmin') { return $script:TsAppsSysadmin }
     return $script:TsAppsRecommended
 }
 
-# Groups exist for the picker only — the saved `apps` array stays flat, so this
-# adds no chezmoi [data] key. Twin of ts_app_group_* in bootstrap/_config.sh;
-# ids no route here can install are skipped by Test-TsAppInstallable.
-$script:TsAppGroups = [ordered]@{
-    shell   = @{ Desc = 'shell essentials';    Members = @('tmux','eza','bat','tree','zoxide','fzf','atuin') }
-    search  = @{ Desc = 'search and find';     Members = @('ripgrep','fd') }
-    disk    = @{ Desc = 'disk usage';          Members = @('duf','ncdu','dust','gdu') }
-    system  = @{ Desc = 'system monitors';     Members = @('btop','bottom','glances','nvtop','lazydocker') }
-    network = @{ Desc = 'network';             Members = @('bandwhich','gping','rclone') }
-    git     = @{ Desc = 'git tooling';         Members = @('delta','gh','ghq','lazygit') }
-    editors = @{ Desc = 'editors and readers'; Members = @('micro','neovim','glow','zed','tldr','prettymark','yazi') }
-    runtimes = @{ Desc = 'language runtimes';  Members = @('fnm','node') }
-    python  = @{ Desc = 'Python tooling';      Members = @('python','uv','pipx','ruff','ipython','httpie','poetry','pre-commit') }
-    ai      = @{ Desc = 'AI coding agents';    Members = @('claude','codex','cursor-agent','grok','gemini','pi') }
-    # llmfit ships a windows-msvc binary but is in no winget manifest (checked:
-    # neither manifests/a/AlexsJones/llmfit nor manifests/l/llmfit exists), and
-    # this table takes verified ids only. It is therefore absent from
-    # $TsAppsAll, which makes the picker skip this group entirely on Windows --
-    # the same treatment tmux, tldr and ncdu already get. Listed so the two
-    # catalogs describe the same world rather than silently diverging.
-    models  = @{ Desc = 'local model sizing'; Members = @('llmfit') }
+# Group descriptions are presentation, so they stay here rather than in the data
+# file; membership and order come from it. Twin of ts_app_group_desc.
+$script:TsAppGroupDesc = @{
+    shell = 'shell essentials'; search = 'search and find'; disk = 'disk usage'
+    system = 'system monitors'; network = 'network'; git = 'git tooling'
+    editors = 'editors and readers'; runtimes = 'language runtimes'
+    python = 'Python tooling'; ai = 'AI coding agents'; models = 'local model sizing'
 }
+$script:TsAppGroups = [ordered]@{}
+foreach ($g in @($script:TsAppCatalog | ForEach-Object { $_.Group } | Select-Object -Unique)) {
+    $script:TsAppGroups[$g] = @{
+        Desc    = $(if ($script:TsAppGroupDesc.ContainsKey($g)) { $script:TsAppGroupDesc[$g] } else { $g })
+        Members = @($script:TsAppCatalog | Where-Object { $_.Group -eq $g } | ForEach-Object { $_.Id })
+    }
+}
+
 function Get-TsAppGroupOf([string]$id) {
     foreach ($g in $script:TsAppGroups.Keys) {
         if ($script:TsAppGroups[$g].Members -contains $id) { return $g }
@@ -212,24 +240,9 @@ function Get-TsAppsPending {
 }
 
 function Get-TsAppDesc([string]$id) {
-    switch ($id) {
-        'eza'     { 'modern ls (icons, git status)' }
-        'fzf'     { 'fuzzy finder (Ctrl+R, Ctrl+T)' }
-        'bat'     { 'cat with syntax highlighting' }
-        'delta'   { 'git diff pager' }
-        'ripgrep' { 'fast recursive grep (rg)' }
-        'zoxide'  { 'smarter cd (z)' }
-        'glow'    { 'terminal markdown renderer' }
-        'micro'   { 'nano-like terminal editor' }
-        'neovim'  { 'neovim editor (nvim)' }
-        'zed'     { 'Zed GUI editor' }
-        'gh'      { 'GitHub CLI (org enumeration for wso)' }
-        'ghq'     { 'clone into the derived workspace path' }
-        'lazygit' { 'git TUI (the wso status hand-off)' }
-        'rclone'  { 'sync/mount 70+ storage backends, SMB shares included' }
-        'prettymark' { 'markdown viewer (pm alias)' }
-        default   { '' }
-    }
+    $row = $script:TsAppCatalog | Where-Object { $_.Id -eq $id } | Select-Object -First 1
+    if ($row) { return $row.Description }
+    return ''
 }
 
 # ── chord / theme mapping ────────────────────────────────────────────────────────
