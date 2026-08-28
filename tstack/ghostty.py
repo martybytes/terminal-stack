@@ -48,7 +48,11 @@ WINDOWS = "windows"
 # "apply will replace this".
 OURS = "managed by terminal-stack"
 
-UNSUPPORTED = """tstack config ghostty: macOS or WSL only. Ghostty runs on macOS, and on
+# Command-neutral: both `tstack ghostty` and `tstack config ghostty` reach here,
+# and naming only one of them was already misleading when the shells split this
+# three ways. "macOS or WSL" was the old bash implementation's reach, not the
+# feature's -- native Windows was the pwsh half.
+UNSUPPORTED = """ghostty: macOS, Windows and WSL only. Ghostty runs on macOS, and on
   Windows as noctty/winghostty; this stack's native-Linux hosts are
   headless, so there is no GUI here to configure."""
 

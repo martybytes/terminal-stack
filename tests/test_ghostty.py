@@ -95,7 +95,10 @@ def test_native_linux_is_refused_rather_than_guessed(monkeypatch, capsys):
     monkeypatch.setattr(plat, "kind", lambda: plat.LINUX)
     assert ghostty.target() is None
     assert ghostty.status(ROOT, print) == 1
-    assert "macOS or WSL only" in "\n".join(lines(capsys))
+    said = "\n".join(lines(capsys))
+    assert "macOS, Windows and WSL only" in said
+    # Command-neutral: two entry points reach this, so it may name neither.
+    assert "tstack config ghostty:" not in said
 
 
 # --------------------------------------------------------------- theme mapping
