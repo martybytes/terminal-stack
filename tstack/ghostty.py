@@ -179,14 +179,17 @@ def binary() -> str | None:
             if found:
                 return found
         return None
-    # WSL, reaching the Windows install through interop.
+    # WSL, reaching the Windows install through interop. Return the literal
+    # string, never str(Path(...)): /mnt/c/... is a POSIX path by definition --
+    # it exists only inside WSL -- and re-rendering it through the HOST's path
+    # flavour turns it into \mnt\c\... the moment anything evaluates this
+    # branch on Windows, which is what the interop test does.
     for candidate in (
         "/mnt/c/Program Files/noctty/noctty.com",
         "/mnt/c/Program Files/winghostty/winghostty.com",
     ):
-        path = Path(candidate)
-        if path.is_file():
-            return str(path)
+        if Path(candidate).is_file():
+            return candidate
     return None
 
 

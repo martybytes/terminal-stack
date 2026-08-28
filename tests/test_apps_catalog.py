@@ -152,7 +152,17 @@ def test_the_inferred_class_cannot_drift_because_it_is_not_stored():
     assert apps.saved_class([]) == apps.DEVELOPER, "never configured keeps the old behaviour"
 
 
+# `_config.sh` is not a Windows file. It decides the platform from `uname -s`,
+# which under CI's Git Bash reports MINGW and falls through to "linux" -- so the
+# bash reader offers `tmux` while the Python reader, correctly asked about
+# Windows, does not. That is a comparison between two readers that never coexist:
+# on Windows the catalog is read by pwsh, and
+# `test_powershell_and_python_agree_on_the_windows_view` below is what covers it.
+NOT_A_BASH_PLATFORM = plat.kind() == plat.WINDOWS
+
+
 @pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+@pytest.mark.skipif(NOT_A_BASH_PLATFORM, reason="_config.sh is not read on Windows")
 def test_bash_and_python_agree_on_every_derived_set():
     """The whole point of one file. Run on THIS platform, so the comparison
     includes the platform filter rather than skipping past it."""
@@ -168,6 +178,7 @@ def test_bash_and_python_agree_on_every_derived_set():
 
 
 @pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+@pytest.mark.skipif(NOT_A_BASH_PLATFORM, reason="_config.sh is not read on Windows")
 def test_bash_and_python_agree_on_group_membership_and_descriptions():
     here = plat.kind()
     for group in apps.groups():

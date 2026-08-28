@@ -58,17 +58,26 @@ def _render(agentmemory: str) -> str:
 
 
 def _run(script: str, stdin: str) -> str:
+    """Bytes in, bytes out, decoded here.
+
+    NOT text=True. This is a test about the exact content of a spliced file, and
+    text mode applies universal-newline translation in both directions -- on
+    Windows it writes the input as CRLF and reads the output back as LF, so what
+    bash saw is not what we sent and the idempotency check compared a run
+    against a differently-terminated one. `~/.zshenv` is a POSIX artifact; the
+    bytes are the subject, so do not let the host's line-ending convention near
+    them.
+    """
     got = subprocess.run(
         [BASH, "-c", script],
-        input=stdin,
+        input=stdin.encode("utf-8"),
         capture_output=True,
-        text=True,
         timeout=60,
         start_new_session=True,
         check=False,
     )
-    assert got.returncode == 0, got.stderr
-    return got.stdout
+    assert got.returncode == 0, got.stderr.decode("utf-8", "replace")
+    return got.stdout.decode("utf-8")
 
 
 # ------------------------------------------------------------------- the block
