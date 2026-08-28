@@ -311,6 +311,19 @@ SETTINGS: tuple[Setting, ...] = (
         flags=frozenset({STANDALONE}),
     ),
     Setting(
+        "ccTtsKokoroModel",
+        "Kokoro model id",
+        "text",
+        "tts-voice",
+        "kokoro",
+        mirror="ccTts.kokoro.model",
+        note=(
+            "the docker image answers to `kokoro`; mlx-audio wants the HuggingFace "
+            "repo id, e.g. mlx-community/Kokoro-82M-bf16"
+        ),
+        flags=frozenset({STANDALONE}),
+    ),
+    Setting(
         "ccTtsKokoroVoice",
         "Kokoro voice",
         "text",

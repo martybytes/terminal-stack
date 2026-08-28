@@ -3087,3 +3087,78 @@ def test_the_container_can_resolve_the_host_on_every_platform():
     """
     body = (ROOT / "services/stacks/agentmemory/docker-compose.yml").read_text(encoding="utf-8")
     assert '"host.docker.internal:host-gateway"' in body
+
+
+# ------------------------------------------------ kokoro's model id, and mlx-audio
+
+
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+def test_the_kokoro_model_id_is_configurable_because_that_is_the_whole_mlx_port():
+    """mlx-audio runs the same Kokoro model natively on Apple Silicon and speaks
+    the same OpenAI protocol -- `/v1/audio/speech` with model, voice, speed and
+    response_format, plus `/v1/audio/voices` and `/v1/models`.
+
+    Every field matches except one: the docker image answers to the literal
+    string `kokoro`, and mlx-audio wants the HuggingFace repo id and rejects
+    anything else. So a hard-coded `model` is the single thing standing between
+    this stack and a native Apple Silicon engine -- which is why it is a setting
+    and not a literal, in both hook libraries and in the runtime config.
+    """
+    assert _sh_eval("ts_cc_tts_default ccTtsKokoroModel") == "kokoro"
+    cfg = (ROOT / "bootstrap/_cc_tts.sh").read_text(encoding="utf-8")
+    assert "ccTtsKokoroModel" in cfg
+    assert '"model": "$(ts_cc_tts_get ccTtsKokoroModel)"' in cfg, "the mirror JSON must carry it"
+
+    for rel, needle in (
+        ("dot_claude/hooks/cc-tts-lib.sh", 'model="$(cc_tts_json .kokoro.model kokoro)"'),
+        ("windows/.claude/hooks/cc-tts-lib.ps1", "Get-CcTtsKokoroModel"),
+        ("dot_claude/tts/config.json.tmpl", 'index . "ccTtsKokoroModel"'),
+        ("bootstrap/_config.ps1", "model = 'kokoro'"),
+    ):
+        assert needle in (ROOT / rel).read_text(encoding="utf-8"), f"{rel} still hard-codes it"
+
+    # No synth call site may name the string directly any more.
+    lib = (ROOT / "dot_claude/hooks/cc-tts-lib.sh").read_text(encoding="utf-8")
+    assert 'model:"kokoro"' not in lib
+    assert '"model":"kokoro"' not in lib
+    ps = (ROOT / "windows/.claude/hooks/cc-tts-lib.ps1").read_text(encoding="utf-8")
+    assert "model = 'kokoro'; input" not in ps
+
+
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+def test_the_voices_query_only_names_a_model_when_one_is_configured():
+    """mlx-audio's /v1/audio/voices 400s without ?model= -- it resolves the voice
+    packs out of that HuggingFace snapshot. The docker image has no such
+    parameter.
+
+    So the query is conditional, and the DEFAULT path must produce the exact
+    request it always made: sending ?model=kokoro to the container would be a
+    change to the one path that is known to work.
+    """
+    assert _sh_eval("ts_cc_tts_kokoro_model_query") == ""
+    got = _sh_eval(
+        "ts_cc_tts_get() { echo 'mlx-community/Kokoro-82M-bf16'; }; ts_cc_tts_kokoro_model_query"
+    )
+    assert got == "?model=mlx-community/Kokoro-82M-bf16"
+
+
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+def test_the_engine_advisor_derives_its_recommendation_rather_than_hard_coding_one():
+    """Three ways to get a voice on a Mac, and which one is right depends on the
+    machine: an Intel Mac cannot run option 3 at all, and on Apple Silicon the
+    deciding fact is that Docker Desktop passes no GPU to the container, so the
+    shipped kokoro image runs on the CPU a model the machine could run on its
+    GPU. The advice therefore branches on `uname -m` and probes what is running.
+    """
+    body = (ROOT / "bootstrap/_cc_tts.sh").read_text(encoding="utf-8")
+    start = body.index("ts_cc_tts_engines() {")
+    fn = body[start : body.index("\nts_cc_tts_kokoro_model_query", start)]
+    assert "arm64)" in fn and "x86_64)" in fn, "the recommendation must depend on the architecture"
+    assert "uname -s" in fn, "macOS-only, and it must say so rather than misfire"
+    for probe in ("docker info", "ts_cc_tts_kokoro_up", "import mlx_audio"):
+        assert probe in fn, f"{probe} is a deciding fact and must be measured, not assumed"
+    # Claims that were wrong in the first draft and must not come back: MLX runs
+    # on the GPU via Metal, not the Neural Engine, and Docker on Apple Silicon
+    # runs kokoro on the CPU rather than emulating an x86 GPU.
+    assert "Neural Engine" not in fn
+    assert "emulated CPU" not in fn

@@ -29,6 +29,7 @@
   "excitement": {{ index . "ccTtsExcitement" | default "0.25" }},
   "kokoro": {
     "url": {{ index . "ccTtsKokoroUrl" | default "http://127.0.0.1:8880" | quote }},
+    "model": {{ index . "ccTtsKokoroModel" | default "kokoro" | quote }},
     "voice": {{ index . "ccTtsKokoroVoice" | default "am_adam" | quote }},
     "speed": {{ index . "ccTtsKokoroSpeed" | default "1.0" }},
     "format": {{ index . "ccTtsKokoroFormat" | default "mp3" | quote }},

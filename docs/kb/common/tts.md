@@ -98,12 +98,52 @@ worse than offering the one you can.
 `voices` used to set the daemon's rotation pool. That is `voice-pool` now; the
 old comma-separated form redirects rather than silently doing the wrong thing.
 
+## Three engines on a Mac, and which one fits
+
+```sh
+tstack config tts engines     # macOS only; derives a recommendation for this Mac
+```
+
+It reports the architecture, core count, memory, installed system voices, and
+whether Docker, kokoro and mlx-audio are actually present — then recommends,
+because the right answer depends on the machine rather than on taste.
+
+| | `say` | kokoro in Docker | kokoro via mlx-audio |
+|---|---|---|---|
+| Setup | none | `tstack services up kokoro` | `pip install mlx-audio` |
+| Runs on | the OS | container CPU | the GPU, via Metal |
+| Same voice on Linux/Windows? | no | **yes** | no |
+| Apple Silicon | fine | **no GPU passthrough** | native |
+| Voices | 184 installed here | 68 in the image | the Kokoro set |
+
+The trap in the middle column is worth stating plainly: **Docker Desktop gives
+the container no GPU on Apple Silicon**, so the shipped kokoro image runs on the
+CPU a model the machine could run on its GPU. That does not make it wrong — one
+voice across a Mac, a Linux box and a Windows machine is a real reason to keep it
+— but it is not the fast option, and mlx-audio is the same model without the
+penalty.
+
+mlx-audio needs no new code path, because it speaks the same OpenAI protocol:
+
+```sh
+pip install mlx-audio
+mlx_audio.server --host 127.0.0.1 --port 8880
+tstack config tts model kokoro mlx-community/Kokoro-82M-bf16
+tstack config tts engine kokoro
+```
+
+The `model` line is the whole difference. The Docker image answers to the literal
+string `kokoro`; mlx-audio wants the HuggingFace repo id and rejects anything
+else. Everything downstream — voice lists, samples, speed, the voice pool —
+works unchanged.
+
 ## Which engine actually speaks
 
 Tried in order, first one that works wins:
 
-1. **Kokoro** — `http://127.0.0.1:8880`, a Docker container **you** run. Nothing
-   here installs it.
+1. **Kokoro** — `http://127.0.0.1:8880`. Either the Docker container **you** run
+   or mlx-audio; nothing here installs either. `tstack config tts engines` on a
+   Mac compares them.
 2. **Chatterbox** — `http://127.0.0.1:8881`, same deal.
 3. **edge-tts** — `pip install edge-tts`. A cloud voice; needs network.
 4. **the offline floor** — `say` on macOS, SAPI on Windows. Neither needs a

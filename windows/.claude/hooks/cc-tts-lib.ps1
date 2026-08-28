@@ -103,6 +103,19 @@ function Get-CcTtsEffectiveExcitement {
     return [double](Get-CcTtsConfigValue 'chatterbox.energy' 0.25)
 }
 
+# The model id the /v1/audio/speech call names. The docker image answers to the
+# literal "kokoro"; mlx-audio -- the same model native on Apple Silicon, same wire
+# protocol -- wants the HuggingFace repo id and 400s on anything else.
+#
+# Defaulted HERE rather than trusted from the config, because a config stored
+# before this key existed has no `model` member at all: Get-CcTtsConfig fills
+# missing TOP-LEVEL keys only, so a nested addition arrives as $null and would be
+# sent as an empty model.
+function Get-CcTtsKokoroModel($k) {
+    if ($k -and $k.PSObject.Properties.Name -contains 'model' -and $k.model) { return [string]$k.model }
+    return 'kokoro'
+}
+
 function Get-CcTtsEffectiveKokoroSpeed {
     $exc = Get-CcTtsConfigValue 'excitement' $null
     if ($null -ne $exc) { return [math]::Round(0.8 + [double]$exc * 0.4, 2) }
@@ -153,7 +166,7 @@ function Invoke-CcTtsSynth {
             'kokoro' {
                 $k = $cfg.kokoro
                 $body = @{
-                    model = 'kokoro'; input = $Text; voice = $k.voice
+                    model = (Get-CcTtsKokoroModel $k); input = $Text; voice = $k.voice
                     response_format = $k.format; speed = [double](Get-CcTtsEffectiveKokoroSpeed)
                 } | ConvertTo-Json -Compress
                 Invoke-RestMethod -Uri ($k.url.TrimEnd('/') + '/v1/audio/speech') `
@@ -177,7 +190,7 @@ function Invoke-CcTtsSynth {
                 try {
                     $k = $cfg.kokoro
                     $body = @{
-                        model = 'kokoro'; input = $Text; voice = $k.voice
+                        model = (Get-CcTtsKokoroModel $k); input = $Text; voice = $k.voice
                         response_format = $k.format; speed = [double](Get-CcTtsEffectiveKokoroSpeed)
                     } | ConvertTo-Json -Compress
                     Invoke-RestMethod -Uri ($k.url.TrimEnd('/') + '/v1/audio/speech') `

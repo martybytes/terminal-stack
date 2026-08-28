@@ -484,19 +484,24 @@ cc_tts_temp_media() {
 
 cc_tts_synth_kokoro() {
     local text="$1" out="$2"
-    local url voice speed fmt timeout payload
+    local url model voice speed fmt timeout payload
     url="$(cc_tts_json .kokoro.url 'http://127.0.0.1:8880')"
+    # The docker image answers to the literal "kokoro"; mlx-audio -- the same
+    # model running natively on Apple Silicon, same wire protocol -- wants the
+    # HuggingFace repo id and 400s on anything else. Being configurable is the
+    # whole difference between the two, so it must not be a literal here.
+    model="$(cc_tts_json .kokoro.model kokoro)"
     voice="$(cc_tts_json .kokoro.voice am_adam)"
     speed="$(cc_tts_effective_kokoro_speed)"
     fmt="$(cc_tts_json .kokoro.format mp3)"
     timeout="$(cc_tts_json .kokoro.timeoutSec 15)"
     if command -v jq >/dev/null 2>&1; then
-        payload="$(jq -n --arg t "$text" --arg v "$voice" --arg f "$fmt" --argjson s "$speed" \
-            '{model:"kokoro",input:$t,voice:$v,response_format:$f,speed:$s}')"
+        payload="$(jq -n --arg t "$text" --arg m "$model" --arg v "$voice" --arg f "$fmt" --argjson s "$speed" \
+            '{model:$m,input:$t,voice:$v,response_format:$f,speed:$s}')"
     else
-        payload="$(python3 - "$text" "$voice" "$fmt" "$speed" <<'PY'
+        payload="$(python3 - "$text" "$voice" "$fmt" "$speed" "$model" <<'PY'
 import json, sys
-print(json.dumps({"model":"kokoro","input":sys.argv[1],"voice":sys.argv[2],
+print(json.dumps({"model":sys.argv[5],"input":sys.argv[1],"voice":sys.argv[2],
                   "response_format":sys.argv[3],"speed":float(sys.argv[4])}))
 PY
 )"

@@ -1525,7 +1525,7 @@ function Get-CcTtsDefaults {
         includeProject = $true
         excitement  = 0.25
         kokoro      = [ordered]@{
-            url = 'http://127.0.0.1:8880'; voice = 'am_adam'; speed = 1.0
+            url = 'http://127.0.0.1:8880'; model = 'kokoro'; voice = 'am_adam'; speed = 1.0
             format = 'mp3'; timeoutSec = 15
         }
         chatterbox  = [ordered]@{

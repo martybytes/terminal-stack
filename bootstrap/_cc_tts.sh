@@ -20,6 +20,7 @@ ts_cc_tts_default() {
         ccTtsIncludeProject)       echo true ;;
         ccTtsExcitement)           echo 0.25 ;;
         ccTtsKokoroUrl)            echo http://127.0.0.1:8880 ;;
+        ccTtsKokoroModel)          echo kokoro ;;
         ccTtsKokoroVoice)          echo am_adam ;;
         ccTtsKokoroSpeed)          echo 1.0 ;;
         ccTtsKokoroFormat)         echo mp3 ;;
@@ -59,7 +60,7 @@ ts_cc_tts_keys() {
         ccTtsPrefixClaude ccTtsPrefixCursor ccTtsPrefixCodex \
         ccTtsPrefixClaudeEnabled ccTtsPrefixCursorEnabled ccTtsPrefixCodexEnabled \
         ccTtsIncludeProject ccTtsExcitement \
-        ccTtsKokoroUrl ccTtsKokoroVoice ccTtsKokoroSpeed ccTtsKokoroFormat ccTtsKokoroTimeout \
+        ccTtsKokoroUrl ccTtsKokoroModel ccTtsKokoroVoice ccTtsKokoroSpeed ccTtsKokoroFormat ccTtsKokoroTimeout \
         ccTtsChatterboxUrl ccTtsChatterboxVoice ccTtsChatterboxEnergy \
         ccTtsChatterboxCfgWeight ccTtsChatterboxTemperature ccTtsChatterboxTimeout \
         ccTtsSayVoice ccTtsEdgeEnabled ccTtsEdgeVoice \
@@ -246,6 +247,7 @@ ts_cc_tts_json_for_mirror() {
     "excitement": $(ts_cc_tts_get ccTtsExcitement),
     "kokoro": {
       "url": "$(ts_cc_tts_get ccTtsKokoroUrl)",
+      "model": "$(ts_cc_tts_get ccTtsKokoroModel)",
       "voice": "$(ts_cc_tts_get ccTtsKokoroVoice)",
       "speed": $(ts_cc_tts_get ccTtsKokoroSpeed),
       "format": "$(ts_cc_tts_get ccTtsKokoroFormat)",
@@ -662,7 +664,11 @@ ts_cc_tts_list_voices() {
     url="$(ts_cc_tts_get ccTtsKokoroUrl)"
     command -v curl >/dev/null 2>&1 || { echo "curl is required to ask the engine." >&2; return 1; }
     local body
-    body="$(curl -fsS --max-time 5 "${url%/}/v1/audio/voices" 2>/dev/null || true)"
+    # mlx-audio's /v1/audio/voices 400s without ?model= (it resolves the voice
+    # packs out of that HuggingFace snapshot); the docker image has no such
+    # parameter and ignores it. Sent only when a model is actually configured, so
+    # the default path is byte-for-byte the request it always made.
+    body="$(curl -fsS --max-time 5 "${url%/}/v1/audio/voices$(ts_cc_tts_kokoro_model_query)" 2>/dev/null || true)"
     [ -n "$body" ] || {
         echo "$WARN kokoro is not answering at $url, so its voice list is unavailable." >&2
         echo "  start it with: tstack services up kokoro" >&2
@@ -682,9 +688,109 @@ ts_cc_tts_list_voices() {
     echo "Choose it: tstack config tts voice <name>"
 }
 
+# ── Which engine, on this particular Mac ───────────────────────────────────────
+# There are three ways to get a voice on macOS and they are not interchangeable.
+# The recommendation is DERIVED, not written down: the deciding facts are the
+# CPU architecture, whether Docker is running, and whether kokoro answers -- and
+# on Apple Silicon the deciding fact is that Docker Desktop does not pass the GPU
+# through, so the container runs kokoro on emulated CPU while mlx-audio runs the
+# same model on the Neural Engine.
+ts_cc_tts_engines() {
+    [ "$(uname -s 2>/dev/null)" = Darwin ] || {
+        echo "tstack config tts engines: macOS only - Windows has SAPI as its floor" >&2
+        echo "and Linux has kokoro or chatterbox. The three-way choice is a Mac thing." >&2
+        return 2; }
+
+    local arch cores mem_gb docker_state kokoro_state mlx_state say_count url
+    arch="$(uname -m 2>/dev/null || echo unknown)"
+    cores="$(sysctl -n hw.ncpu 2>/dev/null || echo '?')"
+    mem_gb="$(( $(sysctl -n hw.memsize 2>/dev/null || echo 0) / 1073741824 ))"
+    say_count="$(say -v '?' 2>/dev/null | wc -l | tr -d ' ')"
+    url="$(ts_cc_tts_get ccTtsKokoroUrl)"
+
+    docker_state=no
+    command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1 && docker_state=yes
+    kokoro_state=no
+    ts_cc_tts_kokoro_up && kokoro_state=yes
+    mlx_state=no
+    command -v python3 >/dev/null 2>&1 && python3 -c 'import mlx_audio' >/dev/null 2>&1 && mlx_state=yes
+
+    echo "This Mac: $arch, ${cores} cores, ${mem_gb} GB, $say_count installed system voices"
+    printf '  docker running: %s   kokoro answering at %s: %s   mlx-audio importable: %s\n\n' \
+        "$docker_state" "$url" "$kokoro_state" "$mlx_state"
+
+    cat <<'EOF'
+  1. say - the built-in macOS synthesiser
+     + Zero setup, zero memory, no server, works offline and on battery.
+     + Hundreds of voices, and the Premium/Enhanced ones are genuinely good.
+       System Settings -> Accessibility -> Spoken Content -> Manage Voices.
+     - macOS only, so a machine-independent voice is not on offer.
+     - No speed/energy control beyond the rate the system voice was built with.
+       tstack config tts engine say ; tstack config tts voices
+
+  2. kokoro in Docker - the container this stack ships
+     + The same voice on every machine you use, Mac, Linux and Windows alike.
+     + 68 voices, a voice pool per session, speed and excitement all work.
+     - On Apple Silicon Docker Desktop does NOT pass the GPU through, so this
+       runs on the CPU: slower per phrase, and an idle container's worth of
+       memory sitting there. It is an API that happens to be local, not a
+       native runtime.
+     - Needs the engine up before a notification can be spoken.
+       tstack services up kokoro ; tstack config tts engine kokoro
+
+  3. kokoro via mlx-audio - the same model, native on Apple Silicon
+     + Runs on the GPU through Metal rather than on the CPU: this is the fast one.
+     + Same Kokoro model, same OpenAI wire protocol, so it is a URL and a model
+       id away - no new code path, and the voice list still works.
+     - Apple Silicon only, and it is a Python package you maintain yourself:
+       there is no container to pin and no health check but the port.
+     - The model id is a HuggingFace repo, not the string "kokoro".
+         pip install mlx-audio
+         mlx_audio.server --host 127.0.0.1 --port 8880
+         tstack config tts model kokoro mlx-community/Kokoro-82M-bf16
+         tstack config tts engine kokoro
+EOF
+
+    echo
+    case "$arch" in
+        arm64)
+            echo "  RECOMMENDATION for this Mac: say."
+            echo "  It costs nothing, needs no server, and for one-sentence notifications the"
+            echo "  quality difference is small. Take mlx-audio (3) over Docker (2) if you want"
+            echo "  kokoro's voices here - Docker Desktop gives the container no GPU on Apple"
+            echo "  Silicon, so option 2 runs on the CPU a model this machine could run on its"
+            echo "  GPU. Keep 2 only if you want the SAME voice across a Mac, a Linux box and a"
+            echo "  Windows machine, which is a real reason."
+            ;;
+        x86_64)
+            echo "  RECOMMENDATION for this Mac: say, then kokoro in Docker (2) if you want a"
+            echo "  voice shared with your other machines. Option 3 is Apple Silicon only, so"
+            echo "  it is not available on this Intel Mac."
+            ;;
+        *)
+            echo "  RECOMMENDATION: say. The architecture ($arch) is not one this advice covers,"
+            echo "  and say is the option that needs nothing."
+            ;;
+    esac
+    [ "$kokoro_state" = yes ] && echo "  (kokoro is answering right now, so 2 or 3 is already usable.)"
+    echo
+    echo "  Hear any of them before choosing: tstack config tts voices"
+    return 0
+}
+
 # Is kokoro answering? Used to pick which engine's list to show when the saved
 # engine is kokoro but the container is down -- offering a list you cannot hear
 # is worse than offering the one you can.
+# "?model=<id>", or empty for the docker image. Deliberately not URL-encoded
+# beyond the one character that matters: a HuggingFace repo id is
+# <owner>/<name>, and the slash is legal in a query value.
+ts_cc_tts_kokoro_model_query() {
+    local model
+    model="$(ts_cc_tts_get ccTtsKokoroModel)"
+    [ -n "$model" ] && [ "$model" != kokoro ] || return 0
+    printf '?model=%s' "$model"
+}
+
 ts_cc_tts_kokoro_up() {
     command -v curl >/dev/null 2>&1 || return 1
     curl -fsS --max-time 2 -o /dev/null "$(ts_cc_tts_get ccTtsKokoroUrl | sed 's:/*$::')/v1/models" 2>/dev/null
@@ -692,11 +798,12 @@ ts_cc_tts_kokoro_up() {
 
 # Synthesise one sample and play it through the same path an announcement uses.
 ts_cc_tts_say_sample_kokoro() {
-    local url="$1" voice="$2" tmp
+    local url="$1" voice="$2" tmp model
+    model="$(ts_cc_tts_get ccTtsKokoroModel)"
     tmp="$(mktemp -t ts-voice).mp3"
     curl -fsS --max-time 20 -X POST "${url%/}/v1/audio/speech" \
         -H 'content-type: application/json' \
-        -d "{\"model\":\"kokoro\",\"input\":\"Hello, I am $voice. This is how I sound.\",\"voice\":\"$voice\",\"response_format\":\"mp3\"}" \
+        -d "{\"model\":\"$model\",\"input\":\"Hello, I am $voice. This is how I sound.\",\"voice\":\"$voice\",\"response_format\":\"mp3\"}" \
         -o "$tmp" 2>/dev/null || { rm -f "$tmp"; echo "synthesis failed" >&2; return 1; }
     if command -v afplay >/dev/null 2>&1; then afplay "$tmp"
     elif command -v ffplay >/dev/null 2>&1; then ffplay -nodisp -autoexit -loglevel quiet "$tmp"
@@ -783,6 +890,21 @@ ts_config_tts() {
             ts_cc_tts_set ccTtsChatterboxEnergy "$arg"
             ts_cc_tts_finish
             finish
+            ;;
+        model)
+            # Only kokoro takes one: chatterbox's API has no model field, and
+            # `say` is a system binary.
+            [ -n "$arg2" ] || { echo "usage: tstack config tts model kokoro <model-id>" >&2; return 2; }
+            case "$arg" in
+                kokoro) ts_cc_tts_set ccTtsKokoroModel "$arg2" ;;
+                *) echo "tstack config tts model: only kokoro takes a model id" >&2; return 2 ;;
+            esac
+            ts_cc_tts_finish
+            finish
+            ;;
+        engines)
+            ts_cc_tts_engines
+            return $?
             ;;
         url)
             [ -n "$arg" ] && [ -n "$arg2" ] || { echo "usage: tstack config tts url kokoro|chatterbox <url>" >&2; return 2; }
@@ -1029,7 +1151,8 @@ tstack config tts — agent local TTS (Kokoro / Chatterbox / edge-tts)
   message template|hook
   voice <kokoro-voice> | voice-chatter <name>
   energy <0-1> | excitement <0-1>
-  url kokoro|chatterbox <url>
+  url kokoro|chatterbox <url> | model kokoro <model-id>
+  engines                                 (macOS: the three options, and which fits this Mac)
   events waiting,error,question,permission
   prefix claude|cursor|codex on|off|<label>
   project on|off

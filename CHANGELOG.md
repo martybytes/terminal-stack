@@ -6,6 +6,28 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Added
 
+- **kokoro natively on Apple Silicon, and a command that says which engine fits
+  this Mac (08/27/2026).** There are three ways to get a voice on macOS and they
+  are not interchangeable, so `tstack config tts engines` measures the machine
+  (architecture, cores, memory, installed voices, and whether Docker, kokoro and
+  mlx-audio are actually present) and **derives** a recommendation rather than
+  carrying one.
+
+  The deciding fact it exists to state: **Docker Desktop gives the container no
+  GPU on Apple Silicon**, so the shipped kokoro image runs on the CPU a model the
+  machine could run on its GPU. mlx-audio is that same Kokoro model running
+  natively, and it speaks the same OpenAI protocol — `/v1/audio/speech` with
+  model, voice, speed and response_format, plus `/v1/audio/voices` and
+  `/v1/models`. Every field matched except one, which is why the whole port is a
+  setting rather than a code path: the Docker image answers to the literal string
+  `kokoro`, and mlx-audio wants the HuggingFace repo id and rejects anything else.
+
+  `ccTtsKokoroModel` (default `kokoro`, `tstack config tts model kokoro <id>`) is
+  now read by both hook libraries, the runtime config template and the Windows
+  mirror. The voices endpoint gets `?model=` only when a model is configured —
+  mlx-audio 400s without it, the container has no such parameter, and the default
+  request must stay byte-for-byte the one that is known to work.
+
 - **`tstack agents llm` — what a chat model switches on, and what runs without
   one (08/27/2026).** AgentMemory needs no LLM for storage, semantic search or
   embeddings; a chat model adds exactly four things (`compression`, `summary`,
