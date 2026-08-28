@@ -103,6 +103,19 @@ function Get-CcTtsEffectiveExcitement {
     return [double](Get-CcTtsConfigValue 'chatterbox.energy' 0.25)
 }
 
+# The model id the /v1/audio/speech call names. The docker image answers to the
+# literal "kokoro"; mlx-audio -- the same model native on Apple Silicon, same wire
+# protocol -- wants the HuggingFace repo id and 400s on anything else.
+#
+# Defaulted HERE rather than trusted from the config, because a config stored
+# before this key existed has no `model` member at all: Get-CcTtsConfig fills
+# missing TOP-LEVEL keys only, so a nested addition arrives as $null and would be
+# sent as an empty model.
+function Get-CcTtsKokoroModel($k) {
+    if ($k -and $k.PSObject.Properties.Name -contains 'model' -and $k.model) { return [string]$k.model }
+    return 'kokoro'
+}
+
 function Get-CcTtsEffectiveKokoroSpeed {
     $exc = Get-CcTtsConfigValue 'excitement' $null
     if ($null -ne $exc) { return [math]::Round(0.8 + [double]$exc * 0.4, 2) }
@@ -153,7 +166,7 @@ function Invoke-CcTtsSynth {
             'kokoro' {
                 $k = $cfg.kokoro
                 $body = @{
-                    model = 'kokoro'; input = $Text; voice = $k.voice
+                    model = (Get-CcTtsKokoroModel $k); input = $Text; voice = $k.voice
                     response_format = $k.format; speed = [double](Get-CcTtsEffectiveKokoroSpeed)
                 } | ConvertTo-Json -Compress
                 Invoke-RestMethod -Uri ($k.url.TrimEnd('/') + '/v1/audio/speech') `
@@ -177,7 +190,7 @@ function Invoke-CcTtsSynth {
                 try {
                     $k = $cfg.kokoro
                     $body = @{
-                        model = 'kokoro'; input = $Text; voice = $k.voice
+                        model = (Get-CcTtsKokoroModel $k); input = $Text; voice = $k.voice
                         response_format = $k.format; speed = [double](Get-CcTtsEffectiveKokoroSpeed)
                     } | ConvertTo-Json -Compress
                     Invoke-RestMethod -Uri ($k.url.TrimEnd('/') + '/v1/audio/speech') `
@@ -207,6 +220,40 @@ function Invoke-CcTtsSynth {
         }
     }
     return $false
+}
+
+function Invoke-CcTtsSapiSpeak {
+    <#
+      The Windows floor, and the reason "on" can no longer mean silence here.
+
+      Invoke-CcTtsSynth's ladder ended at edge-tts and returned $false, so a
+      native-Windows host with the daemon off, kokoro down and edge-tts not
+      installed produced nothing at all -- the exact gap /usr/bin/say was added
+      to close on macOS, still open on the platform this stack started on.
+
+      It SPEAKS rather than synthesising to a file, deliberately. The Windows
+      playback path is cc-tts-play.ps1, which requires ffplay and errors without
+      it; a floor that depends on a package the user may not have is not a floor.
+      SAPI is part of Windows and needs neither a file nor a player.
+
+      The daemon already does exactly this (ttsd/playback.py) -- this is the same
+      rung for the hook path, which is what runs when the daemon is off.
+
+      Never throws: the caller's alternative is silence, so a failure here must
+      leave things no worse than they already were.
+    #>
+    param([string]$Text)
+    if (-not $Text) { return $false }
+    try {
+        # The system voice, deliberately: no ccTts* key selects a SAPI voice,
+        # and inventing one here would be a setting the schema does not describe
+        # and nothing else can read.
+        $sapi = New-Object -ComObject SAPI.SpVoice
+        $sapi.Speak($Text) | Out-Null
+        return $true
+    } catch {
+        return $false
+    }
 }
 
 function Parse-CcTtsInputHook {

@@ -856,72 +856,50 @@ def test_terminal_emulator_stays_optional_on_every_platform():
     assert "if ts_is_headless || _ts_is_wsl; then return 0; fi" in deb
 
 
-def test_multi_select_prompts_render_identically():
-    """ts_prompt_multi and Read-TsMulti are a byte-identical pair, like ts_prompt_choice."""
-    sh = (ROOT / "bootstrap/_wizard.sh").read_text(encoding="utf-8")
-    ps = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
-    assert "ts_prompt_multi() {" in sh and "function Read-TsMulti" in ps
-    # Row format: bash %2d == pwsh {1,2}
-    assert r"'  [%s] %2d) %s%s\n'" in sh
-    assert '"  [{0}] {1,2}) {2}{3}"' in ps
-    for line in (
-        "Toggle a number, [a]ll, [n]one, Enter to continue, [s]kip",
-        "(non-interactive — keeping the defaults)",
-        "(several are fine), a, n, s, or Enter",
-    ):
-        assert line in sh, line
-        assert line in ps, line
-    # The whitespace-stripping trap: "1 2" must stay two tokens.
-    multi = sh[sh.index("ts_prompt_multi() {") :]
-    assert "tr -d '[:space:]'" not in multi[: multi.index("\n}\n")]
-    assert "-split '[,\\s]+'" in ps
-
-
 def test_wezterm_env_vars_map_onto_channels():
-    sh = (ROOT / "bootstrap/_wizard.sh").read_text(encoding="utf-8")
-    ps = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
-    for body in (sh, ps):
-        assert "TS_TERMINALS" in body
-        assert "TS_WEZTERM" in body, "the older spelling must keep working"
-        assert "wezterm-nightly" in body and "wezterm-stable" in body
+    """One implementation to check now, not two files agreeing."""
+    flow = (ROOT / "tstack/wizard/flow.py").read_text(encoding="utf-8")
+    assert "TS_TERMINALS" in flow
+    assert "TS_WEZTERM" in flow, "the older spelling must keep working"
+    assert "wezterm-nightly" in flow and "wezterm-stable" in flow
     # nightly is a real answer again, not a warning.
-    assert "nightly is retired" not in sh and "nightly is retired" not in ps
+    assert "nightly is retired" not in flow
 
 
-@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_wezterm_env_var_channel_mapping_is_exact():
-    """TS_TERMINALS / TS_WEZTERM must resolve to the channel the user named."""
-    cases = {
-        "TS_TERMINALS=none": ("", ""),
-        "TS_TERMINALS=wezterm-stable": ("wezterm-stable", "stable"),
-        "TS_TERMINALS=wezterm-nightly,ghostty": ("wezterm-nightly ghostty", "nightly"),
-        # a bare `wezterm` has never named a channel: take the default one
-        "TS_TERMINALS=wezterm": ("wezterm-nightly", "nightly"),
-        "TS_WEZTERM=nightly": ("wezterm-nightly", "nightly"),
-        "TS_WEZTERM=stable": ("wezterm-stable", "stable"),
-        "TS_WEZTERM=skip": ("", ""),
-    }
-    for env, (want_sel, want_chan) in cases.items():
-        k, v = env.split("=", 1)
-        r = subprocess.run(
-            [
-                BASH,
-                "-c",
-                ". bootstrap/_config.sh >/dev/null 2>&1; . bootstrap/_wizard.sh; "
-                'sel="$(ts_prompt_terminals)"; printf "%s|%s" "$sel" "$(ts_terminals_channel "$sel")"',
-            ],
-            cwd=ROOT,
-            env={**os.environ, k: v},
-            text=True,
-            capture_output=True,
-            check=False,
-            timeout=300,
-            start_new_session=True,
-        )
-        assert r.returncode == 0, r.stderr
-        sel, chan = r.stdout.split("|")
-        assert sel.strip() == want_sel, f"{env}: got selection {sel!r}"
-        assert chan.strip() == want_chan, f"{env}: got channel {chan!r}"
+    """`TS_WEZTERM` predates the tick-list and still has to map onto it, or a
+    scripted install that used it starts installing something else.
+
+    The mapping lives in tstack/wizard/flow.py now -- one implementation, so
+    what is worth asserting is the behaviour rather than two files agreeing.
+    """
+    import os
+
+    from tstack.wizard import flow
+    from tstack.wizard.console import Console
+
+    def terminals(**env):
+        saved = {k: os.environ.get(k) for k in ("TS_TERMINALS", "TS_WEZTERM")}
+        try:
+            for key in saved:
+                os.environ.pop(key, None)
+            os.environ.update(env)
+            return flow._terminals(flow.Asker(Console()))
+        finally:
+            for key, value in saved.items():
+                os.environ.pop(key, None)
+                if value is not None:
+                    os.environ[key] = value
+
+    assert terminals(TS_WEZTERM="stable") == ["wezterm-stable"]
+    assert terminals(TS_WEZTERM="nightly") == ["wezterm-nightly"]
+    assert terminals(TS_WEZTERM="skip") == []
+    assert terminals(TS_WEZTERM="none") == []
+    # The bare token is the old spelling and must still mean the channel this
+    # stack configures.
+    assert terminals(TS_TERMINALS="wezterm") == ["wezterm-nightly"]
+    assert terminals(TS_TERMINALS="none") == []
+    assert terminals(TS_TERMINALS="wezterm-stable,ghostty") == ["wezterm-stable", "ghostty"]
 
 
 def test_wezterm_version_string_parses_to_a_date():
@@ -1151,20 +1129,13 @@ def test_new_tools_are_in_the_catalog_with_descriptions():
 
 @pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_agent_clis_are_asked_about_and_default_to_all():
-    """Default-to-all, but still a question: every group starts ticked and every
-    tool inside stays individually untickable."""
+    """Default-to-all, but still a question: every agent CLI is pre-ticked and
+    every one stays individually untickable."""
     ai = _sh_eval("ts_app_group_members ai").split()
     assert set(ai) == {"claude", "codex", "cursor-agent", "grok", "gemini", "pi"}
     recommended = _sh_eval('echo "$TS_APPS_RECOMMENDED"').split()
     for tool in ai:
         assert tool in recommended, f"{tool} should be pre-ticked (default to all)"
-    # The group picker pre-ticks every group, ai included.
-    wiz = (ROOT / "bootstrap/_wizard.sh").read_text(encoding="utf-8")
-    assert 'case "$g" in ai) ;;' not in wiz, "the ai group must not be singled out any more"
-    ps = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
-    assert "if ($g -ne 'ai')" not in ps
-    # …but it is still a prompt, not a forced install.
-    assert "ts_prompt_multi" in wiz
 
 
 @pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
@@ -1277,30 +1248,6 @@ def test_ts_config_wizard_replays_the_whole_questionnaire():
     assert "$runWizard = {" in ps and "'wizard'" in ps
 
 
-def test_shared_pwsh_prompts_live_where_both_callers_can_reach_them():
-    """$PROFILE dot-sources _config.ps1 only; a prompt in windows-bootstrap.ps1
-    is invisible to `tstack config wizard`."""
-    cfg = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
-    boot = (ROOT / "bootstrap/windows-bootstrap.ps1").read_text(encoding="utf-8")
-    for fn in ("function Read-TsWizard", "function Install-TsTerminals"):
-        assert fn in cfg, f"{fn} must live in _config.ps1"
-        assert fn not in boot, f"{fn} is duplicated in windows-bootstrap.ps1"
-
-
-def test_wizard_callees_are_all_defined_in_config_ps1():
-    """Naming the two moved functions is not enough: `Read-TsWizard` calling a
-    prompt that stayed in windows-bootstrap.ps1 is a runtime crash for
-    `tstack config wizard` only (this is how Read-TsWorkspaceDir broke it). Derive
-    the callee list from the body instead of maintaining it by hand."""
-    cfg = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
-    body = cfg[cfg.index("function Read-TsWizard") :]
-    body = body[: body.index("\nfunction ", 1)]
-    called = set(re.findall(r"\b((?:Read|Get|Test|Show|Save|Install)-Ts[A-Za-z]+)", body))
-    called.discard("Read-TsWizard")
-    missing = sorted(n for n in called if not re.search(r"^function " + n + r"\b", cfg, re.M))
-    assert not missing, f"Read-TsWizard calls {missing}, which tstack config wizard cannot see"
-
-
 def test_pwsh_wizard_persists_the_workspace_answer():
     """The questionnaire asks for a workspace root; dropping the answer on the
     `tstack config wizard` path is a silent behaviour difference from the installer."""
@@ -1309,7 +1256,11 @@ def test_pwsh_wizard_persists_the_workspace_answer():
     )
     cfg = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
     assert "function Save-TsWorkspaceOverride" in cfg
-    assert "Save-TsWorkspaceOverride $w.Workspace" in ps
+    # NOT $w.Workspace. The workspace root is not a wizard question -- it has no
+    # bash twin and the emitted JSON never carried the key -- so that read was
+    # $null and this persisted an EMPTY WORKSPACE_DIR over a real one. Ask for it
+    # the way windows-bootstrap.ps1 does.
+    assert "Save-TsWorkspaceOverride (Read-TsWorkspaceDir)" in ps
     # And a half-finished questionnaire must not be persisted over real answers.
     assert "did not complete" in ps
 
@@ -1477,11 +1428,12 @@ def test_smb_exists_and_is_not_claimed_for_pwsh():
 
 
 def test_rclone_is_in_the_catalog_with_a_description():
-    cfg = (ROOT / "bootstrap/_config.sh").read_text(encoding="utf-8")
-    assert "rclone" in cfg
+    conf = (ROOT / "bootstrap/apps.conf").read_text(encoding="utf-8")
+    row = [ln for ln in conf.splitlines() if ln.split()[:1] == ["rclone"]]
+    assert len(row) == 1, "rclone must be in the catalog exactly once"
+    assert len(row[0].split(None, 4)) == 5, "and carry a description"
     ps = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
-    assert "rclone     = 'Rclone.Rclone'" in ps
-    assert "'rclone'" in ps
+    assert "rclone     = 'Rclone.Rclone'" in ps, "the winget id still lives in the pwsh table"
 
 
 def test_guided_rclone_only_intercepts_exact_bare_config():
@@ -1765,15 +1717,22 @@ def test_windows_ghostty_drops_the_macos_only_directives():
     assert "cmd+" not in body, "there is no Cmd key on Windows"
 
 
-def test_ghostty_theme_mapping_is_the_same_in_both_sync_paths():
+def test_ghostty_theme_mapping_is_the_same_in_every_place_that_renders_it():
     """Ghostty's config format has no conditionals and Windows mirror files get
-    token substitution, so themeMode -> theme is resolved in the sync. That means
-    the mapping exists three times (bash sync, pwsh sync, tstack config diff) and all
-    of them must agree, or `tstack config ghostty diff` reports a phantom change."""
+    token substitution, so themeMode -> theme is resolved before the file is
+    written. The mapping therefore exists in more than one place and all of them
+    must agree, or `tstack ghostty diff` reports a phantom change.
+
+    It used to exist FOUR times -- both syncs, `bootstrap/ts-config.sh` and
+    `$PROFILE`. The last two are now one function, `tstack/ghostty.py`'s
+    `theme_tokens`, which both shells hand off to. The syncs keep their own copy
+    because they run where Python may not be, which is exactly why this test
+    still has to compare them.
+    """
     sources = {
         "run_after_90-sync-windows.sh": (ROOT / "run_after_90-sync-windows.sh"),
         "scripts/sync-windows.ps1": (ROOT / "scripts/sync-windows.ps1"),
-        "bootstrap/ts-config.sh": (ROOT / "bootstrap/ts-config.sh"),
+        "tstack/ghostty.py": (ROOT / "tstack/ghostty.py"),
     }
     for name, path in sources.items():
         body = path.read_text(encoding="utf-8")
@@ -1781,8 +1740,34 @@ def test_ghostty_theme_mapping_is_the_same_in_both_sync_paths():
             f"{name}: follow must use a split theme (it is what tracks the OS)"
         )
         assert "vs-code-light-modern" in body and "Catppuccin Mocha" in body, name
-        for wt in ("'light'", "'auto'", "'dark'"):
-            assert wt in body, f"{name}: missing window-theme value {wt}"
+        for wt in ("light", "auto", "dark"):
+            assert f"'{wt}'" in body or f'"{wt}"' in body, (
+                f"{name}: missing window-theme value {wt}"
+            )
+
+    # And the shells must no longer carry one of their own.
+    for gone in (
+        "bootstrap/ts-config.sh",
+        "windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1",
+    ):
+        body = (ROOT / gone).read_text(encoding="utf-8")
+        assert "dark:Catppuccin Mocha,light:vs-code-light-modern" not in body, (
+            f"{gone} grew a fifth copy of the mapping; it hands off to tstack ghostty"
+        )
+
+
+def test_both_shells_hand_ghostty_off_rather_than_reimplementing_it():
+    """~160 lines of bash and ~90 of PowerShell became one module, reached the
+    way `mux` and `wezterm` already are. A shell that starts doing the work again
+    is a fourth implementation of a mapping this file has to police."""
+    sh = (ROOT / "bootstrap/ts-config.sh").read_text(encoding="utf-8")
+    ps = (ROOT / "windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1").read_text(
+        encoding="utf-8"
+    )
+    assert "run_ghostty()" in sh and 'main.py" ghostty' in sh
+    assert "ghostty_paths" not in sh and "ghostty_status()" not in sh
+    assert "Invoke-TstackSub -Name 'ghostty'" in ps
+    assert "config.bak." not in ps, "the backup dance belongs to tstack/ghostty.py now"
 
 
 def test_ghostty_off_skips_the_windows_subtree_without_deleting_it():
@@ -1812,18 +1797,6 @@ def test_ghostty_is_offered_on_windows_but_never_installed():
     ids = ps.split("$script:TsTerminalWingetIds = @{")[1].split("}")[0]
     assert "ghostty" not in ids, "offered, never auto-installed"
     assert "no Windows build available" not in ps, "that claim is obsolete"
-
-
-def test_pwsh_preticked_list_survives_appending():
-    """A PowerShell `switch` unrolls a one-element array to a SCALAR, so `+=` on
-    the result concatenates strings instead of appending: the preticked list
-    silently became the single key 'wezterm-nightlyghostty' and the whole question
-    rendered unticked. The @( ) around the switch is what prevents it."""
-    ps = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
-    block = ps.split("$preticked = ")[1][:400]
-    assert block.startswith("@(switch"), (
-        "wrap the switch in @( ) or += will concatenate instead of append"
-    )
 
 
 def test_windows_ghostty_pins_the_same_shell_as_wezterm():
@@ -2204,103 +2177,6 @@ def test_wizard_answers_persist_before_any_optional_install():
         )
 
 
-def test_terminal_tick_list_enforces_one_wezterm_channel_live():
-    """Both casks own /Applications/WezTerm.app, so both ticked is impossible.
-    The constraint used to run only after Enter, so the screen showed [x] [x]."""
-    wiz = (ROOT / "bootstrap/_wizard.sh").read_text(encoding="utf-8")
-    ps = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
-    assert "TS_MULTI_EXCLUSIVE" in wiz
-    assert 'TS_MULTI_EXCLUSIVE="wezterm-nightly wezterm-stable"' in wiz
-    assert "$Exclusive" in ps and "-Exclusive @('wezterm-nightly', 'wezterm-stable')" in ps
-    # The env path returned early without the constraint on both sides.
-    assert "ts_terminals_one_channel" in wiz
-    assert wiz.count("ts_terminals_one_channel") >= 3  # def + env path + picker
-
-
-# The exclusive collapse is driven by the index of whatever was just ticked. That
-# index is only a "winner" when it is IN the group: ticking an option outside it
-# gave every ticked member a $keep no member could equal, so the whole group was
-# cleared. On macOS the terminal question is the only exclusive one and Ghostty is
-# the only non-member, so ticking Ghostty returned Ghostty ALONE — WezTerm dropped
-# out of the selection with nothing on screen to say so. Both twins had it; the
-# pwsh side was unreachable behind the Read-TsMulti crash.
-_EXCL_CASES = [
-    # answers typed,  expected selection
-    (["3", ""], ["wezterm-nightly", "ghostty"]),  # non-member must not collapse
-    (["2", ""], ["wezterm-stable"]),  # member still evicts its rival
-    (["3", "2", ""], ["wezterm-stable", "ghostty"]),
-    (["2", "3", ""], ["wezterm-stable", "ghostty"]),
-    (["a", ""], ["wezterm-nightly", "ghostty"]),  # all: group collapses to the tie-break
-    (["1", ""], []),
-]
-
-# ts_prompt_multi reads its answer inside a nested $( ), so a shell-variable
-# cursor would reset on every call. Keep it on disk.
-_EXCL_BASH = """
-. bootstrap/_config.sh >/dev/null 2>&1
-. bootstrap/_wizard.sh
-ts_is_interactive() { return 0; }
-Q=$(mktemp); N=$(mktemp); echo 0 > "$N"
-printf '%s\n' ANSWERS > "$Q"
-ts_tty_prompt() { local i; i=$(cat "$N"); sed -n "$((i+1))p" "$Q"; echo $((i+1)) > "$N"; }
-TS_MULTI_EXCLUSIVE="wezterm-nightly wezterm-stable" ts_prompt_multi \
-    "wezterm-nightly" "T:" "" \
-    "wezterm-nightly|nightly|" "wezterm-stable|stable|" "ghostty|ghostty|"
-rm -f "$Q" "$N"
-"""
-
-_EXCL_PWSH = (
-    ". ./bootstrap/_config.ps1; "
-    "function Test-TsInteractive { $true }; "
-    "$script:q = [System.Collections.Queue]::new(@(ANSWERS)); "
-    "function Read-Host { param([string]$Prompt) "
-    "if ($script:q.Count) { $script:q.Dequeue() } else { '' } }; "
-    "$r = Read-TsMulti -Title 'T:' -Options @("
-    "@{Key='wezterm-nightly';Label='nightly'},"
-    "@{Key='wezterm-stable';Label='stable'},"
-    "@{Key='ghostty';Label='ghostty'}) "
-    "-Preticked @('wezterm-nightly') "
-    "-Exclusive @('wezterm-nightly','wezterm-stable') 6>$null; "
-    "Write-Output ('RESULT=' + ($r -join ' '))"
-)
-
-
-@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
-def test_exclusive_group_survives_a_non_member_tick_bash():
-    for answers, want in _EXCL_CASES:
-        script = _EXCL_BASH.replace("ANSWERS", " ".join(f'"{a}"' for a in answers))
-        r = subprocess.run(
-            [BASH, "-c", script],
-            cwd=ROOT,
-            text=True,
-            capture_output=True,
-            check=False,
-            stdin=subprocess.DEVNULL,
-            timeout=60,
-            start_new_session=True,
-        )
-        assert r.stdout.split() == want, f"{answers}: got {r.stdout.split()!r}"
-
-
-@pytest.mark.skipif(not shutil.which("pwsh"), reason="PowerShell 7 is unavailable")
-def test_exclusive_group_survives_a_non_member_tick_pwsh():
-    """The pwsh twin must reach the same six answers as the bash one."""
-    for answers, want in _EXCL_CASES:
-        command = _EXCL_PWSH.replace("ANSWERS", ",".join(f"'{a}'" for a in answers))
-        r = subprocess.run(
-            [shutil.which("pwsh"), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command],
-            cwd=ROOT,
-            text=True,
-            capture_output=True,
-            check=False,
-            timeout=300,
-            start_new_session=True,
-        )
-        line = next((l for l in r.stdout.splitlines() if l.startswith("RESULT=")), None)
-        assert line is not None, r.stdout + r.stderr
-        assert line[len("RESULT=") :].split() == want, f"{answers}: got {line!r}"
-
-
 @pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_installed_apps_report_survives_a_tool_that_rejects_version():
     """The report assigned a four-stage pipeline directly, so under
@@ -2347,52 +2223,6 @@ def test_ts_config_wizard_asks_about_terminals_and_saves_first():
         "run_wizard installs before saving the answers"
     )
     assert "ts_note_failure" in rw, "installs here must not be fatal either"
-
-
-@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
-def test_wizard_prompts_run_without_undefined_functions():
-    """A RUNTIME smoke test, because the static text checks around it missed two
-    real regressions: `exclusive -1` was called before its function was defined,
-    and ts-config.sh called ts_is_headless without sourcing _detect.sh. Both
-    printed 'command not found' in a live run and silently skipped their work."""
-    script = (
-        'SRC="$PWD"\n'
-        '. "$SRC/bootstrap/_config.sh" >/dev/null 2>&1\n'
-        '. "$SRC/bootstrap/_wizard.sh"\n'
-        '. "$SRC/bootstrap/_detect.sh"\n'
-        # every function ts-config.sh / the bootstraps call on the wizard path
-        "for f in ts_is_headless ts_is_interactive ts_prompt_multi ts_prompt_choice \\\n"
-        "         ts_prompt_terminals ts_terminals_one_channel ts_wizard_collect \\\n"
-        "         ts_note_failure ts_report_failures; do\n"
-        '  command -v "$f" >/dev/null || echo "UNDEFINED: $f"\n'
-        "done\n"
-        # and actually drive the picker, which is where the ordering bug lived
-        'TS_MULTI_EXCLUSIVE="a b" ts_prompt_multi "a b" "T:" "" "a|A|" "b|B|" "c|C|"\n'
-    )
-    # start_new_session detaches the child from the controlling terminal, so
-    # opening /dev/tty fails - which is the state this test already says it
-    # expects ("legitimately absent under pytest"). stdin=DEVNULL is not enough:
-    # ts_prompt_multi reads from /dev/tty, not stdin, so wherever a tty exists
-    # the prompt blocks forever. It does under WSL and it does not under Git
-    # Bash, which is why this passed on Windows and hung on Linux.
-    # The timeout turns any future regression of that shape into a failure
-    # rather than a hang.
-    r = subprocess.run(
-        [BASH, "-c", script],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        stdin=subprocess.DEVNULL,
-        start_new_session=True,
-        timeout=120,
-    )
-    assert "UNDEFINED:" not in r.stdout, r.stdout
-    # /dev/tty is legitimately absent under pytest; anything else is a real fault.
-    noise = [l for l in r.stderr.splitlines() if l.strip() and "/dev/tty" not in l]
-    assert not noise, "wizard emitted errors: " + "; ".join(noise)
-    # The exclusive group must have collapsed a pre-tick of BOTH a and b.
-    picked = r.stdout.replace("UNDEFINED:", "").split()
-    assert picked == ["a"], f"exclusive group not applied: {picked!r}"
 
 
 def test_ts_config_sources_what_it_calls():
@@ -2442,46 +2272,18 @@ def test_service_probes_treat_any_http_response_as_up(monkeypatch):
 
 
 def test_wizard_recommends_and_probes_before_offering():
-    """Blind on/off questions let a machine be wired to a service that is not
-    running — which then fails later and silently, because the agentmemory hooks
-    swallow errors and exit 0. Probe first, default from what was found."""
-    wiz = (ROOT / "bootstrap/_wizard.sh").read_text(encoding="utf-8")
-    for fn in ("ts_prompt_wezterm_mux", "ts_prompt_wezterm_restore", "ts_prompt_atuin"):
-        body = wiz[wiz.index(f"{fn}() {{") :]
-        body = body[: body.index("\n}\n")]
-        assert "RECOMMENDATION:" in body, f"{fn} has no recommendation"
-    # atuin now defaults to ON; the other two stay off.
-    at = wiz[wiz.index("ts_prompt_atuin() {") :]
-    at = at[: at.index("\n}\n")]
-    assert "ts_prompt_choice on " in at, "atuin should default to on"
-    for fn in ("ts_prompt_wezterm_mux", "ts_prompt_wezterm_restore"):
-        b = wiz[wiz.index(f"{fn}() {{") :]
-        b = b[: b.index("\n}\n")]
-        assert "ts_prompt_choice off " in b, f"{fn} should default to off"
-    # Headroom and AgentMemory are no longer two independent toggles -- that is
-    # what made "both memory systems on" reachable -- but the reason for probing
-    # them is unchanged: a machine wired to a service that is not running fails
-    # later and silently. Both probes run inside the one memory question, and
-    # their output is in what the question prints.
-    mem = wiz[wiz.index("ts_prompt_memory_backend() {") :]
-    mem = mem[: mem.index("\n}\n")]
-    assert "ts_probe_agentmemory" in mem and "ts_probe_headroom" in mem, (
-        "the memory question must probe both services before offering"
-    )
-    assert mem.index("ts_probe_agentmemory") < mem.index("ts_prompt_choice"), (
-        "probe before offering, not after"
-    )
-    assert "${am_report}" in mem and "${hr_report}" in mem, (
-        "the probe output must reach the question the user reads"
-    )
-    assert "RECOMMENDATION:" in mem
-    # The default is a CHOICE, not a probe result. Deriving it from the probe
-    # would recommend "none" on a first install -- where nothing is running yet,
-    # by definition -- and talk a newcomer out of the feature they came for.
-    assert "ts_prompt_choice agentmemory " in mem, "the recommended answer must be agentmemory"
-    # And the two blind toggles must not come back.
-    assert 'TS_WIZ_HEADROOM="$(ts_prompt_agent_toggle' not in wiz
-    assert 'TS_WIZ_AGENTMEMORY="$(ts_prompt_agent_toggle' not in wiz
+    """Every behaviour question opens with a RECOMMENDATION saying which way to
+    go AND what it costs. A default with no reasoning is one people override at
+    random."""
+    body = (ROOT / "tstack/wizard/flow.py").read_text(encoding="utf-8")
+    assert body.count("RECOMMENDATION:") >= 3
+    # mux off and restore off both have to say what they cost.
+    assert "tstack mux restart" in body and "kills every pane" in body
+    assert "autosave means Leader+L still restores" in body
+    # atuin is recommended ON, and is asked even on a headless host: unlike the
+    # WezTerm questions it is a shell binding, and a server has a shell.
+    atuin = body[body.index("atuin shell history") :]
+    assert "Reversible" in atuin[:600]
 
 
 def test_platform_impossible_apps_are_not_offered_forever():
@@ -2492,57 +2294,6 @@ def test_platform_impossible_apps_are_not_offered_forever():
     pend = cfg[cfg.index("ts_apps_pending() {") :]
     pend = pend[: pend.index("\n}\n")]
     assert "ts_app_installable" in pend, "pending list must filter impossible ids"
-
-
-@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
-def test_nightly_is_preticked_even_when_stable_is_installed():
-    """Pre-ticking 'whatever is installed' meant a stable box saw nightly
-    unticked, so pressing Enter — the thing everyone does — silently kept a
-    February 2024 build that this stack's WezTerm config is not written for.
-    Nightly is pre-selected regardless; only a hand-installed WezTerm
-    ('unknown', not ours to replace) leaves both unticked."""
-    wiz = (ROOT / "bootstrap/_wizard.sh").read_text(encoding="utf-8")
-    body = wiz[wiz.index("ts_prompt_terminals() {") :]
-    body = body[: body.index("\n}\n")]
-    assert 'stable)  preticked="wezterm-stable"' not in body, "installed-wins pre-tick is back"
-    assert "RECOMMENDATION: nightly" in body
-
-    def pretick(channel):
-        script = (
-            ". bootstrap/_config.sh >/dev/null 2>&1\n"
-            ". bootstrap/_wizard.sh\n"
-            f"ts_wezterm_channel() {{ echo {channel}; }}\n"
-            # Stub the intro: it fetches upstream release data over the network,
-            # which makes this test slow and dependent on being online.
-            "ts_wezterm_prompt_intro() { :; }\n"
-            # non-interactive keeps the pre-ticks, so the answer IS the pre-tick
-            "ts_prompt_terminals 2>/dev/null\n"
-        )
-        r = subprocess.run(
-            [BASH, "-c", script],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-            stdin=subprocess.DEVNULL,
-            timeout=300,
-            start_new_session=True,
-        )
-        return r.stdout.split()
-
-    for ch in ("stable", "nightly", "none"):
-        assert "wezterm-nightly" in pretick(ch), f"{ch}: nightly not pre-ticked"
-        assert "wezterm-stable" not in pretick(ch), f"{ch}: stable pre-ticked"
-    # A hand-placed WezTerm is left alone.
-    got = pretick("unknown")
-    assert "wezterm-nightly" not in got and "wezterm-stable" not in got, got
-
-    ps = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
-    assert "'stable'  { @('wezterm-stable') }" not in ps, "pwsh twin still installed-wins"
-
-
-# ── TTS on macOS: self summarizer + the say floor ──────────────────────────────
-
-CC_TTS_LIB = ROOT / "dot_claude/hooks/cc-tts-lib.sh"
 
 
 def _self_summary_sh(text):
@@ -2626,6 +2377,9 @@ def test_ghostty_preserves_standard_macos_window_cycle_shortcut():
     assert "global:cmd+grave_accent" not in cfg
 
 
+CC_TTS_LIB = ROOT / "dot_claude/hooks/cc-tts-lib.sh"
+
+
 @pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_speak_marker_is_never_spoken_verbatim():
     """In hook mode the raw final message IS the speech text, so a
@@ -2661,9 +2415,22 @@ def test_macos_has_a_synthesis_floor():
     assert "cc_tts_synth_say" in lib
     synth = lib[lib.index("\ncc_tts_synth() {") :]
     synth = synth[: synth.index("\n}\n")]
-    # say must be the LAST rung, after edge.
-    assert synth.index("cc_tts_synth_edge") < synth.index("cc_tts_synth_say"), (
+    # say must be the LAST rung of the FALLBACK chain, after edge.
+    #
+    # The anchor moved when `say` became a selectable engine: it now also appears
+    # in the `case` above, where being first is the whole point of choosing it.
+    # The rule did not move -- say must never be preferred over a real engine
+    # that was NOT chosen -- so the assertion is scoped to the chain after the
+    # case rather than to the whole function.
+    chain = synth[synth.index("esac") :]
+    assert chain.index("cc_tts_synth_edge") < chain.index("cc_tts_synth_say"), (
         "say must be the floor, not preferred over a real engine"
+    )
+    # And being chosen has to be distinguishable from falling through, or the
+    # daily "using the system voice" notice nags about a deliberate decision.
+    case = synth[: synth.index("esac")]
+    assert "cc_tts_synth_say" in case and "chosen" in case, (
+        "the chosen path must pass a marker the fallback path does not"
     )
     say = lib[lib.index("cc_tts_synth_say() {") :]
     say = say[: say.index("\n}\n")]
@@ -2738,3 +2505,686 @@ def test_wizard_does_not_reset_tuned_tts_keys():
     assert '[ -n "$configured" ] || ts_cc_tts_reset_defaults' in fn, (
         "defaults must only be seeded on a never-configured host"
     )
+
+
+def test_say_is_a_selectable_engine_and_is_macos_gated():
+    """`say` was the floor and nothing else: not a legal `engine` value, and no
+    way to pick which of the Mac's 184 voices it used. It is now both, and the
+    setter refuses it off Darwin rather than saving a choice that can never take
+    effect -- Windows falls back to SAPI and Linux has no floor at all."""
+    sh = repo_file("bootstrap/_cc_tts.sh").read_text(encoding="utf-8")
+    assert "kokoro|chatterbox|say|auto" in sh, "the engine enum must accept say"
+    arm = sh[sh.index("        engine)") :]
+    arm = arm[: arm.index("        message)")]
+    assert "Darwin" in arm, "say must be refused off macOS at set time"
+
+
+def test_the_engine_enum_agrees_across_every_copy_that_can_serve_it():
+    """Three copies existed and one was wrong (the Python schema said `edge`,
+    which the setter refuses). The daemon's list is DELIBERATELY different and
+    stays that way: it is Windows-only, and `say` is macOS-only."""
+    sh = repo_file("bootstrap/_cc_tts.sh").read_text(encoding="utf-8")
+    schema_py = repo_file("tstack/schema.py").read_text(encoding="utf-8")
+    assert '"kokoro", "chatterbox", "say", "auto"' in schema_py
+    assert "kokoro|chatterbox|say|auto" in sh
+    daemon = repo_file("bootstrap/tts-daemon/ttsd/settings_schema.py").read_text(encoding="utf-8")
+    assert '("kokoro", "chatterbox", "auto")' in daemon, (
+        "the daemon is Windows-only, so it must NOT offer the macOS say engine"
+    )
+
+
+def test_the_say_voice_reaches_the_runtime_config():
+    """A setting the reader never sees is a setting that does nothing. The
+    reader is cc-tts-lib.sh's `.say.voice`, rendered by config.json.tmpl and
+    mirrored by ts_cc_tts_json_for_mirror."""
+    assert '"voice": {{ index . "ccTtsSayVoice"' in repo_file(
+        "dot_claude/tts/config.json.tmpl"
+    ).read_text(encoding="utf-8")
+    assert "ccTtsSayVoice" in repo_file(".chezmoi.toml.tmpl").read_text(encoding="utf-8")
+    sh = repo_file("bootstrap/_cc_tts.sh").read_text(encoding="utf-8")
+    assert '"say": {' in sh, "the Windows mirror must carry the say block"
+    lib = repo_file("dot_claude/hooks/cc-tts-lib.sh").read_text(encoding="utf-8")
+    assert "cc_tts_json .say.voice" in lib, "nothing reads it"
+    # `say -v ""` is an error, not a synonym for the system voice, so an unset
+    # value must omit the flag rather than pass it empty.
+    say = lib[lib.index("cc_tts_synth_say() {") :]
+    say = say[: say.index("\n}\n")]
+    assert 'say -o "$tmp"' in say, "an unset voice must omit -v entirely"
+
+
+def test_listing_voices_asks_the_engine_rather_than_a_hardcoded_table():
+    """kokoro ships 68 and the set moves with the image; a Mac has 184 with more
+    downloadable. Any list checked in here would be wrong on somebody's machine
+    the week it was written."""
+    sh = repo_file("bootstrap/_cc_tts.sh").read_text(encoding="utf-8")
+    fn = sh[sh.index("ts_cc_tts_list_voices() {") :]
+    fn = fn[: fn.index("\n}\n")]
+    assert "/v1/audio/voices" in fn, "kokoro's own list endpoint"
+    assert "say -v '?'" in fn, "the macOS list"
+    assert "am_adam" not in fn and "af_heart" not in fn, "no hardcoded voice names"
+
+
+def test_the_voice_pool_moved_out_of_the_way_of_listing():
+    """`voices` used to set the daemon's per-session rotation pool -- unrelated
+    to picking a voice, and read only on Windows. It lists now; the pool is
+    `voice-pool`. The old CSV form is redirected rather than silently honoured,
+    which a voice name can never be mistaken for because it has no comma."""
+    sh = repo_file("bootstrap/_cc_tts.sh").read_text(encoding="utf-8")
+    assert "        voice-pool)" in sh
+    arm = sh[sh.index("        voices)") :]
+    arm = arm[: arm.index("        voice-pool)")]
+    assert "*,*)" in arm, "a CSV must be routed to voice-pool, not treated as a name"
+    assert "ts_cc_tts_list_voices" in arm
+
+
+def test_windows_has_a_synthesis_floor_too():
+    """The macOS gap, still open on the platform this stack started on.
+
+    Invoke-CcTtsSynth's ladder ended at edge-tts and returned $false, so a
+    native-Windows host with the daemon off, kokoro down and edge-tts absent
+    produced nothing. SAPI is the floor, and it SPEAKS rather than writing a
+    file: the Windows playback path is cc-tts-play.ps1, which requires ffplay and
+    errors without it, so a file-based floor would still be silent on exactly the
+    machine that needs one.
+    """
+    lib = repo_file("windows/.claude/hooks/cc-tts-lib.ps1").read_text(encoding="utf-8")
+    assert "function Invoke-CcTtsSapiSpeak" in lib
+    fn = lib[lib.index("function Invoke-CcTtsSapiSpeak") :]
+    fn = fn[: fn.index("\nfunction ")]
+    assert "SAPI.SpVoice" in fn and ".Speak(" in fn
+    assert "OutFile" not in fn and "OutPath" not in fn, (
+        "the floor must not depend on a file, and so not on ffplay"
+    )
+    assert "catch" in fn, "a failing floor must leave things no worse than silence"
+
+    notify = repo_file("windows/.claude/hooks/cc-tts-notify.ps1").read_text(encoding="utf-8")
+    worker = notify[notify.index("function Start-SpeakWorker") :]
+    worker = worker[: worker.index("\nif ($Foreground)")]
+    # Both early returns were silence; both must now fall through to the floor.
+    assert worker.count("Invoke-CcTtsSapiSpeak") == 2, (
+        "every path that gave up before playing must reach the floor"
+    )
+
+
+# --------------------------------------------------------------- tstack agents llm
+
+
+def _llm_env(tmp_path, monkeypatch, body: str | None):
+    """A throwaway stack root. TS_STACK_ROOT is what stacks.stack_root honours."""
+    root = tmp_path / "stacks" / "agentmemory"
+    root.mkdir(parents=True)
+    if body is not None:
+        (root / ".env").write_text(body, encoding="utf-8")
+    monkeypatch.setenv("TS_STACK_ROOT", str(tmp_path / "stacks"))
+    return root
+
+
+def test_no_chat_provider_is_reported_as_a_supported_state(tmp_path, monkeypatch, capsys):
+    """The point of the command. An absent LLM is a CHOICE with four named
+    consequences, not a fault -- storage, search and embeddings are unaffected,
+    and telling someone their memory server is broken because they never wired a
+    model to it is how a supported configuration reads as an outage.
+    """
+    from tstack.commands import agents
+
+    _llm_env(tmp_path, monkeypatch, "EMBEDDING_PROVIDER=local\n")
+    rc = agents.Llm(ROOT, agents.Out()).run("status")
+    text = capsys.readouterr().out
+
+    assert rc == 0, "no provider is not a failure"
+    assert "supported state" in text
+    for name, _ in agents.LLM_FEATURES:
+        assert f"off  {name}" in text, f"{name} must be named as switched off"
+    for name, _ in agents.LLM_UNAFFECTED:
+        assert f"ok  {name}" in text, f"{name} works without a model and must say so"
+    assert "llmfit" in text, "the way to pick a model that fits this machine"
+
+
+def test_an_endpoint_with_no_model_leaves_every_feature_off(tmp_path, monkeypatch, capsys):
+    """`inferenceActive` is driven by the MODEL, not the URL (see the console's
+    shared/llmEndpoint.ts). A base URL with an empty OPENAI_MODEL therefore reads
+    as configured everywhere while every family stays off -- the exact shape that
+    has to be called out rather than shown as a tick.
+    """
+    from tstack.commands import agents
+
+    _llm_env(tmp_path, monkeypatch, "OPENAI_BASE_URL=http://127.0.0.1:9/v1\nOPENAI_MODEL=\n")
+    rc = agents.Llm(ROOT, agents.Out()).run("status")
+    text = capsys.readouterr().out
+
+    assert rc == 1
+    assert "OPENAI_MODEL is empty" in text
+    for name, _ in agents.LLM_FEATURES:
+        assert f"off  {name}" in text
+
+
+def test_an_unreachable_provider_is_louder_than_no_provider(tmp_path, monkeypatch, capsys):
+    """The asymmetry this whole workstream exists for: unset is a clean skip,
+    set-but-unreachable dead-letters silently. Port 9 is discard -- nothing
+    answers, and nothing is dialled outside the machine.
+    """
+    from tstack.commands import agents
+
+    _llm_env(tmp_path, monkeypatch, "OPENAI_BASE_URL=http://127.0.0.1:9/v1\nOPENAI_MODEL=m\n")
+    out = agents.Out()
+    rc = agents.Llm(ROOT, out).run("status")
+    text = capsys.readouterr().out
+
+    assert rc == 1 and out.failures
+    assert "dead-letter" in text
+
+
+def test_a_host_probe_is_never_reported_as_container_reachability(tmp_path, monkeypatch, capsys):
+    """A container's DNS is Docker's embedded resolver and its egress a separate
+    path, so reaching an endpoint from here proves nothing about the server. The
+    success line has to say so, and name the check that does dial from inside.
+    """
+    from tstack.commands import agents
+
+    _llm_env(tmp_path, monkeypatch, "OPENAI_BASE_URL=http://example.invalid/v1\nOPENAI_MODEL=m\n")
+    monkeypatch.setattr(agents, "http_answers", lambda *a, **k: True)
+    agents.Llm(ROOT, agents.Out()).run("status")
+    text = capsys.readouterr().out
+
+    assert "does not prove the container can reach it" in text
+    assert "tstack services test agentmemory" in text
+
+
+def test_llm_has_no_action_but_status(tmp_path, monkeypatch, capsys):
+    """`on`/`off` are valid ACTIONS for the other tools, so main() lets them
+    through to here. Rejected as a usage error (2), not as a probe failure (1)."""
+    from tstack.commands import agents
+
+    _llm_env(tmp_path, monkeypatch, "")
+    assert agents.Llm(ROOT, agents.Out()).run("on") == 2
+    assert "is a report" in capsys.readouterr().err
+
+
+def test_the_llm_report_reads_the_env_file_rather_than_the_container(tmp_path, monkeypatch):
+    """It must be right while the stack is DOWN -- that is when someone is most
+    likely to be asking why nothing is being summarised. Reading compose's own
+    interpolation source keeps one copy of the truth and needs no engine.
+    """
+    from tstack.commands import agents
+
+    _llm_env(tmp_path, monkeypatch, "OPENAI_BASE_URL=http://h/v1\nOPENAI_MODEL=m\n")
+    assert agents.Llm(ROOT, agents.Out()).configured() == ("http://h/v1", "m")
+
+
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+def test_llmfit_is_offered_but_never_routed_through_the_agent_cli_installer():
+    """`llmfit recommend` is how someone picks a model AgentMemory's four
+    LLM-only features can actually run on, so it has to be installable rather
+    than merely documented.
+
+    It is NOT in the `ai` group, and that is load-bearing rather than tidiness:
+    `ts_app_is_ai` reads that group as the install ROUTE, so a packaged binary
+    put there is handed to ts_install_ai_cli, which has no branch for it and
+    prints "no agent-CLI installer defined" instead of installing anything.
+    """
+    all_ids = _sh_eval('echo "$TS_APPS_ALL"').split()
+    assert "llmfit" in all_ids
+    assert _sh_eval("ts_app_group_of llmfit") == "models"
+    assert _sh_eval("ts_app_is_ai llmfit && echo yes || echo no") == "no"
+    assert _sh_eval("ts_app_desc llmfit"), "an id with no description is blank in the picker"
+    # Optional, not recommended: it is a one-off sizing tool, not daily kit.
+    assert "llmfit" not in _sh_eval('echo "$TS_APPS_RECOMMENDED"').split()
+    # macOS installs the brew formula; Debian/WSL has no apt package at all, so
+    # the release tarball is the only path there.
+    cfg = (ROOT / "bootstrap/_config.sh").read_text(encoding="utf-8")
+    assert 'llmfit)     formulae="$formulae llmfit"' in cfg
+    deb = (ROOT / "bootstrap/_common-debian.sh").read_text(encoding="utf-8")
+    assert 'common_install_github_binary "AlexsJones/llmfit"' in deb
+
+
+def test_the_windows_catalog_does_not_claim_a_winget_package_that_does_not_exist():
+    """The rule is "can this platform install it", never "is it in winget" -- and
+    the answer for llmfit is no: it ships a windows-msvc release but is in no
+    manifest.
+
+    That used to be expressed by leaving it out of a second hand-maintained id
+    list on the pwsh side. It is a column now, so there is one place to be wrong
+    instead of two.
+    """
+    conf = (ROOT / "bootstrap/apps.conf").read_text(encoding="utf-8")
+    row = next(ln for ln in conf.splitlines() if ln.split()[:1] == ["llmfit"])
+    assert row.split()[3] == "posix", "llmfit is not installable on Windows"
+    ps = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
+    assert "'llmfit'" not in ps, "and no winget id may claim otherwise"
+
+
+def test_a_running_local_runtime_is_offered_with_the_container_side_url(
+    tmp_path, monkeypatch, capsys
+):
+    """ "What do I even put there" is the question that stops people, and the
+    answer is usually a runtime already running on their machine.
+
+    The URL offered is the CONTAINER's, not the host's. Inside a container
+    `localhost` is the container, so copying `http://localhost:11434/v1` out of a
+    browser produces the silent dead-letter state -- which is precisely the shape
+    this whole command exists to keep people out of.
+    """
+    from tstack.commands import agents
+
+    _llm_env(tmp_path, monkeypatch, "")
+    monkeypatch.setattr(
+        agents, "local_llm_models", lambda port, **k: ["llama3.1:8b"] if port == 11434 else None
+    )
+    agents.Llm(ROOT, agents.Out()).run("status")
+    text = capsys.readouterr().out
+
+    assert "OPENAI_BASE_URL=http://host.docker.internal:11434/v1" in text
+    assert "OPENAI_MODEL=llama3.1:8b" in text
+    assert "localhost:11434" not in text, "the host URL must never be the one offered"
+
+
+def test_a_runtime_that_is_up_with_no_model_is_not_silently_treated_as_absent(
+    tmp_path, monkeypatch, capsys
+):
+    """An empty model list is a THIRD state. The endpoint would be right and the
+    configuration would still do nothing, so `None` and `[]` must not collapse."""
+    from tstack.commands import agents
+
+    _llm_env(tmp_path, monkeypatch, "")
+    monkeypatch.setattr(agents, "local_llm_models", lambda port, **k: [] if port == 1234 else None)
+    agents.Llm(ROOT, agents.Out()).run("status")
+    text = capsys.readouterr().out
+
+    assert "none loaded" in text
+    assert "<load a model first>" in text
+
+
+def test_local_runtime_detection_survives_whatever_is_actually_on_that_port(monkeypatch):
+    """The port is a hint; anything can listen there. HTML, a 500, a socket that
+    accepts and says nothing -- none of them may raise out of a status report.
+    """
+    import urllib.error
+
+    from tstack.commands import agents
+
+    class Fake:
+        def __init__(self, body: bytes) -> None:
+            self.body = body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return self.body
+
+    for body, want in (
+        (b"<html>not an api</html>", None),  # invalid JSON
+        (b'{"object":"list"}', []),  # valid JSON, no data key
+        (b'{"data":"not-a-list"}', []),
+        (b'{"data":[{"no":"id"}]}', []),
+        (b'{"data":[{"id":"m"}]}', ["m"]),
+    ):
+        monkeypatch.setattr(agents.urllib.request, "urlopen", lambda *a, _b=body, **k: Fake(_b))
+        assert agents.local_llm_models(11434) == want
+
+    def refuse(*a, **k):
+        raise urllib.error.URLError("refused")
+
+    monkeypatch.setattr(agents.urllib.request, "urlopen", refuse)
+    assert agents.local_llm_models(11434) is None
+
+
+def test_the_container_can_resolve_the_host_on_every_platform():
+    """`host.docker.internal` is free on Docker Desktop and does NOT exist on
+    native Linux unless it is mapped -- so the same OPENAI_BASE_URL that worked
+    on a Mac resolved to nothing on a server, and agentmemory dead-lettered
+    silently. Mapping it makes the one URL this command prints correct on all
+    three platforms; `host-gateway` is accepted (and redundant) on Desktop.
+    """
+    body = (ROOT / "services/stacks/agentmemory/docker-compose.yml").read_text(encoding="utf-8")
+    assert '"host.docker.internal:host-gateway"' in body
+
+
+# ------------------------------------------------ kokoro's model id, and mlx-audio
+
+
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+def test_the_kokoro_model_id_is_configurable_because_that_is_the_whole_mlx_port():
+    """mlx-audio runs the same Kokoro model natively on Apple Silicon and speaks
+    the same OpenAI protocol -- `/v1/audio/speech` with model, voice, speed and
+    response_format, plus `/v1/audio/voices` and `/v1/models`.
+
+    Every field matches except one: the docker image answers to the literal
+    string `kokoro`, and mlx-audio wants the HuggingFace repo id and rejects
+    anything else. So a hard-coded `model` is the single thing standing between
+    this stack and a native Apple Silicon engine -- which is why it is a setting
+    and not a literal, in both hook libraries and in the runtime config.
+    """
+    assert _sh_eval("ts_cc_tts_default ccTtsKokoroModel") == "kokoro"
+    cfg = (ROOT / "bootstrap/_cc_tts.sh").read_text(encoding="utf-8")
+    assert "ccTtsKokoroModel" in cfg
+    assert '"model": "$(ts_cc_tts_get ccTtsKokoroModel)"' in cfg, "the mirror JSON must carry it"
+
+    for rel, needle in (
+        ("dot_claude/hooks/cc-tts-lib.sh", 'model="$(cc_tts_json .kokoro.model kokoro)"'),
+        ("windows/.claude/hooks/cc-tts-lib.ps1", "Get-CcTtsKokoroModel"),
+        ("dot_claude/tts/config.json.tmpl", 'index . "ccTtsKokoroModel"'),
+        ("bootstrap/_config.ps1", "model = 'kokoro'"),
+    ):
+        assert needle in (ROOT / rel).read_text(encoding="utf-8"), f"{rel} still hard-codes it"
+
+    # No synth call site may name the string directly any more.
+    lib = (ROOT / "dot_claude/hooks/cc-tts-lib.sh").read_text(encoding="utf-8")
+    assert 'model:"kokoro"' not in lib
+    assert '"model":"kokoro"' not in lib
+    ps = (ROOT / "windows/.claude/hooks/cc-tts-lib.ps1").read_text(encoding="utf-8")
+    assert "model = 'kokoro'; input" not in ps
+
+
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+def test_the_voices_query_only_names_a_model_when_one_is_configured():
+    """mlx-audio's /v1/audio/voices 400s without ?model= -- it resolves the voice
+    packs out of that HuggingFace snapshot. The docker image has no such
+    parameter.
+
+    So the query is conditional, and the DEFAULT path must produce the exact
+    request it always made: sending ?model=kokoro to the container would be a
+    change to the one path that is known to work.
+    """
+    assert _sh_eval("ts_cc_tts_kokoro_model_query") == ""
+    got = _sh_eval(
+        "ts_cc_tts_get() { echo 'mlx-community/Kokoro-82M-bf16'; }; ts_cc_tts_kokoro_model_query"
+    )
+    assert got == "?model=mlx-community/Kokoro-82M-bf16"
+
+
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+def test_the_engine_advisor_derives_its_recommendation_rather_than_hard_coding_one():
+    """Three ways to get a voice on a Mac, and which one is right depends on the
+    machine: an Intel Mac cannot run option 3 at all, and on Apple Silicon the
+    deciding fact is that Docker Desktop passes no GPU to the container, so the
+    shipped kokoro image runs on the CPU a model the machine could run on its
+    GPU. The advice therefore branches on `uname -m` and probes what is running.
+    """
+    body = (ROOT / "bootstrap/_cc_tts.sh").read_text(encoding="utf-8")
+    start = body.index("ts_cc_tts_engines() {")
+    fn = body[start : body.index("\nts_cc_tts_kokoro_model_query", start)]
+    assert "arm64)" in fn and "x86_64)" in fn, "the recommendation must depend on the architecture"
+    assert "uname -s" in fn, "macOS-only, and it must say so rather than misfire"
+    for probe in ("docker info", "ts_cc_tts_kokoro_up", "import mlx_audio"):
+        assert probe in fn, f"{probe} is a deciding fact and must be measured, not assumed"
+    # Claims that were wrong in the first draft and must not come back: MLX runs
+    # on the GPU via Metal, not the Neural Engine, and Docker on Apple Silicon
+    # runs kokoro on the CPU rather than emulating an x86 GPU.
+    assert "Neural Engine" not in fn
+    assert "emulated CPU" not in fn
+
+
+# ------------------------------------------------------------- which prompt
+
+
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+def test_the_prompt_is_a_setting_and_presets_are_not_vendored():
+    """`starship preset <name>` is run at apply time rather than twelve TOML
+    files being copied into this repo. Vendored copies freeze at whatever
+    upstream shipped the day they were taken, and the entire point of a preset is
+    that it is Starship's rather than ours.
+    """
+    assert _sh_eval("ts_starship_get") == "terminal-stack"
+    tmpl = (ROOT / "dot_config/starship.toml.tmpl").read_text(encoding="utf-8")
+    assert 'output "starship" "preset" $preset' in tmpl
+    # lookPath is the load-bearing half: during a bootstrap this template can be
+    # rendered BEFORE starship is installed, and `output` on a missing binary
+    # aborts the whole apply -- not just this file.
+    assert 'lookPath "starship"' in tmpl
+    assert "{{- else -}}" in tmpl, "and it must fall back to this stack's own prompt"
+    for name in ("bracketed-segments", "tokyo-night", "gruvbox-rainbow"):
+        assert name not in tmpl, f"{name} must not be vendored into the template"
+
+
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+def test_an_unknown_preset_name_is_refused_at_set_time_not_at_apply_time():
+    """`starship preset nonsense` prints NOTHING and exits non-zero, so a name
+    that slipped through would deploy an EMPTY config: a working prompt replaced
+    by no prompt, with nothing in the diff to explain it. The name is therefore
+    checked against `starship preset --list` before it is saved.
+    """
+    cfg = (ROOT / "bootstrap/_config.sh").read_text(encoding="utf-8")
+    body = cfg[cfg.index("ts_starship_set()") : cfg.index("ts_starship_preview()")]
+    assert "ts_starship_presets | grep -qxF" in body
+    # ...and `terminal-stack` must not need starship present to select, or a
+    # machine whose starship is broken could never get back to a working prompt.
+    assert 'if [ "$name" != terminal-stack ]' in body
+
+
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+def test_the_preview_uses_the_plain_ansi_path_and_never_a_shell_dialect():
+    """With STARSHIP_SHELL set, starship emits that shell's escaping (zsh's
+    %{...%}), which a preview prints as literal punctuation instead of colour.
+    Empty selects the plain-ANSI path, which is what a terminal actually shows.
+    """
+    cfg = (ROOT / "bootstrap/_config.sh").read_text(encoding="utf-8")
+    body = cfg[cfg.index("ts_starship_preview()") :]
+    body = body[: body.index("\n# ── Ghostty")]
+    assert "STARSHIP_SHELL= STARSHIP_CONFIG=" in body
+    # -o refuses to overwrite, and mktemp has already created the file: the
+    # command fails, the temp file stays empty, and the preview silently shows
+    # nothing at all.
+    assert 'starship preset "$name" > "$cfg"' in body
+    assert '-o "$cfg"' not in body
+
+
+def test_the_windows_side_gets_the_same_prompt_as_wsl():
+    """A combined machine showing tokyo-night in WSL and this stack's prompt in
+    PowerShell is exactly the split-brain the config mirror exists to prevent, so
+    both sync paths render the preset over the mirrored starship.toml.
+    """
+    sh = (ROOT / "run_after_90-sync-windows.sh").read_text(encoding="utf-8")
+    ps = (ROOT / "scripts/sync-windows.ps1").read_text(encoding="utf-8")
+    assert 'STARSHIP_PRESET="$(cfg starshipPreset ' in sh
+    assert 'starship preset "$preset" > "$rendered"' in sh
+    assert "starshipPreset" in ps and "preset $preset" in ps
+    # Both take a backup before overwriting - the repo-wide rule.
+    assert 'bak="$star_dst.bak.$today"' in sh
+    assert "Get-BackupPath $starDst" in ps
+
+
+def test_a_windows_save_no_longer_strips_keys_the_wsl_side_wrote():
+    """Save-TsConfig rebuilds config.json from a fixed set of properties, so a
+    key missing from that set is DELETED on any Windows-side save. starshipPreset
+    decides which prompt the Windows sync deploys, so losing it visibly reverts
+    the prompt; atuinEnabled had the same hole and is fixed with it rather than
+    left as the next one to find.
+    """
+    ps = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
+    start = ps.index("$obj = [ordered]@{")
+    obj = ps[start : ps.index("$p = Get-TsConfigPath", start)]
+    for key in ("starshipPreset", "atuinEnabled", "memoryBackend", "weztermMux"):
+        assert key in obj, f"a Windows save would strip {key}"
+    # Carried forward when the caller does not pass it, or every unrelated save
+    # resets it to the default.
+    assert "@{ Param = 'StarshipPreset'; Name = 'starshipPreset'" in ps
+    assert "@{ Param = 'AtuinEnabled'; Name = 'atuinEnabled'" in ps
+    # No ValidateSet: `starship preset --list` is the authority and it grows.
+    assert "[string]$StarshipPreset = 'terminal-stack'" in ps
+
+
+# ------------------------------------------------- the first two install questions
+
+
+def _wizard(env: dict) -> dict:
+    """Run ts_wizard_ask headlessly and read the TS_WIZ_* it produced."""
+    script = """
+set -euo pipefail
+. bootstrap/_config.sh >/dev/null 2>&1
+. bootstrap/_wizard.sh >/dev/null 2>&1
+ts_wizard_ask >/dev/null 2>&1
+for v in PROFILE DEV APP_CLASS STARSHIP LEADER THEME APPS CC_TTS MEMORY_BACKEND \
+         CAVEMAN WEZ_MUX WEZ_RESTORE ATUIN; do
+    eval "printf '%s=%s\\n' \\"$v\\" \\"\\${TS_WIZ_$v:-}\\""
+done
+"""
+    base = {
+        "TERMINAL_STACK_DIR": str(ROOT),
+        "TS_THEME": "dark",
+        "TS_LEADER": "ctrl-space",
+        "TS_APPS": "recommended",
+        "TS_ASSUME_YES": "1",
+        "TS_STARSHIP_PRESET": "terminal-stack",
+        "TS_HEADROOM_CURSOR": "mcp",
+    }
+    r = subprocess.run(
+        [BASH, "-c", script],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        # Both are repo rules and both matter here: the wizard prompts on
+        # /dev/tty, so without a new session an unanswered question blocks the
+        # whole suite instead of falling through to its default.
+        timeout=60,
+        start_new_session=True,
+        env={**os.environ, **base, **env},
+    )
+    assert r.returncode == 0, r.stderr
+    return dict(line.split("=", 1) for line in r.stdout.strip().splitlines() if "=" in line)
+
+
+def test_just_the_prompt_really_means_just_the_prompt():
+    """Moved to tests/test_wizard.py against the one implementation. Kept here as
+    a pointer, because this is where someone looks for it."""
+
+
+def test_the_development_answer_picks_which_half_of_the_catalog_is_offered(monkeypatch):
+    """The catalog half of this is now tests/test_apps_catalog.py, and the
+    question half tests/test_wizard.py."""
+    from tstack import apps
+
+    # monkeypatch, not os.environ: a bare assignment leaks into every test that
+    # runs after this one, and makes their result depend on collection order.
+    monkeypatch.setenv("TERMINAL_STACK_DIR", str(ROOT))
+    apps.clear_cache()
+    sysadmin, developer = set(apps.sysadmin()), set(apps.recommended())
+    assert sysadmin != developer
+    for shared in ("delta", "gh", "lazygit", "btop", "ripgrep"):
+        assert shared in sysadmin, f"{shared} is useful without writing code"
+    for dev_only in ("fnm", "poetry", "claude", "codex", "ghq", "llmfit"):
+        assert dev_only not in sysadmin, f"{dev_only} only makes sense if you write code"
+
+
+def test_the_agent_questions_are_skipped_when_there_are_no_agents():
+    """Covered against the one implementation in tests/test_wizard.py."""
+
+
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+def test_the_profile_is_not_a_saved_setting():
+    """It decides what the REST of the wizard asks and what those answers default
+    to, and every one of THOSE is saved on its own. A stored `profile` would be a
+    second copy of state that can disagree with the settings it produced -- and
+    re-running the wizard should ask again, because the answer is about what you
+    want now, not about what this machine is.
+    """
+    from tstack import schema
+
+    assert "profile" not in schema.BY_KEY
+    assert "installProfile" not in schema.BY_KEY
+    toml = (ROOT / ".chezmoi.toml.tmpl").read_text(encoding="utf-8")
+    assert "TS_WIZ_PROFILE" not in toml and "installProfile" not in toml
+    # ...whereas the prompt IS saved, because it is a setting rather than a
+    # branch in a questionnaire.
+    assert "starshipPreset" in schema.BY_KEY
+    assert "starshipPreset" in toml
+
+
+def test_there_is_only_one_wizard_to_keep_in_agreement():
+    """This used to assert the bash and pwsh wizards asked the same questions.
+    There is one implementation now, so the invariant is that neither shell has
+    grown a QUESTION back.
+
+    Note what is not on these lists: `ts_prompt_choice` / `Read-TsChoice`. Those
+    are prompt primitives, not questions, and six non-wizard callers use them --
+    `wso`, `tstack smb setup`, the rclone wizard, the TTS menu, `_cleanup.sh` and
+    each config menu. An earlier version of this test named them, which recorded
+    the deletion that broke every one of those as though it were the invariant.
+    They live in _config.{sh,ps1} and `tests/test_shell_symbols.py` holds the
+    real line: no script may call a function that is defined nowhere.
+    """
+    sh = (ROOT / "bootstrap/_wizard.sh").read_text(encoding="utf-8")
+    ps = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
+    for gone in ("ts_prompt_multi", "ts_prompt_profile", "ts_prompt_leader", "ts_prompt_apps"):
+        assert gone not in sh, f"{gone} came back into the shell"
+    for gone in ("function Read-TsMulti", "function Read-TsProfile", "function Read-TsLeader"):
+        assert gone not in ps, f"{gone} came back into PowerShell"
+    # ...and every env-var escape hatch still works, from the one place.
+    flow = (ROOT / "tstack/wizard/flow.py").read_text(encoding="utf-8")
+    for var in ("TS_PROFILE", "TS_DEVELOPMENT", "TS_STARSHIP_PRESET", "TS_APPS", "TS_THEME"):
+        assert var in flow, var
+
+
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+def test_a_server_is_never_nagged_about_tools_it_declined():
+    """`ts_apps_pending` offers the saved selection PLUS anything since added to
+    the recommended set -- which is the point, or a machine configured before a
+    tool joined the catalog would never get it.
+
+    With two classes that second half turns into a permanent nag: a box set up as
+    a server would be told on every `tstack update` that it is missing fnm,
+    poetry and six agent CLIs it deliberately declined. The class is therefore
+    INFERRED from the saved selection -- a predicate that cannot drift, unlike a
+    stored copy -- and a server that later installs `claude` flips to developer,
+    which is the right answer.
+    """
+    server = _sh_eval(
+        'ts_data_get_apps() { echo "eza fzf bat btop glances rclone"; }; ts_apps_saved_class'
+    )
+    laptop = _sh_eval('ts_data_get_apps() { echo "eza fzf bat claude fnm"; }; ts_apps_saved_class')
+    fresh = _sh_eval('ts_data_get_apps() { echo ""; }; ts_apps_saved_class')
+    assert (server, laptop, fresh) == ("sysadmin", "developer", "developer")
+
+    pending = _sh_eval(
+        'ts_data_get_apps() { echo "eza fzf bat btop glances rclone"; }; ts_apps_pending'
+    ).split()
+    for dev_only in ("fnm", "poetry", "claude", "codex", "ghq", "llmfit"):
+        assert dev_only not in pending, f"a server must not be nagged about {dev_only}"
+
+    ps = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
+    assert "function Get-TsSavedAppClass" in ps, "the same inference is needed on Windows"
+    assert "Get-TsAppsForClass (Get-TsSavedAppClass)" in ps
+
+
+def test_the_prompt_template_preserves_the_trailing_newline():
+    """`{{- end -}}` at the end of a wrapped file trims the newline the wrapped
+    content ended with, so the rendered config loses its final byte and chezmoi
+    reports a diff on a file nobody edited. Caught by rendering it and comparing
+    against the deployed copy; pinned here so the whitespace control cannot be
+    "tidied" back.
+    """
+    body = (ROOT / "dot_config/starship.toml.tmpl").read_text(encoding="utf-8")
+    assert body.endswith("{{ end -}}\n"), (
+        "the closing action must not trim the content's own trailing newline"
+    )
+    assert 'black  = "#616161"\n{{ end -}}\n' in body
+
+
+# ---------------------------------------------------------------------------
+# The install questionnaire moved to tstack/wizard/, one Python implementation
+# replacing bootstrap/_wizard.sh and the Read-Ts* half of bootstrap/_config.ps1.
+# The tests that compared those two, or asserted one existed, are gone with
+# them -- their invariants are in tests/test_wizard.py now, against the single
+# implementation, which is the point of having one:
+#
+#   test_multi_select_prompts_render_identically
+#     -> the two renderers are one renderer; tests/test_wizard.py asserts its output
+#   test_shared_pwsh_prompts_live_where_both_callers_can_reach_them
+#     -> there is no pwsh prompt left to place
+#   test_wizard_callees_are_all_defined_in_config_ps1
+#     -> Read-TsWizard is gone; a Python call cannot reference an undefined function
+#   test_pwsh_preticked_list_survives_appending
+#     -> one tick-list, covered by test_a_non_interactive_tick_list_keeps_the_pre_ticks
+#   test_terminal_tick_list_enforces_one_wezterm_channel_live
+#     -> covered by test_ticking_inside_the_group_collapses_it
+#   test_exclusive_group_survives_a_non_member_tick_bash
+#     -> covered by test_ticking_outside_an_exclusive_group_leaves_it_alone
+#   test_exclusive_group_survives_a_non_member_tick_pwsh
+#     -> same test, same implementation, no second side to check
+#   test_wizard_prompts_run_without_undefined_functions
+#     -> a Python module either imports or does not; mypy and the suite cover it
+#   test_nightly_is_preticked_even_when_stable_is_installed
+#     -> covered by test_both_preticked_collapses_before_the_first_render

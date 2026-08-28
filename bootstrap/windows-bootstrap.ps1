@@ -74,45 +74,43 @@ Write-Host "PowerShell $($PSVersionTable.PSVersion); user $env:USERNAME"
 # re-run. Env vars (TS_LEADER / TS_THEME / TS_WEZTERM / TS_WEZ_MUX /
 # TS_WEZ_RESTORE / TS_APPS / TS_CC_TTS / WORKSPACE_DIR) still skip their prompt
 # individually.
-# Read-TsWizard now lives in bootstrap/_config.ps1 (dot-sourced above) so that
-# `tstack config wizard` can replay the identical questionnaire.
+# The questionnaire, its review and its edit loop are all tstack/wizard/, shared
+# with the bash bootstraps. Show-TsWizardReview lived here and is gone with them:
+# a second review is a second place for "edit" to behave differently from the
+# other three installers, which is how the PowerShell one ended up with a
+# `switch` whose `continue` bound to the switch rather than the loop.
 
-function Show-TsWizardReview($w) {
-    $themeLabel = switch ($w.Theme) {
-        'dark'   { 'dark (Catppuccin Mocha)' }
-        'light'  { 'light (VS Code Light Modern)' }
-        'follow' { 'follow OS appearance' }
-        default  { $w.Theme }
-    }
-    Write-Host ''
-    Write-Host '==> Review'
-    Write-Host ("    Leader           {0}" -f $w.Leader)
-    Write-Host ("    Theme            {0}" -f $themeLabel)
-    Write-Host ("    Terminals        {0}" -f $(if ($w.Terminals) { $w.Terminals -join ' ' } else { '<none>' }))
-    Write-Host ("    WezTerm mux      {0}" -f $w.WezMux)
-    Write-Host ("    Session restore  {0}" -f $w.WezRestore)
-    Write-Host ("    Apps             {0}" -f $(if ($w.Apps.Count) { $w.Apps -join ', ' } else { '<none>' }))
-    Write-Host ("    Claude TTS       {0}" -f $w.CcTts)
-    if ($w.CcTts -eq 'on') { Write-Host ("    TTS daemon       {0}" -f $w.CcTtsDaemon) }
-    Write-Host ("    Headroom         {0} (Cursor: {1})" -f $w.Headroom, $w.HeadroomCursor)
-    Write-Host ("    Caveman          {0}" -f $w.Caveman)
-    Write-Host ("    AgentMemory      {0}" -f $w.Agentmemory)
-    Write-Host ("    Workspace        {0}" -f $(if ($w.Workspace) { $w.Workspace } else { '<none detected>' }))
+# The questionnaire is tstack/wizard/, shared with the bash bootstraps. It runs
+# its own review and edit loop, so the one that used to be here is gone with the
+# prompts -- keeping a second one would be a second place for "edit" to behave
+# differently from the other three installers.
+#
+# Exit 3 is "the user quit at the review".
+# Windows always has a GUI to configure, so the terminal question is always
+# asked here -- unlike the POSIX bootstraps, which skip it on a headless host.
+$askTerminals = $true
+$wizardJson = Join-Path ([IO.Path]::GetTempPath()) ("tswiz-" + [guid]::NewGuid() + ".json")
+$pythonExe  = Get-TsPython
+if (-not $pythonExe) {
+    throw 'Python 3.10+ is required to run the install questionnaire. winget install Python.Python.3.13'
 }
+$wizardArgs = @((Join-Path $SourceDir 'tstack\main.py'), 'wizard', '--emit', 'json', '--out', $wizardJson)
+if ($askTerminals) { $wizardArgs += '--ask-terminals' }
+if ($env:TS_ASSUME_YES) { $wizardArgs += '--assume-yes' }
+& $pythonExe @wizardArgs
+$wizardRc = $LASTEXITCODE
+if ($wizardRc -eq 3) { Write-Host '==> quit - nothing was installed or changed.'; return }
+if ($wizardRc -ne 0 -or -not (Test-Path -LiteralPath $wizardJson)) {
+    throw "The install questionnaire failed (exit $wizardRc)."
+}
+$wizard = Get-Content -LiteralPath $wizardJson -Raw | ConvertFrom-Json
+Remove-Item -LiteralPath $wizardJson -Force -ErrorAction SilentlyContinue
 
-# Plain if/else, not switch: `break`/`continue` inside a PowerShell switch bind
-# to the switch, not the enclosing loop, which would make "edit" fall straight
-# through to the install.
-$wizard = Read-TsWizard
-while ($true) {
-    Show-TsWizardReview $wizard
-    if (-not (Test-TsInteractive)) { Write-Host '  (non-interactive — proceeding)'; break }
-    $a = (Read-Host '  [P]roceed / [e]dit / [q]uit').Trim()
-    if ($a -match '^(e|edit)$') { $wizard = Read-TsWizard; continue }
-    if ($a -match '^(q|quit)$') { Write-Host '==> quit — nothing was installed or changed.'; return }
-    if (-not $a -or $a -match '^(p|proceed|y|yes)$') { break }
-    Write-Host "  '$a' is not one of the choices — Enter to proceed, 'e' to edit, 'q' to quit."
-}
+# The workspace root is NOT a wizard question -- it has no bash twin, and
+# Read-TsWorkspaceDir stayed in _config.ps1 when the prompts moved. Asked here so
+# the answer exists; reading it off $wizard would have been $null, and
+# Save-TsWorkspaceOverride would have persisted an empty WORKSPACE_DIR.
+$wizardWorkspace = Read-TsWorkspaceDir
 
 $leaderChord  = $wizard.Leader
 $themeMode    = $wizard.Theme
@@ -160,7 +158,7 @@ Show-TsInstalledApps $selectedApps
 # Save the chosen config to %LOCALAPPDATA%\terminal-stack\config.json — read by
 # sync-windows.ps1 (and the WSL hook's mirror) to render the Windows .tmpl files.
 if ($PSCmdlet.ShouldProcess('terminal-stack config.json', 'save config')) {
-    Save-TsConfig -LeaderChord $leaderChord -ThemeMode $themeMode -Apps $selectedApps -WeztermMux $wizard.WezMux -WeztermRestore $wizard.WezRestore -CcTts $ccTts -HeadroomEnabled $wizard.Headroom -HeadroomCursorMode $wizard.HeadroomCursor -CavemanEnabled $wizard.Caveman -AgentmemoryEnabled $wizard.Agentmemory -MemoryBackend $wizard.MemoryBackend | Out-Null
+    Save-TsConfig -LeaderChord $leaderChord -ThemeMode $themeMode -Apps $selectedApps -WeztermMux $wizard.WezMux -WeztermRestore $wizard.WezRestore -CcTts $ccTts -HeadroomEnabled $wizard.Headroom -HeadroomCursorMode $wizard.HeadroomCursor -CavemanEnabled $wizard.Caveman -AgentmemoryEnabled $wizard.Agentmemory -MemoryBackend $wizard.MemoryBackend -StarshipPreset $wizard.StarshipPreset | Out-Null
     Export-CcTtsJson
     Write-Host "==> Saved config to $(Get-TsConfigPath)"
     if ($wizard.CcTts -eq 'on') {
@@ -168,13 +166,13 @@ if ($PSCmdlet.ShouldProcess('terminal-stack config.json', 'save config')) {
             else { @('-NoStart', '-NoAutostart') }
         if (Invoke-TsCcTtsDaemonInstaller $installerArgs) {
             $ccTts.daemon.enabled = ($wizard.CcTtsDaemon -eq 'on')
-            Save-TsConfig -LeaderChord $leaderChord -ThemeMode $themeMode -Apps $selectedApps -WeztermMux $wizard.WezMux -WeztermRestore $wizard.WezRestore -CcTts $ccTts -HeadroomEnabled $wizard.Headroom -HeadroomCursorMode $wizard.HeadroomCursor -CavemanEnabled $wizard.Caveman -AgentmemoryEnabled $wizard.Agentmemory -MemoryBackend $wizard.MemoryBackend | Out-Null
+            Save-TsConfig -LeaderChord $leaderChord -ThemeMode $themeMode -Apps $selectedApps -WeztermMux $wizard.WezMux -WeztermRestore $wizard.WezRestore -CcTts $ccTts -HeadroomEnabled $wizard.Headroom -HeadroomCursorMode $wizard.HeadroomCursor -CavemanEnabled $wizard.Caveman -AgentmemoryEnabled $wizard.Agentmemory -MemoryBackend $wizard.MemoryBackend -StarshipPreset $wizard.StarshipPreset | Out-Null
             Export-CcTtsJson
         } else {
             Write-Warning 'TTS executable build failed; voice hooks were not enabled.'
             $ccTts.enabled = $false
             $ccTts.daemon.enabled = $false
-            Save-TsConfig -LeaderChord $leaderChord -ThemeMode $themeMode -Apps $selectedApps -WeztermMux $wizard.WezMux -WeztermRestore $wizard.WezRestore -CcTts $ccTts -HeadroomEnabled $wizard.Headroom -HeadroomCursorMode $wizard.HeadroomCursor -CavemanEnabled $wizard.Caveman -AgentmemoryEnabled $wizard.Agentmemory -MemoryBackend $wizard.MemoryBackend | Out-Null
+            Save-TsConfig -LeaderChord $leaderChord -ThemeMode $themeMode -Apps $selectedApps -WeztermMux $wizard.WezMux -WeztermRestore $wizard.WezRestore -CcTts $ccTts -HeadroomEnabled $wizard.Headroom -HeadroomCursorMode $wizard.HeadroomCursor -CavemanEnabled $wizard.Caveman -AgentmemoryEnabled $wizard.Agentmemory -MemoryBackend $wizard.MemoryBackend -StarshipPreset $wizard.StarshipPreset | Out-Null
             Export-CcTtsJson
         }
     }
@@ -221,8 +219,8 @@ if ($existingIncludes -match 'terminal-stack\.gitconfig') {
 # Persist the workspace answer ONLY when it differs from the autodetect
 # (Get-TsWorkspace in $PROFILE covers the detected case). Save-TsWorkspaceOverride
 # lives in _config.ps1 so `tstack config wizard` persists the answer the same way.
-if ($PSCmdlet.ShouldProcess('Documents\PowerShell\profile.local.ps1', "persist WORKSPACE_DIR=$($wizard.Workspace)")) {
-    Save-TsWorkspaceOverride $wizard.Workspace
+if ($PSCmdlet.ShouldProcess('Documents\PowerShell\profile.local.ps1', "persist WORKSPACE_DIR=$wizardWorkspace")) {
+    Save-TsWorkspaceOverride $wizardWorkspace
 }
 
 Write-Host ''

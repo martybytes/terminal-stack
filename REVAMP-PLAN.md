@@ -6,6 +6,10 @@ it does not disturb the working tree.
 
 Baseline: `terminal-stack` @ `f67ed5f` (main, clean).
 
+**`file:line` citations below are snapshots taken at that baseline**, kept because
+they record what was found and where. Several have since drifted, and a few name
+files this plan has already deleted. Search for the quoted text, not the line.
+
 ---
 
 ## 1. Why
@@ -88,7 +92,9 @@ Python is not a new dependency. It is already mandatory and already load-bearing
   "sync-windows: Python 3 required to merge $dst"`).
 - **11,506 lines already tracked**: `bootstrap/tts-daemon/ttsd/` is a 5,244-line Python
   application with 1,929 lines of its own pytest suite, plus 3,262 lines of repo tests.
-- **The only commit gate is pytest** (`.githooks/pre-commit`).
+- **The commit gate is four checks** (`.githooks/pre-commit`: ruff check, ruff format,
+  mypy, pytest); `pre-push` adds the coverage floor and the characterization replay.
+  (This line said "the only commit gate is pytest" when the plan was written.)
 - **Every shell script already shells out to Python for structured work**, via embedded
   heredocs: `ts-agentmemory.sh` (4 sites), `ts-agents.sh` (5), `ts-stack.sh`,
   `_agentmemory.sh`, `_doctor.sh`, `_merge_json_settings.sh`, `_wezterm.sh`.
@@ -229,15 +235,25 @@ Each is its own branch, `merge --no-ff` into `main`, with docs and a `CHANGELOG.
 | 5a `mux` | **done** - `ts-mux.sh` + `Invoke-TsMux` deleted |
 | 5b `wezterm` | **done** - `ts-wezterm.sh` deleted, `_wezterm.sh` reduced to 66 lines of shims |
 | 5c `agents` | **done** - both twins deleted, all four external callers repointed |
-| 4 `config` writes + wizard | not started |
+| 4 `config` writes + wizard | **done on POSIX** - the row's POSIX column is `python`; the wizard is `tstack/wizard/` and `ghostty` and `prompt` are ported. `apps`, `tts` and `reconfigure` **delegate** to `ts-config.sh` (see below). The Windows column stays `@Set-TerminalStackConfig` until it can be exercised there |
+| 8 `tstack ui` | **done** - `tstack/ui/`, Textual, optional dependency |
 | 5d `agentmemory`, 5e `smb` | not started |
 | 6 `wso` | not started |
 | 7 `update` / `rollback` | not started - **deliberately last**, see below |
-| 8 `tstack ui` | not started |
+
+**Phase 4 ended smaller than planned, on purpose.** `apps` ends in a
+package-manager install, `tts` is twenty-five sub-verbs over the daemon, and
+`reconfigure` is the bootstrap's own save sequence -- and the "never ported" list
+above includes the installer entry points. They are unportable by this plan's own
+rule, so Python routes them to `bootstrap/ts-config.sh`, which survives as the
+delegate target rather than as the entry point. An earlier version of this
+document said the file would be deleted; that was never achievable.
 
 Each landed on its own branch and was green on Windows, WSL, Debian 13, Ubuntu
 24.04, Ubuntu 22.04 and a bash 3.2 syntax gate, plus the CI matrix, before being
-pushed.
+pushed. Phase 4 and phase 8 are the exception on one point: they were verified on
+macOS and the three Linux containers, and **not** on Windows, which is exactly
+why the `config` row's Windows column was left alone.
 
 **Phase 5 was taken before phase 4 deliberately.** `tstack config` fans out into
 `mux`, `wezterm`, `agents`, `ghostty`, `tts` and `memory`, so porting it first
@@ -336,15 +352,22 @@ prompt, key bindings, `ws*` directory jumps).
 
 ## 6. Traps found during investigation
 
-**Path strings appear in three spellings.** `bootstrap/ts-x.ps1` (forward slash,
-deliberate in `sync-windows.ps1`), `bootstrap\ts-x.ps1` (backslash, in `$PROFILE` and
-three kb docs), and **bare `ts-x.ps1` via `$PSScriptRoot`/`$ROOT`** in
-`ts-agents.ps1:381,387,405`, `ts-agents.sh:314,315,324` and `windows-bootstrap.ps1:184`.
-A grep for `bootstrap/ts-` misses the third group entirely. Hence the path-existence
-test, which is the permanent guard.
+> These were written while the port was being planned, in the present tense of
+> that moment. Where one has been dealt with it says so; the rest still stand.
+> Sections 2 and 3 above describe the *pre-port* surface on purpose -- they are
+> the record of what was replaced, not a description of today.
 
-**`check-capture.sh:76` probes for a command named `ts-agentmemory` on `PATH`.** Update
-it with the rest (`:77-79, 89, 93, 431`, and `check-capture.ps1:38-41, 383`).
+**Path strings appear in three spellings.** `bootstrap/ts-x.ps1` (forward slash,
+deliberate in `sync-windows.ps1`), `bootstrap\ts-x.ps1` (backslash), and **bare
+`ts-x.ps1` via `$PSScriptRoot`/`$ROOT`**. A grep for `bootstrap/ts-` misses the third
+group entirely. Hence the path-existence test, which is the permanent guard -- and
+which is why the line numbers this paragraph used to name are gone: `ts-agents.*`
+were deleted by phase 5c, and a citation the test already covers is one more thing
+to keep true by hand.
+
+**~~`check-capture.sh:76` probes for a command named `ts-agentmemory` on `PATH`.~~**
+DONE -- the probe never matched anything and was removed; see `docs/decisions.md`
+§ "The claims audit".
 
 **Bootstrap sequencing.** `ts_wizard_collect` runs **before** package installs,
 deliberately: the documented invariant is that answers are saved before anything that

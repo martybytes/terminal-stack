@@ -1,198 +1,396 @@
-# terminal-stack
+<h1 align="center">terminal-stack</h1>
 
-A reproducible Windows 11 + WSL2 Ubuntu + native Linux (Debian/Ubuntu) + macOS terminal-development stack: WezTerm + tmux + Starship + Claude Code/Codex wrappers + Nerd Font + modern CLI tools, with a single-source-of-truth chezmoi repo that manages config files across all targets.
+<p align="center">
+  <em>One terminal setup — WezTerm, tmux, Starship, zsh and PowerShell — deployed to Windows, WSL, native Linux and macOS from a single repo. Each platform gets the parts that make sense on it.</em>
+</p>
 
-## Quick install
+<p align="center">
+  <a href="https://github.com/martybytes/terminal-stack/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/martybytes/terminal-stack/ci.yml?branch=main&style=flat-square&label=CI"></a>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/github/license/martybytes/terminal-stack?style=flat-square"></a>
+  <a href="https://github.com/martybytes/terminal-stack/tags"><img alt="Latest tag" src="https://img.shields.io/github/v/tag/martybytes/terminal-stack?style=flat-square&label=version"></a>
+  <a href="https://github.com/martybytes/terminal-stack/commits/main"><img alt="Last commit" src="https://img.shields.io/github/last-commit/martybytes/terminal-stack?style=flat-square"></a>
+</p>
 
-One command per environment. GitHub renders a copy button on each code block (top-right corner on hover). Each installer is idempotent and ends with `chezmoi apply` — a fresh box becomes a working stack in one shot.
+<p align="center">
+  <a href="#install">Install</a> ·
+  <a href="#quickstart">Quickstart</a> ·
+  <a href="ARCHITECTURE.md">Architecture</a> ·
+  <a href="docs/kb/_index.md">Knowledge base</a> ·
+  <a href="CHANGELOG.md">Changelog</a>
+</p>
 
-**Windows 11** (PowerShell 7+, from an elevated or normal pwsh window):
+<p align="center">
+  <img alt="Python, Bash, PowerShell, Docker, Lua, GitHub Actions" src="https://skillicons.dev/icons?i=py,bash,powershell,docker,lua,githubactions">
+</p>
 
-```powershell
-irm https://raw.githubusercontent.com/martybytes/terminal-stack/main/install.ps1 | iex
-```
+<p align="center">
+  <img alt="tstack listing its subcommands, then tstack doctor reporting every check passing" src="docs/demo.gif" width="760">
+</p>
 
-**WSL Ubuntu** (run *after* the Windows step above):
+---
 
-```sh
-curl -fsSL https://raw.githubusercontent.com/martybytes/terminal-stack/main/install-wsl.sh | bash
-```
+## What it is
 
-**Native Debian/Ubuntu**:
+Setting up a terminal takes an afternoon. Setting up **four** of them — a Windows
+box, the Ubuntu inside it, a Linux server, a Mac — and keeping them the same
+takes forever, and they drift anyway.
 
-```sh
-curl -fsSL https://raw.githubusercontent.com/martybytes/terminal-stack/main/install-linux.sh | bash
-```
+terminal-stack is one git repository that installs and configures all of them.
+You answer a few questions once; every machine you run it on ends up with the
+same prompt, the same keybindings, the same tools and the same shortcuts. When
+you change something, you change it in one place and run one command.
 
-**macOS** (Apple Silicon or Intel):
+It is built on [chezmoi](https://www.chezmoi.io/), and the interesting part is
+that chezmoi only manages `$HOME` on the machine it runs on — so a Windows user
+profile and the WSL home inside it are two different targets. This repo drives
+both from a single `chezmoi apply`. [ARCHITECTURE.md](ARCHITECTURE.md) explains how.
+
+- **Installs** a full terminal in one command per machine — WezTerm (or Ghostty on macOS), tmux, Starship, zsh, a Nerd Font, and a curated set of modern CLI tools. PowerShell 7 you bring yourself; the stack configures it.
+- **Configures** everything from one source of truth, so the machines that share a feature share its settings exactly.
+- **Remembers** your choices — leader key, theme, tools, voice — and keeps them across updates.
+- **Updates** with `tstack update`, and **undoes** it with `tstack rollback`.
+- **Diagnoses** itself with `tstack doctor` — the same checks on every platform, `--json` for scripts, and a named fix command on every failure.
+- **Documents** itself: `doc` is a searchable knowledge base of runbooks, in your terminal.
+
+> [!NOTE]
+> This is a personal stack, published because the cross-platform mechanism is
+> genuinely reusable. It is opinionated: it expects a fairly clean home
+> directory, and it will manage `~/.zshrc` and your PowerShell `$PROFILE`
+> outright — keep your own additions in `~/.zshrc.local` /
+> `profile.local.ps1`, which it never touches. [INSTALL.md](INSTALL.md) has a
+> step-by-step path if you want to inspect each change before applying it.
+
+## Contents
+
+- [Requirements](#requirements)
+- [Install](#install)
+- [Quickstart](#quickstart)
+- [Demo](#demo)
+- [Configuring](#configuring)
+- [What you get](#what-you-get)
+- [Architecture in 30 seconds](#architecture-in-30-seconds)
+- [Development](#development)
+- [Layout](#layout)
+- [License](#license)
+
+## Requirements
+
+Pick your row. Everything in the third column is installed for you.
+
+| Platform | You need first | The installer adds |
+|---|---|---|
+| **Windows 11** | winget (App Installer); PowerShell 7+ recommended | winget packages, `$PROFILE`, Nerd Font, Starship, and WezTerm if you keep it ticked |
+| **WSL2 Ubuntu** | WSL2 with Ubuntu (run the Windows step first — see below) | apt packages, oh-my-zsh, chezmoi, Starship |
+| **Debian / Ubuntu** | `sudo` and `curl` | the same shell stack (apt packages, oh-my-zsh, chezmoi, Starship); a desktop also gets WezTerm, but the WezTerm and Ghostty GUI configs are macOS/Windows-only |
+| **macOS** | an admin account (Homebrew needs `sudo`; it is installed for you if absent) | brew formulae and casks, oh-my-zsh, chezmoi, Starship |
+
+Docker is **optional**. It is only needed for the memory, compression, voice and
+browser stacks under [`services/`](services/); everything else works without it.
+
+## Install
+
+### 1. Run the one-liner for your platform
+
+Each installer is idempotent — safe to re-run. The macOS, WSL and Linux
+one-liners end with `chezmoi apply`. The Windows one runs its own
+`sync-windows.ps1` instead and hands off to the WSL step, which is where
+`chezmoi apply` happens.
+
+<details open>
+<summary><b>macOS</b> (Apple Silicon or Intel)</summary>
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/martybytes/terminal-stack/main/install-mac.sh | bash
 ```
 
-Defaults: Windows and WSL share **one** clone at `%LOCALAPPDATA%\terminal-stack\stack` (visible from WSL as `/mnt/c/Users/<you>/AppData/Local/terminal-stack/stack`); Linux and macOS clone to `~/.local/share/terminal-stack`. Override with `$env:TERMINAL_STACK_DIR` (PowerShell) or `TERMINAL_STACK_DIR=…` (bash) — though the installer steers you off a location **inside a workspace root** (`wso migrate` would relocate the clone out from under the install), and pwsh ignores a pin left in `profile.local.ps1` when no clone lives at it any more. An existing clone at an old location is offered a move to the canonical path. Expects a clean home directory — if you already have a hand-edited `~/.zshrc` or `$PROFILE`, see `INSTALL.md` for the per-step path that preserves user content.
+Two System Settings toggles free `Ctrl+Space` and the F-row before the
+keybindings work;
+[INSTALL.md § Reopen WezTerm](INSTALL.md#4-reopen-wezterm) walks through them.
+</details>
 
-## Configuring (`tstack config`)
+<details>
+<summary><b>Windows 11</b> (PowerShell 7+)</summary>
 
-The install is a short **wizard** — pick your WezTerm **leader key** (`Ctrl+Space`/`Ctrl+A`/`Ctrl+B`/`Alt+Space`/custom), a **theme** (`dark` Catppuccin Mocha / `light` VS Code Light Modern / `follow` the OS light-dark setting), which **terminal emulator** to install, as a tick-list (WezTerm nightly, WezTerm stable and Ghostty are separate ticks, or none — nightly is pre-selected because upstream's newest stable is from February 2024, and the prompt shows both build dates and a count of what changed so you are choosing on facts), which **CLI tools** to install (the whole recommended set, everything, whole groups like `disk`/`system`/`network`, or a per-tool tick-list — and `tstack config wizard` replays the lot later), whether panes should be hosted by the **WezTerm multiplexer** (off by default — see `tstack mux`), whether launching WezTerm should **reopen your last session** (off by default). Every menu marks its default and takes it on Enter, accepts an option's name as well as its number, and re-prompts rather than quietly defaulting when it cannot understand you; a final **review** lets you edit or quit before anything is installed. Choices are saved (chezmoi `[data]` on WSL/Linux/macOS, `%LOCALAPPDATA%\terminal-stack\config.json` on Windows) and survive `tstack update`.
-
-Change them anytime with **`tstack config`** (both shells): run it bare for an interactive menu, or one-shot — `tstack config theme follow`, `tstack config leader ctrl-a`, `tstack config tmux ctrl-a`, `tstack config apps`, `tstack config restore on`, `tstack config show`. It re-applies and installs any newly-selected apps (it never uninstalls). In `follow` mode WezTerm switches light/dark live; the Starship/tmux palette is baked at apply and refreshed by `tstack update`/`tstack config`. In a combined Windows+WSL setup, run `tstack config` from WSL (its `chezmoi apply` is authoritative for the Windows files). Scripted installs skip the prompts with `TS_LEADER` / `TS_THEME` / `TS_TERMINALS` / `TS_WEZ_MUX` / `TS_WEZ_RESTORE` / `TS_APPS` / `TS_CC_TTS` / `TS_CC_TTS_DAEMON` / `TS_HEADLESS`, and `TS_ASSUME_YES=1` (bash) skips the review (see `INSTALL.md` § Install wizard).
-
-**`tstack smb`** (macOS/Linux) finds, interrogates and mounts **SMB/CIFS shares** through rclone. Start with `tstack smb setup`: it discovers online Tailscale computers with SMB open, explains credentials and share names, verifies access before saving, previews the folder, and offers a read-only mount. Lower-level `hosts`/`shares`/`probe`/`ls`/`tree`/`du`/`get`/`add` commands remain available. Shares live in an untracked `~/.config/terminal-stack/shares.local.conf` that is **never synced anywhere**; passwords are obscured into the OS keychain and never appear in a command line. Windows is not covered yet — Explorer and `net use` already do this there.
-
-Bare **`rclone config`** now opens a guided menu that explains that “Storage” means the server/provider type—not a folder or configuration location—and leads with the SMB workflow. Use `rclone-stock config` for rclone's untouched advanced wizard. Tailscale shortcuts such as `tail-self`, `tail-hosts`, `tail-ip origin`, `tail-fqdn origin`, and `tail-find orig` answer common device-identity questions; see `doc tailscale` for native commands and diagnostics too.
-
-**`tstack mux`** (both shells) owns the WezTerm **multiplexer domain** the wizard asks about: whether WezTerm hosts your panes in `wezterm-mux-server` instead of the GUI, so a GUI crash leaves every pane alive. It defaults to **off** — the mux server loads its own copy of `.wezterm.lua` (config changes need `tstack mux restart`, which kills every pane) and mux panes can't render the per-pane Claude tint. `tstack mux on`/`off` flip it and re-apply; `tstack mux` alone reports the setting, the *rendered* setting and the live server; `tstack mux kill`/`restart`/`reset` drive the server itself. From WSL it reaches the Windows-side server over interop, so it works from either shell.
-
-## Updating & rollback
-
-After install, `tstack update` is available in both pwsh and zsh. It fetches, shows the incoming commits, records a rollback point, then pulls and re-applies (honoring your saved `tstack config` choices):
-
-```text
-$ tstack update
-==> incoming changes:
-  a1b2c3d feat: workspace autodetect
-==> recorded rollback point: e452f67 (tstack rollback to undo)
+```powershell
+irm https://raw.githubusercontent.com/martybytes/terminal-stack/main/install.ps1 | iex
 ```
 
-(PowerShell re-applies via `scripts\sync-windows.ps1` — Windows-side only, no WSL needed. zsh re-applies via `chezmoi apply`.)
+Run this **before** the WSL installer — the two share one clone, and only this
+step installs the Windows-side packages (WezTerm, Starship, the Nerd Font).
+</details>
 
-Re-running the original install one-liner from § Quick install does the same thing (the installers are idempotent and `git pull` if the clone exists).
-
-**`tstack rollback`** undoes the last `tstack update`: it resets the clone to the recorded SHA (refusing if the clone has uncommitted changes) and re-applies. Run `tstack update` again to return to latest. The rollback point lives at `~/.local/state/terminal-stack/rollback-sha` (zsh) / `%LOCALAPPDATA%\terminal-stack\rollback-sha` (pwsh).
-
-**`tstack doctor`** diagnoses a broken install — a chezmoi `sourceDir` pointing at an old/moved clone (the classic "I updated but `doc` says command not found" symptom), a `~/.zshrc`/`$PROFILE` missing the stack block, the two config stores disagreeing, a TTS daemon that is enabled but dead, leftover old clones, or tools off PATH. One implementation now runs on every platform, so Windows gets the checks it never had. It is read-only by default and `--json` emits one record per check for scripts; **`tstack doctor --repair`** repoints `sourceDir`, moves a legacy-path clone to the canonical location (or, when that location is already occupied, switches to the clone there and offers the other for removal), re-applies, and offers to remove old clones and retired files (pre-ticked checklist, one confirmation, `TS_DRY_RUN=1` to preview). The installers run the same checks automatically and prompt for the clone location.
-
-**Manual rollback** (state file missing, or rolling back further than one update):
+<details>
+<summary><b>WSL2 Ubuntu</b></summary>
 
 ```sh
-git -C <clone> log --oneline -10          # pick the SHA or tag to return to
-git -C <clone> reset --hard <sha>         # e.g. v1.0.x tags, or any commit
-~/.local/bin/chezmoi apply                # Windows: <clone>\scripts\sync-windows.ps1
+curl -fsSL https://raw.githubusercontent.com/martybytes/terminal-stack/main/install-wsl.sh | bash
 ```
 
-Two caveats: the clone may double as a dev checkout — commit or stash before any `reset --hard`. And rolling back the *source* doesn't delete files an update introduced (e.g. the git include at `~/.config/git/terminal-stack.gitconfig`); chezmoi simply stops managing them. For a full undo, also `git config --global --unset-all include.path <path>`.
+Detects your Windows username over interop and writes the shared configuration.
+</details>
 
-## Developing WezTerm config
+<details>
+<summary><b>Debian / Ubuntu</b> (native, no WSL)</summary>
 
-WezTerm loads from your home directory, not the clone. On Windows, run `scripts\sync-windows.ps1 -SourceDir <clone>` after editing `windows/.wezterm.lua.tmpl` or `windows/.wezterm/pane_nav.lua`, then reload (`Ctrl+Space` `r` for module changes; the sync prints a reminder when the mux server needs a restart too). On macOS, `chezmoi apply` deploys `dot_wezterm.lua.tmpl` and `dot_wezterm/pane_nav.lua`. See `docs/developing-wezterm.md` for the full loop, the plugin forks, `$env:TERMINAL_STACK_DIR`, and optional auto-sync.
+```sh
+curl -fsSL https://raw.githubusercontent.com/martybytes/terminal-stack/main/install-linux.sh | bash
+```
+
+The Windows-sync hook self-no-ops here, so the same source tree is correct on a
+headless server reached over SSH.
+</details>
+
+### 2. Answer the wizard
+
+**The first question is how much of this you want**, and it opens by rendering
+the prompt you would get:
+
+| | what it installs |
+|---|---|
+| **just the prompt** | Starship and a Nerd Font. Your shell config, aliases and terminal are left alone |
+| **prompt and terminal** | adds the managed zsh/tmux/WezTerm configs and the CLI tools |
+| **the whole stack** | adds the agent wiring, the Docker services, voice notifications and memory |
+
+Then: will you write code on this machine? That decides which half of the CLI
+tool catalog is pre-ticked — a server wants monitors, disk and network tools; a
+laptop wants runtimes, git tooling and the agent CLIs — and whether the agent
+and memory questions are asked at all.
+
+After that it is leader key, theme, terminal emulator and the tool picker. Every
+menu marks its default and takes it on Enter; the single-choice menus accept an
+option's name as well as its number, and the tick-lists take numbers plus `a`,
+`n` and `s`. It ends with a review screen you can edit or abandon before any of
+your choices are installed or saved — base prerequisites (Homebrew, git, the apt
+base set) land before the questions.
+
+Scripted installs skip each prompt with its own env var — `TS_PROFILE`,
+`TS_DEVELOPMENT`, `TS_STARSHIP_PRESET`, `TS_LEADER`, `TS_THEME`,
+`TS_TERMINALS`, `TS_APPS`, `TS_TMUX`, `TS_WEZ_MUX`, `TS_WEZ_RESTORE`,
+`TS_ATUIN`, `TS_MEMORY_BACKEND`, `TS_CC_TTS`, `TS_HEADLESS` (bash only) — plus
+`TS_ASSUME_YES=1` to accept the review. Full list in
+[INSTALL.md § Scripted](INSTALL.md#scripted-fastest).
+
+### 3. Verify
+
+```sh
+tstack doctor
+```
+
+Read-only, and exits non-zero if anything is wrong. Each failing check names the
+command that fixes it; `tstack doctor --repair` points you at the interactive
+cleanup checklist for clone relocation and leftover clones.
+
+## Quickstart
+
+```sh
+tstack                 # every subcommand, with platform gaps marked
+tstack --version       # clone path, branch, commit
+tstack doctor          # diagnose the install; --json for one record per check, exit 1 if anything is wrong
+tstack config          # interactive settings menu
+tstack config theme follow
+tstack ui              # every setting in one screen (needs Textual)
+tstack config wizard   # replay the install questionnaire and save the answers
+tstack ghostty         # the managed Ghostty config: status, diff, on, off
+tstack update          # pull the latest stack and re-apply
+tstack rollback        # undo that update
+doc                    # fuzzy-find a runbook in the knowledge base
+```
+
+`tstack` and `doc` are shell functions the stack installs into `~/.zshrc` and
+your PowerShell `$PROFILE`, so they exist only after an install.
+
+Where things live:
+
+| | Clone | Settings |
+|---|---|---|
+| **Windows + WSL** | `%LOCALAPPDATA%\terminal-stack\stack` (shared) | chezmoi `[data]` on the WSL side, mirrored to `%LOCALAPPDATA%\terminal-stack\config.json` (that mirror is the whole store only on a Windows-only install) |
+| **Linux / macOS** | `~/.local/share/terminal-stack` | chezmoi `[data]` in `~/.config/chezmoi/chezmoi.toml` |
+
+## Demo
+
+The recording at the top is real output, not a mock-up.
+[`docs/demo.tape`](docs/demo.tape) is the [Charm VHS](https://github.com/charmbracelet/vhs)
+script that produced it:
+
+```sh
+brew install vhs ttyd ffmpeg
+vhs docs/demo.tape
+```
+
+Every command in it is read-only. Re-record it after any change to
+`tstack --help`, which is rendered from `tstack/commands.conf` and so changes
+whenever the command surface does. It has to run on a machine where the stack is
+installed: the tape drives the `tstack` shell function, which only exists after
+an apply.
+
+## Configuring
+
+`tstack config` is the front door. Run it bare for a menu, or one-shot:
+
+```sh
+tstack config theme follow      # dark / light / follow the OS
+tstack config prompt list       # every Starship prompt, rendered, then pick one
+tstack agents llm               # which AgentMemory features a chat model switches on
+tstack config leader ctrl-a     # the WezTerm leader key
+tstack config apps              # re-open the CLI tool picker
+tstack config tts on            # voice notifications
+tstack config show              # the saved leader, theme, tmux prefix, apps and toggles
+tstack config wizard            # replay the whole install questionnaire
+```
+
+`tstack ui` is the same settings in one screen — what each is now, what its
+default is, and **which layer the value came from**, which is the thing a printed
+value cannot tell you. `/` filters, `Space` cycles a choice, `d` restores the
+default.
+
+Where a setting's valid values are a fact about *this* machine rather than a
+fixed list, `Enter` opens a picker instead of a text box: the voices your kokoro
+actually serves (`s` plays one), the Starship presets your starship ships (each
+one **rendered** in a preview pane), and the CLI tools as a tick-list.
+AgentMemory's chat provider is editable there too, though it is not a saved
+setting at all — it lives in the stack's `.env`.
+
+It needs [Textual](https://textual.textualize.io/) (`uv tool install textual`),
+the one third-party library this stack's Python uses.
+
+Choices persist across updates. On a combined Windows + WSL machine, run
+`tstack config` **from WSL** — its `chezmoi apply` is authoritative for the
+Windows-side files too.
+
+Other subcommands, each with `-h`:
+
+| Command | What it does |
+|---|---|
+| `tstack services` | the Docker stacks under `services/` — up, down, status, test |
+| `tstack mux` | whether WezTerm hosts panes in a mux server (off by default) |
+| `tstack wezterm` | which WezTerm build you have, what is newer, switch channel |
+| `tstack smb` | find, interrogate and mount SMB shares over rclone (macOS/Linux) |
+| `tstack agents` | wires Headroom, Caveman and AgentMemory into this machine's Claude, Codex and Cursor |
+| `tstack doc` | the knowledge base, same as the bare `doc` command |
 
 ## What you get
 
-Enhanced Codex sessions speak completed turns and `request_user_input`
-questions immediately, including first question text.
+<details open>
+<summary><b>Terminal and prompt</b></summary>
 
-- **WezTerm** (nightly or stable, your pick at install time and changeable with `tstack config wezterm` — Ghostty is offered alongside it on macOS/Linux) with a **taller, hand-drawn fancy tab bar**: the active tab is a solid accent block you can't miss; each tab shows an index, an icon (Claude robot / remote host / foreground process), and a deliberately short title — the bare project leaf for Claude panes, a ` host ·` chip + directory leaf for remote ones, never a full path. Claude tabs carry a coloured dot per pane and tint green when done / red on error (each Claude pane's background tints to match), and inactive tabs flag unseen output. The **hand-rolled status bar** stays quiet: a mode badge appears on the left only while the leader or a repeat mode is live (no permanent `NORMAL`), and the right side shows Claude fleet counts (working/done/error across every pane) plus the non-default workspace — never a date or clock; `Ctrl+Space s` adds `user@host │ path`. Integrated window buttons, JetBrainsMono Nerd Font at 11.5pt. **`F1`–`F4` are directions** (left/right/down/up): press to focus the pane that way, or split one into existence if none is there; `Shift+F1`–`F4` always split into a fuzzy-picked SSH/WSL domain, `F5` jumps via a labelled PaneSelect overlay, `F6` swaps panes, and `Ctrl+Space 1`–`6` mirror the F-keys. A **no-timeout leader** (`Ctrl+Space` by default — configurable via `tstack config leader`; peach-cursor "waiting" indicator) drives splits (`h`/`v` local; `H`/`V` into a chosen domain) and **arrow-key repeatable modes** — `Ctrl+Space`+arrows move focus, `+Shift` resizes, `+Ctrl` rotates panes, plus `t`/`f` for tab-switch / font-size — each shown by an on-screen mode badge, all auto-exiting after a short idle. **`Ctrl+Space p`** fuzzy-picks a project workspace (sessionizer over the `wso` tree; needs `fd`), and **`Ctrl+Space S`/`L`** save/restore sessions (resurrect; 15-min autosave — launching WezTerm starts clean unless you run `tstack config restore on`). QoL: QuickSelect patterns for git SHAs and `file:line` refs, hyperlink rules (`owner/repo` → GitHub; Ctrl-click a `file.ext:123` to open it in Cursor), `Ctrl+Shift+↑/↓` jump between shell prompts (OSC 133), `Alt+1…9` tab selection, `Ctrl+V` rebound for synthetic-paste (Wispr Flow, etc.), `Ctrl+Space o` to pop a pane into its own window, and workspace management (`Ctrl+Space R` rename, `Ctrl+Space X` close-all). Windows uses the OpenGL renderer. Panes can optionally be hosted in a **mux server** so a GUI crash doesn't kill your shells — off by default, `tstack mux on` to enable (`tstack mux -h` for status/kill/restart/reset and the trade-offs). The colour theme (Catppuccin **Mocha** dark / **VS Code Light Modern** light / **follow** the OS) is set by `tstack config theme` and switches live in follow mode. On macOS, two System Settings toggles free `Ctrl+Space` and the F-row first — see `INSTALL.md` § macOS.
-- **PowerShell 7 `$PROFILE`** with Starship prompt, OSC 7 cwd hint, tilde-abbreviated tab title, UTF-8 console restore (heals Claude-Code `Γ¥»` mojibake), Claude wrappers that set per-tab project titles, and enhanced interactive Codex dispatch with `cy` / `cyr` yolo shortcuts.
-- **WSL zsh** with oh-my-zsh, theme cleared so Starship owns the prompt, a `precmd` that sets tab titles, `ccs` / `ssht` helpers for tmux-attached Claude Code and SSH sessions, and the same enhanced interactive Codex dispatch.
-- **Three-line Codex dashboard + TTS** for every interactive `codex`, `resume`, and `fork` launch (plus `cy` / `cyr`): smart location and Git identity; detailed changes, sync, stashes, exact session patch, commit age, and cached PR health; then live activity/timers, model/effort, context and account-usage bars, token breakdown, permissions/version, and actionable failures. It occupies a disposable three-row WezTerm split; utility commands stay stock and `codex-stock` is the explicit escape hatch. See `doc codex`.
-- **Claude Code hooks** that drive the WezTerm tab state — the per-pane dots, tab tint, and fleet counts via the `cc_state` user var — and pin the tab title to the project name while Claude runs, symmetric across Windows pwsh and WSL bash.
-- **Voice notifications** (opt-in, `tstack config tts on`) — a spoken line when Claude Code or Cursor finishes, errors, or needs you, via local Kokoro TTS with edge-tts fallback. The optional **tray daemon** (`tstack config tts daemon on`) makes them session-aware: it names the project ("terminal-stack two finished"), coalesces simultaneous completions into one utterance, speaks questions immediately, ducks or pauses your music while talking, and can read a one-line summary the model writes itself. Hooks fall back to direct playback whenever the daemon is off or unreachable. `ccmute` (or a left-click on the tray icon, `Ctrl+Alt+Shift+M`, or `Leader+m`) silences it instantly for a call, absolutely and until you unmute. The tray also opens a **dashboard** with a live activity timeline, the daemon log, and a settings editor. See `doc windows/tts-daemon`.
-- **The services those features need, in this repo** (`tstack services`) — agentmemory, Headroom, Kokoro TTS and a Playwright MCP browser are Docker stacks under `services/`, not something you clone separately. `tstack services bootstrap` seeds every `.env`, **generates** Headroom's two secrets and creates the external volumes; `tstack services up`/`down`/`restart`/`logs`/`status` drive them; `tstack services test` takes everything down, brings it back up and proves the chain works — that Headroom's token is actually *enforced*, that a memory can be written and read back, that Kokoro really synthesises audio, and that every published port still binds `127.0.0.1`. Which stacks take part comes from the settings you already have, so a machine with a feature off is *skipped*, never reported as broken. Everything it creates is named `ts-`, so `docker ps` separates it from your own work at a glance. `tstack services` is the only thing here that may run Docker; `tstack config agents` only ever probes. See `doc services`.
-- **One memory backend, chosen at install** (`tstack config memory`) — AgentMemory and Headroom both do semantic memory, so exactly one runs: two stores means two half-filled ones with no way to tell which holds the answer. The default is AgentMemory for memory and Headroom for compression. It is one slot, not two toggles, so the bad combination is unrepresentable rather than merely discouraged, and choosing Headroom's own store is what merges the Qdrant + Neo4j overlay — a machine that does not want it never pulls those images. See `doc headroom`.
-- **Per-computer agent tooling** (`tstack config agents`) — user-global Headroom, Caveman and AgentMemory controls shared by every project without project files. Headroom routes Claude/Codex only while their shell wrapper runs, uses separate proxy authentication without replacing provider OAuth, and fails open to direct mode. `tstack config agents headroom off` is the immediate revert; `on`/`repair` require an authenticated data-plane preflight before routing returns. Its MCP clients launch `headroom mcp serve` through Docker stdio and verify a JSON-RPC initialize handshake, avoiding the dashboard gateway's nonexistent `/mcp` route. Cursor keeps its explicit `mcp` / `byok` / `off` choice. Fresh computers default off, enabled tools repair on `tstack update`, and `claude-stock` / `codex-stock` remain escape hatches.
-- **Six agent CLIs, installed for you if you want them** (`claude`, `codex`, `cursor-agent`, `grok`, `gemini`, `pi`) — a pre-ticked group in the install questionnaire that is still a question, never a silent install. None come from a package manager: three have native installers needing no Node, and the three npm ones are gated on the Node version (16, 20 and 22 respectively) and tell you what to do rather than failing.
-- **Node and Python runtimes in the questionnaire** — `fnm` (chosen over nvm: ~10ms of shell startup instead of 200-500ms, same `.nvmrc` support) plus the current Node LTS, and a Python group of `uv`, `pipx`, `ruff`, `ipython`, `httpie`, `poetry`, `pre-commit`.
-- **`tstack wezterm` / `tstack config wezterm`** — what WezTerm build you have and when it was built, what is newest on each channel, and a count of what changed in between, sliced from upstream's own changelog. Switching channel is one command and removes the other package for you. Nothing upgrades on its own.
-- **Modern CLI tools**: eza, zoxide, fzf, bat, git-delta, ripgrep, fd, tree, and a disk/monitor set (duf, ncdu, dust, gdu, btop, bottom, glances, bandwhich, gping), `glow` (markdown renderer), the `micro` editor (a friendly nano alternative), **Neovim** (with `v` as its alias), and the opt-in `atuin` (SQLite shell history on `Ctrl+R`) and `yazi` (file manager, `y` to cd where you exited) — installed on every target; **Zed** (GUI editor) is an opt-in pick in the app catalog on every platform. Delta is wired into `git diff` and the stack's `git st/lg/lga/br/co/cm` aliases via a managed gitconfig include.
-- **tmux** configured for Claude Code passthrough, extended keys, and mouse mode.
-- **`lsr` — top-level directories by most recent activity.** Ranks each directory by the newest mtime among its *immediate* children, so a project you edited files inside all day sorts first — unlike `ls -lt`/`eza -s modified`, which sort by the directory's own mtime and bury it. One level deep, never recursive. Both shells; `lsr -a` includes hidden dirs, and `lsrr` caps the list at the 20 most recent. See `doc common/files-disk`.
+- **WezTerm** (nightly or stable, your pick) with a taller hand-drawn tab bar on Windows, WSL and macOS: the active tab is a solid accent block, each tab carries an index, an icon and a deliberately short title. Desktop Linux installs WezTerm but keeps its stock config. **Ghostty** is the macOS alternative — installed, with a managed `~/.config/ghostty/config`; Windows gets the same managed config at `%LOCALAPPDATA%\ghostty\`, and on Linux the installer points you at ghostty.org rather than installing it.
+- **`F1`–`F4` are directions** — focus the pane that way, or split one into existence if none is there. `F5` jumps via a labelled overlay, `F6` swaps.
+- **A no-timeout leader** (`Ctrl+Space` by default) drives splits and arrow-key repeatable modes for move, resize, rotate, tab-switch and font-size, each with an on-screen badge that auto-exits when idle. `Ctrl+Space p` fuzzy-picks a project from the `wso` tree (needs `fd`); `Ctrl+Space S`/`L` save and restore a session.
+- **Starship prompt** on both zsh and PowerShell, with the palette baked to your theme.
+- **tmux** configured for Claude Code passthrough, extended keys and mouse mode.
+</details>
 
-- **`ws`/`wsp`/`wspu`/`wsw` workspace navigation** that autodetects the workspace root per machine (`$WORKSPACE_DIR` in `~/.zshrc.local` / `profile.local.ps1` overrides it). `wsw` finds the `*_Work`/`*-Work` sibling, and `wsw --set` writes the override for you when work lives elsewhere.
-- **`db`/`dbx` — jump to Dropbox** from anywhere, on every platform. Reads Dropbox's own `info.json` before guessing at paths, so a relocated folder, a Business account or two linked accounts all resolve correctly; `$DROPBOX_DIR` overrides. macOS Ventura moved the folder under `~/Library/CloudStorage`, which is why guessing is not enough.
-- **`wso` — workspace organizer for many repos across many machines.** Keeps every clone in one derivable tree, `<workspace>/<tier>/github.com/<owner>/<repo>`, where the path is computed from the repo's `origin` remote rather than the folder someone typed once — which is what catches a repo misfiled under the wrong name, the same remote cloned twice under two spellings, or a clone still pointing at a renamed GitHub account. `wso status` is a read-only report of everything dirty, unpushed or detached; `wso plan`/`wso migrate` move an existing mess into the tree as atomic renames that preserve uncommitted work, stashes and untracked files, refusing anything whose destination already exists; `wso sync` is a fast-forward-only bulk update that can never destroy local work; `wso archive`/`wso unarchive` move cold repos to a parallel `archive/` tier behind an interactive checklist and a hard safety gate. `ws37`/`ws42`/`wsmb`/`wsmd`/`wspu`/`wsar` jump to an owner and `wsj` fuzzy-jumps to any repo, which is what makes the deep paths free. Both shells. See `doc common/workspace-org`.
-- **`doc` knowledge base** — a tree of markdown command runbooks under `docs/kb/` in the clone (`common/` + per-OS `linux/`/`macos/`/`windows/` + `wezterm/`), rendered by `glow`. `doc` fuzzy-finds a topic, `doc <topic>` opens it, `doc -g` greps, `doc cmd` drops a command straight onto your prompt, and `doc sync` commits your edits back (with a changelog bullet). Personal/secret runbooks live in an untracked `~/.doc.local/` layer. `ref` and `wzr` are thin aliases into it.
+<details>
+<summary><b>Command-line tools</b></summary>
+
+- **The modern set**: eza, zoxide, fzf, bat, git-delta, ripgrep, fd, tree, glow, micro, Neovim.
+- **Disk and monitoring**: duf, ncdu, dust and btop by default; gdu, bottom, glances, bandwhich and gping are one tick away in the picker.
+- **Also in the catalog**: atuin — SQLite shell history, pre-ticked, and the wizard recommends letting it own `Ctrl+R` — plus yazi (file manager) and Zed, both unticked by default.
+- **Runtimes**: `fnm` plus current Node LTS, and a Python group — Python itself, uv, pipx, ruff and ipython by default, with httpie, poetry and pre-commit a tick away.
+- **Delta wired into git** through a managed gitconfig include — the installer adds one `include.path` line to your `~/.gitconfig` and owns nothing else in it. Because `--add` appends, the include resolves **last** and its settings win — six aliases, the delta pager, `pull.ff = only`, `help.autocorrect` — so put a setting of your own *below* that line if you want yours to.
+</details>
+
+<details>
+<summary><b>Navigation</b></summary>
+
+- **`ws`** jumps to your workspace root, autodetected per machine; **`wsp`** and **`wsw`** to its Personal and Work sibling roots.
+- **`wso`** keeps every clone in one derivable tree, `<workspace>/<tier>/<host>/<owner>/<repo>` (`local/` when there is no remote), with the path computed from the repo's `origin` remote rather than the folder someone typed once — which is what catches a misfiled repo, the same remote cloned twice, or a clone pointing at a renamed account.
+- **`lsr`** ranks directories by the newest mtime among their *immediate* children, so a project you edited inside all day sorts first — unlike `ls -lt`, which sorts by the directory's own mtime and buries it.
+- **`db`** jumps to Dropbox, preferring Dropbox's own `info.json` — the only thing that gets a relocated folder or a Business account right — and falling back to the usual locations when it is unreadable.
+</details>
+
+<details>
+<summary><b>Agent integrations</b> (optional)</summary>
+
+- **Claude Code hooks** that drive the WezTerm tab state — per-pane dots, tab tint and fleet counts — and pin the tab title to the project while Claude runs.
+- **A three-line Codex dashboard** for interactive sessions: location and git identity, changes and sync state, then live activity, model, context and usage bars.
+- **Voice notifications** (opt-in) — a spoken line when an agent finishes, errors or needs you, via local Kokoro TTS, falling back through Chatterbox and edge-tts to the OS voice on macOS and Windows, so a stopped container does not mean silence. `ccmute` silences it instantly, with no apply.
+- **One memory backend, chosen at install** — AgentMemory or Headroom, never both, because two stores means two half-filled ones with no way to tell which holds the answer.
+</details>
+
+<details>
+<summary><b>The services those features need</b></summary>
+
+`tstack services` drives Docker stacks that live in [`services/`](services/) —
+agentmemory and its console, Headroom, Kokoro TTS and a Playwright MCP browser.
+Nothing to clone separately.
+
+`tstack services bootstrap` seeds every `.env`, generates secrets and creates
+volumes; `tstack services test` takes it all down, brings it back up and proves
+the chain works — that a memory can be written and read back, that Kokoro really
+synthesises audio, and that every published port still binds `127.0.0.1`.
+Everything it creates is named `ts-`, so `docker ps` separates it from your own
+work at a glance.
+</details>
 
 ## Architecture in 30 seconds
 
-This is a chezmoi repo with a twist: chezmoi natively manages Linux/WSL home (`~/.zshrc`, `~/.tmux.conf`, `~/.config/starship.toml`, `~/.claude/*`), but Windows-side files live in a `windows/` subdirectory excluded from chezmoi's normal apply via `.chezmoiignore`. A `run_after_90-sync-windows.sh` hook then mirrors `windows/` to `/mnt/c/Users/<user>/` and `docs/kb/` to `%LOCALAPPDATA%\terminal-stack\docs\kb\` on every `chezmoi apply` (or `scripts\sync-windows.ps1` on Windows-only), with same-day `.bak.YYYYMMDD[.N]` backups for any file it overwrites. On native Linux and macOS the hook self-no-ops (no `/mnt/c/` mount), so the same source tree drives WSL, native Linux, macOS, and Windows from one apply.
+chezmoi manages `$HOME` on the machine it runs on. That covers WSL, Linux and
+macOS. Most Windows-side files live in a `windows/` subdirectory that is
+**excluded** from chezmoi's apply (`.chezmoiignore`), and a `run_after` hook
+mirrors them to `C:\Users\<you>\` afterwards — substituting `__WIN_USER__` and
+the saved leader/theme tokens on the way, splicing rather than overwriting the
+two files another tool also writes (`~/.claude/settings.json`,
+`~/.cursor/hooks.json`), and taking a dated backup of everything else. The same
+hook also mirrors two trees chezmoi *does* apply to `$HOME`: `dot_codex/` to
+`C:\Users\<you>\.codex\`, and `docs/kb/` to the Windows knowledge-base cache.
 
-Single source of truth, single `chezmoi apply`, three targets updated. See `ARCHITECTURE.md` for the long version.
+On native Linux and macOS that hook self-no-ops — there is no `/mnt/c` — so the
+same source tree is correct on all four targets.
 
-## Install (longer paths)
+Single source of truth, single `chezmoi apply`, every target updated. The long
+version is in [ARCHITECTURE.md](ARCHITECTURE.md); the design decisions and the
+failures behind them are in [docs/decisions.md](docs/decisions.md).
 
-The § Quick install one-liners above are the recommended path. For people who want to read each step before running it, `INSTALL.md` documents two alternatives:
+## Development
 
-- **Scripted bootstrap** — run each `bootstrap/*` script by hand, then `chezmoi apply`. See `INSTALL.md` § Scripted.
-- **Step-by-step walkthrough** — every install step documented with its "why". Slower, but each command is annotated. See `INSTALL.md` § Manual.
+The management layer is being ported from parallel bash + PowerShell
+implementations to one Python program, `tstack`. The plan and its phases are in
+[REVAMP-PLAN.md](REVAMP-PLAN.md); the rules for working on it are in
+[AGENTS.md](AGENTS.md).
 
-For an existing machine with chezmoi already pointed elsewhere, just clone this repo and write `~/.config/chezmoi/chezmoi.toml` with `sourceDir = "<absolute path to your clone>"`.
+```sh
+ruff check tstack tests
+ruff format --check tstack
+mypy
+pytest tests/
+```
+
+`.githooks/pre-commit` runs those four; `pre-push` re-runs the suite with the
+coverage floor (`--cov`, `fail_under = 81`) and adds the characterization
+replay, once the clone has `core.hooksPath=.githooks` set.
+
+```sh
+tests/parity/run.sh        # the suite on Debian 13, Ubuntu 24.04, 22.04 and a bash 3.2 gate
+```
+
+CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) covers Ubuntu, macOS,
+Windows and WSL, which is more than any single development machine can.
+[docs/verifying-changes.md](docs/verifying-changes.md) covers the gates a runner
+cannot perform — loading a WezTerm config without a GUI, driving an interactive
+prompt through a pty, exercising a real config store.
 
 ## Layout
 
 ```
 terminal-stack/
-├── README.md             # this file
-├── ARCHITECTURE.md       # cross-side chezmoi, run_after hook, sync semantics
-├── CHANGELOG.md          # curated change history
-├── INSTALL.md            # scripted + step-by-step install paths
-├── LICENSE               # MIT
-├── install.ps1           # one-liner Windows installer (irm | iex)
-├── install-wsl.sh        # one-liner WSL installer (curl | bash)
-├── install-linux.sh      # one-liner native-Linux installer
-├── install-mac.sh        # one-liner macOS installer
-├── REVAMP-PLAN.md        # the port to one `tstack` program, phase by phase
-├── pyproject.toml        # ruff / mypy / pytest / coverage config
-├── tstack/               # the `tstack` command itself (chezmoi-ignored, run from the clone)
-│   ├── main.py           #   entry point the shell shims invoke
-│   ├── cli.py            #   dispatcher; renders ALL help, so the twins cannot drift
-│   ├── commands.conf     #   the subcommand table: name, posix impl, windows impl, summary
-│   ├── registry.py       #   parser for that table
-│   ├── paths.py          #   clone resolution (was written three times)
-│   ├── platform.py       #   windows / wsl / linux / macos detection and interop
-│   ├── store.py          #   the ONE reader of chezmoi [data] + the config.json mirror
-│   ├── checks.py         #   the check model behind `doctor` and `--json`
-│   └── commands/         #   one module per ported subcommand (doctor)
-├── services/             # the Docker stacks the memory/compression/voice
-│   ├── stacks/           #   features run on (chezmoi-ignored, run from the clone)
-│   └── console/          #   the agentmemory console's source, built from here
-├── bootstrap/            # deeper bootstraps + command backends, run from the clone
-│   ├── windows-bootstrap.ps1
-│   ├── wsl-bootstrap.sh
-│   ├── linux-bootstrap.sh
-│   ├── mac-bootstrap.sh
-│   ├── _common-debian.sh    # shared Debian install helpers (sourced)
-│   ├── _config.sh / _config.ps1   # config store, app catalog, prompt helper
-│   ├── _wizard.sh           # install-wizard prompts (ts_prompt_choice)
-│   ├── _cleanup.sh / _cleanup.ps1 # old-clone checklist; ts_backup_file lives here
-│   ├── ts-config.sh         # backend for the `tstack config` shell command
-│   ├── ts-smb.sh            # backend for `tstack smb` (SMB shares over rclone)
-│   ├── _smb.sh              # share store, engine probe, mount lifecycle
-│   ├── shares.conf          # tracked tstack smb defaults (never a real host)
-│   ├── workspace.conf       # tracked layout map for `wso` (org → tier, renames)
-│   ├── _workspace.sh + wso.sh              # `wso` — bash half (WSL/Linux/macOS)
-│   └── _workspace.ps1 + _workspace_cmd.ps1 # `wso` — pwsh half (Windows)
-├── scripts/
-│   └── sync-windows.ps1  # Windows-native port of run_after sync (no WSL needed)
-├── docs/                 # design-decision documentation
-│   ├── cross-side-chezmoi.md
-│   ├── developing-wezterm.md
-│   ├── powershell-quirks.md
-│   ├── decisions.md
-│   └── kb/               # the `doc` knowledge base (common/, linux/, macos/, windows/, wezterm/)
-├── dot_zshrc             # ↘ chezmoi-managed (WSL + native Linux + macOS home)
-├── dot_zshrc.local.example  # template for per-machine overrides (~/.zshrc.local)
-├── dot_tmux.conf.tmpl
-├── dot_wezterm.lua.tmpl  # macOS WezTerm config (gated to darwin in .chezmoiignore)
-├── dot_wezterm/          # WezTerm Lua modules (pane_nav.lua) — darwin-gated too
-├── dot_config/
-├── dot_claude/
-├── .chezmoi.toml.tmpl    # OS-detection seam → [data].os = wsl|linux|darwin|windows
-├── windows/              # ↘ NOT chezmoi-managed; synced by run_after hook (or sync-windows.ps1)
-│   ├── .wezterm.lua.tmpl
-│   ├── .wezterm/         # pane_nav.lua (Windows mirror)
-│   ├── .config/
-│   ├── Documents/
-│   └── .claude/
-└── run_after_90-sync-windows.sh
+├── tstack/          the `tstack` command — one Python program, every platform
+├── bootstrap/       per-OS bootstraps and the remaining shell backends
+├── services/        Docker stacks (agentmemory, Headroom, Kokoro, Playwright)
+├── docs/            architecture, decisions, and the `doc` knowledge base
+├── tests/           pytest suite, characterization fixtures, parity containers
+├── windows/         Windows-side files, synced by the run_after hook
+├── dot_*            chezmoi-managed home files for WSL / Linux / macOS
+├── install-*.sh     the one-liner installers (macOS, WSL, Linux)
+└── install.ps1      the Windows one-liner installer
 ```
 
-## Portability
-
-The repo carries no hard-coded usernames. The WSL bootstrap detects your Windows username (via `cmd.exe` interop) and persists it under `[data].windowsUsername` in `~/.config/chezmoi/chezmoi.toml`. The sync hook substitutes that value into `windows/**/*.tmpl` files (e.g., `windows/.claude/settings.json.tmpl`) at apply time, and WSL-side templates use chezmoi's native `{{ .chezmoi.homeDir }}`. See `ARCHITECTURE.md` § "Username resolution" for the resolution order.
-
-Tested on Windows 11 + WSL2 Ubuntu, native Debian/Ubuntu, and macOS (Apple Silicon + Intel).
+`bootstrap/`, `services/`, `tstack/`, `docs/` and `tests/` are all
+chezmoi-ignored and run from the clone, so `tstack update` ships changes to them
+without a home-directory apply. (On Windows the sync additionally mirrors
+`docs/kb/` to `%LOCALAPPDATA%\terminal-stack\docs\kb` so `doc` picks up new
+runbooks.)
 
 ## License
 
-MIT. See `LICENSE`.
+[MIT](LICENSE).

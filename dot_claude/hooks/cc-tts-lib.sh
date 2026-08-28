@@ -484,19 +484,24 @@ cc_tts_temp_media() {
 
 cc_tts_synth_kokoro() {
     local text="$1" out="$2"
-    local url voice speed fmt timeout payload
+    local url model voice speed fmt timeout payload
     url="$(cc_tts_json .kokoro.url 'http://127.0.0.1:8880')"
+    # The docker image answers to the literal "kokoro"; mlx-audio -- the same
+    # model running natively on Apple Silicon, same wire protocol -- wants the
+    # HuggingFace repo id and 400s on anything else. Being configurable is the
+    # whole difference between the two, so it must not be a literal here.
+    model="$(cc_tts_json .kokoro.model kokoro)"
     voice="$(cc_tts_json .kokoro.voice am_adam)"
     speed="$(cc_tts_effective_kokoro_speed)"
     fmt="$(cc_tts_json .kokoro.format mp3)"
     timeout="$(cc_tts_json .kokoro.timeoutSec 15)"
     if command -v jq >/dev/null 2>&1; then
-        payload="$(jq -n --arg t "$text" --arg v "$voice" --arg f "$fmt" --argjson s "$speed" \
-            '{model:"kokoro",input:$t,voice:$v,response_format:$f,speed:$s}')"
+        payload="$(jq -n --arg t "$text" --arg m "$model" --arg v "$voice" --arg f "$fmt" --argjson s "$speed" \
+            '{model:$m,input:$t,voice:$v,response_format:$f,speed:$s}')"
     else
-        payload="$(python3 - "$text" "$voice" "$fmt" "$speed" <<'PY'
+        payload="$(python3 - "$text" "$voice" "$fmt" "$speed" "$model" <<'PY'
 import json, sys
-print(json.dumps({"model":"kokoro","input":sys.argv[1],"voice":sys.argv[2],
+print(json.dumps({"model":sys.argv[5],"input":sys.argv[1],"voice":sys.argv[2],
                   "response_format":sys.argv[3],"speed":float(sys.argv[4])}))
 PY
 )"
@@ -553,29 +558,59 @@ cc_tts_synth_edge() {
 # format from the EXTENSION and only really writes AIFF, so synthesise to a
 # .aiff and move it into place — afplay sniffs content, not the name.
 cc_tts_synth_say() {
-    local text="$1" out="$2" tmp
+    # $3 is "chosen" when `say` is the configured engine rather than the floor.
+    # It changes two things and neither is cosmetic: the daily notice explains an
+    # UNEXPECTED fallback, so firing it for a deliberate choice is a nag about a
+    # decision already made; and the log line should say which of the two
+    # happened, because "why is it using say" is the question this rung creates.
+    local text="$1" out="$2" chosen="${3:-}" tmp voice
     [ "$(uname -s 2>/dev/null)" = Darwin ] || return 1
     command -v say >/dev/null 2>&1 || return 1
     tmp="${out%.*}.say.aiff"
-    say -o "$tmp" -- "$text" >/dev/null 2>&1 || { rm -f "$tmp"; return 1; }
+
+    # An unset voice means the SYSTEM voice, which is what the floor has always
+    # used and what a user who never chose one expects. `say -v ""` is an error,
+    # not a synonym, so the flag is omitted rather than passed empty.
+    voice="$(cc_tts_json .say.voice "")"
+    if [ -n "$voice" ]; then
+        say -v "$voice" -o "$tmp" -- "$text" >/dev/null 2>&1 || { rm -f "$tmp"; return 1; }
+    else
+        say -o "$tmp" -- "$text" >/dev/null 2>&1 || { rm -f "$tmp"; return 1; }
+    fi
+
     # Guard the junk-file case explicitly rather than trusting the exit code.
     [ -s "$tmp" ] && [ "$(wc -c < "$tmp" 2>/dev/null || echo 0)" -gt 1024 ] || {
         rm -f "$tmp"; return 1; }
     mv -f "$tmp" "$out" || { rm -f "$tmp"; return 1; }
-    cc_tts_log "synth say (fallback: no Kokoro/Chatterbox/edge-tts)"
-    cc_tts_say_notice
+    if [ "$chosen" = chosen ]; then
+        cc_tts_log "synth say (engine: say${voice:+, voice $voice})"
+    else
+        cc_tts_log "synth say (fallback: no Kokoro/Chatterbox/edge-tts)"
+        cc_tts_say_notice
+    fi
     return 0
 }
 
 # Tell the user ONCE A DAY that the system voice is standing in, so a changed
 # voice reads as "Kokoro is down", not "my config broke". Never fatal.
 cc_tts_say_notice() {
+    # The REASON goes in the file, not just a mark that it happened.
+    #
+    # This printed to stderr and nothing else, and cc-tts-notify.sh runs the
+    # worker as `( _worker ) >/dev/null 2>&1 &` -- so the one line that explains
+    # why the voice changed was written to a discarded stream, every time. The
+    # symptom that produces is "my TTS is speaking in a different voice and I
+    # cannot find out why", which is exactly the question the notice answers.
+    #
+    # `tstack config tts` reads this back. Still once a day: the point is to
+    # explain a change, not to narrate every announcement.
     local stamp dir
     dir="${TMPDIR:-/tmp}"
     stamp="${dir%/}/cc-tts-say-notice.$(date +%Y%m%d)"
     [ -e "$stamp" ] && return 0
-    : > "$stamp" 2>/dev/null || return 0
-    printf 'cc-tts: using the macOS system voice — Kokoro/Chatterbox/edge-tts were unavailable.\n' >&2
+    printf 'used the macOS system voice at %s: Kokoro/Chatterbox/edge-tts were all unavailable.\n' \
+        "$(date '+%H:%M')" > "$stamp" 2>/dev/null || return 0
+    printf 'cc-tts: using the macOS system voice - Kokoro/Chatterbox/edge-tts were unavailable.\n' >&2
     return 0
 }
 
@@ -585,6 +620,10 @@ cc_tts_synth() {
     case "$engine" in
         kokoro)     cc_tts_synth_kokoro "$text" "$out" && ok=0 ;;
         chatterbox) cc_tts_synth_chatterbox "$text" "$out" && ok=0 ;;
+        # Chosen, so tried FIRST -- and it still falls through to edge and to
+        # itself-as-floor below if `say` is somehow unavailable, which keeps the
+        # "on never means silence" property that the floor exists for.
+        say)        cc_tts_synth_say "$text" "$out" chosen && ok=0 ;;
         auto)
             cc_tts_synth_kokoro "$text" "$out" && ok=0
             [ "$ok" -ne 0 ] && cc_tts_synth_chatterbox "$text" "$out" && ok=0

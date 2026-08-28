@@ -148,6 +148,28 @@ def is_stack_clone(path: Path) -> bool:
     return origin is not None and "terminal-stack" in origin.lower()
 
 
+def dev_clone_at(start: Path | None = None) -> Path | None:
+    """The terminal-stack DEV clone the caller is standing in, or None.
+
+    resolve_source_dir() deliberately never returns a dev clone -- dev trees are
+    invisible to resolution so that `tstack update` cannot pull one. That is
+    right for deployment and wrong for any check about *developing*, which is
+    why check_git_hooks keyed off the resolved clone and could never once fire.
+
+    Discovery is the git toplevel of the working directory, not a candidate
+    search: the question is "am I in a dev clone right now", and the answer is
+    wherever the developer actually is.
+    """
+    here = Path.cwd() if start is None else Path(start)
+    top = _git(here, "rev-parse", "--show-toplevel")
+    if not top:
+        return None
+    path = Path(top)
+    if not is_dev_clone(path) or not is_stack_clone(path):
+        return None
+    return path
+
+
 def clones() -> list[Clone]:
     """Every terminal-stack clone on this machine, in priority order."""
     pin = os.environ.get("TERMINAL_STACK_DIR")

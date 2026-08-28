@@ -67,6 +67,21 @@ EXIT_DIVERGENCES: dict[str, str] = {
         "and exit 1. There is one implementation now: the name is checked before "
         "anything else happens and a bad one is exit 2, with the list of real names."
     ),
+    "config/bad-verb": (
+        "`ts-config.sh` ended every usage mistake with `exit 2` in the case arm but "
+        "reached the unknown-verb arm through a path that exited 1. The port exits 2 "
+        "for every usage error, on every platform, which is the rule the rest of the "
+        "program already followed."
+    ),
+    "config/leader-no-arg": (
+        "Same cause: a missing argument is a usage error and is exit 2 now. The shell "
+        "printed the same usage line and exited 1, so only the code changed -- and it "
+        "changed toward what `tstack services` and `tstack agents` already did."
+    ),
+    "config/theme-no-arg": (
+        "As above. Recorded here rather than special-cased in the port: a caller that "
+        "keys off the exit code should see one answer for one kind of mistake."
+    ),
     "services/logs-no-stack": (
         "Same handoff, same cause: `logs` with no stack name exited 1 on WSL and 2 "
         "elsewhere. It is a usage error in both places and now says so in both places."

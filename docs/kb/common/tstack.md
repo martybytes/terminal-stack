@@ -6,12 +6,15 @@ commands any more, and no aliases for them.
 | Command | What it does |
 |---|---|
 | `tstack config` | view and change saved settings (the table below) |
+| `tstack ui` | every setting in one screen; needs Textual |
 | `tstack doctor` | diagnose the install; `--quiet`, `--json`, `--repair` (see below) |
 | `tstack update` | pull the latest stack and re-apply |
 | `tstack rollback` | undo the last update |
 | `tstack services` | the Docker service stacks - see `doc services` |
 | `tstack mux` | the WezTerm multiplexer domain |
 | `tstack wezterm` | WezTerm channel and updates |
+| `tstack ghostty` | the managed Ghostty config; `status`, `diff`, `on`, `off` |
+| `tstack wizard` | ask the install questions and print the answers — it saves nothing |
 | `tstack smb` | SMB shares over rclone (POSIX only) - see `doc smb-shares` |
 | `tstack agents` | agent CLI wiring - see `doc agentmemory`, `doc headroom` |
 | `tstack agentmemory` | the agentmemory hook harness; `--check` reports reverted edits |
@@ -22,11 +25,51 @@ commands any more, and no aliases for them.
 A subcommand reported as "not available on <platform>" is deliberate, not a
 broken install: `smb` has no PowerShell implementation.
 
-`doctor`, `services`, `mux`, `wezterm` and `agents` are one Python program that
-runs identically on Windows, WSL, Linux and macOS. `config`, `update`, `rollback`,
-`smb` and `agentmemory` are still shell, and `tstack` routes to whichever the
-registry (`tstack/commands.conf`) says - so the command you type never changes as
-each one is ported.
+`doctor`, `services`, `mux`, `wezterm`, `agents`, `ghostty`, `wizard`, `ui` and (on POSIX) `config` are one Python program
+that runs identically on Windows, WSL, Linux and macOS. `update`, `rollback`,
+`smb` and `agentmemory` are still shell, as is `config` on **Windows** -- that
+row's two columns differ deliberately until it can be exercised there. `tstack`
+routes to whichever the registry (`tstack/commands.conf`) says, so the command
+you type never changes as each one is ported.
+
+On POSIX, `tstack config apps`, `tts` and `reconfigure` hand back to
+`bootstrap/ts-config.sh`: they end in a package-manager install or the
+bootstrap's own save sequence, which the port deliberately never covers.
+
+## `tstack ui`
+
+Every saved setting in one screen: what it is now, what the default is, and
+**which layer the value came from** - chezmoi `[data]`, the Windows mirror, or
+nothing at all. Those three look identical once a value is printed, and on
+2026-08-21 they disagreed while every report looked healthy.
+
+```sh
+tstack ui
+```
+
+| Key | What |
+|---|---|
+| `/` | filter by key, label, group, value **or note** - the keys are camelCase internals, so "ollama" or "leader" is what you actually type |
+| `Enter` | edit the selected setting |
+| `Space` | next value, for a choice setting; saves straight away |
+| `d` | back to the default |
+| `r` | reload from the store |
+| `q` | quit |
+
+A `*` before a value means it differs from the default. A setting chezmoi
+*derives* from your other choices (`resolvedTheme`, `leaderKey`, …) is listed but
+refused - writing one produces a value that survives until the next save.
+
+Writes go through the same setter the command line uses, so there is no second
+writer and no second set of validation rules. Nothing here starts a container or
+installs anything; it edits settings.
+
+Textual is the one third-party library this program uses and only this command
+needs it, which is why it is not installed for you:
+
+```sh
+uv tool install textual     # or pipx install textual, or pip install --user textual
+```
 
 ## `tstack doctor`
 
@@ -39,6 +82,11 @@ in a script: **0 healthy, 1 issues found**.
 | `tstack doctor --quiet` | drops the `ok` lines. Problems and `note:` advisories still print |
 | `tstack doctor --json` | one record per check: `check`, `status`, `message`, optional `hint` |
 | `tstack doctor --repair` | fix what is fixable, confirming each step |
+
+It also reports a **chosen Starship preset that is not the prompt you are
+running**: the template falls back to this stack's own prompt when starship is
+missing, so the setting and the deployed file can disagree with nothing else
+saying so.
 
 Three severities. `ok` is the only one `--quiet` drops. `!!` is a problem and counts
 toward the exit status. `note:` is worth telling you and never counts - a leftover
@@ -84,9 +132,10 @@ Run it bare for an interactive menu; `tstack config show` just prints the state.
 | `tstack config leader <chord>` | WezTerm leader, e.g. `ctrl-space`, `ctrl-a`, `alt-x` |
 | `tstack config theme <dark\|light\|follow>` | palette; `follow` tracks the OS theme |
 | `tstack config tmux <chord>` | tmux prefix — see `doc common/tmux` |
-| `tstack config apps [recommended\|all\|none\|id,…]` | app catalog; no arg → picker. Installs, never uninstalls |
+| `tstack config apps [recommended\|all\|none\|id,…]` | app catalog (`bootstrap/apps.conf`); no arg → picker. Installs, never uninstalls |
+| `tstack config prompt [status\|list\|<name>]` | which Starship prompt. `list` renders every option so you can see them |
 | `tstack config atuin <on\|off>` | atuin owns `Ctrl+R` — see `doc common/tools/atuin` |
-| `tstack config ghostty [on\|off\|status\|diff]` | managed Ghostty config, macOS — see `doc common/tools/ghostty` |
+| `tstack config ghostty [on\|off\|status\|diff]` | hand-off to `tstack ghostty` — see `doc common/tools/ghostty` |
 | `tstack config tts …` | agent voice — see `doc common/tts` |
 | `tstack config mux [on\|off\|…]` | hand-off to `tstack mux` (WezTerm multiplexer domain) |
 | `tstack config restore <on\|off>` | reopen the last WezTerm session at startup (default off) |
@@ -99,13 +148,21 @@ Run it bare for an interactive menu; `tstack config show` just prints the state.
 | `tstack config agents [show]` | saved Headroom / Caveman / AgentMemory state |
 | `tstack config agents <tool> on\|off\|status\|repair\|uninstall` | one tool, user scope; never edits a project or Docker |
 | `tstack config agents headroom cursor <mcp\|byok\|off>` | Cursor-only mode; `mcp` keeps subscription traffic direct |
-| `tstack config wizard` | re-run **every** install question and persist the lot |
+| `tstack config wizard` | ask them **and** save and install — see below |
 
 ## `tstack config wizard`
 
-The "start over as if installing" path — it re-asks leader, theme, terminal
-emulator, apps, mux, session restore, atuin, voice and the agent tools, then
-saves them all. `tstack config apps` re-asks only the apps question.
+The "start over as if installing" path — it re-asks the profile question,
+then leader, theme, terminal emulator, apps, prompt preset, mux, session
+restore, atuin, voice and the agent tools, saves them all, and installs what
+they imply. `tstack config apps` re-asks only the apps question.
+
+**`tstack wizard` is a different command.** It runs the same questionnaire and
+then *prints* or emits the answers; it writes no setting and installs nothing.
+The split is deliberate — the four bootstraps each need the answers before
+there is a config file to save them into, and each owns its own save order. So
+`tstack wizard` is the questionnaire and `tstack config wizard` is the
+questionnaire plus the consequences; `-h` on either one says which you have.
 
 `TS_ASSUME_YES=1 tstack config wizard` takes every default without prompting, and
 the per-question `TS_*` env vars still skip individual prompts

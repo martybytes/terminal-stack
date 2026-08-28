@@ -45,8 +45,17 @@ function Start-SpeakWorker([string]$SpeakText) {
     $ext = Get-CcTtsConfigValue 'kokoro.format' 'mp3'
     $out = Join-Path $env:TEMP ("cc-tts-{0}.{1}" -f [guid]::NewGuid().ToString('N'), $ext)
     try {
-        if (-not (Invoke-CcTtsSynth -Text $SpeakText -OutPath $out)) { return }
-        if (-not (Test-Path -LiteralPath $out) -or (Get-Item $out).Length -eq 0) { return }
+        # Every `return` below used to mean silence. SAPI is the floor: it needs
+        # no engine, no file and no ffplay, so it is what "voice notifications
+        # are on" degrades to instead of nothing.
+        if (-not (Invoke-CcTtsSynth -Text $SpeakText -OutPath $out)) {
+            [void](Invoke-CcTtsSapiSpeak -Text $SpeakText)
+            return
+        }
+        if (-not (Test-Path -LiteralPath $out) -or (Get-Item $out).Length -eq 0) {
+            [void](Invoke-CcTtsSapiSpeak -Text $SpeakText)
+            return
+        }
         $wait = 0
         while ((Test-Path $lockFile) -and ($wait -lt 30)) {
             Start-Sleep -Milliseconds 200

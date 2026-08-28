@@ -13,21 +13,38 @@ set -euo pipefail
 root="$(git rev-parse --show-toplevel)"
 [ -d "$root/tests" ] || exit 0
 
-if ! command -v python3 >/dev/null 2>&1 || ! python3 -c 'import pytest' >/dev/null 2>&1; then
-    echo "pre-push: pytest unavailable — the full suite did NOT run." >&2
-    echo "          install it with: python3 -m pip install --user pytest pytest-cov" >&2
+# shellcheck source=_gates.sh
+. "$root/.githooks/_gates.sh"
+
+pytest_runner="$(gate_runner pytest)"
+if [ -z "$pytest_runner" ]; then
+    echo "pre-push: pytest unavailable - the full suite did NOT run." >&2
+    echo "          install uv (it is in the app catalog), or: python3 -m pip install --user pytest pytest-cov" >&2
     exit 0
 fi
 
 cd "$root"
 
-if python3 -c 'import pytest_cov' >/dev/null 2>&1; then
+# tests/ has no __init__.py and its modules import each other; see _gates.sh.
+if gate_needs_pythonpath "$pytest_runner"; then
+    export PYTHONPATH="$root${PYTHONPATH:+:$PYTHONPATH}"
+fi
+
+# pytest-cov has to live in the SAME environment as pytest, so an ephemeral uvx
+# run needs it named there rather than probed for here.
+case "$pytest_runner" in
+    uvx*) cov_runner="uvx --quiet --from pytest --with pytest-cov pytest"; have_cov=1 ;;
+    *) cov_runner="$pytest_runner"
+       if python3 -c 'import pytest_cov' >/dev/null 2>&1; then have_cov=1; else have_cov=0; fi ;;
+esac
+
+if [ "$have_cov" = 1 ]; then
     echo "pre-push: full suite with the coverage floor"
-    python3 -m pytest tests/ --cov --cov-report=term-missing
+    $cov_runner tests/ --cov --cov-report=term-missing
 else
-    echo "pre-push: pytest-cov missing — running WITHOUT the coverage floor." >&2
+    echo "pre-push: pytest-cov missing - running WITHOUT the coverage floor." >&2
     echo "          install it with: python3 -m pip install --user pytest-cov" >&2
-    python3 -m pytest tests/
+    $pytest_runner tests/
 fi
 
 # The replay lives in tests/test_characterize.py; tests/characterize/ holds the
@@ -40,7 +57,7 @@ fi
 # passed is the thing to avoid, so say which one happened.
 if [ -f "$root/tests/test_characterize.py" ]; then
     echo "pre-push: characterization replay"
-    python3 -m pytest "$root/tests/test_characterize.py" -q
+    $pytest_runner "$root/tests/test_characterize.py" -q
 else
     echo "pre-push: no characterization corpus yet (nothing ported)."
 fi

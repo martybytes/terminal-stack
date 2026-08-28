@@ -849,7 +849,7 @@ function Resolve-TsSourceDir([string]$SourceDir) {
             return $env:TERMINAL_STACK_DIR
         }
         Write-Warning "stale `$env:TERMINAL_STACK_DIR pin: no clone at $($env:TERMINAL_STACK_DIR) — searching the usual locations."
-        Write-Host   "  Clear it with 'tstack doctor -Repair', or delete the line from $(Join-Path (Split-Path $PROFILE) 'profile.local.ps1')."
+        Write-Host   "  Clear it with 'tstack doctor --repair', or delete the line from $(Join-Path (Split-Path $PROFILE) 'profile.local.ps1')."
         $stalePin = $true
     }
     $clones = Get-TsClones
@@ -865,7 +865,7 @@ function Resolve-TsSourceDir([string]$SourceDir) {
             Write-Host ("  {0} {1}" -f $mark, $c.Path)
             Write-Host ("       {0}  |  {1}" -f $c.Origin, $c.Short)
         }
-        Write-Host "  Consolidate with 'tstack doctor -Repair' (or pin one: Set-TsSourceDirPersisted '<path>')"
+        Write-Host "  Consolidate with 'tstack doctor --repair' (or pin one: Set-TsSourceDirPersisted '<path>')"
     }
     return $clones[0].Path
 }
@@ -911,7 +911,7 @@ function Update-TerminalStack {
     # Location notice only — moving is tstack doctor's job, never a side effect of updating.
     $canon = Get-TsCanonicalCloneDir
     if ($SourceDir.TrimEnd('\') -ne $canon.TrimEnd('\') -and -not (Test-TsDevClone $SourceDir)) {
-        Write-Host "tstack update: note — clone is at a legacy location; run 'tstack doctor -Repair' to move it to $canon."
+        Write-Host "tstack update: note — clone is at a legacy location; run 'tstack doctor --repair' to move it to $canon."
     }
     # A second clone is not just untidy: whichever one tstack update picks is the one
     # that overwrites $PROFILE, so an unnoticed leftover silently reinstates an
@@ -1106,7 +1106,9 @@ function Set-TerminalStackConfig {
     # child scope, so assignments in here would not reach the menu's copies and
     # the menu would keep printing the pre-wizard values.
     $runWizard = {
-        $w = Read-TsWizard
+        # The questionnaire is tstack/wizard/ now, run through the one helper the
+        # bootstrap also uses. It used to be Read-TsWizard, which no longer exists.
+        $w = Invoke-TsWizard -SourceDir $src -AskTerminals
         # A prompt that throws leaves $w null or half-filled, and Save-TsConfig would
         # then persist '' over real answers (ValidateSet only catches some of them).
         if (-not $w -or -not $w.Leader -or -not $w.Theme -or -not $w.Headroom) {
@@ -1122,11 +1124,36 @@ function Set-TerminalStackConfig {
             -MemoryBackend $w.MemoryBackend | Out-Null
         Set-TsMemoryComposeFile $w.MemoryBackend
         Export-CcTtsJson
-        Save-TsWorkspaceOverride $w.Workspace
+        # NOT $w.Workspace: the workspace root is not a wizard question and the
+        # JSON does not carry it, so that read was $null and this persisted an
+        # empty WORKSPACE_DIR. Same fix as windows-bootstrap.ps1.
+        Save-TsWorkspaceOverride (Read-TsWorkspaceDir)
         Invoke-TsSync $src
         Show-TsInstalledApps @($w.Apps)
         Write-Host '==> done.'
         return $w
+    }
+
+    # ── the menu's own prompts ──
+    # This menu is not the questionnaire: it edits ONE setting and re-applies,
+    # which is the whole reason to open it rather than re-run the wizard. Same
+    # options the wizard offers, but defaulting to what is currently SAVED --
+    # a menu's default is the value you already have. POSIX twin: menu_leader /
+    # menu_theme in bootstrap/ts-config.sh.
+    $menuLeader = {
+        Read-TsChoice -Title 'Leader key (WezTerm) - prefix for pane / tab / workspace commands:' `
+            -Default $leader -Options @(
+                @{ Key = 'ctrl-space'; Label = 'Ctrl+Space' },
+                @{ Key = 'ctrl-a';     Label = 'Ctrl+A'; Note = 'tmux muscle memory' },
+                @{ Key = 'ctrl-b';     Label = 'Ctrl+B'; Note = 'tmux default' },
+                @{ Key = 'alt-space';  Label = 'Alt+Space' })
+    }
+
+    $menuTheme = {
+        Read-TsChoice -Title 'Theme:' -Default $theme -Options @(
+            @{ Key = 'dark';   Label = 'dark';   Note = 'Catppuccin Mocha' },
+            @{ Key = 'light';  Label = 'light';  Note = 'VS Code Light Modern' },
+            @{ Key = 'follow'; Label = 'follow OS appearance'; Note = 'WezTerm switches live' })
     }
 
     $save = {
@@ -1171,10 +1198,13 @@ function Set-TerminalStackConfig {
                 Write-Host ''
                 Write-Host '  1) leader  2) theme  3) tmux prefix  4) apps  5) re-apply  6) Claude TTS  7) WezTerm mux  8) session restore  9) coding agents  t) WezTerm build  w) re-run wizard  q) quit'
                 switch (Read-Host 'Choose') {
-                    '1' { $leader = Read-TsLeader; & $save }
-                    '2' { $theme  = Read-TsTheme;  & $save }
+                    '1' { $leader = & $menuLeader; & $save }
+                    '2' { $theme  = & $menuTheme;  & $save }
                     '3' { $t = Read-Host 'tmux prefix chord (e.g. ctrl-a) [ctrl-b]'; $tmux = if ($t) { $t } else { 'ctrl-b' }; & $save }
-                    '4' { $apps = @(Read-TsApps); Install-TsApps $apps; Show-TsInstalledApps $apps; & $save }
+                    '4' {
+                        $picked = Invoke-TsWizard -SourceDir $src -Only apps
+                        if ($picked) { $apps = @($picked.Apps); Install-TsApps $apps; Show-TsInstalledApps $apps; & $save }
+                    }
                     '5' { & $save }
                     '6' {
                         Show-CcTtsConfig
@@ -1195,7 +1225,13 @@ function Set-TerminalStackConfig {
                         }
                     }
                     '7' { Invoke-TstackSub -Name 'mux' -Forwarded @('status') }
-                    '8' { $restore = Read-TsWeztermRestore; Save-TsConfig -WeztermRestore $restore | Out-Null; Invoke-TsSync $src; Write-Host '==> done.' }
+                    '8' {
+                        $restore = Read-TsChoice -Title 'WezTerm session restore (reopen the last session at startup):' `
+                            -Default (Get-TsProp (Get-TsConfig) weztermRestore 'off') -Options @(
+                                @{ Key = 'off'; Label = 'off'; Note = 'start clean every time' },
+                                @{ Key = 'on';  Label = 'on';  Note = 'reopen the last session' })
+                        Save-TsConfig -WeztermRestore $restore | Out-Null; Invoke-TsSync $src; Write-Host '==> done.'
+                    }
                     '9' {
                         & $agentsShow
                         $which = Read-Host 'Agent: headroom, caveman, agentmemory, or Enter to go back'
@@ -1240,7 +1276,13 @@ function Set-TerminalStackConfig {
                     'none'        { $apps = @() }
                     default       { $apps = ($Value -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
                 }
-            } else { $apps = @(Read-TsApps) }
+            } else {
+                # The picker is tstack/wizard/ now, like the rest of the
+                # questionnaire. POSIX twin: run_wizard_apps in ts-config.sh.
+                $picked = Invoke-TsWizard -SourceDir $src -Only apps
+                if (-not $picked) { return }
+                $apps = @($picked.Apps)
+            }
             Install-TsApps $apps; Show-TsInstalledApps $apps; & $save
         }
         'wezterm' {
@@ -1402,88 +1444,13 @@ function Set-TerminalStackConfig {
         # NOTE for a combined WSL+Windows box: prefer running this from WSL. Its
         # chezmoi apply is authoritative for the Windows-side files, same caveat
         # as the rest of tstack config.
+        # Ghostty. One implementation in tstack/ghostty.py, reached the same way
+        # mux does: this branch was ~90 lines and carried its own copy of the
+        # themeMode -> theme mapping, which had to be kept in agreement with the
+        # bash side and both syncs by a test.
         'ghostty' {
-            # %LOCALAPPDATA%\ghostty\, NOT the app-named dir. noctty reads both
-            # its own %LOCALAPPDATA%\<appname>\config.ghostty and the
-            # upstream-compatible path; <appname> is winghostty today and noctty
-            # the day the rename ships, so only this one survives the upgrade.
-            $gDir   = Join-Path $env:LOCALAPPDATA 'ghostty'
-            $gCfg   = Join-Path $gDir 'config'
-            $gTheme = Join-Path $gDir 'themes\vs-code-light-modern'
-            switch ($Value) {
-                { $_ -in 'on', 'off' } {
-                    Save-TsConfig -GhosttyConfig $_ | Out-Null
-                    if ($_ -eq 'off') {
-                        # A real revert, not merely "stop managing". Deliberately
-                        # not a sync-side deletion: that runs on every machine and
-                        # would wipe a hand-written config on a box that never
-                        # opted in. This removes for THIS machine, on request.
-                        $bak = Get-ChildItem -LiteralPath $gDir -Filter 'config.bak.*' -ErrorAction SilentlyContinue |
-                               Sort-Object LastWriteTime -Descending | Select-Object -First 1
-                        if ($bak) {
-                            Copy-Item -LiteralPath $bak.FullName -Destination $gCfg -Force
-                            Write-Host "==> restored $gCfg from $($bak.Name)"
-                        } elseif (Test-Path -LiteralPath $gCfg) {
-                            Remove-Item -LiteralPath $gCfg -Force
-                            Write-Host "==> removed $gCfg (no backup existed; Ghostty uses its defaults)"
-                        }
-                        if (Test-Path -LiteralPath $gTheme) {
-                            Remove-Item -LiteralPath $gTheme -Force
-                            Write-Host "==> removed $gTheme"
-                        }
-                    } else {
-                        Invoke-TsSync $src
-                    }
-                    Write-Host "==> ghostty config $_. Reload with Ctrl+Shift+, (or restart it)."
-                }
-                'diff' {
-                    if (-not (Test-Path -LiteralPath $gCfg)) {
-                        Write-Host "ghostty config: $gCfg would be created"; return
-                    }
-                    $tmplPath = Join-Path $src 'windows\AppData\Local\ghostty\config.tmpl'
-                    $mode = Get-TsProp (Get-TsConfig) themeMode 'dark'
-                    $gt, $gw = switch ($mode) {
-                        'light'  { 'vs-code-light-modern', 'light' }
-                        'follow' { 'dark:Catppuccin Mocha,light:vs-code-light-modern', 'auto' }
-                        default  { 'Catppuccin Mocha', 'dark' }
-                    }
-                    $want = (Get-Content -LiteralPath $tmplPath -Raw).
-                        Replace('__GHOSTTY_THEME__', $gt).Replace('__GHOSTTY_WINDOW_THEME__', $gw)
-                    $have = Get-Content -LiteralPath $gCfg -Raw
-                    if ($want -eq $have) { Write-Host 'ghostty config: up to date' }
-                    else {
-                        Write-Host "ghostty config: $gCfg differs from the rendered template —"
-                        Compare-Object ($have -split "`r?`n") ($want -split "`r?`n") |
-                            ForEach-Object { "  $($_.SideIndicator) $($_.InputObject)" }
-                    }
-                }
-                default {
-                    Write-Host "ghostty config: $(Get-TsGhosttyConfig)   (target: windows)"
-                    if (Test-Path -LiteralPath $gCfg) {
-                        $head = (Get-Content -LiteralPath $gCfg -TotalCount 20) -join "`n"
-                        if ($head -match 'managed by terminal-stack') { Write-Host "  $gCfg  (ours)" }
-                        else { Write-Host "  $gCfg  (NOT ours — sync would replace it; a backup is taken first)" }
-                    } else { Write-Host "  $gCfg  (absent)" }
-                    if (Test-Path -LiteralPath $gTheme) { Write-Host "  $gTheme  (custom light theme)" }
-                    $bak = Get-ChildItem -LiteralPath $gDir -Filter 'config.bak.*' -ErrorAction SilentlyContinue |
-                           Sort-Object LastWriteTime -Descending | Select-Object -First 1
-                    if ($bak) { Write-Host "  newest backup: $($bak.FullName)" }
-                    $exe = Get-TsGhosttyExe
-                    if ($exe) {
-                        Write-Host "  $([IO.Path]::GetFileNameWithoutExtension($exe)): $(& $exe --version 2>$null | Select-Object -First 1)"
-                        # NO validate step, deliberately. `+validate-config` fails
-                        # with FileTooBig on winghostty 1.3.123 even for a 14-byte
-                        # config, and `+show-config` reports nothing at all for an
-                        # unknown key or a bad value — so unlike macOS there is no
-                        # honest syntax gate here. "validate: ok" would be a lie.
-                        Write-Host '  validate: unavailable on this build (see docs/decisions.md)'
-                    } else {
-                        Write-Host '  noctty/winghostty: not installed'
-                        Write-Host '    winget install AmanThanvi.winghostty'
-                        Write-Host '    or https://github.com/amanthanvi/noctty/releases'
-                    }
-                }
-            }
+            $gArgs = @(@($Value) + @($Rest) | Where-Object { $_ })
+            Invoke-TstackSub -Name 'ghostty' -Forwarded $gArgs
         }
         # The mux has its own verbs (kill/restart/reset), so tstack config just hands off.
         'mux'    {

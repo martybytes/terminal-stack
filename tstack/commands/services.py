@@ -53,6 +53,7 @@ Usage:
   -n, --tail <N>     logs: lines of history (default 50)
   -f, --follow       logs: follow (needs a single stack)
   --start-engine     doctor/up: launch the container engine and wait for it
+  --build            up/restart: rebuild locally built images first
   -y, --yes          skip the migrate-volumes confirmation (NOT the destructive ones)
   --destroy-data     test/reset: also destroy volumes   [BACKS UP FIRST]
   --purge            reset: also the two memory volumes [EVERY MEMORY YOU HAVE]
@@ -176,6 +177,7 @@ class Args:
         self.follow = False
         self.all = False
         self.start_engine = False
+        self.build = False
         self.destroy_data = False
         self.purge = False
         self.assume_yes = False
@@ -209,6 +211,8 @@ def parse(argv: list[str]) -> Args:
             args.tail = rest.pop(0)
         elif item == "--start-engine":
             args.start_engine = True
+        elif item == "--build":
+            args.build = True
         elif item in ("-y", "--yes"):
             args.assume_yes = True
         elif item == "--destroy-data":
@@ -367,8 +371,21 @@ def cmd_up(svc: Services) -> None:
     warn_unseeded(svc)
     for name in svc.selected():
         svc.out.section(name)
-        if not svc.compose.ok(name, ["up", "-d"]):
+        if not svc.compose.ok(name, _up_argv(svc)):
             svc.out.bad(f"up failed for {name}")
+
+
+def _up_argv(svc: Services) -> list[str]:
+    """`up -d`, plus `--build` when asked.
+
+    Only two stacks in this tree build an image locally (the console, and
+    headroom's gateway), and after editing their source `up` reuses the image it
+    already has -- so the change appears to have done nothing. The alternative
+    was `reset` then `up`, which also destroys the container. Not offered on
+    `test`: that verb proves a clean bring-up, and rebuilding mid-proof would
+    change what is being proved.
+    """
+    return ["up", "-d", "--build"] if svc.args.build else ["up", "-d"]
 
 
 def cmd_down(svc: Services) -> None:
@@ -398,7 +415,7 @@ def cmd_restart(svc: Services) -> None:
         svc.compose.run(name, ["down"])
     for name in svc.selected():
         svc.out.section(name)
-        if not svc.compose.ok(name, ["up", "-d"]):
+        if not svc.compose.ok(name, _up_argv(svc)):
             svc.out.bad(f"restart failed for {name}")
 
 

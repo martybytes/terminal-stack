@@ -135,6 +135,7 @@ run_wizard() {
     ts_wez_mux_set "${TS_WIZ_WEZ_MUX:-off}"
     ts_wez_restore_set "${TS_WIZ_WEZ_RESTORE:-off}"
     ts_atuin_set "${TS_WIZ_ATUIN:-off}"
+    ts_starship_set "${TS_WIZ_STARSHIP:-terminal-stack}" || true
     ts_cc_tts_apply_wizard_choice "${TS_WIZ_CC_TTS:-off}" off "${TS_WIZ_CC_TTS_MESSAGE:-}"
 
     install_apps "${TS_WIZ_APPS:-}" || ts_note_failure "optional apps" "retry: tstack config apps"
@@ -156,192 +157,31 @@ set_restore() { ts_wez_restore_set "$1"; finish; }
 set_atuin() { ts_atuin_set "$1"; finish; }
 
 # ── Ghostty ───────────────────────────────────────────────────────────────────
-# Two platforms, one setting. On macOS this manages ~/.config/ghostty/; on WSL it
-# manages the WINDOWS-side copy under /mnt/c/…/AppData/Local/ghostty/, because
-# there is a Ghostty for Windows after all: noctty (github.com/amanthanvi/noctty),
-# Ghostty's terminal core in a native Win32 app. It still ships its release assets
-# under its former name winghostty — the rebrand landed in main on 2026-08-20,
-# after the v1.3.123 tag, so no release carries the new name yet.
-#
-# It reads the upstream-compatible %LOCALAPPDATA%\ghostty\config as well as its
-# own %LOCALAPPDATA%\<appname>\config.ghostty, and we target the upstream one on
-# purpose: <appname> is `winghostty` today and `noctty` the day the rename ships,
-# so the app-named path would silently stop being read on upgrade day.
-#
-# Native Linux is still refused: those hosts are headless, the GUI lives elsewhere.
-# See docs/decisions.md § "Why Ghostty is managed on Windows too".
-GHOSTTY_PLATFORM=""
-GHOSTTY_DIR=""
-GHOSTTY_CFG=""
-GHOSTTY_THEME=""
-
-# Resolve the platform and the paths, or explain why we cannot.
-ghostty_paths() {
-    [ -n "$GHOSTTY_PLATFORM" ] && return 0
-    if [ "$(uname -s)" = Darwin ]; then
-        GHOSTTY_PLATFORM=darwin
-        GHOSTTY_DIR="$HOME/.config/ghostty"
-    elif [ -d /mnt/c/Users ]; then
-        local u=""
-        if [ -n "$CZ" ] && [ -x "$CZ" ]; then
-            u="$("$CZ" execute-template '{{ if hasKey . "windowsUsername" }}{{ .windowsUsername }}{{ end }}' 2>/dev/null || true)"
-        fi
-        if [ -z "$u" ] && [ -x /mnt/c/Windows/System32/cmd.exe ]; then
-            u="$(/mnt/c/Windows/System32/cmd.exe /c 'echo %USERNAME%' 2>/dev/null | tr -d '\r\n' || true)"
-        fi
-        if [ -z "$u" ]; then
-            echo "tstack config ghostty: could not resolve the Windows username." >&2
-            echo "  Add windowsUsername to [data] in ~/.config/chezmoi/chezmoi.toml." >&2
-            return 1
-        fi
-        GHOSTTY_PLATFORM=wsl
-        GHOSTTY_DIR="/mnt/c/Users/$u/AppData/Local/ghostty"
+# The CLI tool picker. Sources the wizard's answer file rather than capturing
+# stdout: the menu goes to the terminal and only the answers go to the file, so
+# there is no $( ) boundary for a rendered menu to leak into.
+run_wizard_apps() {
+    local spec="${1:-}" wiz rc=0
+    wiz="$(mktemp "${TMPDIR:-/tmp}/tsapps.XXXXXX")" || return 1
+    if [ -n "$spec" ]; then export TS_APPS="$spec"; fi
+    if "$(ts_python)" "$SRC/tstack/main.py" wizard --only apps --emit sh --out "$wiz"; then
+        # shellcheck disable=SC1090
+        . "$wiz"
+        rm -f "$wiz"
+        printf '%s\n' "${TS_WIZ_APPS:-}"
     else
-        echo "tstack config ghostty: macOS or WSL only. Ghostty runs on macOS, and on" >&2
-        echo "  Windows as noctty/winghostty; this stack's native-Linux hosts are" >&2
-        echo "  headless, so there is no GUI here to configure." >&2
-        return 1
-    fi
-    GHOSTTY_CFG="$GHOSTTY_DIR/config"
-    GHOSTTY_THEME="$GHOSTTY_DIR/themes/vs-code-light-modern"
-    return 0
-}
-
-# Render the Windows template the way the sync will. sed is safe for exactly
-# these two tokens — both are single-line and neither value can contain a `#`,
-# which is why the sync's own no-sed rule (multi-line __CC_TTS_*__ tokens) does
-# not apply. `follow` needs a split dark:…,light:… theme, which always tracks the
-# OS, so it cannot be expressed by pinning window-theme.
-ghostty_render_windows() {
-    local mode gt gw
-    mode="$(ts_data_get themeMode 2>/dev/null || echo dark)"
-    case "$mode" in
-        light)  gt='vs-code-light-modern'; gw='light' ;;
-        follow) gt='dark:Catppuccin Mocha,light:vs-code-light-modern'; gw='auto' ;;
-        *)      gt='Catppuccin Mocha'; gw='dark' ;;
-    esac
-    sed -e "s#__GHOSTTY_THEME__#$gt#g" -e "s#__GHOSTTY_WINDOW_THEME__#$gw#g" \
-        "$SRC/windows/AppData/Local/ghostty/config.tmpl"
-}
-
-ghostty_status() {
-    ghostty_paths || return 1
-    echo "ghostty config: $(ts_ghostty_get)   (target: $GHOSTTY_PLATFORM)"
-    if [ -e "$GHOSTTY_CFG" ]; then
-        if head -20 "$GHOSTTY_CFG" | grep -q 'managed by terminal-stack'; then
-            echo "  $GHOSTTY_CFG  (ours)"
-        else
-            echo "  $GHOSTTY_CFG  (NOT ours — apply would replace it; a backup is taken first)"
-        fi
-    else
-        echo "  $GHOSTTY_CFG  (absent)"
-    fi
-    [ -e "$GHOSTTY_THEME" ] && echo "  $GHOSTTY_THEME  (custom light theme)"
-    local b
-    b="$(ls -1t "$GHOSTTY_DIR"/config.bak.* 2>/dev/null | head -1 || true)"
-    [ -n "$b" ] && echo "  newest backup: $b"
-    ghostty_status_binary
-}
-
-# The binary half differs enough per platform to be worth splitting out.
-ghostty_status_binary() {
-    if [ "$GHOSTTY_PLATFORM" = darwin ]; then
-        if command -v ghostty >/dev/null 2>&1; then
-            echo "  ghostty: $(ghostty --version 2>/dev/null | head -1)"
-            if [ -e "$GHOSTTY_CFG" ]; then
-                if ghostty +validate-config --config-file="$GHOSTTY_CFG" >/dev/null 2>&1; then
-                    echo "  validate: ok"
-                else
-                    echo "  validate: FAILED —"
-                    ghostty +validate-config --config-file="$GHOSTTY_CFG" 2>&1 | sed 's/^/    /'
-                fi
-            fi
-        else
-            echo "  ghostty: not installed (tstack config wizard installs the cask)"
-        fi
-        return 0
-    fi
-
-    # Windows, reached over WSL interop. Both names, post-rename first.
-    local exe="" c
-    for c in "/mnt/c/Program Files/noctty/noctty.com" \
-             "/mnt/c/Program Files/winghostty/winghostty.com"; do
-        [ -x "$c" ] && { exe="$c"; break; }
-    done
-    if [ -z "$exe" ]; then
-        echo "  noctty/winghostty: not installed"
-        echo "    releases: https://github.com/amanthanvi/noctty/releases"
-        return 0
-    fi
-    echo "  $(basename "$exe" .com): $("$exe" --version 2>/dev/null | head -1)"
-    # NO validate step, deliberately. `+validate-config` fails with FileTooBig on
-    # winghostty 1.3.123 even for a 14-byte config, and `+show-config` reports
-    # nothing at all for an unknown key or a bad value — so unlike macOS there is
-    # no honest syntax gate to run here. Printing "validate: ok" would be a lie.
-    echo "  validate: unavailable on this build (see docs/decisions.md)"
-}
-
-# What apply would change, without applying it.
-ghostty_diff() {
-    ghostty_paths || return 1
-    if [ "$GHOSTTY_PLATFORM" = darwin ]; then
-        "$CZ" diff -- "$GHOSTTY_CFG" "$GHOSTTY_THEME" 2>/dev/null || true
-        return 0
-    fi
-    # The Windows copy is not chezmoi-managed (windows/** is chezmoi-ignored and
-    # mirrored by the sync), so diff the rendered template against what is live.
-    local tmp; tmp="$(mktemp)"
-    ghostty_render_windows > "$tmp" || { rm -f "$tmp"; return 1; }
-    if [ -e "$GHOSTTY_CFG" ]; then
-        diff -u "$GHOSTTY_CFG" "$tmp" && echo "ghostty config: up to date"
-    else
-        echo "ghostty config: $GHOSTTY_CFG would be created"
-    fi
-    rm -f "$tmp"
-    if [ -e "$GHOSTTY_THEME" ]; then
-        diff -u "$GHOSTTY_THEME" \
-            "$SRC/windows/AppData/Local/ghostty/themes/vs-code-light-modern" \
-            && echo "ghostty theme: up to date"
-    else
-        echo "ghostty theme: $GHOSTTY_THEME would be created"
+        rc=$?
+        rm -f "$wiz"
+        return "$rc"
     fi
 }
 
-ghostty_reload_hint() {
-    if [ "$GHOSTTY_PLATFORM" = darwin ]; then
-        echo "Reload Ghostty with Cmd+Shift+, (or restart it)."
-    else
-        echo "Reload with Ctrl+Shift+, (or restart it)."
-    fi
-}
-
-# `off` is a real revert, not merely "stop managing": restore the newest backup
-# if there is one, else remove our files so Ghostty falls back to its defaults.
-# Deliberately NOT a .chezmoiignore removal rule or a sync deletion — those are
-# evaluated on every machine and would wipe a hand-written config on a box that
-# never opted in. This removes for THIS machine, because it was asked to.
-ghostty_off() {
-    ghostty_paths || return 1
-    ts_ghostty_set off
-    local b
-    b="$(ls -1t "$GHOSTTY_DIR"/config.bak.* 2>/dev/null | head -1 || true)"
-    if [ -n "$b" ] && [ -e "$b" ]; then
-        cp -p -- "$b" "$GHOSTTY_CFG"
-        echo "==> restored $GHOSTTY_CFG from $b"
-    elif [ -e "$GHOSTTY_CFG" ]; then
-        rm -f -- "$GHOSTTY_CFG"
-        echo "==> removed $GHOSTTY_CFG (no backup existed; Ghostty uses its defaults)"
-    fi
-    [ -e "$GHOSTTY_THEME" ] && { rm -f -- "$GHOSTTY_THEME"; echo "==> removed $GHOSTTY_THEME"; }
-    echo "==> ghostty config off. $(ghostty_reload_hint)"
-    finish
-}
-
-ghostty_on() {
-    ghostty_paths || return 1
-    ts_ghostty_set on
-    finish
-    echo "==> ghostty config on. $(ghostty_reload_hint)"
+# Ghostty. One implementation in tstack/ghostty.py, reached the same way mux and
+# wezterm are: this used to be ~160 lines here, ~90 more in $PROFILE, and a third
+# copy of the themeMode -> theme mapping in each.
+run_ghostty() {
+    TERMINAL_STACK_DIR="$SRC" TERMINAL_STACK_CHEZMOI="$CZ" \
+        "$(ts_python)" "$SRC/tstack/main.py" ghostty "$@"
 }
 
 # The mux has its own verbs (kill/restart/reset), so tstack config just hands off.
@@ -515,6 +355,31 @@ show() {
     echo "  agentmemory: $(ts_agent_get agentmemoryEnabled)"
 }
 
+# ── the menu's own prompts ──
+# The install questionnaire is Python now, so its per-question bash functions are
+# gone -- but this menu is not the questionnaire. It edits ONE setting at a time
+# and re-applies, which is the whole reason to open it rather than re-run the
+# wizard. These ask the same questions with the same options, and default to
+# whatever is currently SAVED: a menu's default is the value you already have,
+# not the value a fresh install would pick.
+menu_leader() {
+    ts_prompt_choice "$(cur leaderChord ctrl-space)" \
+        'Leader key (WezTerm) - prefix for pane / tab / workspace commands:' '' \
+        'ctrl-space|Ctrl+Space' 'ctrl-a|Ctrl+A|tmux muscle memory' \
+        'ctrl-b|Ctrl+B|tmux default' 'alt-space|Alt+Space'
+}
+
+menu_theme() {
+    ts_prompt_choice "$(cur themeMode dark)" 'Theme:' '' \
+        'dark|dark|Catppuccin Mocha' 'light|light|VS Code Light Modern' \
+        'follow|follow OS appearance|WezTerm switches live'
+}
+
+# usage: menu_on_off <settings-key> <title> <off-note> <on-note>
+menu_on_off() {
+    ts_prompt_choice "$(cur "$1" off)" "$2" '' "off|off|$3" "on|on|$4"
+}
+
 menu() {
     while true; do
         echo
@@ -523,17 +388,17 @@ menu() {
         echo "  1) leader key   2) theme   3) tmux prefix   4) apps   5) re-apply   6) Claude TTS   7) WezTerm mux   8) session restore   9) coding agents   a) atuin   g) ghostty   t) WezTerm build   w) re-run wizard   q) quit"
         local c; c="$(ts_tty_prompt 'Choose: ')"
         case "$c" in
-            1) set_leader "$(ts_prompt_leader)" ;;
-            2) set_theme  "$(ts_prompt_theme)" ;;
+            1) set_leader "$(menu_leader)" ;;
+            2) set_theme  "$(menu_theme)" ;;
             3) local t; t="$(ts_tty_prompt 'tmux prefix chord (e.g. ctrl-a) [ctrl-b]: ')"; set_tmux "${t:-ctrl-b}" ;;
-            4) set_apps "$(ts_prompt_apps)" ;;
+            4) local sel; sel="$(run_wizard_apps '')" && set_apps "$sel" ;;
             5) finish ;;
             6) ts_config_tts show; echo; ts_config_tts_menu ;;
             7) run_mux status ;;
-            8) local r; r="$(ts_prompt_wezterm_restore)"; set_restore "$r" ;;
+            8) set_restore "$(menu_on_off weztermRestore 'WezTerm session restore (reopen the last session at startup):' 'start clean every time' 'reopen the last session')" ;;
             9) agents_menu ;;
-            a|A) set_atuin "$(ts_prompt_atuin)" ;;
-            g|G) ghostty_status ;;
+            a|A) set_atuin "$(menu_on_off atuinEnabled 'atuin shell history (replaces Ctrl+R):' 'keep fzf on Ctrl+R' 'atuin owns Ctrl+R')" ;;
+            g|G) run_ghostty status ;;
             t|T) run_wezterm status ;;
             w|W) run_wizard ;;
             q|Q|"") return 0 ;;
@@ -549,8 +414,11 @@ case "${1:-}" in
     theme)  [ -n "${2:-}" ] || { echo "usage: tstack config theme <dark|light|follow>" >&2; exit 2; }; set_theme "$2" ;;
     tmux)   [ -n "${2:-}" ] || { echo "usage: tstack config tmux <chord>" >&2; exit 2; }; set_tmux "$2" ;;
     apps)
-        if [ -n "${2:-}" ]; then set_apps "$(ts_expand_apps "$2")"
-        else set_apps "$(ts_pick_apps)"; fi ;;
+        # The picker is tstack/wizard/ now, like the rest of the questionnaire.
+        # A spec on the command line is passed through as TS_APPS, which is the
+        # same escape hatch a scripted install uses -- one expansion, not two.
+        _apps_sel="$(run_wizard_apps "${2:-}")" || exit $?
+        set_apps "$_apps_sel" ;;
     wezterm)
         shift
         run_wezterm "$@" ;;
@@ -569,14 +437,16 @@ case "${1:-}" in
         case "${2:-}" in on|off) ;; *)
             echo "usage: tstack config atuin <on|off>" >&2; exit 2 ;; esac
         set_atuin "$2" ;;
-    ghostty)
+    prompt)
         case "${2:-status}" in
-            on)     ghostty_on ;;
-            off)    ghostty_off ;;
-            status) ghostty_status ;;
-            diff)   ghostty_diff ;;
-            *) echo "usage: tstack config ghostty [on|off|status|diff]" >&2; exit 2 ;;
+            status|show|"")  prompt_status ;;
+            list)            prompt_list ;;
+            preview)         prompt_preview "${3:-}" ;;
+            *)               prompt_set "$2" ;;
         esac ;;
+    ghostty)
+        shift
+        run_ghostty "$@" ;;
     memory)
         case "${2:-status}" in
             agentmemory|headroom|none) memory_set "$2" ;;
@@ -592,7 +462,8 @@ case "${1:-}" in
         echo "  mux status|on|off|list|kill|restart|reset  (see: tstack mux -h)"
         echo "  restore on|off   reopen the last WezTerm session at startup"
         echo "  atuin on|off     atuin shell history; when on it owns Ctrl+R (fzf keeps Ctrl+T/Alt+C)"
-        echo "  ghostty [on|off|status|diff]   managed Ghostty config (macOS only; off restores your backup)"
+        echo "  prompt [status|list|<name>|preview <name>]   which Starship prompt; list renders every option"
+        echo "  ghostty [on|off|status|diff]   managed Ghostty config (macOS/Windows; off restores your backup)"
         echo "  memory [agentmemory|headroom|none|status]   which memory system runs — only ever one"
         echo "  agents [show|<headroom|caveman|agentmemory> on|off|status|repair|uninstall]"
         echo "  wezterm [status|changes|install <stable|nightly>|upgrade]  (see: tstack wezterm -h)"

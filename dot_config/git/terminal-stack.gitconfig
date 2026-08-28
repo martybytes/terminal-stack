@@ -1,6 +1,12 @@
-# terminal-stack git config — pulled in via `include.path` from ~/.gitconfig
-# (the bootstrap adds the include once; user-specific settings like user.email
-# stay in ~/.gitconfig itself and always win, since includes resolve first).
+# terminal-stack git config — pulled in via `include.path` from ~/.gitconfig,
+# which the bootstrap adds once with `git config --global --add`.
+#
+# THAT APPENDS, so this file resolves LAST and its values WIN over anything set
+# earlier in ~/.gitconfig. The reverse was claimed here until 2026-08-28
+# ("includes resolve first"); git resolves them in file order like everything
+# else, verified both ways. Your own user.name / user.email are unaffected only
+# because nothing here sets them — not because of ordering. To override one of
+# the settings below, put yours BELOW the [include] line in ~/.gitconfig.
 #
 # Canonical copy: dot_config/git/terminal-stack.gitconfig.
 # windows/.config/git/terminal-stack.gitconfig is a byte-identical mirror —

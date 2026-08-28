@@ -115,7 +115,11 @@ FRAGMENT = r"""
 
 
 def emit(text):
-    sys.stdout.write(text)
+    # Binary, not sys.stdout.write: text mode translates \n on the way out, so
+    # on a CRLF host every apply adds a \r that the next apply reads back and
+    # doubles. This script's contract is that only OUR keys change; the bytes it
+    # writes are part of that.
+    sys.stdout.buffer.write(text.encode("utf-8"))
     raise SystemExit(0)
 
 

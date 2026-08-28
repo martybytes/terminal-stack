@@ -1970,7 +1970,7 @@ no edit anywhere:
   asserts no path appears in both.
 
 - **A pinned network name.** `ts-agentmemory-net`, not the project-derived
-  `tstack agentmemory_default`. Anything that reaches across projects has to be
+  `ts-agentmemory_default`. Anything that reaches across projects has to be
   pinned, or it changes under the other side the day that project is renamed.
   For the same reason the console addresses `ts-agentmemory-server` by container
   name rather than the `agentmemory` service alias.
@@ -2190,3 +2190,487 @@ invariants ride on that being literally true:
 
 A second builder would be a second set of rules that nothing checks, which is how
 the ordering bug happened the first time.
+
+## Why a fresh clone ships no chat provider at all
+
+`services/stacks/agentmemory/.env.example` had `OPENAI_BASE_URL` and
+`OPENAI_MODEL` **active**, pointing at a Tailscale host on one person's network,
+and `tstack services bootstrap` copies that file verbatim. Every clone but the
+author's booted into the state below.
+
+There are three states, and they are not symmetric:
+
+| state | `ts-verify` | what actually happens |
+|---|---|---|
+| unset | `skip -` | compression, summary, graph and consolidation are skipped; storage, search and embeddings are unaffected |
+| set and reachable | pass | all four run |
+| set and unreachable | `000`, fail | every call returns empty, fails XML parsing, retries, and dead-letters — while the log line still reads `outcome:"success"` |
+
+52,570 jobs accumulated in the third state before anyone noticed, because nothing
+about it looks like a failure from the outside. Shipping an address that resolves
+on nobody else's network put every fresh install straight into it, so the example
+now ships with everything commented and names three provider shapes anyone can
+copy instead.
+
+**`OPENAI_API_KEY` in `services/.env.example` matters more than it looks**, and
+is commented out for a reason that is easy to miss: with a key set and no base
+URL, the client falls back to its own default endpoint (`api.openai.com`) and
+sends the placeholder there. `ts-verify` would still report `skip`, because it
+reads the container's `OPENAI_BASE_URL` and that is empty — so the machine looks
+cleanly unconfigured while quietly 401ing against a service nobody chose.
+
+The compose **default** for `LLM_PROVIDER_LABEL` stays `OpenAI`, deliberately.
+An unlabelled provider is then assessed as paid, and over-reporting cost is the
+safe direction to be wrong in. It is the wrong answer for a machine with no
+provider at all, which is what the two explicit `none` lines in the example
+correct.
+
+## Why `tstack agents llm` reads the env file rather than the container
+
+It has to be right while the stack is **down** — that is when someone is most
+likely to be asking why nothing is being summarised. The stack's own `.env` is
+compose's authoritative interpolation source (`agent007memory/ts-envfiles` says
+the same thing from the console's side), so reading it needs no engine and keeps
+one copy of the truth.
+
+Two things it will not do:
+
+- **It never reports a host probe as container reachability.** A container's DNS
+  is Docker's embedded resolver, not the host's, and its egress is a separate
+  path — so an endpoint your shell reaches may be unreachable from the server.
+  The success line says so and names `tstack services test agentmemory`, which
+  dials from inside.
+- **An endpoint with an empty `OPENAI_MODEL` is called out, not ticked.**
+  `inferenceActive` in the console's `shared/llmEndpoint.ts` is driven by the
+  *model*, not the URL, so that configuration reads as done everywhere while
+  every family stays off.
+
+## Why the container gets `host.docker.internal` mapped explicitly
+
+A chat model running on the host — Ollama, LM Studio, llama.cpp — is the most
+likely provider anyone here will have, and from inside a container `localhost` is
+the container. So `tstack agents llm` offers `http://host.docker.internal:11434/v1`
+rather than the URL you would copy out of a browser.
+
+That name is free on Docker Desktop and **does not exist on native Linux** unless
+it is mapped, which is how the same `OPENAI_BASE_URL` that worked on a Mac
+silently `000`d on a server. `extra_hosts: host.docker.internal:host-gateway` on
+the agentmemory service makes one printed URL correct on all three platforms; it
+is accepted and redundant on Desktop (verified against Docker Desktop on macOS,
+which resolves the name and returns a connection error rather than a DNS one).
+
+## Why `llmfit` is in `models`, not `ai`
+
+`ts_app_is_ai` reads the `ai` group as the install **route**, not as a category:
+every member is handed to `ts_install_ai_cli`, which has a branch per agent CLI
+and a `*)` that prints "no agent-CLI installer defined". A packaged binary put in
+that group would therefore be silently skipped on macOS and Linux and reported as
+an error on the way past.
+
+`llmfit` comes from brew on macOS and from a release tarball on Debian/WSL, so it
+needs the ordinary package-manager path. A one-member `models` group is cheaper
+than teaching `ts_app_is_ai` an exception list, and it is where someone looks for
+"which model fits this machine" anyway.
+
+It is **absent from the Windows catalog**. It ships a windows-msvc binary but is
+in no winget manifest (checked: neither `manifests/a/AlexsJones/llmfit` nor
+`manifests/l/llmfit` exists), and that table takes verified ids only — the rule is
+"can this platform install it", never "is it in winget".
+
+## Why the kokoro model id had to become a setting
+
+mlx-audio runs the same Kokoro model natively on Apple Silicon and speaks the
+same OpenAI protocol: `/v1/audio/speech` with `model`, `voice`, `speed` and
+`response_format`, plus `/v1/audio/voices` and `/v1/models`. Every field this
+stack sends matched **except one** — the docker image answers to the literal
+string `kokoro`, and mlx-audio wants the HuggingFace repo id and rejects anything
+else.
+
+So a hard-coded `model` was the single thing standing between this stack and a
+native Apple Silicon engine, and `ccTtsKokoroModel` is the whole port. Nothing
+else changed: voice lists, samples, speed, the pool and the fallback ladder all
+work unaltered.
+
+Two details that are not obvious:
+
+- **The pwsh side defaults it at the call site**, not from the config.
+  `Get-CcTtsConfig` fills missing *top-level* keys only, so a config stored before
+  this key existed has no nested `model` member at all and would send an empty
+  string.
+- **`?model=` is sent to `/v1/audio/voices` only when a model is configured.**
+  mlx-audio 400s without it (it resolves the voice packs out of that HuggingFace
+  snapshot); the docker image has no such parameter. Sending it unconditionally
+  would change the one request that is known to work.
+
+## Why the macOS engine advice is derived, not written down
+
+There are three ways to get a voice on a Mac and which one is right depends on
+the machine, so `tstack config tts engines` measures it — architecture, cores,
+memory, installed system voices, and whether Docker, kokoro and mlx-audio are
+actually present — and branches on `uname -m`.
+
+The deciding fact it exists to state: **Docker Desktop gives the container no GPU
+on Apple Silicon**, so the shipped kokoro image runs on the CPU a model the
+machine could run on its GPU. That does not make the container wrong — one voice
+across a Mac, a Linux box and a Windows machine is a real reason to keep it — but
+it is not the fast option, and mlx-audio is the same model without the penalty.
+
+Two claims were wrong in the first draft and are pinned against by a test: MLX
+runs on the **GPU through Metal**, not the Neural Engine, and Docker on Apple
+Silicon runs the model on the CPU rather than emulating an x86 GPU.
+
+## Why `tstack ui` does not write the store
+
+A dashboard is exactly the kind of thing that grows its own writer — it already
+has the key, the value and the file path — and a second writer is how this repo
+lost five TTS hooks in a day. So every save routes through
+`tstack.commands.config.set_value`, the same function the command line uses.
+
+That also gets the schema's validation and the `DERIVED` refusal for free: a key
+regenerated by `chezmoi init` cannot be edited from the dashboard any more than
+from a shell, and the message is the same one either way. It needed no part of
+the phase-4 flip — that module is already built, just not yet wired to the
+`config` name.
+
+Three structural choices behind it:
+
+- **Textual is optional and isolated in `tstack/ui/`.** Everything else in
+  `tstack` runs on the standard library, which is what lets a fresh machine run
+  `tstack doctor` before anything is installed. `tstack ui` catches the
+  `ImportError` and prints how to install Textual.
+- **`ui/app.py` is excluded from coverage MEASUREMENT, not from testing.**
+  `tests/test_ui_app.py` drives it headless through Textual's own `run_test()`.
+  Measuring it would make the floor depend on whether the machine running the
+  suite happens to have Textual installed — present, the number goes up; absent,
+  every line reads as uncovered and the gate fails for a reason unrelated to the
+  change. A floor that moves with the environment is not a floor.
+- **The Textual tests live in their own module.** `pytest.importorskip` skips the
+  module it is *in*; at the top of `tests/test_ui.py` it silently took the
+  fourteen stdlib-only model tests with it, and the suite still reported green.
+
+Two UI details worth keeping: the `source` column is a fixed width because
+auto-sizing pushed it off the right edge at 110 columns, and `source` is the
+entire reason the screen exists. And `e` is the advertised edit key rather than
+Enter — a focused `DataTable` claims `enter` for its own select action, so the
+App-level binding never fires there and never appears in the footer. Enter still
+works, through `on_data_table_row_selected`.
+
+## Why the install profile is not a saved setting
+
+The wizard opened with the WezTerm leader key, then the mux, then session
+restore, then voice notifications, then a memory backend — fourteen questions
+aimed at someone who may only have wanted the prompt. The honest answer to "can I
+just have the prompt" has to be yes, so that is now question one, and it opens by
+rendering the prompt you would get.
+
+The answer (`prompt` / `shell` / `full`) is **not stored**. It decides what the
+rest of the wizard asks and what those answers default to, and every one of those
+*is* saved on its own — so a stored `profile` would be a second copy of state that
+can disagree with the settings it produced. Re-running the wizard asks again,
+which is correct: the answer is about what you want now, not about what this
+machine is.
+
+On `prompt`, every remaining answer is pinned to its off/default value rather
+than asked, and the review screen lists them. A review that silently omits what
+it decided for you is how "I didn't choose that" happens.
+
+## Why the app class is inferred rather than saved
+
+The second question — "will you write code on this machine?" — picks between two
+recommended sets. The split is "does this only make sense if you write code
+here", not taste: git tooling stays in **both**, because delta, gh and lazygit
+earn their place on a server you deploy from, while ghq, the runtimes, the Python
+tooling, the agent CLIs and llmfit are development-only. The monitors and network
+tools that are merely optional on a laptop become default kit on a server, so
+neither set is a subset of the other — they are two different defaults.
+
+`ts_apps_pending` had to learn about this or the class would have become a
+permanent nag. It offers the saved selection **plus anything since added to the
+recommended set**, which is the point — a machine configured before a tool joined
+the catalog would otherwise never get it. With two classes, a box set up as a
+server would be told on every `tstack update` that it is missing fnm, poetry and
+six agent CLIs it deliberately declined: the same nag `ts_app_installable` was
+added to end, in a new place.
+
+So the class is derived from a predicate that cannot drift — *does the saved
+selection contain anything outside the sysadmin set?* — rather than from a stored
+copy that can. A server that later installs `claude` flips to developer, which is
+the right answer. A machine that has never been configured reports `developer`,
+keeping the previous behaviour rather than guessing.
+
+## Why the Starship presets are not vendored
+
+`starshipPreset` is a saved setting: `terminal-stack` (the default) is this
+repo's own two-line prompt, and any other value is one of Starship's twelve
+built-in presets. `tstack config prompt list` renders **every** option live,
+because a preset name tells you nothing and this is a decision about what you
+look at all day.
+
+Copying twelve TOML files into this repo would freeze them at whatever upstream
+shipped the day they were taken, and the whole point of a preset is that it is
+Starship's rather than ours. `dot_config/starship.toml.tmpl` therefore runs
+`starship preset <name>` at apply time.
+
+**`lookPath` is the load-bearing half.** During a bootstrap that template can be
+rendered *before* starship is installed, and chezmoi's `output` on a missing
+binary aborts the entire apply — not just that file. Falling back to this stack's
+own prompt keeps a half-installed machine with a working prompt, and the next
+apply picks up the preset.
+
+Three traps found while building it:
+
+- **`starship preset -o <file>` refuses to overwrite an existing file**, and
+  `mktemp` has already created one. The command fails, the temp file stays empty,
+  and the preview silently renders nothing. Redirect stdout instead.
+- **`STARSHIP_SHELL` must be empty, not unset.** With a shell name starship emits
+  that shell's escaping (zsh's `%{…%}`), which a preview prints as literal
+  punctuation rather than as colour.
+- **An unknown preset name renders an empty config**, so it is checked against
+  `starship preset --list` before it is saved — a working prompt replaced by no
+  prompt, with nothing in the diff to explain it, is worse than a refusal.
+
+Both sync paths render it on the Windows side too. A combined machine showing
+tokyo-night in WSL and this stack's prompt in PowerShell is exactly the
+split-brain the config mirror exists to prevent.
+
+## Why `Save-TsConfig` needed two more parameters
+
+It rebuilds `config.json` from a fixed set of properties, so a key missing from
+that set is **deleted** on any Windows-side save — the same failure its own
+`ccTts` comment warns about, one level up. `atuinEnabled` had this hole from the
+day it was added and has no pwsh consumer, so nothing ever showed;
+`starshipPreset` decides which prompt `sync-windows.ps1` deploys, so losing it
+would visibly revert the prompt on the next Windows save.
+
+Both are now parameters, carried forward when the caller does not pass them.
+`StarshipPreset` deliberately has **no `ValidateSet`**: `starship preset --list`
+is the authority and it grows, so a hardcoded set here would reject a preset the
+installed starship has.
+
+## What the bash agentmemory twin may not copy from the `.ps1`
+
+`bootstrap/_agentmemory.sh` keeps the `.ps1`'s `@T`/`@N` encoding on purpose, so
+the two files' edit text diffs directly. Exactly **two** things differ, and both
+are mandatory:
+
+- **Stale-secret recovery reads the 0600 cache**
+  (`${XDG_CONFIG_HOME:-~/.config}/docker-local/agentmemory.secret`) rather than
+  `reg query HKCU\Environment`, which on Unix throws, is caught, and leaves the
+  recovery a permanent no-op.
+- **Hook commands are a POSIX `VAR=value node "<path>"` prefix**, not a cmd.exe
+  `set X=…&&` chain. That chain written into a hooks file on a Mac fails
+  **silently**.
+
+Three implementation constraints that are not obvious from the code:
+
+- **The literal multi-line replace runs in python3, not bash.** `${x//a/b}`
+  treats the needle as a glob, and `sed` is line-oriented and appends a trailing
+  newline to a file that lacked one.
+- **The FILE's line endings decide what gets inserted, not the matched form's.**
+  A single-line anchor is byte-identical in LF and CRLF, so deciding from the
+  match injects LF blocks into a CRLF file.
+- **Python must read with `newline=""`**, or universal-newline translation
+  silently rewrites every CRLF vendor file to LF.
+
+And unlike the `.ps1`, which reports problems and still exits 0, the bash twin
+**exits non-zero in every mode**, so `tstack agents` can tell a clean apply from
+one where an edit's anchor had moved.
+
+## Why every agent gets prompt-level retrieval
+
+`/agentmemory/context` from `prompt-submit.mjs`, gated by
+`AGENTMEMORY_INJECT_CONTEXT`, was Codex/Cursor-only on the theory that Claude
+already retrieved through `/enrich` at `PreToolUse` and `/session/start`.
+
+`/enrich` fires only for the vendor allow-list, is excluded for `Bash`, and drops
+a path-less `Grep`/`Glob` — so a shell-heavy Claude session retrieved almost
+nothing. Measured: **1041 captures against one `/context` call in 5.7 hours.**
+Claude's patch set therefore includes `prompt-submit.mjs`, and adding a script to
+an agent's list is the whole change.
+
+`AGENTMEMORY_INJECT_CONTEXT` is **inlined into every generated hook command**
+rather than inherited. A User environment variable only reaches processes started
+after it was set, so inheriting it left long-running shells and desktop apps
+retrieving nothing.
+
+## Why `doc`'s edit binding cannot hard-code fzf's `become(...)`
+
+`become` — replace the fzf process with `$EDITOR` — only exists in fzf 0.42.0+.
+Debian/Ubuntu `apt`, which is what `_common-debian.sh` installs, ships older fzf
+(0.29 on Ubuntu 22.04), where it is an unrecognized action and **fzf refuses to
+start at all**: `unknown action: become(...)`. That takes out the whole finder,
+not just the edit key.
+
+`_doc_finder` in `dot_zshrc` resolves the bind through `_doc_edit_bind`, which
+checks the installed version with zsh's `is-at-least` and falls back to
+`execute(${EDITOR:-micro} {2})+abort` below 0.42.0 — the same fallback the pwsh
+side (`Invoke-DocFinder`) has always used unconditionally.
+
+## Why `~/.claude/settings.json` and `~/.cursor/hooks.json` are never copied
+
+`~/.claude/settings.json` holds Claude Code's own state — `model`,
+`enabledPlugins`, `permissions`, `env` — next to this stack's `statusLine`,
+`hooks` and `theme`. A whole-file mirror deletes all of it with **no error and
+nothing in the diff**. That is how the agentmemory plugin got silently disabled:
+`enabledPlugins` vanished mid-session, so its hooks and MCP server stopped
+loading. The same sync emptied `~/.cursor/hooks.json` of agentmemory's seven
+Cursor hooks.
+
+Both now route through a merge helper on both sync paths
+(`bootstrap/_merge_claude_settings.ps1`, `bootstrap/_merge_cursor_hooks.ps1`).
+If you add another such file, splice it rather than copying it — and work out
+whether ownership is per **key** or, as with Cursor's shared event arrays, per
+**entry**.
+
+## Why every wizard question carries a recommendation, and what each one costs
+
+A default with no reasoning is a default people override at random. Each
+behaviour question therefore opens with a `RECOMMENDATION:` line that says which
+way to go **and what it costs**:
+
+- **mux off** — config changes then need `tstack mux restart`, which kills every
+  pane, and mux panes cannot render the per-pane Claude tint.
+- **session restore off** — panes come back without their processes, and the
+  autosave runs either way, so `Leader+L` still restores on demand.
+- **atuin on** — its *wizard* default is `on`, while the stored `[data]` default
+  stays `off` so a machine that never answered is not flipped silently.
+
+**The agent toggles are probed, not guessed.** `ts_probe_headroom` and
+`ts_probe_agentmemory` run before the question, print what they found, and set
+the default. This matters because the agentmemory hooks `fetch(...).catch(() => {})`
+then `exit(0)`: a machine wired to a service that is not running captures nothing
+and reports nothing.
+
+**"Answering" is the test, never a 2xx.** AgentMemory returns 404 on `/` and 401
+on `/agentmemory/health`, so `curl -fsS` — which `tstack agents agentmemory
+status` used — reported the service *down* while it was up and serving.
+`ts_probe_http` accepts any HTTP status and counts only a refused connection as
+down; `ts_probe_http_ok` is the strict variant, for genuine readiness endpoints
+like Headroom's `/readyz`. When a probe fails, `ts_docker_ports` reports what
+docker *is* publishing, so the warning names the real port rather than repeating
+the expected one.
+
+## Why the app catalog became a data file
+
+There were two catalogs -- `bootstrap/_config.sh` and `bootstrap/_config.ps1` --
+carrying the same ids, group membership, descriptions and two default sets each.
+They had already drifted in a way that mattered: the pwsh side kept a **second id
+list** to express "Windows cannot install this", doing by omission what
+`Test-TsAppInstallable` was supposed to do by rule. That is the exact drift
+CLAUDE.md warns about, in the file it warns about it in.
+
+A third reader forced the issue. The settings dashboard, the wizard port and
+`tstack config apps` all need the catalog, and only one of those is bash.
+
+`bootstrap/apps.conf` is whitespace-delimited for the same reason
+`workspace.conf` and `commands.conf` are: bash cannot parse JSON without `jq`,
+and this stays diffable. Two columns replace four lists:
+
+- **`classes`** -- `both | dev | sys | none`. The recommended and sysadmin sets
+  are DERIVED from it, so they cannot drift apart. Neither is a subset of the
+  other: a server's default kit includes the monitors that are merely optional on
+  a laptop, and drops the runtimes and agents entirely.
+- **`platforms`** -- `all | posix | linux | windows`. "Can this platform install
+  it", never "is it in winget", and it is what replaced the second id list.
+
+Verified by construction rather than by eye: every derived set was dumped from
+bash and pwsh before the change and reproduced exactly after, and
+`tests/test_apps_catalog.py` now runs all three readers and compares them.
+
+Two fixes fell out. macOS no longer offers `nvtop` in the picker at all, rather
+than offering it and then refusing to install it. And the catalog is ASCII,
+because Python prints these descriptions now and a Windows console on codepage
+437 renders an em dash as mojibake.
+
+## Why the wizard's answers travel in a file
+
+The questionnaire is one Python implementation, and the four bootstraps that call
+it are shell. The answers reach them by writing a file the caller sources, never
+by printing to stdout.
+
+That removes a whole class of failure by construction. The bash wizard routed
+every prompt to `/dev/tty` precisely because it was called inside `$( )`, and a
+single `printf` that forgot the redirect would have been captured as part of an
+answer. With a file there is no capture boundary to corrupt: menus go to the
+terminal, answers go to the path the caller passed, and the two cannot mix.
+
+Three details are load-bearing under `set -euo pipefail`:
+
+- **Every variable is emitted unconditionally**, empty where there is no value.
+  The callers read several of them unguarded, and `set -u` aborts on a missing
+  one.
+- **`export`, not assignment.** `ts_agents_apply_wizard` reads `TS_WIZ_HEADROOM`
+  and friends from the ENVIRONMENT of a child `tstack agents` process; a bare
+  assignment would silently turn the agent wiring off.
+- **Written whole, then renamed.** A crashed wizard cannot leave half a file for
+  the caller to source -- and it is never reached anyway, because the exit code
+  is non-zero and the call is the condition of an `if`.
+
+Windows gets the same answers as JSON, keyed by the PascalCase names the old
+PowerShell hashtable already used, so every `$w.X` call site downstream is
+unchanged.
+
+**Exit 3 means the user quit at the review**, which each caller already handled
+as cancelled and which has to stay distinguishable from a failure.
+
+## Why `tstack config` flipped only its POSIX column
+
+`tstack/commands.conf` has two implementation columns per row, and `config` is
+the row that uses them differently on purpose.
+
+POSIX runs the ported Python. Windows stays on `Set-TerminalStackConfig` until it
+can be exercised on a Windows machine: `tstack config` is the most-used command
+in the stack, the delegation there would have to reach a function that lives
+inside `$PROFILE`, and flipping it blind is how you find out on someone else's
+morning.
+
+Three verbs are **delegated**, not unported. `apps` ends in a package-manager
+install, `tts` is twenty-five sub-verbs over the daemon, and `reconfigure` is the
+bootstrap's own save sequence -- and `REVAMP-PLAN.md` lists the installer entry
+points as never ported. They are unportable by the plan's own rule, so Python
+routes them to `bootstrap/ts-config.sh`, which survives as the delegate target
+rather than as the entry point. "Delete ts-config.sh" was never achievable and
+the checklist that said so was wrong.
+
+`mux`, `wezterm`, `ghostty` and `wizard` are handed to their ported commands
+**in-process**: they are in the same program, and spawning a second interpreter
+to reach one would double the startup cost for nothing.
+
+Two divergences from the shell are recorded in the characterization harness
+rather than papered over: an unknown verb and a missing argument are exit 2 now,
+on every platform, where `ts-config.sh` returned 1. A caller that keys off the
+exit code should see one answer for one kind of mistake.
+
+## How each kind of tool actually gets installed
+
+The catalog says *what*; these are the *hows*, and each exists because the
+obvious route failed.
+
+**Agent CLIs never come from a package manager.** `ts_install_ai_cli` /
+`Install-TsAiCli` handle them instead of brew/apt/winget: claude, grok and
+cursor-agent ship native installers that need no Node, while codex (npm, Node
+16+) and gemini (npm, Node 20+) are gated on the Node version and *say what to
+do* rather than failing. There is **no brew fallback for gemini** -- that formula
+is deprecated upstream, so installing from it would hand you a dead end.
+
+**grok's installer appends a PATH line to `~/.zshrc`**, which this stack owns
+whole-file, so the next apply would wipe it. `GROK_BIN_DIR="$HOME/.local/bin"`
+routes the symlink onto the already-managed PATH instead, and `dot_zshrc` carries
+its completions `fpath` itself.
+
+**Node is fnm, not nvm** -- roughly 10ms of shell startup against 200-500ms --
+wired into both shells with `--use-on-cd`. Because fnm's PATH entry is created
+per-shell, `ts_apps_pending` and `ts_report_installed_apps` call
+`ts_load_node_env` first, or they nag about npm-installed CLIs forever.
+
+**The Python group is the same shape as the agent one.** `pipx`, `poetry`,
+`glances`, `ipython`, `httpie` and `pre-commit` have no winget package (three
+were carried as ids that do not resolve), so Windows routes them through
+`Install-TsPyTool` -- `uv tool install`, else `py -m pip install --user` -- after
+the winget pass and before the agent CLIs, in **both** `Install-TsApps` and
+`windows-bootstrap.ps1`'s own loop.
+
+**Binary names can differ from the id** (`btop` becomes `btop4win` on Windows),
+and a new winget id is verified with `winget show --id <id> --exact` before it is
+written down. An id that always fails is worse than an honest "not available on
+this platform".

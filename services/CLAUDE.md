@@ -93,6 +93,7 @@ server-side record is evidence, because the hook always exits 0.
 tstack services                     # status: one line per stack
 tstack services bootstrap           # first run: .env files, generated secrets, volumes
 tstack services up | down | restart
+tstack services up <stack> --build  # rebuild a locally built image first
 tstack services logs <stack>
 tstack services test                # down, up, and prove the whole chain works
 tstack services doctor
@@ -151,6 +152,17 @@ Add a stack and it registers itself by having them.
   which is why every memory you have ever saved lives in one. `tstack services reset
   --purge` is the only path that removes them, and it needs a verified backup and
   a typed phrase.
+- **A fresh clone has no chat provider, and that is the supported state.** The
+  examples ship `OPENAI_BASE_URL`, `OPENAI_MODEL` and `OPENAI_API_KEY` commented
+  out because the three states are not symmetric: unset is a skip every check
+  reports, set-and-unreachable dead-letters *silently*. A key with no base URL is
+  the subtle half — the client falls back to `api.openai.com` while `ts-verify`
+  still reports "skip", because it reads the container's `OPENAI_BASE_URL` and
+  that is empty. `tstack agents llm` reports which state a machine is in.
+- **From inside a container `localhost` is the container.** A host runtime is
+  reached at `host.docker.internal`, which is free on Docker Desktop and does not
+  exist on native Linux unless mapped — `extra_hosts: host.docker.internal:host-gateway`
+  on the agentmemory service is why the one printed URL works on all three.
 - **agentmemory's consolidation reports success while failing.** A `reflect` run
   logging `newInsights: 0` is the signature of a prompt rejected for length, not
   a quiet day. Confirm with `promptChars` and a sub-100ms `providerLatencyMs` in
@@ -172,4 +184,6 @@ Add a stack and it registers itself by having them.
   match. Capture first, match in the shell.
 - **The console builds from `../../console`**, this repo's own tree. It used to be
   a pinned SHA of a separate repo, so a dirty working tree now builds a dirty
-  image: `git status` before `tstack services up` is the whole discipline.
+  image: `git status` before `tstack services up` is the whole discipline. And
+  `up` on its own reuses the image it already has, so an edit to `console/`
+  shows up only with `--build`.

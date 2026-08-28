@@ -76,11 +76,28 @@ Run in a side pwsh window while editing; re-syncs whenever anything under `windo
 $clone = 'C:\DATA\Workspace\src\github.com\martybytes\terminal-stack'   # your dev clone
 $src   = Join-Path $clone 'windows'
 $sync  = Join-Path $clone 'scripts\sync-windows.ps1'
-$w = New-Object IO.FileSystemWatcher $src -PropertyName LastWrite,FileName,DirectoryName -IncludeSubdirectories
-Register-ObjectEvent $w Changed -Action { & $sync -SourceDir $clone } | Out-Null
+# -Property takes a hashtable. There is no -PropertyName, and
+# -IncludeSubdirectories is a property of the watcher, not a parameter of
+# New-Object -- written the old way this line threw before anything was watched.
+$w = New-Object IO.FileSystemWatcher $src -Property @{
+    NotifyFilter          = [IO.NotifyFilters]'LastWrite, FileName, DirectoryName'
+    IncludeSubdirectories = $true
+    EnableRaisingEvents   = $true
+}
+# -MessageData, not the outer variables: the -Action scriptblock runs in the
+# event runspace and cannot see this scope, so a bare $sync in there is $null
+# and every change fires a call to nothing.
+$job = Register-ObjectEvent $w Changed -MessageData @{ Clone = $clone; Sync = $sync } -Action {
+    $d = $Event.MessageData
+    & $d.Sync -SourceDir $d.Clone
+}
 Write-Host "Watching $src — Ctrl+C to stop"
-while ($true) { Start-Sleep 60 }
+try { while ($true) { Start-Sleep 60 } }
+finally { Unregister-Event -SourceIdentifier $job.Name -ErrorAction SilentlyContinue; $w.Dispose() }
 ```
+
+A save can raise several `Changed` events, so the sync may run two or three
+times in a row. It is idempotent, so that is noise rather than a problem.
 
 Still use **`Ctrl+Space` `r`** after `pane_nav.lua` edits.
 

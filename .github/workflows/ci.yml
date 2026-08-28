@@ -54,7 +54,12 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install test dependencies
-        run: python -m pip install --upgrade pip pytest pytest-cov hypothesis
+        # textual is `tstack ui`'s optional dependency and nothing else in the
+        # program imports it. Installed HERE so tests/test_ui_app.py actually
+        # runs the dashboard headless rather than skipping -- the parity and
+        # distro jobs below deliberately do not, which is what keeps the
+        # importorskip honest.
+        run: python -m pip install --upgrade pip pytest pytest-cov hypothesis textual
       # zsh is not present on the GitHub runners by default, and dot_zshrc is
       # zsh-only syntax that `bash -n` cannot check. Without this the zsh gate
       # skips silently, which is the failure mode this whole change set is about.

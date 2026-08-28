@@ -29,6 +29,7 @@
   "excitement": {{ index . "ccTtsExcitement" | default "0.25" }},
   "kokoro": {
     "url": {{ index . "ccTtsKokoroUrl" | default "http://127.0.0.1:8880" | quote }},
+    "model": {{ index . "ccTtsKokoroModel" | default "kokoro" | quote }},
     "voice": {{ index . "ccTtsKokoroVoice" | default "am_adam" | quote }},
     "speed": {{ index . "ccTtsKokoroSpeed" | default "1.0" }},
     "format": {{ index . "ccTtsKokoroFormat" | default "mp3" | quote }},
@@ -41,6 +42,9 @@
     "cfgWeight": {{ index . "ccTtsChatterboxCfgWeight" | default "0.5" }},
     "temperature": {{ index . "ccTtsChatterboxTemperature" | default "0.6" }},
     "timeoutSec": {{ index . "ccTtsChatterboxTimeout" | default "60" }}
+  },
+  "say": {
+    "voice": {{ index . "ccTtsSayVoice" | default "" | quote }}
   },
   "edge": {
     "enabled": {{ if eq (index . "ccTtsEdgeEnabled" | default "true") "true" }}true{{ else }}false{{ end }},

@@ -222,12 +222,38 @@ def test_snapshot_is_serialisable_and_complete(monkeypatch):
     json.dumps(rows)
 
 
-def test_the_schema_and_the_store_agree_on_defaults():
-    """Two default tables would drift, and the one that lost would be the one
-    nobody was reading."""
-    for key, default in store.DEFAULTS.items():
-        if key in schema.BY_KEY:
-            assert schema.BY_KEY[key].default == default, key
+def test_the_schema_and_the_shell_agree_on_every_tts_default():
+    """Two default tables drift, and the one that loses is the one nobody reads.
+
+    The Python-vs-Python case is gone by construction: store.defaults() is built
+    FROM the schema. What can still drift is Python against bash, because
+    `ts_cc_tts_default` is still the table the shell TTS path reads. Until that
+    path is ported, this is the gate.
+    """
+    import re
+
+    from tests.test_agent_tools import repo_file
+
+    body = repo_file("bootstrap/_cc_tts.sh").read_text(encoding="utf-8")
+    block = body[body.index("ts_cc_tts_default()") : body.index("ts_cc_tts_keys()")]
+    shell = dict(re.findall(r"^\s*(ccTts\w+)\)\s+echo\s+(.*?)\s*;;\s*$", block, re.M))
+    assert shell, "the shell default table moved; repoint this test"
+
+    for key, raw in shell.items():
+        assert key in schema.BY_KEY, f"{key} is in the shell table but not the schema"
+        want = raw.strip()
+        if len(want) >= 2 and want[0] == want[-1] and want[0] in "\"'":
+            want = want[1:-1]
+        assert schema.BY_KEY[key].default == want, key
+
+    declared = {s.key for s in schema.SETTINGS if s.key.startswith("ccTts")}
+    assert declared == set(shell), "the two TTS key sets differ"
+
+
+def test_store_defaults_come_from_the_schema():
+    """One table, not two: every default the store serves is a schema default."""
+    for key, value in store.defaults().items():
+        assert schema.BY_KEY[key].default == value, key
 
 
 # ------------------------------------------- the Windows-standalone write path
@@ -369,6 +395,14 @@ def test_the_mirror_key_mapping_covers_every_divergence_pair():
     check and the reader disagree about where a value lives."""
     for flat, dotted in store.DIVERGENCE_PAIRS:
         assert store.mirror_key(flat) == dotted, flat
-    # The general rule covers TTS keys the pair list does not name.
-    assert store.mirror_key("ccTtsKokoroVoice") == "ccTts.kokoroVoice"
+    # The schema now carries the path wherever the mirror nests or renames, and
+    # it must be the one `get` reads through. The auto-derivation was WRONG for
+    # most of the TTS block -- `ccTts.kokoroVoice` is not a path that exists, so
+    # every nested key missed the mirror silently and fell through to its default.
+    for setting in schema.SETTINGS:
+        if setting.mirror:
+            assert store.mirror_key(setting.key) == setting.mirror, setting.key
+    assert store.mirror_key("ccTtsKokoroVoice") == "ccTts.kokoro.voice"
+    assert store.mirror_key("ccTtsKokoroTimeout") == "ccTts.kokoro.timeoutSec"
+    # A key that is flat in both stores still takes the identity path.
     assert store.mirror_key("apps") == "apps"

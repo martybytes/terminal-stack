@@ -22,7 +22,7 @@ remember these two.
 
 | check | what it means |
 |---|---|
-| `tstack config tts status` | is TTS on at all, and which engine is selected |
+| `tstack config tts show` | is TTS on at all, and which engine is selected |
 | `tstack services status` | is `kokoro` running (only matters when the engine is kokoro) |
 | `tstack config tts test` | end to end, right now |
 

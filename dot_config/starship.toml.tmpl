@@ -1,3 +1,29 @@
+{{- /*
+  Which prompt gets deployed.
+
+  "terminal-stack" (the default, and everything below this block) is this repo's
+  own two-line prompt. Any other value is one of Starship's twelve built-in
+  presets, emitted by `starship preset <name>` right here at apply time rather
+  than vendored -- vendoring twelve TOML files would freeze them at whatever
+  upstream shipped the day they were copied, and the whole point of a preset is
+  that it is Starship's, not ours.
+
+  `lookPath` is the load-bearing half. During a bootstrap this template can be
+  rendered BEFORE starship is installed, and `output` on a missing binary aborts
+  the entire apply -- not just this file. Falling back to our own config keeps a
+  half-installed machine with a working prompt, and the next apply picks up the
+  preset.
+
+  Set it with `tstack config prompt <name>`, which lists what is available and
+  can show you each one rendered before you choose.
+*/ -}}
+{{- $preset := index . "starshipPreset" | default "terminal-stack" -}}
+{{- if and (ne $preset "terminal-stack") (lookPath "starship") -}}
+# Starship's built-in "{{ $preset }}" preset, rendered by `starship preset` at
+# apply time. Managed by terminal-stack: edits here are replaced on the next
+# apply. To go back to this stack's own prompt: tstack config prompt terminal-stack
+{{ output "starship" "preset" $preset }}
+{{- else -}}
 "$schema" = "https://starship.rs/config-schema.json"
 
 # Powerlevel10k Rainbow-style two-line prompt rebuilt in Starship.
@@ -149,3 +175,4 @@ cyan   = "#005fb8"
 yellow = "#949800"
 red    = "#CD3131"
 black  = "#616161"
+{{ end -}}

@@ -6,6 +6,606 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Added
 
+- **The dashboard configures all of it now, not just the settings
+  (08/28/2026).** Three settings were blind text boxes and one was a
+  space-separated string, because their valid values are facts about the machine
+  rather than a fixed list. A `Setting` now names a **provider** and
+  `tstack/choices.py` is where one is asked: `options()` for what this machine
+  can offer, `preview()` for what it looks like, `sample()` for what it sounds
+  like. The CLI's probes moved behind that interface, so both front ends ask the
+  same question.
+
+  - `ccTtsKokoroVoice` / `ccTtsSayVoice` open a picker of the voices actually
+    served, with `s` to hear one.
+  - `starshipPreset` opens a picker that **renders each prompt** in a preview
+    pane.
+  - `apps` is a tick-list with `space`, `a` and `n`, saved in catalog order so
+    the stored value is stable and diffable.
+  - **AgentMemory's chat provider is editable too**, though it is not a saved
+    setting at all: `OPENAI_BASE_URL` and `OPENAI_MODEL` live in the stack's
+    `.env`. They appear as rows tagged with their own store, and a save routes
+    to `tstack/llmconfig.py` rather than to the settings writer.
+
+  `tstack agents llm set <url> <model>` and `tstack agents llm none` do the same
+  from the command line. Clearing the endpoint clears the model and the labels
+  with it -- the compose file defaults the labels to OpenAI, so a half-cleared
+  provider names one the machine no longer has.
+
+  Two traps the tests exist for. Escape needs a sentinel, because an unset
+  `ccTtsSayVoice` **means** "the system voice" and `""` cannot also mean
+  cancelled. And writing the `.env` normalises CRLF before matching and restores
+  it after: a line-anchored `^KEY=.*$` swallows the `\r`, silently converting
+  the one line it touched.
+
+- **`tstack doctor` reports a prompt preset that is not the prompt you are
+  running (08/28/2026).** `dot_config/starship.toml.tmpl` falls back to this
+  stack's own prompt when starship is not on PATH — deliberately, because a
+  bootstrap can render that template before starship is installed and chezmoi's
+  `output` on a missing binary aborts the *entire* apply. The cost of that safety
+  is a machine whose `starshipPreset` says one thing and whose prompt is another,
+  with nothing anywhere reporting it.
+
+  Silent on the default, which is the actual answer rather than a fallback. An
+  unknown preset name is also flagged, because `starship preset <nonsense>`
+  prints nothing and the rendered config would be **empty** — a working prompt
+  replaced by no prompt.
+
+- **`tstack ui` - every saved setting in one screen (08/27/2026).** The dashboard
+  the revamp plan has carried as phase 8. It shows what each setting is, what its
+  default is, and **which layer the value came from** - chezmoi `[data]`, the
+  Windows mirror, or nothing at all. Those three look identical once a value is
+  printed, which is the failure this whole schema exists for.
+
+  Filtering searches the NOTE as well as the key, because the keys are camelCase
+  internals nobody remembers: "ollama" finds `ccTtsSummarizer`. `Space` cycles a
+  choice setting in place, `d` restores the default, and a derived key is listed
+  and refused rather than hidden - knowing a value exists and is not yours to set
+  is the point of showing it.
+
+  It does not write the store. A dashboard is exactly the kind of thing that
+  grows a second writer - it already has the key, the value and the path - so
+  every save routes through `config.set_value`, the same function the command
+  line uses, which is what keeps the validation, the chezmoi re-init and the
+  DERIVED refusal identical in both front ends.
+
+  Textual is the only third-party import in `tstack` and only this command uses
+  it, so it is optional: `tstack ui` prints how to install it rather than raising
+  ImportError. The rules live in `tstack/ui/model.py` (stdlib, 94% covered) and
+  the Textual shell in `app.py` holds none of its own; `tests/test_ui_app.py`
+  drives that shell headless through Textual's own `run_test()`, in a separate
+  module because `importorskip` skips the file it is in and would otherwise have
+  taken the fourteen stdlib-only tests with it.
+
+- **kokoro natively on Apple Silicon, and a command that says which engine fits
+  this Mac (08/27/2026).** There are three ways to get a voice on macOS and they
+  are not interchangeable, so `tstack config tts engines` measures the machine
+  (architecture, cores, memory, installed voices, and whether Docker, kokoro and
+  mlx-audio are actually present) and **derives** a recommendation rather than
+  carrying one.
+
+  The deciding fact it exists to state: **Docker Desktop gives the container no
+  GPU on Apple Silicon**, so the shipped kokoro image runs on the CPU a model the
+  machine could run on its GPU. mlx-audio is that same Kokoro model running
+  natively, and it speaks the same OpenAI protocol — `/v1/audio/speech` with
+  model, voice, speed and response_format, plus `/v1/audio/voices` and
+  `/v1/models`. Every field matched except one, which is why the whole port is a
+  setting rather than a code path: the Docker image answers to the literal string
+  `kokoro`, and mlx-audio wants the HuggingFace repo id and rejects anything else.
+
+  `ccTtsKokoroModel` (default `kokoro`, `tstack config tts model kokoro <id>`) is
+  now read by both hook libraries, the runtime config template and the Windows
+  mirror. The voices endpoint gets `?model=` only when a model is configured —
+  mlx-audio 400s without it, the container has no such parameter, and the default
+  request must stay byte-for-byte the one that is known to work.
+
+- **`tstack agents llm` — what a chat model switches on, and what runs without
+  one (08/27/2026).** AgentMemory needs no LLM for storage, semantic search or
+  embeddings; a chat model adds exactly four things (`compression`, `summary`,
+  `graph`, `consolidation`) and the command names all four either way. It reads
+  the stack's own `.env` — compose's authoritative interpolation source — so it
+  is correct while the stack is **down**, which is when someone is most likely to
+  be asking why nothing is being summarised.
+
+  Two things it will not do. It never reports a host probe as container
+  reachability: a container's DNS is Docker's embedded resolver and its egress a
+  separate path, so the success line says so and names
+  `tstack services test agentmemory` as the check that dials from inside. And an
+  endpoint set with an empty `OPENAI_MODEL` is called out rather than ticked —
+  `inferenceActive` is driven by the model, not the URL, so that configuration
+  reads as done everywhere while every family stays off.
+
+- **Local-runtime detection, printing the container's URL rather than the
+  host's (08/27/2026).** With nothing configured, `tstack agents llm` probes
+  Ollama (11434), LM Studio (1234), vLLM (8000) and llama.cpp (8080) and prints
+  the two lines to paste for whichever answers. The URL it offers is
+  `host.docker.internal`, never `localhost` — inside a container `localhost` is
+  the container, and copying the host URL out of a browser lands squarely in the
+  silent dead-letter state described below.
+
+  `host.docker.internal` is free on Docker Desktop and does **not** exist on
+  native Linux unless it is mapped, so `extra_hosts: host.docker.internal:
+  host-gateway` is now on the agentmemory service. That makes the one printed URL
+  correct on all three platforms; it is accepted and redundant on Desktop
+  (verified against Docker Desktop on macOS).
+
+- **`llmfit` in the app catalog, under a new `models` group (08/27/2026).**
+  "Which model fits this machine" is the question standing between someone and a
+  working LLM configuration, and it was answerable only by a KB page for a tool
+  the installer never offered. brew on macOS, the release tarball on Debian/WSL
+  (there is no apt package). Deliberately **not** in the `ai` group:
+  `ts_app_is_ai` reads that group as the install *route*, so a packaged binary
+  put there is handed to `ts_install_ai_cli`, which has no branch for it and
+  prints "no agent-CLI installer defined" instead of installing anything.
+
+  Absent from the Windows catalog. It ships a windows-msvc binary but is in no
+  winget manifest, and that table takes verified ids only — the rule is "can this
+  platform install it", never "is it in winget".
+
+### Changed
+
+- **`tstack config` is the ported Python on POSIX (08/28/2026).** The row's two
+  columns differ on purpose, which is what they are for. `apps`, `tts` and
+  `reconfigure` are routed to `bootstrap/ts-config.sh` rather than reimplemented:
+  they end in a package-manager install or the bootstrap's own save sequence, and
+  REVAMP-PLAN.md lists the installer entry points as never ported. `mux`,
+  `wezterm`, `ghostty` and `wizard` are handed to their ported commands
+  in-process.
+
+  **Windows stays on `Set-TerminalStackConfig` for now.** It is the most-used
+  command in the stack and the delegation there needs a Windows machine to
+  exercise; flipping it blind is how you find out on someone else's morning.
+
+  `prompt` was ported on the way, so it is no longer shell either. Two
+  divergences from the shell are recorded in the characterization harness rather
+  than papered over: a usage error is exit 2 now, on every platform, where
+  `ts-config.sh` returned 1 for an unknown verb and a missing argument.
+
+  Fixed while flipping: `-h` anywhere in argv printed `config`'s own help, so
+  `tstack config wizard -h` showed the wrong page. The shell forwarded it; the
+  port now does too.
+
+- **The install questionnaire is one implementation (08/28/2026).**
+  `bootstrap/_wizard.sh` was 944 lines and the `Read-Ts*` half of
+  `bootstrap/_config.ps1` about 800 more -- two implementations of the same
+  fourteen questions, kept in agreement by hand and **already drifted**: the
+  PowerShell tick-list rejected a whole multi-answer where bash applied the valid
+  tokens and warned about the rest. Someone typing `1 3 9` at a six-row list
+  means the first two, and throwing that away is how people stop reading menus.
+  The bash behaviour is the one that survived.
+
+  It is `tstack/wizard/` now, behind a `tstack wizard` command. What is left in
+  the shell is a 50-line hand-off, because the four bootstraps are shell and need
+  the answers as variables.
+
+  **The answers travel in a file, not on stdout.** The wizard writes its menus to
+  the terminal and its answers to a path the caller passed, so there is no `$( )`
+  boundary for a stray line to corrupt -- the failure the bash version guarded
+  against by routing every prompt to `/dev/tty`, now impossible by construction.
+  Every variable is emitted unconditionally (the callers read some unguarded, and
+  `set -u` aborts on a missing one), as `export` rather than assignment (the
+  agent wiring reads them from a child process's environment), and the file is
+  renamed into place so a crash cannot leave half of one to source. Windows gets
+  the same answers as JSON, keyed by the PascalCase names the old hashtable used,
+  so every `$w.X` downstream is unchanged.
+
+  The behaviours that had to survive are pinned by tests rather than by reading:
+  the three-try cap on a choice, the default returned verbatim and unvalidated
+  (the prompt question depends on it), numbers splitting on space or comma
+  without fusing `1 2` into `12`, and the exclusive-group collapse whose guard
+  is why ticking Ghostty no longer unticks WezTerm.
+
+- **The managed Ghostty config is one implementation instead of three
+  (08/28/2026).** `bootstrap/ts-config.sh` covered macOS and the WSL view of the
+  Windows side (~160 lines), `$PROFILE`'s `Set-TerminalStackConfig` covered
+  native Windows (~90 more), and each carried its **own copy of the
+  themeMode -> theme mapping** — a mapping that has to agree everywhere or
+  `tstack ghostty diff` reports a phantom change, which is why a test existed to
+  compare four copies of it against each other.
+
+  Now `tstack/ghostty.py`, behind a new `tstack ghostty` command reached the way
+  `mux` and `wezterm` already are; both shells hand off to it. The two sync
+  scripts keep their own copy, because they run where Python may not be, so the
+  comparison test stays — over three sources instead of five, and it now also
+  asserts the shells did **not** grow one back.
+
+  Two behaviour differences, both deliberate. WSL and native Windows resolve
+  through `plat.local_app_data()`, so a combined machine targets one Ghostty (the
+  Windows one) by construction rather than through two separate username lookups.
+  And `diff` on macOS now says "up to date" instead of printing nothing — chezmoi
+  is silent when there is nothing to change, and silence reads exactly like a
+  diff that failed.
+
+- **A fresh clone no longer ships a chat endpoint that resolves on one person's
+  network (08/27/2026).** `services/stacks/agentmemory/.env.example` had
+  `OPENAI_BASE_URL` and `OPENAI_MODEL` **active**, pointing at a private
+  Tailscale host, and `tstack services bootstrap` copies that file verbatim. Of
+  the three possible states that is the worst one: `ts-verify` treats an unset
+  base URL as a supported skip and a set-but-unreachable one as a failure,
+  because that is where every compression call returns empty, fails XML parsing,
+  retries and dead-letters while the log line still reads `outcome:"success"`.
+  52,570 jobs accumulated that way. Every clone but the author's booted into it.
+
+  `services/.env.example`'s `OPENAI_API_KEY` placeholder is commented out for a
+  related reason that is easier to miss: with a key set and no base URL the
+  client falls back to `api.openai.com` and sends it there, while `ts-verify`
+  still reports "skip" because it reads the container's `OPENAI_BASE_URL` and
+  that is empty. The machine looks cleanly unconfigured while quietly 401ing
+  against a service nobody chose.
+
+  In their place the file names three provider shapes anyone can copy — any
+  OpenAI-compatible server, Ollama (with the reminder that `localhost` inside a
+  container is the container), and the OpenAI API — and points at `llmfit` for
+  choosing a model. `LLM_PROVIDER_LABEL` / `LLM_ENDPOINT_LABEL` now say "none"
+  rather than inheriting the compose default of "OpenAI"/"OpenAI API", which is
+  wrong twice over on a machine with no provider. The compose *default* is
+  unchanged on purpose: an unlabelled provider is assessed as paid, and
+  over-reporting cost is the safe direction to be wrong in.
+
+- **The agentmemory docs describe a provider you choose, not one you were given
+  (08/27/2026).** `services/stacks/agentmemory/README.md`'s LLM section was a
+  deployment record for one machine — "vLLM on <host> (current provider)", a
+  table of its GPUs, a rollback path to the account it migrated from. A reader
+  with an Ollama install and a question had nothing to copy.
+
+  Rewritten as *Choosing a provider* (none / local runtime / another box /
+  hosted, with what each costs and what bites), *Setting one* (the four values
+  and the order they load in), and a switching table for moving between a
+  ~16k local model and a large-context hosted one. Every hard-won failure
+  analysis is kept — the truthy `reasoning_effort`, the chunk size that must
+  track the context, the reflect stage that reports `success: true` with zero
+  insights — reframed from "what happened here" to "what will happen to you".
+
+  `services/.env.example` went the same way: the `VLLM_*` block was the author's
+  endpoint record, read by nothing in the repo, and is replaced by the two things
+  that actually go wrong when the endpoint is on another machine — host
+  reachability is not container reachability, and prefer an IP to an overlay-DNS
+  name.
+
+  Also genericised in the same file: the embedding-provider warning and the
+  reasoning-effort note were written against one specific vLLM deployment, and
+  `LLM_HOST_BEARER_TOKEN` was a rollback credential for that host which nothing
+  in the repo has ever read.
+
+### Fixed
+
+- **Every `modify_` script grew a `\r` per apply on a CRLF host (08/28/2026).**
+  `sys.stdout.write` opens stdout in *text* mode, so each `\n` it writes becomes
+  `\r\n`; the next apply reads those back, splits on `\n`, rejoins with `\n` and
+  translates again. These scripts exist to be byte-preserving — `~/.zshenv` is
+  part-owned, `settings.json` is written by Claude Code itself — and the bytes
+  they write are part of that promise. All four apply-time writers
+  (`modify_dot_zshenv.tmpl`, `dot_claude/modify_settings.json.tmpl`,
+  `dot_codex/modify_private_terminal-stack.config.toml.tmpl` and the Windows sync
+  hook's renderer) use `sys.stdout.buffer.write` now, pinned by a test, with a
+  second test driving a CRLF `~/.zshenv` through two applies.
+
+  Surfaced by `pytest (windows-latest)`, which is the only place native Windows
+  runs — the idempotency test had been comparing a run against a
+  differently-terminated one and blaming the transport.
+
+- **`ghostty.binary()`'s WSL branch returned a host-flavoured path
+  (08/28/2026).** `/mnt/c/Program Files/...` is POSIX by definition — it exists
+  only inside WSL — and `str(Path(candidate))` re-renders it through whatever
+  path flavour the running host uses, so it became `\mnt\c\...` the moment
+  anything evaluated that branch on Windows.
+
+- **`Get-TsConfigPath` threw on every non-Windows pwsh (08/28/2026).**
+  `Join-Path $env:LOCALAPPDATA …` is a terminating error when that variable is
+  unset, so dot-sourcing `_config.ps1` and calling `Get-TsConfig` died before
+  returning anything on macOS and Linux. Found by running the strict-mode repro
+  that `docs/powershell-quirks.md` gives for checking this exact class of bug —
+  the repro itself failed. It returns `$null` there now, matching
+  `tstack/store.py`'s `mirror_path`, and callers fall through to the defaults
+  they already carry. Windows always sets the variable, so nothing changes there.
+
+- **The `FileSystemWatcher` snippet in `docs/developing-wezterm.md` could never
+  have run (08/28/2026).** `New-Object` has no `-PropertyName`, and
+  `-IncludeSubdirectories` is a property of the watcher rather than a parameter,
+  so the line threw before anything was watched; the `-Action` scriptblock also
+  referenced outer variables it cannot see from the event runspace, so every
+  change would have invoked `$null`. Rewritten, and verified by running it. Found
+  by parsing every PowerShell block in the docs — which also caught a `$EDITOR
+  .env` in a `powershell` fence in the agentmemory README.
+
+- **`tstack services up <stack> --build` was documented and rejected
+  (08/28/2026).** The agentmemory stack's README named it as the way to rebuild
+  the console after editing `services/console/`; the parser answered `unknown
+  option: --build`. Only two stacks here build an image from this repo's own
+  source, and without it `up` reuses the image it already has, so the edit
+  appears to have done nothing. Deliberately not wired into `test`, which proves
+  a clean bring-up — rebuilding mid-proof changes what is being proved.
+
+  Found by sweeping every `tstack <verb> --flag` in the docs against what the
+  parsers accept, the same way the dangling-function sweep works.
+
+- **The wizard port deleted three prompt primitives that six non-wizard callers
+  used (08/28/2026).** Moving the install questionnaire into `tstack/wizard/`
+  correctly deleted 21 bash prompt functions and the `Read-Ts*` half of
+  `_config.ps1` — but `ts_prompt_choice`, `ts_tty_prompt` and `ts_is_interactive`
+  were never questions. They are the primitives every *other* prompt in the stack
+  is built from, and `wso` (six call sites), `tstack smb setup`, the rclone
+  wizard, the TTS menu and `_cleanup.sh` all call them. Each died with `command
+  not found` the moment it prompted. Five items of each `tstack config` menu —
+  leader, theme, apps, session restore, and on Windows the re-run-wizard item —
+  called questions that were likewise gone.
+
+  Nothing caught it: bash resolves a function name at *call* time, `bash -n`
+  checks syntax only, and PowerShell's parser is equally content with a command
+  that does not exist. `tests/test_shell_symbols.py` now resolves every
+  `ts_*` / `Read-Ts*` name statically, the way neither interpreter will, on both
+  shells. It immediately found a second, older instance: a rename to
+  `ts_smb_conn` had left one caller in `_smb_setup.sh` behind, so `tstack smb
+  setup` died at the point where it asks the host for its share list.
+
+  The primitives now live in `_config.sh` / `_config.ps1`, which every caller
+  already sources — not with the questionnaire that moved. The menus ask their
+  own single-setting questions (`menu_leader` / `$menuLeader`, and twins), with
+  the same options the wizard offers but defaulting to whatever is currently
+  *saved*: a menu's default is the value you already have.
+
+- **`tstack config wizard` collected every answer and threw them away
+  (08/28/2026).** It had been routed to `tstack wizard`, which only *asks* —
+  that is what lets the four bootstraps each own their own save order. The
+  variant under `config` is the one that also saves and installs, so it belongs
+  with `apps` and `tts` on the delegated path, where the shell's `run_wizard`
+  does the persisting. `-h` on any delegated verb is now answered in Python
+  rather than forwarded: `ts-config.sh` dispatches on `$1` and ignores the rest,
+  so `tstack config wizard -h` had been *running the installer*.
+
+- **`Save-TsWorkspaceOverride $w.Workspace` on the `$PROFILE` wizard path
+  (08/28/2026).** The workspace root is not a wizard question and the emitted
+  JSON never carried the key, so the read was `$null` and an empty
+  `WORKSPACE_DIR` was persisted over a real one. Both callers now go through one
+  `Invoke-TsWizard`, which is also what stops the two copies drifting again.
+
+### Fixed
+
+- **A Windows-side save silently deleted `starshipPreset` and `atuinEnabled`
+  (08/27/2026).** `Save-TsConfig` rebuilds config.json from a fixed set of
+  properties, so a key missing from that set is dropped on any save - the same
+  failure its own `ccTts` comment warns about, one level up. `atuinEnabled` has
+  had this hole since it was added and has no pwsh consumer, so nothing showed;
+  `starshipPreset` decides which prompt the Windows sync deploys, so losing it
+  would visibly revert the prompt. Both are now parameters, carried forward when
+  the caller does not pass them.
+
+- **Windows had no synthesis floor, so "on" could still mean silence
+  (08/28/2026).** `Invoke-CcTtsSynth`'s ladder ended at edge-tts and returned
+  `$false`: a native-Windows host with the daemon off, kokoro down and edge-tts
+  not installed produced nothing at all. That is the same gap `/usr/bin/say`
+  closed on macOS in August, left open on the platform this stack started on.
+
+  SAPI is the floor now, and it **speaks** rather than synthesising to a file.
+  The Windows playback path is `cc-tts-play.ps1`, which requires `ffplay` and
+  errors without it -- so a file-based floor would still be silent on exactly the
+  machine that needs one. SAPI is part of Windows and needs neither a file nor a
+  player. The daemon has done this since it shipped; this is the same rung for
+  the hook path, which is what runs when the daemon is off. Both early returns in
+  `Start-SpeakWorker` now reach it, and it cannot throw: the alternative is
+  silence, so a failure must leave things no worse.
+
+  **Not verified on Windows.** The COM call cannot run on the development Mac;
+  the change is parse-checked, pinned by a test, and structured so its worst case
+  is the silence it replaces. CI covers the rest.
+
+- **The one line explaining a voice change went to a discarded stream.**
+  `cc_tts_say_notice` printed to stderr, and `cc-tts-notify.sh` runs the worker
+  as `( _worker ) >/dev/null 2>&1 &` -- so the message that answers "why is it
+  speaking in a different voice" was written where nobody could read it, every
+  time. The reason now goes into the dated sentinel file the notice already
+  wrote, and `tstack config tts` reports it. Still once a day: the point is to
+  explain a change, not narrate every announcement.
+
+### Added
+
+- **`say` is a real engine, and voices can be listed and heard (08/28/2026).**
+  macOS's `say` was the floor of the ladder and nothing else: not a legal
+  `ccTtsEngine` value, and no way to pick which of the machine's 184 voices it
+  used -- it passed no `-v` at all, so it always spoke the system default. It is
+  now selectable, with `ccTtsSayVoice` beside it, refused off Darwin at set time
+  rather than saved as a choice that can never take effect.
+
+  Choosing it is distinguishable from falling back to it, which matters for two
+  reasons: the once-a-day "using the system voice" notice explains an
+  *unexpected* fallback and would otherwise nag about a decision already made,
+  and the log line should say which of the two happened. The floor is unchanged
+  -- `say` stays last in the fallback chain, and the test that pinned that now
+  scopes itself to the chain rather than the whole function.
+
+  `tstack config tts voices` lists what the ACTIVE engine can produce, and
+  `voices <name>` plays a sample. Both ask the engine: kokoro over
+  `GET /v1/audio/voices`, which nothing in this repo had ever called, and macOS
+  with `say -v '?'`. No list is checked in -- kokoro ships 68 and the set moves
+  with the image, and a Mac has 184 with more downloadable, so a table here would
+  be wrong on somebody's machine the week it was written. When the saved engine
+  is kokoro but the container is down, the macOS list is shown instead.
+
+  `voices` previously set the daemon's per-session rotation pool -- unrelated to
+  picking a voice, and read only by the Windows daemon. That is `voice-pool`
+  now. The old comma-separated form is redirected with the new spelling rather
+  than silently honoured; a voice name never contains a comma, so the two stay
+  distinguishable.
+
+### Fixed
+
+- **A backup of a SOURCE file became a permanent managed target (08/28/2026).**
+  `.gitignore` carries `*.bak.*`, so a `dot_zshrc.bak.20260827204438` sitting in
+  the chezmoi source tree is invisible to `git status` -- and therefore to
+  `tstack update`'s dirty-clone refusal and to `run_before_05`, both of which
+  read it. `.chezmoiignore` had no matching rule, so chezmoi treated it as a
+  source entry and the next apply would have written
+  `~/.zshrc.bak.20260827204438` into `$HOME`, and kept writing it forever. Same
+  `$HOME`-pollution trap as `tests/**` and `services/**`, arriving by a different
+  door: not a file someone added, but one a backup helper left behind. Found by
+  reading `chezmoi status` before an apply, not by a test.
+
+- **The managed gitconfig's header had its own precedence backwards.** It claimed
+  user settings "always win, since includes resolve first". The bootstrap adds
+  the include with `git config --global --add`, which **appends**, so the
+  included file resolves LAST and its values win over anything set earlier in
+  `~/.gitconfig`. Verified both orders. `user.name` and `user.email` are
+  unaffected only because nothing in the included file sets them -- not because
+  of ordering. Corrected in the canonical copy and its byte-identical Windows
+  mirror.
+
+### Added
+
+- **AGENTMEMORY_SECRET now reaches the processes that need it (08/28/2026).**
+  The plugin's MCP clients expand `${AGENTMEMORY_SECRET}` from the environment.
+  Nothing set it on macOS -- there is no `HKCU\Environment` equivalent -- so
+  every MCP tool answered 401, silently, because retrieval discards a non-2xx
+  response. The hooks self-healed from the 0600 cache; the MCP server has no such
+  recovery.
+
+  Two carriers, because the three consumers reach differently. A spliced
+  `~/.zshenv` block covers terminal agents **and hook subprocesses**, which is
+  the reason it is `.zshenv` and not `.zshrc`: hooks are non-interactive, zsh
+  never sources `.zshrc` for them, and a variable exported there reaches nothing
+  and logs nothing. A `~/Library/LaunchAgents` plist covers GUI Cursor and Codex
+  Desktop, which are launched by launchd and read no shell file at all;
+  `launchctl setenv` alone is session-scoped and evaporates at logout, so the job
+  runs at every login.
+
+  `~/.zshenv` is **spliced, not owned**. It is where rustup writes
+  `. "$HOME/.cargo/env"`, where nvm and pyenv write their shims, and where a
+  person puts the one export they need everywhere -- a whole-file target would
+  delete all of it with no error and nothing in `chezmoi diff`, which is the
+  failure that removed every Claude TTS hook and emptied `~/.cursor/hooks.json`.
+
+  Both carriers READ the cache rather than embedding the value: the secret
+  rotates with the container's `/data/.hmac`, and a hardcoded copy works until it
+  does not and then 401s with the error swallowed -- 56 consecutive captures were
+  lost that way on 2026-08-21. `check-capture.sh`'s fixed-string scan now covers
+  both, since they were the obvious place for a future "just inline it" change
+  and were unscanned.
+
+  The block reads with `$(<file)`, a zsh builtin: `.zshenv` runs for every zsh
+  including every hook subprocess, and `$(cat file)` would be a process per
+  shell. Both carriers are removed when `agentmemoryEnabled` is off, and the
+  `.chezmoiignore` gates name the directory as well as its contents -- naming
+  only `Library/**` still creates an empty `~/Library/LaunchAgents` on machines
+  that opted out.
+
+### Fixed
+
+- **`chezmoi_data()` read 19 of the 59 saved keys (08/28/2026).** `DATA_KEYS` was
+  a hand-maintained tuple -- a FOURTH parallel key list beside
+  `.chezmoi.toml.tmpl`, `TS_MIRROR_DATA_KEYS` and the mirror heredoc -- and it
+  omitted `apps`, all four derived bindings and 37 of the 41 `ccTts*` keys. Those
+  keys were simply invisible to Python: `store.get("apps")` returned `""` on a
+  machine whose `chezmoi.toml` lists 47 apps, and `schema.source_of()` reported
+  `default` for values that were plainly saved -- the exact "right value for the
+  wrong reason" the schema exists to make visible, in the one field added to make
+  it visible. It now derives from `schema.SETTINGS`.
+
+  Two things fell out of actually reading those keys. A TOML **array** needs
+  `range`, not `index`: Go renders a slice as `[a b c]`, brackets included, so
+  `apps` arrived as the literal string `"[tmux eza ...]"`. And the branch has to
+  test the VALUE's kind, not the schema's -- `ccTtsEvents` and `ccTtsVoicePool`
+  are `kind="list"` but are stored as comma-separated STRINGS, and `range` over a
+  string makes chezmoi reject the whole template, so one wrong key returned
+  nothing for all 59 and every value fell back to its default.
+
+- **The commit gate reported "NOT RUN" for every gate and exited 0 (08/28/2026).**
+  Both hooks probed for their tools with `python3 -c "import <tool>"` only, which
+  is the one shape this stack does not produce: `TS_APPS_RECOMMENDED` installs
+  `ruff` and `uv` as formulae, and `ruff` has no importable module at all. So on
+  a machine the stack itself provisioned, `pre-commit` printed NOT RUN four times
+  and exited 0 - the precise failure its own header warns about ("a gate you
+  believe is running and is not is worse than no gate"), one level up.
+
+  `.githooks/_gates.sh` now resolves a tool three ways - importable module, binary
+  on PATH, then `uvx` - and both hooks share it rather than each carrying a copy.
+  It also answers whether the chosen runner puts the working directory on
+  `sys.path`, because `uvx pytest` does not and `tests/` has no `__init__.py`
+  while its modules import each other, so collection failed outright.
+  `tests/test_githooks.py` pins all three shapes; verified the shape-2 test fails
+  against the old probe. Measured: the gate now runs in about 15 seconds here.
+
+- **`tstack doctor`'s git-hooks check could never fire.** It keyed off the
+  RESOLVED clone, and `resolve_source_dir()` refuses to return a dev clone by
+  design - dev trees are deliberately invisible so `tstack update` cannot pull
+  one. `is_dev_clone(src)` was therefore false by construction on any machine
+  with a runtime clone, and the check returned early every time. Its existing
+  tests could not see this: they pass a dev clone straight in, exercising the
+  body without the reachability. It now asks `paths.dev_clone_at()` - the git
+  toplevel of the working directory - which is where a developer actually is, and
+  a new test pins the reachability rather than the body.
+
+- **The `[Unreleased]` heading, dropped by the previous commit.** Its CHANGELOG
+  edit anchored on the heading and did not re-emit it, so the entries below sat
+  under no version at all.
+
+- **Every nested TTS key read the wrong place in the Windows mirror (08/28/2026).**
+  The two stores spell the TTS block differently on purpose - chezmoi `[data]` is
+  flat (`ccTtsKokoroVoice`), the mirror nests (`ccTts.kokoro.voice`) because the
+  daemon reads that file too - and `mirror_key` derived the nested name by
+  lowercasing one character, producing `ccTts.kokoroVoice`. That path does not
+  exist, so the lookup MISSED and fell through to the shipped default: on a
+  Windows-standalone install every voice, URL, template, timeout and summarizer
+  setting read back as the default with nothing reporting a problem. The same
+  class of bug as the one `mirror_key` was written to fix, one level deeper.
+
+  The path now lives on the setting itself, so there is one declaration rather
+  than a lookup table beside a derivation rule. `tests/test_store.py` asserts the
+  schema's path is the one `get` reads through, for every key that declares one.
+
+- **`tstack config tts engine` advertised a value it would refuse.** The new
+  schema listed `kokoro`, `chatterbox`, `edge`; the setter accepts `kokoro`,
+  `chatterbox`, `auto`, and so do `docs/kb/common/tts.md` and the daemon's own
+  schema. `edge-tts` is a fallback rung, never a choice. Third copy of an enum,
+  and the only one that was wrong.
+
+### Added
+
+- **`tstack config`, phase II: the module, not yet the entry point (08/28/2026).**
+  `tstack/commands/config.py` implements `show` (prose, byte-identical to the
+  shell's, verified by diff), `show --json`, `get`, `set`, `leader`, `theme`,
+  `tmux`, `restore`, `atuin`, `memory` and `agents`. `apps`, `ghostty`, `tts` and
+  `wizard` stay with the shell for now.
+
+  The registry row is deliberately NOT flipped. Both columns flip together, and a
+  Python `config` that shelled out to `bootstrap/ts-config.sh` for its un-ported
+  verbs would leave Windows -- which has no bash -- with no implementation at
+  all. Half a subcommand cannot route.
+
+  Three behaviours differ from the shell on purpose:
+
+  - **argv is validated before the clone is resolved.** `tstack config theme`
+    is a usage error whether or not a clone exists. The two already-ported
+    comparators disagree on this (`mux` checks argv first, `services` does not),
+    so it is now pinned by a test.
+  - **`agents agentmemory on|off` is refused in both directions.** The shell
+    guarded only `on`, so `off` wrote the DERIVED `agentmemoryEnabled` directly
+    and produced the exact `memoryBackend=agentmemory` / `agentmemoryEnabled=off`
+    pair `tstack doctor` reports as drift.
+  - **`agents playwright` is routed.** The shell advertised it in its usage
+    string and had working branches for it, but the dispatch never reached them,
+    so the advertised command answered `unknown tool 'playwright'`.
+
+  Also: `show`'s ghostty row now prints wherever the Ghostty config path resolves
+  (macOS, WSL, Windows) rather than on Darwin alone, and `config atuin` works on
+  Windows -- it sets the key and says it affects WSL shells only, because the
+  pwsh save never wrote `atuinEnabled` and so STRIPPED it from the mirror.
+
+  One deliberate byte difference: `==> applying...` uses three periods where the
+  shell uses U+2026. `tests/test_tstack_cli.py` forbids non-ASCII anywhere under
+  `tstack/` because a Windows console on codepage 437 renders it as a
+  replacement glyph, and that gate is enforced where the shell's byte is not.
+
+- **The settings schema now covers all 41 `ccTts*` keys (08/28/2026).**
+  It carried three. The rest were reachable only through the shell, which is why
+  the mirror bug above could not be seen from Python at all. Each declares its
+  type, allowed values, default, group and mirror path, so `tstack config show`
+  and the future dashboard describe the whole TTS surface from one place.
+
+  `store.defaults()` is now built FROM the schema instead of a second literal
+  table, and the test that guarded those two against each other has been
+  repointed at the drift that can still happen: Python against `ts_cc_tts_default`
+  in `bootstrap/_cc_tts.sh`, which is still what the shell TTS path reads. Also
+  corrects a count repeated through the docs - the daemon has 72 runtime fields
+  and chezmoi has 41 `ccTts*` keys; "43" was neither.
+
 - **The macOS regression fixes, carried forward into the Python (08/27/2026).**
   `e969c30f` landed on `main` while the `tstack` port was in flight, fixing four
   regressions that ran on every non-Windows host - and three of the files it fixed

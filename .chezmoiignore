@@ -42,6 +42,17 @@ services/**
 # without this line every module is written into $HOME on apply
 # (tstack/commands/config.py -> ~/tstack/commands/config.py).
 tstack/**
+# Backups of SOURCE files. The repo's convention is to write <path>.bak.YYYYMMDD
+# before overwriting a user file, and .gitignore's `*.bak.*` means git never
+# reports one -- so a backup taken against a file in this tree is invisible to
+# `git status` AND to the dirty-clone guards that read it. chezmoi has no such
+# rule, so `dot_zshrc.bak.20260827204438` became a source entry and the next
+# apply would have written ~/.zshrc.bak.20260827204438 into $HOME and kept
+# writing it forever. Same trap as tests/** and services/**, arriving by a
+# different door: not a file someone added, but one a helper left behind.
+*.bak
+*.bak.*
+
 # Python bytecode caches are build noise. .gitignore already covers them, but
 # chezmoi has its own ignore list — without this, running the codex hook tests
 # deploys ~/.codex/hooks/__pycache__/*.pyc.
@@ -64,6 +75,23 @@ scripts/**
 .wezterm.lua
 .wezterm/**
 .config/ghostty/**
+{{- /* ~/Library/LaunchAgents is a macOS path. On WSL the GUI agents are WINDOWS
+       processes and inherit HKCU\Environment, which the plugin's own setup
+       writes; on native Linux this stack installs no GUI agent at all. Both the
+       directory AND its contents: naming only `Library/**` still creates an
+       empty ~/Library/LaunchAgents. */}}
+Library
+Library/**
+{{ end }}
+{{- /* The LaunchAgent exists to put AGENTMEMORY_SECRET into the launchd
+       environment that Cursor and Codex Desktop inherit. With agentmemory off
+       there is no secret to export, and a login job that reads a file nobody
+       writes is worse than no job: it is a thing to explain later. Removal is
+       chezmoi's here (unlike the Ghostty config, which a user may have written
+       by hand) because nothing but this stack ever creates this plist. */}}
+{{ if ne (index . "agentmemoryEnabled" | default "off") "on" }}
+Library
+Library/**
 {{ end }}
 {{- /* Ghostty config, off switch. Two independent gates: the darwin one above
        (this path is chezmoi's, and chezmoi only manages $HOME here; the WINDOWS

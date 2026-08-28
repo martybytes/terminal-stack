@@ -16,13 +16,18 @@ Workarounds people try:
 
 ## Our convention
 
-`.chezmoiignore` at the source root contains a single line:
+`.chezmoiignore` at the source root starts with the line this whole mechanism
+rests on:
 
 ```
 windows/**
 ```
 
-This excludes anything under `windows/` from chezmoi's normal apply. chezmoi-managed files (`dot_zshrc`, `dot_tmux.conf`, etc.) outside of `windows/` are applied normally to WSL home.
+It is not the only line -- there are around sixty entries now, including
+platform gates (`{{ if ne .chezmoi.os "darwin" }}`), the docs tree, and `*.bak.*`
+after a source-tree backup was very nearly deployed into `$HOME` -- but
+`windows/**` is the one that makes the cross-side trick work. It excludes
+anything under `windows/` from chezmoi's normal apply. chezmoi-managed files (`dot_zshrc`, `dot_tmux.conf.tmpl`, etc.) outside of `windows/` are applied normally to WSL home.
 
 Files under `windows/` use absolute-path-mirror naming (with `$WIN_USER` resolved at sync time — see § "Username resolution" below):
 

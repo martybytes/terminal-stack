@@ -324,8 +324,16 @@ def test_main_returns_usage_for_unknown_and_ok_for_help():
     assert cli.main(["nope"]) == cli.EXIT_USAGE
 
 
-def test_main_refuses_an_unported_subcommand_by_naming_the_shell_target(capsys):
-    assert cli.main(["config"]) == cli.EXIT_USAGE
+def test_main_refuses_an_unported_subcommand_by_naming_the_shell_target(monkeypatch, capsys):
+    """Reached only by running main.py directly, or by a shim older than the
+    registry. `smb` is the remaining POSIX row that is still shell.
+
+    Pin the platform: on Windows `smb` has no row at all and the right answer is
+    the platform-gap message, which its own test covers. Left unpinned this
+    passed everywhere except the one OS where it said something different.
+    """
+    as_platform(monkeypatch, plat.LINUX)
+    assert cli.main(["smb"]) == cli.EXIT_USAGE
     assert "still implemented in the shell" in capsys.readouterr().err
 
 

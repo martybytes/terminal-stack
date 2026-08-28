@@ -97,6 +97,12 @@ weztermRestore = {{ index . "weztermRestore" | default "off" | quote }}
        saved setting rather than a presence check, because the binary is often
        installed but dormant. `tstack config atuin on|off`. */}}
 atuinEnabled = {{ index . "atuinEnabled" | default "off" | quote }}
+{{- /* Which prompt. "terminal-stack" (default) is this repo's own two-line
+       Starship config; anything else is one of Starship's built-in presets,
+       rendered by `starship preset <name>` at apply time. The template falls
+       back to ours when starship is not on PATH, so a machine mid-bootstrap
+       still gets a working prompt. `tstack config prompt <name>`. */}}
+starshipPreset = {{ index . "starshipPreset" | default "terminal-stack" | quote }}
 {{- /* Ghostty config, macOS only. "off" makes .chezmoiignore drop it so apply
        stops re-rendering; `tstack config ghostty off` also removes/restores the
        deployed files. Default on. */}}
@@ -149,6 +155,7 @@ ccTtsChatterboxEnergy = {{ index . "ccTtsChatterboxEnergy" | default "0.25" | qu
 ccTtsChatterboxCfgWeight = {{ index . "ccTtsChatterboxCfgWeight" | default "0.5" | quote }}
 ccTtsChatterboxTemperature = {{ index . "ccTtsChatterboxTemperature" | default "0.6" | quote }}
 ccTtsChatterboxTimeout = {{ index . "ccTtsChatterboxTimeout" | default "60" | quote }}
+ccTtsSayVoice = {{ index . "ccTtsSayVoice" | default "" | quote }}
 ccTtsEdgeEnabled = {{ index . "ccTtsEdgeEnabled" | default "true" | quote }}
 ccTtsEdgeVoice = {{ index . "ccTtsEdgeVoice" | default "en-US-AndrewMultilingualNeural" | quote }}
 ccTtsTemplateWaiting = {{ index . "ccTtsTemplateWaiting" | default "Done in {project}. I'm waiting for you." | quote }}

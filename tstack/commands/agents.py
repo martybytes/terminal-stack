@@ -36,14 +36,16 @@ from pathlib import Path
 
 from .. import paths
 from .. import platform as plat
+from ..stacks import env_value, stack_dir
 
 HELP = """tstack agents - user-global Headroom, Caveman and AgentMemory wiring.
 
 Usage:
   tstack agents [<tool>] [<action>] [<cursor-mode>]
 
-  <tool>         all (default) | headroom | caveman | agentmemory
+  <tool>         all (default) | headroom | caveman | agentmemory | llm
   <action>       status (default) | on | off | repair | uninstall | dashboard
+                 llm also takes: set <base-url> <model> | none
   <cursor-mode>  mcp (default) | byok | off      (headroom only)
 
   status     what is wired up, and what is missing
@@ -52,10 +54,20 @@ Usage:
   off        remove the client wiring; data, containers and secrets are untouched
   uninstall  also remove the terminal-stack-owned client pieces
 
+`llm` reports which AgentMemory features a chat model switches on and which run
+without one. It also SETS one, because that configuration is not a saved setting
+-- it lives in the stack's .env, which is compose's own interpolation source:
+
+  tstack agents llm set http://host.docker.internal:11434/v1 llama3.1:8b
+  tstack agents llm none
+
+`none` is a supported state, not a broken one: storage, search and embeddings are
+unaffected.
+
 Docker is out of scope here: this command probes a service and names the
 `tstack services` verb, it never starts or stops one."""
 
-TOOLS = ("all", "headroom", "caveman", "agentmemory")
+TOOLS = ("all", "headroom", "caveman", "agentmemory", "llm")
 ACTIONS = ("status", "on", "off", "repair", "uninstall", "dashboard")
 CURSOR_MODES = ("mcp", "byok", "off")
 
@@ -871,6 +883,7 @@ class AgentMemory:
             else:
                 self.out.bad("agent hook wiring incomplete - tstack agents agentmemory repair")
         self.out.info(f"pinned plugin version: {dig(self.body, 'agentmemory.version')}")
+        self.out.info("chat-model features: tstack agents llm")
         return ok
 
     def run(self, action: str) -> int:
@@ -887,6 +900,209 @@ class AgentMemory:
         return 2
 
 
+# ---------------------------------------------------------------------- llm
+
+
+# What a chat model actually buys, and what it does not. The list is short on
+# purpose: it is the answer to "is it worth configuring one", and every other
+# part of AgentMemory works without it.
+LLM_FEATURES = (
+    ("compression", "long observations condensed before they are stored"),
+    ("summary", "session summaries"),
+    ("graph", "entity and relation extraction into the knowledge graph"),
+    ("consolidation", "the periodic reflect pass that turns observations into insights"),
+)
+
+# Where a chat model most plausibly already is on someone's machine. Probed only
+# when nothing is configured, because the answer to "what do I even put there" is
+# usually "the runtime you already have running".
+#
+# THE PORT IS A HINT, NOT A CLAIM. Anything can listen anywhere; the name is what
+# conventionally uses that port, and what gets reported is the endpoint, which is
+# checked.
+LLM_LOCAL_RUNTIMES = (
+    (11434, "Ollama"),
+    (1234, "LM Studio"),
+    (8000, "vLLM or text-generation-webui"),
+    (8080, "llama.cpp server"),
+)
+
+LLM_UNAFFECTED = (
+    ("storage", "every observation is written either way"),
+    ("search", "semantic search, over embeddings computed in the image"),
+    ("embeddings", "local, on-device, no API key and no network"),
+)
+
+
+def local_llm_models(port: int, timeout: float = 1.5) -> list[str] | None:
+    """Model ids from an OpenAI-compatible /v1/models, or None if nothing answers.
+
+    An empty LIST is not None: a runtime that is up with no model loaded is a
+    different answer from no runtime at all, and it is the one worth saying out
+    loud, because the endpoint would be right and the config would still do
+    nothing.
+    """
+    url = f"http://127.0.0.1:{port}/v1/models"
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as response:
+            body = json.loads(response.read().decode("utf-8", "replace"))
+    except (urllib.error.URLError, OSError, ValueError):
+        return None
+    rows = body.get("data") if isinstance(body, dict) else None
+    if not isinstance(rows, list):
+        return []
+    return [str(r["id"]) for r in rows if isinstance(r, dict) and r.get("id")]
+
+
+class Llm:
+    """Whether AgentMemory has a chat model, and what that decides.
+
+    Reads the stack's own .env, which is compose's authoritative interpolation
+    source (`services/stacks/agentmemory/ts-envfiles` says the same thing from
+    the console's side) - a file read, no container required, and correct while
+    the stack is stopped.
+
+    THE HOST PROBE IS NOT PROOF. A container's DNS is Docker's embedded resolver
+    and its egress a separate path, so an endpoint this command reaches may still
+    be unreachable from inside the server. Reported as such, never as a pass;
+    `tstack services test agentmemory` is the check that dials from in there.
+    """
+
+    def __init__(self, source: Path, out: Out) -> None:
+        self.source = source
+        self.out = out
+
+    def env_file(self) -> Path:
+        return stack_dir(self.source, "agentmemory") / ".env"
+
+    def configured(self) -> tuple[str, str]:
+        path = self.env_file()
+        return (env_value(path, "OPENAI_BASE_URL") or "", env_value(path, "OPENAI_MODEL") or "")
+
+    def status(self) -> bool:
+        print("AgentMemory chat model:")
+        path = self.env_file()
+        if not path.is_file():
+            self.out.info(f"no stack .env yet at {path}")
+            self.out.info("tstack services bootstrap seeds it from .env.example")
+        base, model = self.configured()
+
+        if not base:
+            self.out.info("no chat provider configured - this is a supported state")
+            for name, what in LLM_FEATURES:
+                self.out.info(f"  off  {name} - {what}")
+            for name, what in LLM_UNAFFECTED:
+                self.out.good(f"{name} - {what}")
+            print()
+            self.suggest(path)
+            return True
+
+        self.out.good(f"endpoint {base}")
+        if model:
+            self.out.good(f"model {model}")
+        else:
+            # inferenceActive is driven by the model, not the URL: an endpoint
+            # with no model leaves every family switched off while the endpoint
+            # reads as configured.
+            self.out.bad("OPENAI_MODEL is empty - the four features below stay OFF")
+        for name, what in LLM_FEATURES:
+            if model:
+                self.out.good(f"{name} - {what}")
+            else:
+                self.out.info(f"  off  {name} - {what}")
+
+        reachable = http_answers(base.rstrip("/") + "/models", timeout=4)
+        if reachable:
+            self.out.good(
+                "answers from THIS HOST - which does not prove the container can reach it"
+            )
+        else:
+            self.out.bad("no answer from this host - compression will dead-letter silently")
+            self.out.info("an unreachable provider is worse than none: the calls return empty,")
+            self.out.info('fail XML parsing, retry, and still log outcome:"success"')
+        self.out.info("tstack services test agentmemory dials it from inside the container")
+        return reachable and bool(model)
+
+    def suggest(self, path: Path) -> None:
+        """What to put in the file, preferring a runtime that is already running."""
+        found = []
+        for port, name in LLM_LOCAL_RUNTIMES:
+            models = local_llm_models(port)
+            if models is not None:
+                found.append((port, name, models))
+
+        for port, name, models in found:
+            listed = ", ".join(models[:6]) if models else "none loaded"
+            self.out.good(f"something answers on 127.0.0.1:{port} - likely {name}: {listed}")
+            # The trap these two lines exist for: inside a container `localhost`
+            # is the CONTAINER. The compose file maps host.docker.internal on
+            # every platform, so this one URL is correct on all three.
+            self.out.info(f"  OPENAI_BASE_URL=http://host.docker.internal:{port}/v1")
+            self.out.info(f"  OPENAI_MODEL={models[0] if models else '<load a model first>'}")
+        if not found:
+            self.out.info("nothing answers on the usual local ports (ollama, lm studio, vllm,")
+            self.out.info("llama.cpp) - a hosted endpoint works just as well, and the example")
+            self.out.info("file names three shapes to copy")
+            self.out.info("llmfit recommend --use-case coding sizes a local model for this machine")
+
+        print()
+        self.out.info(f"set OPENAI_BASE_URL and OPENAI_MODEL in {path},")
+        self.out.info("OPENAI_API_KEY in services/.env (any non-empty string for a local")
+        self.out.info("server that does not check it), then: tstack services restart agentmemory")
+
+    def set_provider(self, base_url: str, model: str) -> int:
+        """Point agentmemory at an endpoint, and label it honestly.
+
+        The labels are not cosmetic: the console assesses an unlabelled provider
+        as PAID, which is the safe direction to be wrong in and wrong for a local
+        runtime.
+        """
+        from .. import llmconfig
+
+        path = llmconfig.stack_env(self.source)
+        if not path.is_file():
+            self.out.bad(f"no stack .env at {path}")
+            self.out.info("tstack services bootstrap seeds it from .env.example")
+            return 1
+        labels = llmconfig.labels_for(base_url)
+        changed = llmconfig.configure(self.source, base_url, model, labels)
+        if not changed:
+            self.out.info("already set to exactly that")
+            return 0
+        self.out.good(f"endpoint {base_url}")
+        self.out.good(f"model {model}")
+        self.out.info(f"labelled {labels[0]} / {labels[1]}")
+        if not llmconfig.read(self.source).api_key_set:
+            print()
+            self.out.info(f"set OPENAI_API_KEY in {llmconfig.shared_env(self.source)}")
+            self.out.info("(any non-empty string for a local server that does not check it)")
+        self.out.info("then: tstack services restart agentmemory")
+        return 0
+
+    def clear_provider(self) -> int:
+        from .. import llmconfig
+
+        changed = llmconfig.clear(self.source)
+        if not changed:
+            self.out.info("no chat provider was configured")
+            return 0
+        self.out.good("chat provider cleared - storage, search and embeddings are unaffected")
+        self.out.info("then: tstack services restart agentmemory")
+        return 0
+
+    def run(self, action: str) -> int:
+        if action == "status":
+            return 0 if self.status() else 1
+        # stderr and 2, not out.bad(): main() collapses any recorded failure to 1,
+        # and this is a usage error, which every other one here reports as 2.
+        print(
+            f"tstack agents: llm has no '{action}' action - it is a report.\n"
+            f"Set the endpoint in {self.env_file()} instead.",
+            file=sys.stderr,
+        )
+        return 2
+
+
 # ----------------------------------------------------------------- entry point
 
 
@@ -898,6 +1114,30 @@ def main(argv: list[str]) -> int:
     tool = argv[0] if argv else "all"
     action = argv[1] if len(argv) > 1 else "status"
     cursor_mode = argv[2] if len(argv) > 2 else "mcp"
+
+    # `llm` has its own grammar: it is the one tool whose configuration is a URL
+    # and a model rather than an on/off toggle, and it lives in a .env rather
+    # than the settings store.
+    if tool == "llm" and action in ("set", "none"):
+        try:
+            source = paths.resolve_source_dir()
+        except paths.CloneNotFound as exc:
+            print(f"tstack agents: {exc}", file=sys.stderr)
+            return 1
+        out = Out()
+        llm = Llm(source, out)
+        if action == "none":
+            return llm.clear_provider()
+        if len(argv) < 4:
+            print(
+                "usage: tstack agents llm set <base-url> <model>\n"
+                "   eg: tstack agents llm set http://host.docker.internal:11434/v1 llama3.1:8b",
+                file=sys.stderr,
+            )
+            return 2
+        rc = llm.set_provider(argv[2], argv[3])
+        return 1 if out.failures else rc
+
     if tool not in TOOLS:
         print(f"tstack agents: unknown tool '{tool}'", file=sys.stderr)
         return 2
@@ -924,6 +1164,7 @@ def main(argv: list[str]) -> int:
         "headroom": lambda: Headroom(source, out, cursor_mode).run(action),
         "caveman": lambda: Caveman(source, out).run(action),
         "agentmemory": lambda: AgentMemory(source, out).run(action),
+        "llm": lambda: Llm(source, out).run(action),
     }
     if tool != "all":
         rc = runners[tool]()

@@ -21,22 +21,66 @@
 . "$(dirname -- "${BASH_SOURCE[0]}")/_wezterm.sh"
 
 # ── App catalog ────────────────────────────────────────────────────────────────
-# Toggleable apps the wizard/picker offers. Required prerequisites (zsh, git,
-# curl, unzip, fontconfig, the Nerd Font, Starship, chezmoi) are always installed
-# by the common_* steps and are NOT listed here.
-#   TS_APPS_RECOMMENDED — pre-checked in the picker / installed by "recommended".
-#   TS_APPS_OPTIONAL    — unchecked by default (GUI editor, GPU/docker tools,
-#                         the agent CLIs — nothing here is installed unasked).
-TS_APPS_RECOMMENDED="tmux eza fzf bat fd tree delta ripgrep zoxide atuin glow micro neovim gh ghq lazygit duf ncdu dust btop fnm python uv pipx ruff ipython claude codex cursor-agent grok gemini pi"
-TS_APPS_OPTIONAL="zed tldr yazi nvtop lazydocker gdu bottom glances bandwhich gping rclone node httpie poetry pre-commit"
-TS_APPS_ALL="$TS_APPS_RECOMMENDED $TS_APPS_OPTIONAL"
+# The toggleable apps the wizard/picker offers, read from bootstrap/apps.conf.
+# Required prerequisites (zsh, git, curl, unzip, fontconfig, the Nerd Font,
+# Starship, chezmoi) are always installed by the common_* steps and are NOT in it.
+#
+# The catalog used to live here AND in bootstrap/_config.ps1, two hand-maintained
+# copies of the same ids, groups, descriptions and default sets. A third reader
+# is what forced it into data: the settings dashboard, the wizard and
+# `tstack config apps` all need it, and only one of those is bash.
+#
+# Everything below is DERIVED from that file's `classes` column, so the two
+# default sets cannot drift apart the way two lists did:
+#   both -> a laptop and a server      dev  -> only where you write code
+#   sys  -> only where you administer  none -> offered, never pre-ticked
+TS_APPS_CONF="${TS_APPS_CONF:-$(dirname -- "${BASH_SOURCE[0]}")/apps.conf}"
 
-# Groups exist for the picker only — the saved `apps` array stays flat, so this
-# adds no chezmoi [data] key and none of the 7-step blast radius that comes with
-# one (CLAUDE.md, docs/decisions.md §§ at :236 and :325). Every catalog id must
-# appear in exactly one group or it is unreachable from the group picker; a test
-# asserts the union equals TS_APPS_ALL.
-TS_APP_GROUPS="shell search disk system network git editors runtimes python ai"
+# Loaded once per shell: the picker calls ts_app_desc once per app, and a file
+# read per call would be 48 reads to draw one menu.
+TS_APPS_ROWS=""
+ts_apps_load() {
+    [ -n "$TS_APPS_ROWS" ] && return 0
+    if [ ! -r "$TS_APPS_CONF" ]; then
+        echo "!! $TS_APPS_CONF is missing; the app catalog is empty." >&2
+        return 1
+    fi
+    # Only a FULL-LINE comment is a comment: `#` is legal inside a description,
+    # which is the rest of the line by definition.
+    TS_APPS_ROWS="$(grep -v '^[[:space:]]*#' "$TS_APPS_CONF" | grep -v '^[[:space:]]*$')"
+    # Only what THIS platform can install. The filter used to be a second
+    # hand-maintained id list on the pwsh side; it is a column now.
+    local _plat
+    case "$(uname -s 2>/dev/null)" in
+        Darwin) _plat=macos ;;
+        *)      if [ -d /mnt/c/Users ]; then _plat=wsl; else _plat=linux; fi ;;
+    esac
+    TS_APPS_ROWS="$(printf '%s\n' "$TS_APPS_ROWS" | awk -v p="$_plat" '
+        $4=="all" { print; next }
+        $4=="posix" && (p=="macos" || p=="linux" || p=="wsl") { print; next }
+        $4=="linux" && p=="linux" { print; next }
+    ')"
+    TS_APPS_ALL="$(printf '%s\n' "$TS_APPS_ROWS" | awk '{print $1}' | tr '\n' ' ')"
+    TS_APPS_ALL="${TS_APPS_ALL% }"
+    TS_APPS_RECOMMENDED="$(printf '%s\n' "$TS_APPS_ROWS" \
+        | awk '$3=="both"||$3=="dev"{print $1}' | tr '\n' ' ')"
+    TS_APPS_RECOMMENDED="${TS_APPS_RECOMMENDED% }"
+    TS_APPS_SYSADMIN="$(printf '%s\n' "$TS_APPS_ROWS" \
+        | awk '$3=="both"||$3=="sys"{print $1}' | tr '\n' ' ')"
+    TS_APPS_SYSADMIN="${TS_APPS_SYSADMIN% }"
+    TS_APPS_OPTIONAL=""
+    local id
+    for id in $TS_APPS_ALL; do
+        case " $TS_APPS_RECOMMENDED " in *" $id "*) ;; *) TS_APPS_OPTIONAL="$TS_APPS_OPTIONAL $id" ;; esac
+    done
+    TS_APPS_OPTIONAL="${TS_APPS_OPTIONAL# }"
+    # File order, deduplicated: that is picker order, grouped.
+    TS_APP_GROUPS="$(printf '%s\n' "$TS_APPS_ROWS" | awk '!seen[$2]++{print $2}' | tr '\n' ' ')"
+    TS_APP_GROUPS="${TS_APP_GROUPS% }"
+    return 0
+}
+ts_apps_load || true
+
 ts_app_group_desc() {
     case "$1" in
         shell)   echo "shell essentials" ;;
@@ -49,84 +93,37 @@ ts_app_group_desc() {
         runtimes) echo "language runtimes" ;;
         python)  echo "Python tooling" ;;
         ai)      echo "AI coding agents" ;;
+        models)  echo "local model sizing" ;;
         *)       echo "" ;;
     esac
 }
+
 ts_app_group_members() {
-    case "$1" in
-        shell)   echo "tmux eza bat tree zoxide fzf atuin" ;;
-        search)  echo "ripgrep fd" ;;
-        disk)    echo "duf ncdu dust gdu" ;;
-        system)  echo "btop bottom glances nvtop lazydocker" ;;
-        network) echo "bandwhich gping rclone" ;;
-        git)     echo "delta gh ghq lazygit" ;;
-        editors) echo "micro neovim glow zed tldr yazi" ;;
-        runtimes) echo "fnm node" ;;
-        python)  echo "python uv pipx ruff ipython httpie poetry pre-commit" ;;
-        ai)      echo "claude codex cursor-agent grok gemini pi" ;;
-        *)       echo "" ;;
-    esac
+    ts_apps_load || return 0
+    printf '%s\n' "$TS_APPS_ROWS" | awk -v g="$1" '$2==g{print $1}' | tr '\n' ' ' | sed 's/ $//'
 }
+
 # The group an id belongs to (empty when uncategorised).
 ts_app_group_of() {
-    local g
-    for g in $TS_APP_GROUPS; do
-        case " $(ts_app_group_members "$g") " in *" $1 "*) echo "$g"; return 0 ;; esac
-    done
-    echo ""
+    ts_apps_load || return 0
+    printf '%s\n' "$TS_APPS_ROWS" | awk -v id="$1" '$1==id{print $2; exit}'
 }
 
 # Human-readable one-liners for the picker.
 ts_app_desc() {
-    case "$1" in
-        tmux)       echo "terminal multiplexer (ssht, persistent sessions)";;
-        eza)        echo "modern ls (icons, git status)";;
-        fzf)        echo "fuzzy finder (Ctrl+R, Ctrl+T)";;
-        bat)        echo "cat with syntax highlighting";;
-        delta)      echo "git diff pager";;
-        ripgrep)    echo "fast recursive grep (rg)";;
-        zoxide)     echo "smarter cd (z)";;
-        atuin)      echo "SQLite shell history, better Ctrl+R (opt-in)";;
-        glow)       echo "terminal markdown renderer";;
-        micro)      echo "nano-like terminal editor";;
-        neovim)     echo "neovim editor (nvim)";;
-        gh)         echo "GitHub CLI (org enumeration for wso)";;
-        ghq)        echo "clone into the derived workspace path";;
-        lazygit)    echo "git TUI (the wso status hand-off)";;
-        zed)        echo "Zed GUI editor";;
-        tldr)       echo "concise command examples";;
-        yazi)       echo "terminal file manager (y to cd on exit)";;
-        nvtop)      echo "GPU process monitor (NVIDIA hosts)";;
-        lazydocker) echo "docker TUI (docker hosts)";;
-        fd)         echo "fast, friendly find (the WezTerm sessionizer needs it)";;
-        tree)       echo "directory tree as text";;
-        duf)        echo "modern df — colourful disk free";;
-        ncdu)       echo "interactive disk usage TUI";;
-        dust)       echo "du with a tree view, sorted by size";;
-        gdu)        echo "very fast disk usage TUI (ncdu alternative)";;
-        btop)       echo "resource monitor (CPU, memory, disk, net, procs)";;
-        bottom)     echo "alternative system monitor (btm)";;
-        glances)    echo "cross-platform system monitor";;
-        bandwhich)  echo "which process is using the bandwidth";;
-        gping)      echo "ping with a live graph";;
-        rclone)     echo "sync/mount 70+ storage backends, SMB shares included (tstack smb)";;
-        claude)     echo "Claude Code CLI (cc/ccd wrappers drive it)";;
-        codex)      echo "OpenAI Codex CLI (cx/cy wrappers drive it)";;
-        cursor-agent) echo "Cursor's CLI agent";;
-        grok)       echo "xAI Grok CLI (standalone binary; no Node needed)";;
-        gemini)     echo "Google Gemini CLI";;
-        pi)         echo "Pi coding agent (earendil-works; needs Node 22+)";;
-        fnm)        echo "fast Node version manager (reads .nvmrc; ~10ms shell cost)";;
-        node)       echo "Node.js itself, without a version manager";;
-        python)     echo "Python 3 interpreter";;
-        uv)         echo "fast Python package/project manager";;
-        pipx)       echo "install Python CLI tools in isolated envs";;
-        ruff)       echo "Python linter + formatter, one fast binary";;
-        ipython)    echo "a far better Python REPL";;
-        httpie)     echo "friendly HTTP client (readable curl)";;
-        poetry)     echo "Python project/dependency manager";;
-        pre-commit) echo "run git hooks before every commit";;
-        *)          echo "";;
+    ts_apps_load || return 0
+    printf '%s\n' "$TS_APPS_ROWS" \
+        | awk -v id="$1" '$1==id{$1="";$2="";$3="";$4="";sub(/^ +/,"");print;exit}'
+}
+
+# The ids pre-ticked for a machine class. Neither set is a subset of the other:
+# a server's default kit includes the monitors and network tools that are merely
+# optional on a laptop, and drops the runtimes and agent CLIs entirely.
+ts_apps_for_class() {
+    ts_apps_load || return 0
+    case "${1:-developer}" in
+        sysadmin) echo "$TS_APPS_SYSADMIN" ;;
+        *)        echo "$TS_APPS_RECOMMENDED" ;;
     esac
 }
 
@@ -154,6 +151,10 @@ ts_app_bin() {
 # ts_install_ai_cli rather than brew/apt/winget. Kept out of the package-manager
 # paths on purpose: a curl-pipe installer that fails must not look like an apt
 # failure, and none of them belong in TS_APPS_RECOMMENDED.
+# NOTE the coupling: this reads the `ai` group as the install ROUTE, not merely
+# as a category. A packaged tool put in that group would be handed to
+# ts_install_ai_cli, which has no branch for it and would report "no agent-CLI
+# installer defined" -- which is why llmfit sits in `models` instead.
 ts_app_is_ai() {
     case " $(ts_app_group_members ai) " in *" $1 "*) return 0 ;; *) return 1 ;; esac
 }
@@ -180,21 +181,47 @@ ts_load_node_env() {
 # actually install" in Get-TsAppsPending); POSIX did not, so a macOS user who
 # picked "install everything" was told nvtop was missing on every single
 # tstack update, accepted, and watched it print "Linux-only; skipping" forever.
+# Can this platform install <id>? Reads the `platforms` column, so an id that is
+# impossible here is never offered and never nags. It used to be a hardcoded case
+# on the bash side and a SECOND id list on the pwsh side -- the drift that meant a
+# Windows box missing grok/gemini/pi/cursor-agent was never once told so.
+#
+# ts_apps_load has already filtered TS_APPS_ROWS to this platform, so membership
+# in the loaded catalog IS the answer.
 ts_app_installable() {
-    case "$(uname -s 2>/dev/null)" in
-        Darwin)
-            case "$1" in
-                nvtop) return 1 ;;   # NVIDIA/Linux only; no macOS build exists
-            esac ;;
-    esac
-    return 0
+    ts_apps_load || return 0
+    case " $TS_APPS_ALL " in *" $1 "*) return 0 ;; esac
+    return 1
+}
+
+# Which class this machine looks like, INFERRED from what it has chosen rather
+# than saved. The install profile is a wizard branch and is deliberately not
+# stored; the class, though, is needed on every `tstack update` -- so it is
+# derived from a predicate that cannot drift: does the saved selection contain
+# anything outside the sysadmin set?
+#
+# Without this, a machine set up as a server would be told on every single update
+# that it is missing fnm, poetry and six agent CLIs it deliberately declined --
+# which is the exact nag ts_app_installable was added to end, in a new place.
+# A server that later installs `claude` flips to developer, which is correct.
+ts_apps_saved_class() {
+    local saved id
+    saved="$(ts_data_get_apps 2>/dev/null || true)"
+    # Never configured: keep the old behaviour rather than guessing.
+    [ -n "$saved" ] || { echo developer; return 0; }
+    for id in $saved; do
+        case " $TS_APPS_SYSADMIN " in *" $id "*) continue ;; esac
+        echo developer; return 0
+    done
+    echo sysadmin
 }
 
 ts_apps_pending() {
-    local saved id seen="" out=""
+    local saved id seen="" out="" expected
     ts_load_node_env
     saved="$(ts_data_get_apps 2>/dev/null || true)"
-    for id in $saved $TS_APPS_RECOMMENDED; do
+    expected="$(ts_apps_for_class "$(ts_apps_saved_class)")"
+    for id in $saved $expected; do
         case " $seen " in *" $id "*) continue ;; esac
         seen="$seen $id"
         command -v "$(ts_app_bin "$id")" >/dev/null 2>&1 && continue
@@ -399,6 +426,7 @@ ts_brew_install_apps() {
             eza)        formulae="$formulae eza" ;;
             zoxide)     formulae="$formulae zoxide" ;;
             atuin)      formulae="$formulae atuin" ;;
+            llmfit)     formulae="$formulae llmfit" ;;
             yazi)       formulae="$formulae yazi" ;;
             fzf)        formulae="$formulae fzf" ;;
             bat)        formulae="$formulae bat" ;;
@@ -649,6 +677,98 @@ ts_win_user() {
 # this stack (run_after_90-sync-windows.sh refuses to render the Windows templates
 # without it), so a miss here is a broken install rather than a missing option.
 # Twin: _tstack_python in dot_zshrc, Get-TstackPython in $PROFILE.
+# ── terminal prompt primitives ───────────────────────────────────────────────
+# These live here, not in _wizard.sh, because they are not wizard questions.
+# `wso`, `ts-smb.sh`, `_smb_setup.sh`, `ts-rclone-config.sh`, `_cc_tts.sh`,
+# `_cleanup.sh` and the `tstack config` menu all prompt, and none of them is the
+# install questionnaire. Moving the questionnaire to Python took its whole file
+# with it and left every one of those callers referring to a function that no
+# longer existed -- the SMB setup, the rclone wizard, the TTS menu and five items
+# of the config menu all died with "command not found" the moment they prompted.
+# Sourcing _config.sh is what those files already do, so this is where the
+# primitives belong. `tests/test_shell_symbols.py` now fails on the next such
+# deletion instead of leaving it to be found by hand.
+
+# Prompt on the controlling terminal: under curl|bash, stdin is the script pipe,
+# so read from /dev/tty. Returns "" when there is no terminal (CI).
+ts_tty_prompt() {
+    local answer=""
+    # Read with readline (-e) so Backspace and the arrow keys edit the line
+    # instead of inserting raw control codes (^?, ^[[D); -p shows the prompt.
+    # Skip cleanly when there is no controlling terminal (CI / non-interactive).
+    if { true > /dev/tty; } 2>/dev/null; then
+        IFS= read -e -r -p "$1" answer < /dev/tty || answer=""
+    fi
+    echo "$answer"
+}
+
+# One definition of "is there a human here" for every prompt in the stack, so
+# headless behaviour cannot drift between them. pwsh twin: Test-TsInteractive.
+ts_is_interactive() { { true > /dev/tty; } 2>/dev/null; }
+
+# The menu prompt. Marks the default and says how to take it, accepts the
+# option's name as well as its number, and RE-PROMPTS on anything else -- the old
+# `case "$ans" in *) default ;; esac` silently selected option 1 for a typo, a
+# stray 'y', or a fat-fingered '9', which is the opposite of what a default is
+# for. Three invalid answers take the default rather than looping forever.
+#
+# usage: ts_prompt_choice <default-key> <title> <intro-or-empty> "key|label|note"...
+# Writes the menu to /dev/tty (the caller captures stdout for the chosen key).
+# Twin of bootstrap/_config.ps1 Read-TsChoice -- keep the rendered output identical.
+ts_prompt_choice() {
+    local def="$1" title="$2" intro="$3"; shift 3
+    local n=0 opt rest key label note mark suffix ans i lower
+    {
+        printf '\n%s\n' "$title"
+        [ -n "$intro" ] && printf '%s\n' "$intro"
+        for opt in "$@"; do
+            n=$((n + 1))
+            key="${opt%%|*}"; rest="${opt#*|}"
+            label="${rest%%|*}"; note="${rest#*|}"
+            [ "$note" = "$label" ] && note=""
+            mark=" "; suffix=""
+            [ -n "$note" ] && suffix="  ($note)"
+            if [ "$key" = "$def" ]; then mark=">"; suffix="$suffix  [default - press Enter]"; fi
+            printf ' %s  %d) %s%s\n' "$mark" "$n" "$label" "$suffix"
+        done
+    } > /dev/tty 2>/dev/null
+    n=0; for opt in "$@"; do n=$((n + 1)); done
+
+    if ! ts_is_interactive; then
+        printf 'Choose [1-%d, Enter=default]: (non-interactive - taking the default)\n' "$n" \
+            > /dev/tty 2>/dev/null
+        printf '%s\n' "$def"
+        return 0
+    fi
+    local tries=0
+    while [ "$tries" -lt 3 ]; do
+        tries=$((tries + 1))
+        ans="$(ts_tty_prompt "Choose [1-$n, Enter=default]: ")"
+        ans="$(printf '%s' "$ans" | tr -d '[:space:]')"
+        [ -z "$ans" ] && { printf '%s\n' "$def"; return 0; }
+        case "$ans" in
+            ''|*[!0-9]*) ;;
+            *)  if [ "$ans" -ge 1 ] && [ "$ans" -le "$n" ]; then
+                    i=0
+                    for opt in "$@"; do
+                        i=$((i + 1))
+                        [ "$i" = "$ans" ] && { printf '%s\n' "${opt%%|*}"; return 0; }
+                    done
+                fi ;;
+        esac
+        lower="$(printf '%s' "$ans" | tr 'A-Z' 'a-z')"
+        for opt in "$@"; do
+            key="${opt%%|*}"
+            [ "$lower" = "$(printf '%s' "$key" | tr 'A-Z' 'a-z')" ] \
+                && { printf '%s\n' "$key"; return 0; }
+        done
+        printf "  '%s' is not one of the choices - enter 1-%s, a name, or press Enter for the default.\n" \
+            "$ans" "$n" > /dev/tty 2>/dev/null
+    done
+    printf '  three invalid answers - taking the default.\n' > /dev/tty 2>/dev/null
+    printf '%s\n' "$def"
+}
+
 ts_python() {
     local p
     for p in python3 python; do
@@ -790,7 +910,7 @@ TS_MIRROR_DATA_KEYS="
     ccTtsPrefixCodex ccTtsPrefixCodexEnabled ccTtsPrefixCursor ccTtsPrefixCursorEnabled 
     ccTtsSummarizer ccTtsTemplateError ccTtsTemplatePermission ccTtsTemplateQuestion 
     ccTtsTemplateWaiting ccTtsVoicePool leaderChord tmuxPrefix windowsUsername
-    weztermMux weztermRestore atuinEnabled headroomEnabled headroomCursorMode
+    weztermMux weztermRestore atuinEnabled starshipPreset headroomEnabled headroomCursorMode
     cavemanEnabled agentmemoryEnabled playwrightEnabled memoryBackend
 "
 
@@ -1034,6 +1154,83 @@ ts_atuin_set() {
     ts_mirror_windows_config
 }
 
+# ── Which prompt ────────────────────────────────────────────────────────────────
+# "terminal-stack" (default) is this repo's own two-line Starship config; any
+# other value is one of Starship's built-in presets, rendered by
+# `starship preset <name>` inside dot_config/starship.toml.tmpl at apply time.
+#
+# Not vendored, deliberately: twelve copied TOML files would freeze at whatever
+# upstream shipped the day they were copied, and the point of a preset is that it
+# is Starship's rather than ours. The template falls back to our config when
+# starship is not on PATH, because during a bootstrap it can be rendered before
+# starship is installed and `output` on a missing binary aborts the WHOLE apply.
+#
+# The name is NOT validated against a hardcoded list here: `starship preset
+# --list` is the authority and it grows. An unknown name renders as an empty
+# config, which is why ts_starship_set asks starship first.
+ts_starship_presets() {
+    command -v starship >/dev/null 2>&1 || return 1
+    # `--list` emits a trailing blank line, which a bare pass-through turns into
+    # an empty entry in every menu and an empty "available" row on a refusal.
+    starship preset --list 2>/dev/null | sed '/^[[:space:]]*$/d'
+}
+
+ts_starship_get() {
+    local v; v="$(ts_data_get starshipPreset 2>/dev/null || true)"
+    [ -n "$v" ] && echo "$v" || echo terminal-stack
+}
+
+# ts_starship_set <name> — persist, regenerate derived keys, mirror to Windows.
+ts_starship_set() {
+    local name="${1:-}"
+    [ -n "$name" ] || { echo "ts_starship_set: expected a preset name" >&2; return 2; }
+    if [ "$name" != terminal-stack ]; then
+        if ! ts_starship_presets >/dev/null 2>&1; then
+            echo "!! starship is not installed, so its presets cannot be listed." >&2
+            echo "   Only 'terminal-stack' can be set without it." >&2
+            return 1
+        fi
+        # Checked here rather than at apply time, because an unknown name makes
+        # `starship preset` print nothing and the deployed config would be EMPTY
+        # -- a working prompt replaced by no prompt, with nothing in the diff to
+        # explain it.
+        if ! ts_starship_presets | grep -qxF "$name"; then
+            echo "!! no starship preset named '$name'. Available:" >&2
+            ts_starship_presets | sed 's/^/     /' >&2
+            echo "     terminal-stack   (this stack's own prompt)" >&2
+            return 2
+        fi
+    fi
+    ts_data_set starshipPreset "$name"
+    local cz; if cz="$(ts_chezmoi_bin)"; then "$cz" init >/dev/null 2>&1 || true; fi
+    ts_mirror_windows_config
+}
+
+# Render one prompt exactly as it would look, without installing it.
+#
+# STARSHIP_SHELL must be EMPTY, not unset: with a shell name starship emits that
+# shell's escaping (zsh %{...%}), which prints as literal punctuation rather than
+# as colour. Empty selects the plain-ANSI path, which is what a terminal shows.
+ts_starship_preview() {
+    local name="${1:-terminal-stack}" cfg rc=0
+    command -v starship >/dev/null 2>&1 || { echo "  (starship is not installed yet)"; return 1; }
+    if [ "$name" = terminal-stack ]; then
+        cfg="$HOME/.config/starship.toml"
+        [ -r "$cfg" ] || { echo "  (not deployed yet -- it appears after the first apply)"; return 1; }
+    else
+        cfg="$(mktemp -t ts-preset)" || return 1
+        # Redirect, never `-o`: mktemp CREATES the file, and `starship preset -o`
+        # refuses to overwrite an existing one ("use --force"). It fails, the
+        # temp file stays empty, and the preview silently shows nothing.
+        starship preset "$name" > "$cfg" 2>/dev/null || { rm -f "$cfg"; echo "  (no preset named $name)"; return 1; }
+        [ -s "$cfg" ] || { rm -f "$cfg"; echo "  (no preset named $name)"; return 1; }
+    fi
+    STARSHIP_SHELL= STARSHIP_CONFIG="$cfg" starship prompt 2>/dev/null || rc=1
+    echo
+    [ "$name" = terminal-stack ] || rm -f "$cfg"
+    return $rc
+}
+
 # ── Ghostty config ──────────────────────────────────────────────────────────────
 # "on"  (default) -> chezmoi renders ~/.config/ghostty/config and the custom
 #                    light theme.
@@ -1171,6 +1368,7 @@ EOF
   "weztermMux": "$(ts_wez_mux_get)",
   "weztermRestore": "$(ts_wez_restore_get)",
   "atuinEnabled": "$(ts_atuin_get)",
+  "starshipPreset": "$(ts_starship_get)",
   "headroomEnabled": "$(ts_agent_get headroomEnabled)",
   "headroomCursorMode": "$(ts_agent_get headroomCursorMode)",
   "cavemanEnabled": "$(ts_agent_get cavemanEnabled)",

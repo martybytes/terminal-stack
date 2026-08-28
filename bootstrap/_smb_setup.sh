@@ -78,7 +78,7 @@ EOF
     fi
 
     local root_remote shares="" errf
-    root_remote="$(ts_smb_remote "$host" "$user" "$domain" "${OPT_PORT:-}")"
+    root_remote="$(ts_smb_conn "$host" "$user" "$domain" "${OPT_PORT:-}")"
     errf="$(mktemp "${TMPDIR:-/tmp}/ts-smb-error.XXXXXX")" || return 1
     echo "$INFO signing in and asking $host for its shared-folder list..." >/dev/tty
     if [ -n "$blob" ]; then

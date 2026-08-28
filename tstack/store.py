@@ -33,45 +33,47 @@ MISSING = "__missing__"
 # The keys worth rendering in one batch. A per-key `chezmoi execute-template`
 # spawn costs seconds on a combined WSL+Windows host -- bootstrap/_config.sh
 # measured 49 spawns at 229s -- so everything is fetched at once.
-DATA_KEYS = (
-    "leaderChord",
-    "themeMode",
-    "resolvedTheme",
-    "tmuxPrefix",
-    "weztermMux",
-    "weztermRestore",
-    "atuinEnabled",
-    "ghosttyConfig",
-    "memoryBackend",
-    "agentmemoryEnabled",
-    "headroomEnabled",
-    "headroomCursorMode",
-    "cavemanEnabled",
-    "playwrightEnabled",
-    "ccTtsEnabled",
-    "ccTtsDaemon",
-    "ccTtsEngine",
-    "ccTtsSummarizer",
-    "windowsUsername",
-)
+# Not a settings key: the Windows username the sync hook substitutes. It is in
+# `[data]` but is not a user choice, so the schema does not describe it.
+EXTRA_DATA_KEYS = ("windowsUsername",)
+
+
+@functools.cache
+def data_keys() -> tuple[str, ...]:
+    """Every `[data]` key worth reading, derived from the schema.
+
+    This was a hand-maintained tuple of 19 -- a FOURTH parallel key list beside
+    .chezmoi.toml.tmpl, TS_MIRROR_DATA_KEYS and the mirror heredoc. It omitted
+    `apps`, the four derived bindings and 37 of the 41 ccTts* keys, so
+    `chezmoi_data()` never saw them: `store.get("apps")` returned "" on a machine
+    whose chezmoi.toml listed 47 apps, and `schema.source_of()` reported
+    `default` for values that were plainly saved -- the exact "right value for
+    the wrong reason" the schema exists to make visible.
+    """
+    from . import schema
+
+    return tuple(s.key for s in schema.SETTINGS) + EXTRA_DATA_KEYS
+
 
 # Documented defaults, applied when a key has never been written. A machine that
 # never answered a question must read as the old behaviour, not as empty.
-DEFAULTS: dict[str, str] = {
-    "themeMode": "dark",
-    "weztermMux": "off",
-    "weztermRestore": "off",
-    "atuinEnabled": "off",
-    "ghosttyConfig": "on",
-    "memoryBackend": "agentmemory",
-    "headroomEnabled": "off",
-    "headroomCursorMode": "mcp",
-    "cavemanEnabled": "off",
-    "playwrightEnabled": "off",
-    "ccTtsEnabled": "false",
-    "ccTtsDaemon": "off",
-    "ccTtsEngine": "kokoro",
-}
+@functools.cache
+def defaults() -> dict[str, str]:
+    """Every setting's default, read from the schema.
+
+    Declared once, in schema.py, because two default tables drift and the one
+    that loses is the one nobody is reading. `tests/test_store.py` pins that the
+    schema and the shell's own `ts_cc_tts_default` still agree, which is the
+    drift that can actually happen now: bash and Python, not Python and Python.
+
+    Cached but deliberately absent from clear_cache(): that list is the reads
+    whose answer depends on the machine, and this one depends only on a module
+    constant. A test injecting a store has nothing to invalidate here.
+    """
+    from . import schema
+
+    return {s.key: s.default for s in schema.SETTINGS if s.default}
+
 
 TRUTHY = {"on", "true", "yes", "1", "enabled"}
 FALSEY = {"off", "false", "no", "0", "disabled", ""}
@@ -110,10 +112,26 @@ def chezmoi_data() -> dict[str, str]:
     # Go template braces, so an f-string would need every one doubled. Kept as
     # explicit concatenation because the doubled form is unreadable and this text
     # has to stay diffable against bootstrap/_config.sh's ts_data_prefetch.
-    template = "".join(
-        '{{ if hasKey . "' + k + '" }}' + k + '=<<{{ index . "' + k + '" }}>>\n{{ end }}'
-        for k in DATA_KEYS
-    )
+    # A key stored as a TOML ARRAY needs `range`, not `index`: Go renders a slice
+    # as `[a b c]`, brackets included, so `apps` came back as a literal
+    # "[tmux eza ...]" the moment it was added to the key set.
+    #
+    # The test is the VALUE's kind, not the schema's. `ccTtsEvents` and
+    # `ccTtsVoicePool` are lists conceptually and `kind="list"` in the schema, but
+    # the store holds them as comma-separated STRINGS -- only `apps` is an actual
+    # array. Branching on the schema made `range` run over a string, which chezmoi
+    # rejects, and one bad key fails the whole template: the batch returned
+    # nothing and every value silently fell back to its default.
+    parts = []
+    for k in data_keys():
+        ref = 'index . "' + k + '"'
+        body = (
+            '{{ if kindIs "slice" (' + ref + ") }}"
+            "{{ range $i, $v := " + ref + " }}{{ if $i }} {{ end }}{{ $v }}{{ end }}"
+            "{{ else }}{{ " + ref + " }}{{ end }}"
+        )
+        parts.append('{{ if hasKey . "' + k + '" }}' + k + "=<<" + body + ">>\n{{ end }}")
+    template = "".join(parts)
     try:
         out = subprocess.run(
             [chezmoi, "execute-template", template],
@@ -183,6 +201,13 @@ def mirror_key(key: str) -> str:
     notifications very much on. Found by running the command through the pwsh shim
     rather than by a test, because every test injects a store.
     """
+    # The schema is the declaration; this is only the lookup. Late import because
+    # schema imports this module, and the cycle is one-directional by design.
+    from . import schema
+
+    setting = schema.BY_KEY.get(key)
+    if setting is not None and setting.mirror:
+        return setting.mirror
     explicit = dict(DIVERGENCE_PAIRS)
     if key in explicit:
         return explicit[key]
@@ -205,7 +230,7 @@ def get(key: str, default: str | None = None) -> str:
         return from_mirror
     if default is not None:
         return default
-    return DEFAULTS.get(key, "")
+    return defaults().get(key, "")
 
 
 # chezmoi [data] key -> dotted path in the Windows mirror. Only the keys whose

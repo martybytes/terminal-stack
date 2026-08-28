@@ -1,7 +1,7 @@
 # _cleanup.ps1 — find and (with confirmation) remove old terminal-stack clones and
 # retired leftover files on Windows, plus a standalone health check. Dot-sourced by
 # install.ps1 (post-clone cleanup + post-sync check) and by the profile's
-# Test-TerminalStack / Repair-TerminalStack. Never touches the keep-list
+# `tstack doctor` / `tstack doctor --repair`. Never touches the keep-list
 # (profile.local.ps1, the personal doc layer, rollback state, *.local.md).
 # Honors $env:TS_DRY_RUN = '1' (preview only).
 
@@ -118,7 +118,7 @@ function Move-TsClone {
             }
             Remove-Item -LiteralPath $srcResolved -Recurse -Force
         } else {
-            Write-Warning "Move-TsClone: move failed ($($_.Exception.Message)). Close shells/editors open in $Source and re-run tstack doctor -Repair."
+            Write-Warning "Move-TsClone: move failed ($($_.Exception.Message)). Close shells/editors open in $Source and re-run tstack doctor --repair."
             return $false
         }
     }
@@ -260,19 +260,19 @@ function Test-TsInstall {
         if (Test-TsDevClone $SourceDir) {
             Write-Host '  note: pinned at a dev clone (workspace tier path) — deliberate, leaving it alone.'
         } else {
-            Write-Host "  note: clone is at a legacy location; 'tstack doctor -Repair' can move it to $canon"
+            Write-Host "  note: clone is at a legacy location; 'tstack doctor --repair' can move it to $canon"
         }
     }
 
     # Leftover clones are advisory, not a health failure — note without counting.
     $others = @(Find-TsClones $SourceDir)
     if ($others.Count -gt 0) {
-        Write-Host '  note: other terminal-stack clones present (Repair-TerminalStack can clean them up):'
+        Write-Host '  note: other terminal-stack clones present ('tstack doctor --repair' can clean them up):'
         $others | ForEach-Object { Write-Host "        $($_.Path)" }
     }
 
     $issues = $script:_tsIssues
     if ($issues -eq 0) { if (-not $Quiet) { Write-Host '==> all checks passed.' } }
-    else { Write-Warning "$issues issue(s) found — run Repair-TerminalStack (tstack doctor -Repair) to fix." }
+    else { Write-Warning "$issues issue(s) found — run 'tstack doctor --repair' to fix." }
     return $issues
 }

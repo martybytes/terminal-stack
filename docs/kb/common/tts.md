@@ -33,7 +33,11 @@ save happily on a Mac and do nothing.
 | `tstack config tts` / `show` | effective config (config.json + local.json) |
 | `cctts` / `cctts on` / `cctts off` | quick status and toggle |
 | `tstack config tts test [--source claude\|cursor\|codex]` | speak a fixed line. **Ignores any text you pass** |
-| `tstack config tts engine kokoro\|chatterbox\|auto` | which synthesiser to try first |
+| `tstack config tts engine kokoro\|chatterbox\|say\|auto` | which synthesiser to try first (`say` is macOS-only) |
+| `tstack config tts voices` | list what the active engine can produce |
+| `tstack config tts voices <name>` | play a sample in that voice |
+| `tstack config tts voice-say <name\|system>` | the macOS system voice |
+| `tstack config tts voice-pool <v1,v2,…>` | the daemon's per-session rotation (Windows) |
 | `tstack config tts voice <name>` / `voice-chatter <name>` | per-engine voice |
 | `tstack config tts excitement <0-1>` | speaking rate |
 | `tstack config tts events waiting,error,question,permission` | when it speaks |
@@ -75,15 +79,77 @@ the agent is waiting on you.
 summary. Both need the daemon; `haiku` also needs an API key, `ollama` a local
 server. On a host without a daemon they are refused.
 
+## Choosing a voice
+
+```sh
+tstack config tts voices              # what the active engine can produce
+tstack config tts voices af_heart     # hear it
+tstack config tts voice af_heart      # kokoro
+tstack config tts voice-say Samantha  # macOS system voice
+```
+
+Nothing is hardcoded: kokoro is asked over `GET /v1/audio/voices` (68 in the
+v0.8.0 image, and the set moves with the image) and macOS is asked with
+`say -v '?'` (184 installed here, more from System Settings → Accessibility →
+Spoken Content → Manage Voices). If the saved engine is kokoro but the container
+is down, the macOS list is shown instead — offering a list you cannot hear is
+worse than offering the one you can.
+
+`voices` used to set the daemon's rotation pool. That is `voice-pool` now; the
+old comma-separated form redirects rather than silently doing the wrong thing.
+
+## Three engines on a Mac, and which one fits
+
+```sh
+tstack config tts engines     # macOS only; derives a recommendation for this Mac
+```
+
+It reports the architecture, core count, memory, installed system voices, and
+whether Docker, kokoro and mlx-audio are actually present — then recommends,
+because the right answer depends on the machine rather than on taste.
+
+| | `say` | kokoro in Docker | kokoro via mlx-audio |
+|---|---|---|---|
+| Setup | none | `tstack services up kokoro` | `pip install mlx-audio` |
+| Runs on | the OS | container CPU | the GPU, via Metal |
+| Same voice on Linux/Windows? | no | **yes** | no |
+| Apple Silicon | fine | **no GPU passthrough** | native |
+| Voices | 184 installed here | 68 in the image | the Kokoro set |
+
+The trap in the middle column is worth stating plainly: **Docker Desktop gives
+the container no GPU on Apple Silicon**, so the shipped kokoro image runs on the
+CPU a model the machine could run on its GPU. That does not make it wrong — one
+voice across a Mac, a Linux box and a Windows machine is a real reason to keep it
+— but it is not the fast option, and mlx-audio is the same model without the
+penalty.
+
+mlx-audio needs no new code path, because it speaks the same OpenAI protocol:
+
+```sh
+pip install mlx-audio
+mlx_audio.server --host 127.0.0.1 --port 8880
+tstack config tts model kokoro mlx-community/Kokoro-82M-bf16
+tstack config tts engine kokoro
+```
+
+The `model` line is the whole difference. The Docker image answers to the literal
+string `kokoro`; mlx-audio wants the HuggingFace repo id and rejects anything
+else. Everything downstream — voice lists, samples, speed, the voice pool —
+works unchanged.
+
 ## Which engine actually speaks
 
 Tried in order, first one that works wins:
 
-1. **Kokoro** — `http://127.0.0.1:8880`, a Docker container **you** run. Nothing
-   here installs it.
+1. **Kokoro** — `http://127.0.0.1:8880`. Either the Docker container **you** run
+   or mlx-audio; nothing here installs either. `tstack config tts engines` on a
+   Mac compares them.
 2. **Chatterbox** — `http://127.0.0.1:8881`, same deal.
 3. **edge-tts** — `pip install edge-tts`. A cloud voice; needs network.
-4. **the offline floor** — `say` on macOS, SAPI on Windows.
+4. **the offline floor** — `say` on macOS, SAPI on Windows. Neither needs a
+   running service; SAPI also needs no player, which matters because the
+   Windows playback path requires `ffplay`. Linux has no floor: if every
+   engine is down there, it is silent.
 
 The wizard probes all of these and tells you which are reachable before you
 choose. If you hear the system voice instead of your usual one, the floor caught
@@ -93,6 +159,15 @@ a fallback — Kokoro is probably down. A once-a-day notice says so.
 
 - **`~/.claude/tts/local.json` with `"enabled": false`** overrides everything and
   is the most common silent killer. `tstack config tts` shows the effective value.
+- **A Windows-standalone install reporting a setting you never chose.** The two
+  stores spell the TTS block differently: chezmoi `[data]` is flat
+  (`ccTtsKokoroVoice`), the mirror nests (`ccTts.kokoro.voice`) because the daemon
+  reads that file too. Until 08/28/2026 the reader derived the nested name wrongly
+  for every key below the top level, missed, and served the default instead — so a
+  voice, URL, template or timeout set on Windows read back as the shipped default
+  with nothing reporting a problem. `tstack config show` now names the layer each
+  value came from, which is what makes this visible rather than merely fixed.
+
 - **A `chezmoi apply` from the wrong side.** On combined WSL+Windows, run
   `tstack config tts …` from **WSL** — a pwsh save writes only the `config.json`
   mirror, so the next WSL apply renders the setting back off. This removed all

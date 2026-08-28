@@ -7,7 +7,7 @@ tracked files.
 ## Layout
 
 One top-level directory per stack, named after the service. Nothing registers a stack anywhere —
-`stack.sh` / `stack.ps1` discover any directory containing a `docker-compose.yml`, so adding a
+`tstack services` discovers any directory containing a `docker-compose.yml`, so adding a
 stack means adding a directory.
 
 ```
@@ -44,13 +44,12 @@ stack means adding a directory.
   problems on Windows, and cost uid-mapping and virtiofs performance on Docker Desktop for Mac —
   which also only shares `$HOME`, `/tmp`, `/private` and `/Volumes` by default, so a bind mount
   from anywhere else fails at run time. Where a volume needs the same name everywhere, declare it
-  `external: true` and add it to the required-volumes list in **both** `bootstrap.sh` and
+  `external: true` and add it to the required-volumes list in **both** `tstack services bootstrap` and
   `bootstrap.ps1` so it gets created on a new machine whichever one is run.
 - **Set `container_name:`** when Compose's default `<project>-<service>-<n>` would obscure what a
-  container actually is — a multi-service stack (`headroom-proxy`, `headroom-qdrant`,
-  `headroom-neo4j`), a container an external tool finds by literal name (`kokoro`, load-bearing for
-  `claude-local`'s Windows GPU diagnostics), or a service whose image comes from a differently-named
-  upstream repo (`agentmemory`'s `console` service is named `agent007memory`). This only sets the
+  container actually is — a multi-service stack (`ts-headroom-proxy`, `ts-headroom-qdrant`,
+  `ts-headroom-neo4j`), a container an external tool finds by literal name (`ts-kokoro`), or a service whose image comes from a differently-named
+  upstream repo (`agentmemory`'s console is `ts-agent007memory-console`). This only sets the
   Docker-level display name — the Compose **service key** is unchanged, so `docker compose` commands
   still address the service by its original name.
 
@@ -94,15 +93,15 @@ Every repo script exists **twice**, side by side, doing the same thing:
 `-GpuTag` ↔ `--gpu-tag`, `-MaxPlannedTerraCalls` ↔ `--max-planned-terra-calls`. The `.sh` scripts
 also accept the PowerShell spelling, normalised by one helper, so muscle memory from the other
 platform still works. Breaking that parity costs more than it buys: it invalidates a sentence in
-every other doc, and `tests/test_script_parity.py` fails on it.
+every other doc, and `tests/test_service_script_parity.py` fails on it.
 
 Both **preview by default**. A script prints what it would do and changes nothing unless given
 `-Apply` / `--apply`; a destructive mode (`-Undo`/`--undo`, `-Down`/`--down`) still requires it.
 Use the shared `Section` / `Step` / `Info` / `Warn` / `Have` helpers and the `[would]` vs `[DO]`
 output so every script in the repo reads the same. On the `.sh` side they live once in
-`_common.sh`; the `.ps1` deliberately keep their own copies — copy them from `bootstrap.ps1`.
+`_stack.sh`; the `.ps1` deliberately keep their own copies — copy them from `bootstrap.ps1`.
 
-**Target bash 3.2.** macOS ships 3.2 and always will, and `bootstrap.sh`'s whole job is to report
+**Target bash 3.2.** macOS ships 3.2 and always will, and the bootstrap's whole job is to report
 what a machine is missing — it cannot require an unlisted `brew install bash` to say so. No
 associative arrays, no `mapfile`/`readarray`, no `${x,,}`. Use `case`-based lookup functions and
 space-separated strings instead. Shebang is `#!/usr/bin/env bash`, prologue is `set -euo pipefail`.
@@ -122,7 +121,7 @@ Line endings are pinned in `.gitattributes` for the same reason: `.ps1` is `eol=
 **Commit `.sh` files executable** — mode `100755`. Windows git ignores filesystem modes entirely,
 so on a shared repo the index is the only place the bit can live; if it records `100644`, the next
 macOS clone gets `permission denied`. Set it with `git update-index --chmod=+x <file>` before
-committing. Sourced libraries (`_common.sh`) stay `100644` — they are sourced, not executed.
+committing. Sourced libraries (`_stack.sh`) stay `100644` — they are sourced, not executed.
 
 Every script opens with a header block. `.ps1` uses `.NAME`, `.SYNOPSIS`, `.PLATFORM`, `.USAGE`,
 `.WHEN`, `.NOTE`; `.sh` uses a comment block whose second line is `name.sh — purpose.`, followed by
@@ -150,19 +149,17 @@ anything not here is drift.
 
 | Divergence | Where | Why |
 |---|---|---|
-| `[DO]   ` is three spaces, not two | `_common.sh` | Makes `[DO]   ` and `[would]` both 7 chars, so a message lands in the same column with or without `--apply`. The 2-space form was copied into seven `.ps1` and is the bug. |
-| Missing Chrome warns in preview, refuses only under `--apply` | `setup-playwright-agents.sh` | Matches the MCP check six lines earlier. In the `.ps1` `$chromePath` is discovered, printed, and never used again — the MCP browser is headless Chromium *inside* the container. |
+| `[DO]   ` is three spaces, not two | `_stack.sh` | Makes `[DO]   ` and `[would]` both 7 chars, so a message lands in the same column with or without `--apply`. The 2-space form was copied into seven `.ps1` and is the bug. |
 | Exits non-zero when problems were found | `check-capture.sh` | The house rule for anything usable in a pipeline or a hook. The `.ps1` always exits 0. |
 | Probe sessions tracked and cleaned from an `EXIT` trap | `check-capture.sh` | Fixes a real bug: the `.ps1`'s `$probeSessions` is never initialised and section D's probe is never added to it. |
 | Backup root defaults under `$HOME` XDG state | `reconcile-llm-queue.sh`, `migrate-durable-llm.sh` | There is no Unix `C:\DATA`, and Docker Desktop for Mac only bind-mounts from `$HOME`, `/tmp`, `/private`, `/Volumes`. |
-
 | Refuses the GPU path on macOS instead of falling back to CPU | `setup-kokoro-docker.sh` | Docker Desktop for Mac has no passthrough of any kind. A silent switch is the failure mode `kokoro`'s Blackwell section exists to warn about. |
 | CPU image pinned to `v0.8.0`, not `:latest` | `setup-kokoro-docker.sh` | A new file should not inherit the `.ps1`'s violation of the pin rule. Bring the `.ps1` into line the next time it is touched. |
-| agentmemory image derived, not hardcoded | `migrate-durable-llm.sh` | `.ps1:56` hardcodes `agentmemory-agentmemory:latest`, correct only because the compose project name happens to match the directory name. |
-| Secret resolution has a fallback chain and a 0600 mode check | `check-capture.sh`, `_common.sh` | `.ps1:79` reads the Windows User env var with *no* fallback, so that check fails on any machine where it is unset. There is no Unix equivalent of `HKCU\Environment`. |
+| agentmemory image derived, not hardcoded | `migrate-durable-llm.sh` | The `.ps1` hardcodes `agentmemory-agentmemory:latest`, correct only because the compose project name happens to match the directory name. |
+| Secret resolution has a fallback chain and a 0600 mode check | `check-capture.sh`, `_stack.sh` | The `.ps1` reads the Windows User env var with *no* fallback, so that check fails on any machine where it is unset. There is no Unix equivalent of `HKCU\Environment`. |
 | Upstream-source version check | `bootstrap.sh` | New capability; `bootstrap.ps1` gains it the next time it is touched. |
 | No `wsl` probe | `bootstrap.sh` | No WSL on Unix; replaced by an OS-conditional engine check that stays quiet on native Linux. |
-| `_common.sh` and `_json.mjs` have no `.ps1` twin | repo root | PowerShell has these built in — dot-sourcing helpers and `ConvertTo/FromJson`. |
+| `_stack.sh` and `_json.mjs` have no `.ps1` twin | repo root | PowerShell has these built in — dot-sourcing helpers and `ConvertTo/FromJson`. |
 | `.billing.env` written with LF | `configure-openai-billing.sh` | `[Environment]::NewLine` is CRLF on Windows. The file is gitignored, but a machine driven from both sets should not see it flip. |
 
 ## Cross-platform command idioms
@@ -244,8 +241,8 @@ Every stack has a `README.md` that covers, at minimum:
 - the gotchas — the things that cost you an afternoon. These are the highest-value part of the file.
   `kokoro`'s Blackwell section is the model.
 
-The root `README.md` carries the stack index table, including each stack's upstream repo. Update it
-when adding a stack.
+`services/README.md` carries the stack index table, including each stack's ports and what you
+lose without it. Update it when adding a stack.
 
 ## Secrets
 
@@ -258,13 +255,14 @@ Watch for a secret generated on first boot being *printed* on first boot: it the
 `docker logs` until log rotation ages it out. Document that where it applies, and give a rotation
 procedure.
 
-AgentMemory's LLM provider credential lives in repo-root `.env`, seeded from the tracked placeholder
+AgentMemory's LLM provider credential lives in `services/.env`, seeded from the tracked placeholder
 in `.env.example`. It is read as `OPENAI_API_KEY` regardless of provider, because AgentMemory speaks
 the OpenAI wire protocol — the variable is named for the protocol, not the vendor. Compose loads that
 file *after* `agentmemory/.env`, so it is the only place the credential can win; switching providers
 means editing the root file. The companion console receives display-only provider metadata and never
 the key. Stack-local `agentmemory/.env` contains non-secret provider settings — endpoint, model, and
-prompt bounds — plus a rollback-only <your-llm-host> Ollama placeholder.
+prompt bounds — all of them commented out, so a fresh clone lands in the supported no-provider state
+rather than pointed at an endpoint that resolves on nobody's network.
 
 A **masked fingerprint is not a secret, and a generated file is not a tracked one.** The console
 displays which key is live via `LLM_API_KEY_HINT` / `LLM_ADMIN_KEY_HINT` — the key's `sk-<role>-`
