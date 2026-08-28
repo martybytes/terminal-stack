@@ -376,6 +376,21 @@ def collect(console: Console, ask_terminals: bool = False) -> Answers:
     )
 
 
+def collect_apps(console: Console) -> Answers:
+    """Just the tool picker, for `tstack config apps`.
+
+    A whole `collect()` would ask about the leader key and the memory backend to
+    answer "which tools", which is the shape of wizard people close. The class is
+    INFERRED from what the machine already has rather than asked, because this is
+    a re-run: `tstack config apps` on a server should not start by asking whether
+    it is a server.
+    """
+    ask = Asker(console)
+    app_class = catalog.saved_class(store.get("apps", "").split())
+    selected = _apps(ask, app_class)
+    return Answers(app_class=app_class, apps=selected, asked=ask.count)
+
+
 def _saved_tmux() -> str:
     """Never asked, but a re-run must not silently reset it.
 
@@ -480,6 +495,14 @@ def _apps(ask: Asker, app_class: str) -> list[str]:
     """The CLI tool picker: a whole-set answer, then optionally per-tool."""
     here = plat.kind()
     available = [a for a in catalog.catalog() if a.installable(here)]
+    if not available:
+        # A clone with no apps.conf, or one this platform can install nothing
+        # from. Answering "recommended" with silence is the silently-dropped-tool
+        # failure this repo keeps being bitten by, so it says so.
+        ask.console.say(
+            "  !! the app catalog is empty (bootstrap/apps.conf missing?) - no tools offered"
+        )
+        return []
     pretick = [a.id for a in available if a.in_class(app_class)]
 
     if _env("TS_APPS"):

@@ -23,6 +23,7 @@ Usage:
   --emit sh       shell `export NAME=value` lines, for a bootstrap to source
   --emit json     one object, for the PowerShell bootstrap
   --out PATH      where to write them (required with --emit)
+  --only apps     just the CLI tool picker, no review
   --ask-terminals include the terminal-emulator question
   --assume-yes    accept the review without showing the prompt
   --no-review     skip the review screen entirely
@@ -43,6 +44,7 @@ def main(argv: list[str]) -> int:
 
     emit_as = ""
     out: Path | None = None
+    only = ""
     ask_terminals = False
     assume_yes = False
     no_review = False
@@ -60,6 +62,11 @@ def main(argv: list[str]) -> int:
                 print("tstack wizard: --out needs a path", file=sys.stderr)
                 return 2
             out = Path(rest.pop(0))
+        elif item == "--only":
+            if not rest or rest[0] not in ("apps",):
+                print("tstack wizard: --only takes apps", file=sys.stderr)
+                return 2
+            only = rest.pop(0)
         elif item == "--ask-terminals":
             ask_terminals = True
         elif item == "--assume-yes":
@@ -76,6 +83,11 @@ def main(argv: list[str]) -> int:
 
     console = Console.open()
     try:
+        if only == "apps":
+            # One question, no review: the caller asked for the picker, not the
+            # questionnaire.
+            answers = flow.collect_apps(console)
+            return _emit(answers, emit_as, out)
         answers = flow.collect(console, ask_terminals=ask_terminals)
         if no_review:
             flow.review(console, answers)
@@ -87,6 +99,10 @@ def main(argv: list[str]) -> int:
     finally:
         console.close()
 
+    return _emit(answers, emit_as, out)
+
+
+def _emit(answers: flow.Answers, emit_as: str, out: Path | None) -> int:
     if not emit_as or out is None:
         return 0
     try:

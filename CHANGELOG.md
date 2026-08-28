@@ -143,6 +143,27 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Changed
 
+- **`tstack config` is the ported Python on POSIX (08/28/2026).** The row's two
+  columns differ on purpose, which is what they are for. `apps`, `tts` and
+  `reconfigure` are routed to `bootstrap/ts-config.sh` rather than reimplemented:
+  they end in a package-manager install or the bootstrap's own save sequence, and
+  REVAMP-PLAN.md lists the installer entry points as never ported. `mux`,
+  `wezterm`, `ghostty` and `wizard` are handed to their ported commands
+  in-process.
+
+  **Windows stays on `Set-TerminalStackConfig` for now.** It is the most-used
+  command in the stack and the delegation there needs a Windows machine to
+  exercise; flipping it blind is how you find out on someone else's morning.
+
+  `prompt` was ported on the way, so it is no longer shell either. Two
+  divergences from the shell are recorded in the characterization harness rather
+  than papered over: a usage error is exit 2 now, on every platform, where
+  `ts-config.sh` returned 1 for an unknown verb and a missing argument.
+
+  Fixed while flipping: `-h` anywhere in argv printed `config`'s own help, so
+  `tstack config wizard -h` showed the wrong page. The shell forwarded it; the
+  port now does too.
+
 - **The install questionnaire is one implementation (08/28/2026).**
   `bootstrap/_wizard.sh` was 944 lines and the `Read-Ts*` half of
   `bootstrap/_config.ps1` about 800 more -- two implementations of the same

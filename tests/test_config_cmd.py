@@ -102,11 +102,37 @@ def test_the_unknown_verb_hint_names_every_verb():
         assert verb in config.KNOWN, verb
 
 
-def test_a_deferred_verb_says_so_rather_than_pretending(capsys):
-    """Until the row flips these are the shell's. Saying "unknown command" would
-    be a lie a user would act on."""
-    assert config.main(["tts"]) == 1
-    assert "not ported yet" in capsys.readouterr().err
+def test_a_delegated_verb_is_routed_rather_than_refused(monkeypatch, capsys):
+    """`apps`, `tts` and `reconfigure` are not unported so much as UNPORTABLE by
+    the plan's own rule: they end in a package-manager install or the bootstrap's
+    save sequence, and REVAMP-PLAN.md lists the installer entry points as never
+    ported. Python routes them to the shell that owns them.
+    """
+    seen: list[list[str]] = []
+
+    class Done:
+        returncode = 0
+
+    # The delegation resolves the clone so it can name the script; the suite runs
+    # with a throwaway HOME where the installed one is not found.
+    monkeypatch.setattr(config.paths, "resolve_source_dir", lambda: ROOT)
+    monkeypatch.setattr(config.subprocess, "run", lambda argv, **kw: (seen.append(argv), Done())[1])
+    assert config.main(["tts", "show"]) == 0
+    assert seen, "the verb was refused instead of routed"
+    assert seen[0][0] == "bash" and seen[0][-2:] == ["tts", "show"]
+    assert "ts-config.sh" in seen[0][1]
+
+
+def test_a_handed_off_verb_runs_the_ported_command_in_process(monkeypatch):
+    """`mux`, `wezterm`, `ghostty` and `wizard` are ported commands in this same
+    program. Spawning a second interpreter to reach one would double the startup
+    cost for nothing."""
+    from tstack.commands import ghostty as ghostty_cmd
+
+    calls: list[list[str]] = []
+    monkeypatch.setattr(ghostty_cmd, "main", lambda argv: (calls.append(argv), 0)[1])
+    assert config.main(["ghostty", "status"]) == 0
+    assert calls == [["status"]]
 
 
 # ----------------------------------------------------------------------- reading
@@ -247,3 +273,17 @@ def test_every_schema_key_is_read_from_the_store():
     for setting in schema.SETTINGS:
         assert setting.key in keys, setting.key
     assert "windowsUsername" in keys, "the sync hook's username is still needed"
+
+
+def test_a_sub_commands_help_is_forwarded_not_swallowed(capsys):
+    """`tstack config wizard -h` wants the wizard's help. `-h` anywhere in argv
+    printed this command's page instead, which the shell it replaced did not do:
+    it forwarded the flag to the hand-off."""
+    assert config.main(["-h"]) == 0
+    assert "tstack config -" in capsys.readouterr().out
+
+    assert config.main(["wizard", "-h"]) == 0
+    assert "tstack wizard -" in capsys.readouterr().out
+
+    assert config.main(["ghostty", "-h"]) == 0
+    assert "tstack ghostty -" in capsys.readouterr().out

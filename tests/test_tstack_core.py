@@ -325,7 +325,9 @@ def test_main_returns_usage_for_unknown_and_ok_for_help():
 
 
 def test_main_refuses_an_unported_subcommand_by_naming_the_shell_target(capsys):
-    assert cli.main(["config"]) == cli.EXIT_USAGE
+    """Reached only by running main.py directly, or by a shim older than the
+    registry. `smb` is the remaining POSIX row that is still shell."""
+    assert cli.main(["smb"]) == cli.EXIT_USAGE
     assert "still implemented in the shell" in capsys.readouterr().err
 
 

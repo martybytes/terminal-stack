@@ -3048,16 +3048,14 @@ def test_just_the_prompt_really_means_just_the_prompt():
     a pointer, because this is where someone looks for it."""
 
 
-def test_the_development_answer_picks_which_half_of_the_catalog_is_offered():
+def test_the_development_answer_picks_which_half_of_the_catalog_is_offered(monkeypatch):
     """The catalog half of this is now tests/test_apps_catalog.py, and the
     question half tests/test_wizard.py."""
-    import os
-
     from tstack import apps
 
-    # The catalog reads from the clone; without the pin it resolves to whatever
-    # is installed, which on a fresh CI runner is nothing.
-    os.environ["TERMINAL_STACK_DIR"] = str(ROOT)
+    # monkeypatch, not os.environ: a bare assignment leaks into every test that
+    # runs after this one, and makes their result depend on collection order.
+    monkeypatch.setenv("TERMINAL_STACK_DIR", str(ROOT))
     apps.clear_cache()
     sysadmin, developer = set(apps.sysadmin()), set(apps.recommended())
     assert sysadmin != developer

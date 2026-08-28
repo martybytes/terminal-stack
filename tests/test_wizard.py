@@ -420,3 +420,198 @@ def test_the_wizard_is_in_the_registry_on_both_platforms():
     row = registry.get("wizard")
     assert row is not None
     assert row.posix == "python" and row.windows == "python"
+
+
+# ------------------------------------------------------- the app picker paths
+
+
+def test_the_app_picker_offers_keeping_what_is_already_chosen(monkeypatch):
+    """Defaulting to `recommended` on a re-run shrank a larger saved list,
+    silently, on Enter. An existing selection has to be offered AND be the
+    default."""
+    monkeypatch.setattr(store, "chezmoi_data", lambda: {"apps": "eza fzf bat"})
+    store.clear_cache()
+    monkeypatch.setenv("TS_PROFILE", "shell")
+    console = Console.scripted([""])  # Enter takes the default
+    answers = flow.collect(console)
+    assert answers.apps == ["eza", "fzf", "bat"]
+    assert any("keep this machine's current selection" in line for line in console.captured)
+
+
+def test_the_app_picker_whole_set_answers(monkeypatch):
+    from tstack import apps as catalog
+
+    monkeypatch.setenv("TS_PROFILE", "shell")
+    ask = flow.Asker(Console.scripted(["all"]))
+    everything = flow._apps(ask, catalog.DEVELOPER)
+    assert len(everything) > 40
+
+    ask = flow.Asker(Console.scripted(["none"]))
+    assert flow._apps(ask, catalog.DEVELOPER) == []
+
+    ask = flow.Asker(Console.scripted(["recommended"]))
+    assert set(flow._apps(ask, catalog.SYSADMIN)) == {
+        a
+        for a in catalog.sysadmin()
+        if catalog.installable(a, __import__("tstack.platform", fromlist=["kind"]).kind())
+    }
+
+
+def test_choosing_groups_selects_their_members():
+    from tstack import apps as catalog
+
+    # "groups", then tick only `search`, then Enter.
+    groups = [g for g in catalog.groups() if catalog.in_group(g)]
+    index = groups.index("search") + 1
+    ask = flow.Asker(Console.scripted(["groups", "n", str(index), ""]))
+    chosen = flow._apps(ask, catalog.DEVELOPER)
+    assert set(chosen) == {a.id for a in catalog.in_group("search")}
+
+
+def test_choosing_individual_tools_walks_group_by_group():
+    """Thirty consecutive Y/n prompts is a lot to sit through; the walk is a
+    tick-list per group instead."""
+    from tstack import apps as catalog
+
+    # "customize", then clear and accept each group in turn.
+    script = ["customize"] + ["n", ""] * (len(catalog.groups()) + 2)
+    ask = flow.Asker(Console.scripted(script))
+    assert flow._apps(ask, catalog.DEVELOPER) == []
+
+
+def test_an_empty_catalog_says_so_rather_than_silently_offering_nothing(monkeypatch):
+    """ "recommended installed nothing" is the silently-dropped-tool failure this
+    repo keeps being bitten by."""
+    from tstack import apps as catalog
+
+    monkeypatch.setattr(catalog, "catalog", lambda: ())
+    console = Console.scripted([])
+    assert flow._apps(flow.Asker(console), catalog.DEVELOPER) == []
+    assert any("catalog is empty" in line for line in console.captured)
+
+
+# --------------------------------------------------------------- voice, agents
+
+
+def test_the_voice_follow_ups_only_appear_once_voice_is_on(monkeypatch):
+    monkeypatch.setenv("TS_PROFILE", "full")
+    monkeypatch.setenv("TS_DEVELOPMENT", "no")
+    monkeypatch.setenv("TS_APPS", "none")
+    monkeypatch.setenv("TS_CC_TTS", "off")
+    assert flow.collect(Console()).cc_tts_message == "template"
+
+    monkeypatch.setenv("TS_CC_TTS", "on")
+    monkeypatch.setenv("TS_CC_TTS_MESSAGE", "hook")
+    answers = flow.collect(Console())
+    assert answers.cc_tts == "on" and answers.cc_tts_message == "hook"
+
+
+def test_the_cursor_mode_is_only_asked_when_headroom_is_on(monkeypatch):
+    monkeypatch.setenv("TS_PROFILE", "full")
+    monkeypatch.setenv("TS_DEVELOPMENT", "yes")
+    monkeypatch.setenv("TS_APPS", "none")
+    monkeypatch.setenv("TS_CC_TTS", "off")
+    monkeypatch.setenv("TS_MEMORY_BACKEND", "off")
+    monkeypatch.setenv("TS_CAVEMAN", "off")
+    answers = flow.collect(Console())
+    assert answers.headroom == "off"
+    assert answers.headroom_cursor == "mcp", "the default, unasked"
+
+
+def test_the_full_review_lists_every_answer():
+    console = Console.scripted([])
+    flow.review(console, flow.Answers(profile="full", apps=["eza"], terminals=["ghostty"]))
+    text = "\n".join(console.captured)
+    for label in (
+        "For development",
+        "Leader",
+        "Theme",
+        "Terminals",
+        "WezTerm mux",
+        "Session restore",
+        "atuin",
+        "tmux prefix",
+        "Apps",
+        "Agent voice",
+        "Headroom",
+        "Caveman",
+        "Memory backend",
+    ):
+        assert label in text, label
+
+
+def test_editing_at_the_review_asks_again():
+    """`e` must re-run the questions, not fall through to the install. In the
+    PowerShell version a `switch` made `continue` bind to the switch rather than
+    the loop, which did exactly that."""
+    console = Console.scripted(["e", "1", "", "2", ""])
+    answers = flow.confirm(console, flow.Answers(asked=1, profile="full"), assume_yes=False)
+    assert answers is not None
+    assert answers.profile == "prompt", "the second pass replaced the first"
+
+
+def test_an_unrecognised_review_answer_re_asks_rather_than_proceeding():
+    console = Console.scripted(["maybe", ""])
+    answers = flow.confirm(console, flow.Answers(asked=1), assume_yes=False)
+    assert answers is not None
+    assert any("is not one of the choices" in line for line in console.captured)
+
+
+# ------------------------------------------------------------------- headless
+
+
+def test_headless_detection(monkeypatch):
+    from tstack import platform as tsplat
+
+    monkeypatch.delenv("TS_HEADLESS_RESOLVED", raising=False)
+    for kind in (tsplat.WSL, tsplat.WINDOWS, tsplat.MACOS):
+        monkeypatch.setattr(tsplat, "kind", lambda k=kind: k)
+        assert not flow.headless(), f"{kind} drives a GUI"
+
+    monkeypatch.setattr(tsplat, "kind", lambda: tsplat.LINUX)
+    monkeypatch.delenv("DISPLAY", raising=False)
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+    monkeypatch.setenv("SSH_CONNECTION", "1.2.3.4 22 5.6.7.8 22")
+    assert flow.headless(), "an SSH session has no local display"
+
+    monkeypatch.setenv("DISPLAY", ":0")
+    assert not flow.headless(), "an explicit display wins"
+
+
+def test_an_explicitly_resolved_headless_answer_wins(monkeypatch):
+    """The caller may have ASKED. Recomputing here made an explicit override
+    silently ineffective, which is the kind that looks like it worked."""
+    monkeypatch.setenv("TS_HEADLESS_RESOLVED", "1")
+    assert flow.headless()
+    monkeypatch.setenv("TS_HEADLESS_RESOLVED", "0")
+    assert not flow.headless()
+
+
+def test_the_console_survives_a_terminal_it_cannot_open(monkeypatch):
+    """A container, a CI runner and `curl | bash` all land here."""
+    import builtins
+
+    real = builtins.open
+
+    def refuse(path, *a, **k):
+        if str(path) in ("/dev/tty", "CONIN$", "CONOUT$"):
+            raise OSError("no controlling terminal")
+        return real(path, *a, **k)
+
+    monkeypatch.setattr(builtins, "open", refuse)
+    console = Console.open()
+    assert not console.interactive
+    console.close()
+
+
+def test_a_console_write_that_fails_does_not_take_the_wizard_down(tmp_path):
+    """A terminal can go away mid-run. Losing the menu is survivable; a
+    traceback out of an installer is not."""
+    handle = (tmp_path / "tty").open("w")
+    console = Console(reader=None, writer=handle)
+    handle.close()
+    # A CLOSED handle raises ValueError, not OSError -- which is why suppressing
+    # only OSError was not enough and this test exists.
+    console.say("into the void")
+    assert console.ask("q: ") is None
+    console.close()

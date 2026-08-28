@@ -1044,6 +1044,9 @@ def test_the_app_prompt_runs_on_a_fresh_machine_under_set_u():
     script = (
         "set -euo pipefail\n"
         f"cd {bash_path(ROOT)}\n"
+        # Pin the clone: without it the catalog resolves to whatever is
+        # installed, which is not the tree under test.
+        f"export TERMINAL_STACK_DIR={bash_path(ROOT)}\n"
         "source bootstrap/_config.sh >/dev/null 2>&1\n"
         "source bootstrap/_wizard.sh >/dev/null 2>&1\n"
         "export TS_PROFILE=full TS_DEVELOPMENT=yes TS_THEME=dark TS_LEADER=ctrl-space\n"

@@ -157,6 +157,25 @@ set_restore() { ts_wez_restore_set "$1"; finish; }
 set_atuin() { ts_atuin_set "$1"; finish; }
 
 # ── Ghostty ───────────────────────────────────────────────────────────────────
+# The CLI tool picker. Sources the wizard's answer file rather than capturing
+# stdout: the menu goes to the terminal and only the answers go to the file, so
+# there is no $( ) boundary for a rendered menu to leak into.
+run_wizard_apps() {
+    local spec="${1:-}" wiz rc=0
+    wiz="$(mktemp "${TMPDIR:-/tmp}/tsapps.XXXXXX")" || return 1
+    if [ -n "$spec" ]; then export TS_APPS="$spec"; fi
+    if "$(ts_python)" "$SRC/tstack/main.py" wizard --only apps --emit sh --out "$wiz"; then
+        # shellcheck disable=SC1090
+        . "$wiz"
+        rm -f "$wiz"
+        printf '%s\n' "${TS_WIZ_APPS:-}"
+    else
+        rc=$?
+        rm -f "$wiz"
+        return "$rc"
+    fi
+}
+
 # Ghostty. One implementation in tstack/ghostty.py, reached the same way mux and
 # wezterm are: this used to be ~160 lines here, ~90 more in $PROFILE, and a third
 # copy of the themeMode -> theme mapping in each.
@@ -370,8 +389,11 @@ case "${1:-}" in
     theme)  [ -n "${2:-}" ] || { echo "usage: tstack config theme <dark|light|follow>" >&2; exit 2; }; set_theme "$2" ;;
     tmux)   [ -n "${2:-}" ] || { echo "usage: tstack config tmux <chord>" >&2; exit 2; }; set_tmux "$2" ;;
     apps)
-        if [ -n "${2:-}" ]; then set_apps "$(ts_expand_apps "$2")"
-        else set_apps "$(ts_pick_apps)"; fi ;;
+        # The picker is tstack/wizard/ now, like the rest of the questionnaire.
+        # A spec on the command line is passed through as TS_APPS, which is the
+        # same escape hatch a scripted install uses -- one expansion, not two.
+        _apps_sel="$(run_wizard_apps "${2:-}")" || exit $?
+        set_apps "$_apps_sel" ;;
     wezterm)
         shift
         run_wezterm "$@" ;;

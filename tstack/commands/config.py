@@ -81,12 +81,20 @@ NATIVE = (
     "memory",
     "agents",
     "ghostty",
+    "prompt",
 )
 # `prompt` stays here rather than becoming a generic `set starshipPreset`: the
 # value has to be checked against `starship preset --list`, which is the
 # authority and grows, and an unknown name renders an EMPTY config -- a working
 # prompt replaced by no prompt, with nothing in the diff to explain it.
-DEFERRED = ("apps", "tts", "wizard", "reconfigure", "mux", "wezterm", "prompt")
+# Verbs Python does not implement itself. They are not unported so much as
+# UNPORTABLE by the plan's own rule: `apps` ends in a package-manager install,
+# `tts` is 25 sub-verbs over the daemon, and `reconfigure` is the bootstrap's
+# save sequence -- and REVAMP-PLAN.md lists the installer entry points as never
+# ported. Python routes them to the shell that owns them.
+DELEGATED = ("apps", "tts", "reconfigure")
+# Handed to another ported command rather than reimplemented here.
+HANDOFF = {"mux": "mux", "wezterm": "wezterm", "ghostty": "ghostty", "wizard": "wizard"}
 
 # The unknown-verb hint. ONE list, and it must be complete: the bash hint omits
 # `memory`, which it implements, and the pwsh one omits `atuin` instead.
@@ -316,6 +324,95 @@ def set_value(key: str, value: str, out: Out, dry_run: bool) -> int:
     return 0
 
 
+def _delegate(verb: str, args: list[str]) -> int:
+    """Hand a verb to the shell that owns it.
+
+    These end in a package-manager install or the bootstrap's own save sequence,
+    and REVAMP-PLAN.md lists the installer entry points as never ported. Calling
+    the shell is the design, not a gap.
+    """
+    try:
+        source = paths.resolve_source_dir()
+    except paths.CloneNotFound:
+        return _fail("cannot locate the terminal-stack clone (set TERMINAL_STACK_DIR).")
+    script = source / "bootstrap" / "ts-config.sh"
+    if not script.is_file():
+        return _fail(f"{script} is missing from the clone")
+    got = subprocess.run(
+        ["bash", str(script), verb, *args],
+        check=False,
+        timeout=3600,
+        env={**os.environ, "TERMINAL_STACK_DIR": str(source)},
+    )
+    return got.returncode
+
+
+def _prompt(args: list[str], out: Out, dry_run: bool) -> int:
+    """Which Starship prompt, with every option rendered.
+
+    A preset name tells you nothing, so `list` renders each one. The name is
+    checked against `starship preset --list` BEFORE it is saved: an unknown one
+    makes `starship preset` print nothing, and the deployed config would be
+    EMPTY -- a working prompt replaced by no prompt, with nothing in the diff to
+    explain it.
+    """
+    from .. import choices
+
+    sub = args[0] if args else "status"
+    current = store.get("starshipPreset", "terminal-stack")
+
+    if sub in ("status", "show"):
+        out.say(f"prompt: {current}")
+        rendered = choices.preview(choices.STARSHIP, current)
+        for line in (rendered or "  (starship is not installed yet)").splitlines():
+            out.say(line)
+        out.say("  tstack config prompt list      every option, each one rendered")
+        out.say("  tstack config prompt <name>    switch to it")
+        return 0
+
+    offered = choices.options(choices.STARSHIP)
+    if sub == "list":
+        if len(offered) <= 1:
+            return _fail("starship is not installed, so its presets cannot be listed.")
+        for option in offered:
+            out.say(f"{'*' if option.value == current else ' '} {option.value}")
+            rendered = choices.preview(choices.STARSHIP, option.value)
+            for line in (rendered or "").splitlines():
+                out.say(line)
+        out.say("  * is what you have now.  Switch: tstack config prompt <name>")
+        return 0
+
+    if sub == "preview":
+        if len(args) < 2:
+            return _usage("usage: tstack config prompt preview <name>")
+        rendered = choices.preview(choices.STARSHIP, args[1])
+        if rendered is None:
+            return _fail(f"no preset named '{args[1]}'")
+        for line in rendered.splitlines():
+            out.say(line)
+        return 0
+
+    known = {o.value for o in offered}
+    if sub not in known:
+        if len(offered) <= 1:
+            return _fail(
+                "starship is not installed, so its presets cannot be listed.\n"
+                "  Only 'terminal-stack' can be set without it."
+            )
+        listing = "\n".join(f"     {name}" for name in sorted(known))
+        return _usage(f"tstack config: no starship preset named '{sub}'. Available:\n{listing}")
+    if dry_run:
+        out.say(f"==> would set starshipPreset = {sub}")
+        return 0
+    store.set("starshipPreset", sub)
+    out.say(f"==> prompt: {sub}")
+    _apply(out, dry_run)
+    rendered = choices.preview(choices.STARSHIP, sub)
+    for line in (rendered or "").splitlines():
+        out.say(line)
+    return 0
+
+
 def _ghostty(args: list[str], out: Out, dry_run: bool) -> int:
     """The one implementation of the managed Ghostty config.
 
@@ -449,8 +546,14 @@ def main(argv: list[str]) -> int:
     rest: list[str] = []
     for item in argv:
         if item in ("-h", "--help", "help"):
-            print(HELP)
-            return 0
+            # Only BEFORE a verb is it OURS. `tstack config wizard -h` wants the
+            # wizard's help, and the shell this replaced forwarded it -- claiming
+            # it here made every sub-command's -h print this page instead.
+            if not rest:
+                print(HELP)
+                return 0
+            rest.append(item)
+            continue
         if item == "--dry-run":
             dry_run = True
         elif item == "--quiet":
@@ -465,11 +568,14 @@ def main(argv: list[str]) -> int:
     verb = rest[0] if rest else "show"
     args = rest[1:]
 
-    if verb in DEFERRED:
-        return _fail(
-            f"'{verb}' is not ported yet - it is still served by "
-            f"bootstrap/ts-config.sh; this module is phase II"
-        )
+    if verb in HANDOFF:
+        # In-process, not a subprocess: these are ported commands in this same
+        # program, and spawning a second interpreter to reach one would double
+        # the startup cost for nothing.
+        module = __import__(f"tstack.commands.{HANDOFF[verb]}", fromlist=["main"])
+        return int(module.main(args))
+    if verb in DELEGATED:
+        return _delegate(verb, args)
     if verb not in NATIVE:
         return _usage(f"tstack config: unknown command '{verb}' (try: {KNOWN})")
 
@@ -508,6 +614,9 @@ def main(argv: list[str]) -> int:
 
     if verb == "ghostty":
         return _ghostty(args, out, dry_run)
+
+    if verb == "prompt":
+        return _prompt(args, out, dry_run)
 
     if verb == "memory":
         sub = args[0] if args else "status"

@@ -70,7 +70,11 @@ class Console:
             return
         if self._writer is None:
             return
-        with contextlib.suppress(OSError):
+        # ValueError as well as OSError: writing to a CLOSED handle raises
+        # ValueError("I/O operation on closed file"), which is what a terminal
+        # going away mid-run looks like. Losing a menu line is survivable; a
+        # traceback out of an installer is not.
+        with contextlib.suppress(OSError, ValueError):
             self._writer.write(text + "\n")
             self._writer.flush()
 
@@ -92,7 +96,9 @@ class Console:
             self._writer.write(prompt)
             self._writer.flush()
             line = self._reader.readline()
-        except OSError:
+        except (OSError, ValueError):
+            # Same reason as say(): a closed handle is a ValueError. No answer
+            # means take the default, which is what every caller does with None.
             return None
         if line == "":
             # EOF on an open tty. Treated exactly as an empty answer -- take the
@@ -103,5 +109,5 @@ class Console:
     def close(self) -> None:
         for handle in {self._reader, self._writer}:
             if handle is not None:
-                with contextlib.suppress(OSError):
+                with contextlib.suppress(OSError, ValueError):
                     handle.close()
