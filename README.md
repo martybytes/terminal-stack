@@ -174,6 +174,7 @@ tstack --version       # clone path, branch, commit
 tstack doctor          # diagnose the install; --json for one record per check, exit 1 if anything is wrong
 tstack config          # interactive settings menu
 tstack config theme follow
+tstack ui              # every setting in one screen (needs Textual)
 tstack update          # pull the latest stack and re-apply
 tstack rollback        # undo that update
 doc                    # fuzzy-find a runbook in the knowledge base
@@ -218,6 +219,12 @@ tstack config tts on            # voice notifications
 tstack config show              # the saved leader, theme, tmux prefix, apps and toggles
 tstack config wizard            # replay the whole install questionnaire
 ```
+
+`tstack ui` is the same settings in one screen — what each is now, what its
+default is, and **which layer the value came from**, which is the thing a printed
+value cannot tell you. `/` filters, `Space` cycles a choice, `d` restores the
+default. It needs [Textual](https://textual.textualize.io/)
+(`uv tool install textual`), the one third-party library this stack's Python uses.
 
 Choices persist across updates. On a combined Windows + WSL machine, run
 `tstack config` **from WSL** — its `chezmoi apply` is authoritative for the

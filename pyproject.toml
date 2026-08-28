@@ -53,7 +53,21 @@ markers = [
 [tool.coverage.run]
 branch = true
 source = ["tstack"]
-omit = ["tstack/main.py"]          # a six-line sys.path shim with no branches
+omit = [
+    "tstack/main.py",                 # a six-line sys.path shim with no branches
+    # The Textual shell. Excluded from MEASUREMENT, which is not the same as
+    # excluded from testing -- tests/test_ui.py drives it headless through
+    # Textual's own run_test(), and skips when Textual is absent because it is
+    # this program's one optional dependency.
+    #
+    # Measuring it would make the floor depend on whether the machine running the
+    # suite happens to have Textual installed: present, the number goes up;
+    # absent, every line reads as uncovered and the gate fails for a reason that
+    # has nothing to do with the change under test. A floor that moves with the
+    # environment is not a floor. The rules it would cover live in ui/model.py,
+    # which is measured and at 94%.
+    "tstack/ui/app.py",
+]
 
 [tool.coverage.report]
 show_missing = true

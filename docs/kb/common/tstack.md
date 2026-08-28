@@ -6,6 +6,7 @@ commands any more, and no aliases for them.
 | Command | What it does |
 |---|---|
 | `tstack config` | view and change saved settings (the table below) |
+| `tstack ui` | every setting in one screen; needs Textual |
 | `tstack doctor` | diagnose the install; `--quiet`, `--json`, `--repair` (see below) |
 | `tstack update` | pull the latest stack and re-apply |
 | `tstack rollback` | undo the last update |
@@ -22,11 +23,46 @@ commands any more, and no aliases for them.
 A subcommand reported as "not available on <platform>" is deliberate, not a
 broken install: `smb` has no PowerShell implementation.
 
-`doctor`, `services`, `mux`, `wezterm` and `agents` are one Python program that
-runs identically on Windows, WSL, Linux and macOS. `config`, `update`, `rollback`,
-`smb` and `agentmemory` are still shell, and `tstack` routes to whichever the
-registry (`tstack/commands.conf`) says - so the command you type never changes as
-each one is ported.
+`doctor`, `services`, `mux`, `wezterm`, `agents` and `ui` are one Python program
+that runs identically on Windows, WSL, Linux and macOS. `config`, `update`,
+`rollback`, `smb` and `agentmemory` are still shell, and `tstack` routes to
+whichever the registry (`tstack/commands.conf`) says - so the command you type
+never changes as each one is ported.
+
+## `tstack ui`
+
+Every saved setting in one screen: what it is now, what the default is, and
+**which layer the value came from** - chezmoi `[data]`, the Windows mirror, or
+nothing at all. Those three look identical once a value is printed, and on
+2026-08-21 they disagreed while every report looked healthy.
+
+```sh
+tstack ui
+```
+
+| Key | What |
+|---|---|
+| `/` | filter by key, label, group, value **or note** - the keys are camelCase internals, so "ollama" or "leader" is what you actually type |
+| `Enter` | edit the selected setting |
+| `Space` | next value, for a choice setting; saves straight away |
+| `d` | back to the default |
+| `r` | reload from the store |
+| `q` | quit |
+
+A `*` before a value means it differs from the default. A setting chezmoi
+*derives* from your other choices (`resolvedTheme`, `leaderKey`, …) is listed but
+refused - writing one produces a value that survives until the next save.
+
+Writes go through the same setter the command line uses, so there is no second
+writer and no second set of validation rules. Nothing here starts a container or
+installs anything; it edits settings.
+
+Textual is the one third-party library this program uses and only this command
+needs it, which is why it is not installed for you:
+
+```sh
+uv tool install textual     # or pipx install textual, or pip install --user textual
+```
 
 ## `tstack doctor`
 

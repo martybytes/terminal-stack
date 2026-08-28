@@ -6,6 +6,32 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Added
 
+- **`tstack ui` - every saved setting in one screen (08/27/2026).** The dashboard
+  the revamp plan has carried as phase 8. It shows what each setting is, what its
+  default is, and **which layer the value came from** - chezmoi `[data]`, the
+  Windows mirror, or nothing at all. Those three look identical once a value is
+  printed, which is the failure this whole schema exists for.
+
+  Filtering searches the NOTE as well as the key, because the keys are camelCase
+  internals nobody remembers: "ollama" finds `ccTtsSummarizer`. `Space` cycles a
+  choice setting in place, `d` restores the default, and a derived key is listed
+  and refused rather than hidden - knowing a value exists and is not yours to set
+  is the point of showing it.
+
+  It does not write the store. A dashboard is exactly the kind of thing that
+  grows a second writer - it already has the key, the value and the path - so
+  every save routes through `config.set_value`, the same function the command
+  line uses, which is what keeps the validation, the chezmoi re-init and the
+  DERIVED refusal identical in both front ends.
+
+  Textual is the only third-party import in `tstack` and only this command uses
+  it, so it is optional: `tstack ui` prints how to install it rather than raising
+  ImportError. The rules live in `tstack/ui/model.py` (stdlib, 94% covered) and
+  the Textual shell in `app.py` holds none of its own; `tests/test_ui_app.py`
+  drives that shell headless through Textual's own `run_test()`, in a separate
+  module because `importorskip` skips the file it is in and would otherwise have
+  taken the fourteen stdlib-only tests with it.
+
 - **kokoro natively on Apple Silicon, and a command that says which engine fits
   this Mac (08/27/2026).** There are three ways to get a voice on macOS and they
   are not interchangeable, so `tstack config tts engines` measures the machine
