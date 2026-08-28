@@ -189,6 +189,8 @@ tstack doctor          # diagnose the install; --json for one record per check, 
 tstack config          # interactive settings menu
 tstack config theme follow
 tstack ui              # every setting in one screen (needs Textual)
+tstack wizard          # replay the install questionnaire
+tstack ghostty         # the managed Ghostty config: status, diff, on, off
 tstack update          # pull the latest stack and re-apply
 tstack rollback        # undo that update
 doc                    # fuzzy-find a runbook in the knowledge base
@@ -228,6 +230,7 @@ an apply.
 ```sh
 tstack config theme follow      # dark / light / follow the OS
 tstack config prompt list       # every Starship prompt, rendered, then pick one
+tstack agents llm               # which AgentMemory features a chat model switches on
 tstack config leader ctrl-a     # the WezTerm leader key
 tstack config apps              # re-open the CLI tool picker
 tstack config tts on            # voice notifications
@@ -238,8 +241,17 @@ tstack config wizard            # replay the whole install questionnaire
 `tstack ui` is the same settings in one screen — what each is now, what its
 default is, and **which layer the value came from**, which is the thing a printed
 value cannot tell you. `/` filters, `Space` cycles a choice, `d` restores the
-default. It needs [Textual](https://textual.textualize.io/)
-(`uv tool install textual`), the one third-party library this stack's Python uses.
+default.
+
+Where a setting's valid values are a fact about *this* machine rather than a
+fixed list, `Enter` opens a picker instead of a text box: the voices your kokoro
+actually serves (`s` plays one), the Starship presets your starship ships (each
+one **rendered** in a preview pane), and the CLI tools as a tick-list.
+AgentMemory's chat provider is editable there too, though it is not a saved
+setting at all — it lives in the stack's `.env`.
+
+It needs [Textual](https://textual.textualize.io/) (`uv tool install textual`),
+the one third-party library this stack's Python uses.
 
 Choices persist across updates. On a combined Windows + WSL machine, run
 `tstack config` **from WSL** — its `chezmoi apply` is authoritative for the

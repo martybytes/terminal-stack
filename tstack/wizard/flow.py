@@ -17,6 +17,7 @@ from dataclasses import dataclass, field, replace
 from .. import apps as catalog
 from .. import platform as plat
 from .. import store
+from . import probes
 from .console import Console
 from .prompts import Option, choice, multi, text
 
@@ -297,18 +298,26 @@ def collect(console: Console, ask_terminals: bool = False) -> Answers:
         # wiring there is nothing to announce.
         cc_tts, cc_tts_message, cc_tts_daemon = "off", "template", "off"
     else:
-        cc_tts = (
-            _on_off(_env("TS_CC_TTS"))
-            if _env("TS_CC_TTS")
-            else ask.choose(
+        if _env("TS_CC_TTS"):
+            cc_tts = _on_off(_env("TS_CC_TTS"))
+        else:
+            # PROBED, not guessed. Offering voice where nothing can speak
+            # promises silence; defaulting it off on a Mac ignores that `say` is
+            # a floor which cannot be missing.
+            best, report = probes.voice()
+            cc_tts = ask.choose(
                 "Agent voice notifications?",
                 [
                     ("off", "off", "stay silent"),
                     ("on", "on", "speak on finish, error and questions"),
                 ],
-                "off",
+                best,
+                f"  RECOMMENDATION: {best}. Claude, Cursor and Codex speak when they finish,\n"
+                "  hit an error, or need you - so you can leave a long run and be called back.\n"
+                "  What can speak here, probed just now:\n" + "\n".join(report) + "\n"
+                "  The first reachable engine wins, in that order. Nothing is installed for\n"
+                "  you. Turn it off any time with `cctts off`.",
             )
-        )
         cc_tts_message = "template"
         cc_tts_daemon = "off"
         if cc_tts == "on":
@@ -609,16 +618,33 @@ def _agents(ask: Asker, profile: str, development: str, bare: bool) -> tuple[str
             memory = "agentmemory"
         return (memory, _on_off(_env("TS_HEADROOM")), agentmemory, _on_off(_env("TS_CAVEMAN")))
 
-    memory = _env("TS_MEMORY_BACKEND") or ask.choose(
-        "Memory and compression:",
-        [
-            ("agentmemory", "AgentMemory remembers, Headroom compresses", "the default"),
-            ("headroom", "Headroom does both", "AgentMemory is not installed"),
-            ("none", "Headroom compresses only", "no memory at all"),
-            ("off", "Neither", "no proxy, no memory"),
-        ],
-        "agentmemory",
-    )
+    if _env("TS_MEMORY_BACKEND"):
+        memory = _env("TS_MEMORY_BACKEND")
+    elif _env("TS_AGENTMEMORY") or _env("TS_HEADROOM"):
+        # A pre-merge unattended install only knew the two booleans. Honour them
+        # rather than ignoring them, so an old script cannot land on a
+        # combination this menu will not offer.
+        memory = "agentmemory" if _on_off(_env("TS_AGENTMEMORY")) == "on" else "none"
+    else:
+        _am_up, am_line = probes.agentmemory()
+        _hr_up, hr_line = probes.headroom()
+        memory = ask.choose(
+            "Memory and compression:",
+            [
+                ("agentmemory", "AgentMemory remembers, Headroom compresses", "the default"),
+                ("headroom", "Headroom does both", "AgentMemory is not installed"),
+                ("none", "Headroom compresses only", "no memory at all"),
+                ("off", "Neither", "no proxy, no memory"),
+            ],
+            "agentmemory",
+            "  RECOMMENDATION: AgentMemory remembers, Headroom compresses.\n"
+            "  Only ONE memory system runs. They overlap, and two stores means two\n"
+            "  half-filled ones with no way to tell which holds the answer you want.\n"
+            f"{am_line}\n{hr_line}\n"
+            "  Compression is not a memory feature and is unaffected by this. Headroom's\n"
+            "  memory additionally runs Qdrant and Neo4j (about 940 MB); the other\n"
+            "  answers never pull those images.",
+        )
     mapping = {
         "agentmemory": ("agentmemory", "on", "on"),
         "headroom": ("headroom", "on", "off"),

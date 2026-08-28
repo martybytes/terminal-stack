@@ -127,7 +127,7 @@ Run it bare for an interactive menu; `tstack config show` just prints the state.
 | `tstack config leader <chord>` | WezTerm leader, e.g. `ctrl-space`, `ctrl-a`, `alt-x` |
 | `tstack config theme <dark\|light\|follow>` | palette; `follow` tracks the OS theme |
 | `tstack config tmux <chord>` | tmux prefix — see `doc common/tmux` |
-| `tstack config apps [recommended\|all\|none\|id,…]` | app catalog; no arg → picker. Installs, never uninstalls |
+| `tstack config apps [recommended\|all\|none\|id,…]` | app catalog (`bootstrap/apps.conf`); no arg → picker. Installs, never uninstalls |
 | `tstack config prompt [status\|list\|<name>]` | which Starship prompt. `list` renders every option so you can see them |
 | `tstack config atuin <on\|off>` | atuin owns `Ctrl+R` — see `doc common/tools/atuin` |
 | `tstack config ghostty [on\|off\|status\|diff]` | hand-off to `tstack ghostty` — see `doc common/tools/ghostty` |

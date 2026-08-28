@@ -741,3 +741,96 @@ def test_the_powershell_bootstrap_reads_only_keys_the_json_carries():
     carried = {name for name, _field in emit.JSON_NAMES}
     missing = sorted(used - carried)
     assert not missing, f"windows-bootstrap.ps1 reads {missing}, which the JSON does not carry"
+
+
+# ------------------------------------------------------------- probe, do not guess
+
+
+def test_the_voice_question_defaults_from_what_can_actually_speak(monkeypatch):
+    """Offering voice where nothing can speak promises silence; defaulting it
+    off on a Mac ignores that `say` is a floor which cannot be missing. The bash
+    wizard probed and printed a report, and dropping that in the port was a
+    regression, not a simplification.
+    """
+    from tstack.wizard import probes
+
+    monkeypatch.setenv("TS_PROFILE", "full")
+    monkeypatch.setenv("TS_DEVELOPMENT", "yes")
+    monkeypatch.setenv("TS_APPS", "none")
+    monkeypatch.setenv("TS_MEMORY_BACKEND", "none")
+    monkeypatch.setenv("TS_CAVEMAN", "off")
+    monkeypatch.setenv("TS_HEADROOM_CURSOR", "mcp")
+
+    monkeypatch.setattr(probes, "voice", lambda: ("off", ["    kokoro: not reachable"]))
+    console = Console.scripted([""])
+    assert flow.collect(console).cc_tts == "off"
+    assert any("not reachable" in line for line in console.captured), "the report is shown"
+
+    monkeypatch.setattr(probes, "voice", lambda: ("on", ["    say: always available on macOS"]))
+    console = Console.scripted([""])
+    assert flow.collect(console).cc_tts == "on", "Enter takes the PROBED default"
+
+
+def test_the_memory_question_reports_what_is_running(monkeypatch):
+    """A blind on/off question happily wired a machine to a service that was not
+    running, and the failure showed up much later as an agent that silently
+    retrieved nothing."""
+    from tstack.wizard import probes
+
+    monkeypatch.setenv("TS_PROFILE", "full")
+    monkeypatch.setenv("TS_DEVELOPMENT", "yes")
+    monkeypatch.setenv("TS_APPS", "none")
+    monkeypatch.setenv("TS_CC_TTS", "off")
+    monkeypatch.setenv("TS_CAVEMAN", "off")
+    monkeypatch.setenv("TS_HEADROOM_CURSOR", "mcp")
+    monkeypatch.setattr(probes, "agentmemory", lambda: (False, "  AgentMemory: not reachable"))
+    monkeypatch.setattr(probes, "headroom", lambda: (True, "  Headroom: ready"))
+
+    console = Console.scripted([""])
+    flow.collect(console)
+    rendered = "\n".join(console.captured)
+    assert "AgentMemory: not reachable" in rendered
+    assert "Headroom: ready" in rendered
+
+
+def test_the_pre_merge_booleans_are_honoured_not_ignored(monkeypatch):
+    """An unattended install written before the two toggles became one question
+    only knew TS_AGENTMEMORY/TS_HEADROOM. Ignoring them would land it on a
+    combination this menu will not offer."""
+    monkeypatch.setenv("TS_PROFILE", "full")
+    monkeypatch.setenv("TS_DEVELOPMENT", "yes")
+    monkeypatch.setenv("TS_APPS", "none")
+    monkeypatch.setenv("TS_CC_TTS", "off")
+    monkeypatch.setenv("TS_CAVEMAN", "off")
+    monkeypatch.setenv("TS_HEADROOM_CURSOR", "mcp")
+
+    monkeypatch.setenv("TS_AGENTMEMORY", "on")
+    assert flow.collect(Console()).memory_backend == "agentmemory"
+
+    monkeypatch.setenv("TS_AGENTMEMORY", "off")
+    assert flow.collect(Console()).memory_backend == "none"
+
+
+def test_answering_is_the_test_never_a_2xx():
+    """AgentMemory returns 404 on `/` and 401 on its health endpoint; both prove
+    a server is listening. `curl -fsS` treats either as failure, which is why it
+    once reported the service down while it was up and serving."""
+    body = (ROOT / "tstack/wizard/probes.py").read_text(encoding="utf-8")
+    assert "except urllib.error.HTTPError:\n        return True" in body
+    # ...and the STRICT form is used only where the endpoint is a real readiness
+    # check, which is Headroom's /readyz.
+    strict = body[body.index("def headroom(") :]
+    assert "/readyz" in strict and "200 <= response.status" in strict
+
+
+def test_a_probe_that_cannot_reach_anything_is_not_an_error(monkeypatch):
+    from tstack.wizard import probes
+
+    def refuse(*a, **k):
+        raise probes.urllib.error.URLError("refused")
+
+    monkeypatch.setattr(probes.urllib.request, "urlopen", refuse)
+    assert probes.agentmemory()[0] is False
+    assert probes.headroom()[0] is False
+    best, lines = probes.voice()
+    assert best in ("on", "off") and lines
