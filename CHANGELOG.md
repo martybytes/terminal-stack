@@ -99,6 +99,27 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Changed
 
+- **The managed Ghostty config is one implementation instead of three
+  (08/28/2026).** `bootstrap/ts-config.sh` covered macOS and the WSL view of the
+  Windows side (~160 lines), `$PROFILE`'s `Set-TerminalStackConfig` covered
+  native Windows (~90 more), and each carried its **own copy of the
+  themeMode -> theme mapping** — a mapping that has to agree everywhere or
+  `tstack ghostty diff` reports a phantom change, which is why a test existed to
+  compare four copies of it against each other.
+
+  Now `tstack/ghostty.py`, behind a new `tstack ghostty` command reached the way
+  `mux` and `wezterm` already are; both shells hand off to it. The two sync
+  scripts keep their own copy, because they run where Python may not be, so the
+  comparison test stays — over three sources instead of five, and it now also
+  asserts the shells did **not** grow one back.
+
+  Two behaviour differences, both deliberate. WSL and native Windows resolve
+  through `plat.local_app_data()`, so a combined machine targets one Ghostty (the
+  Windows one) by construction rather than through two separate username lookups.
+  And `diff` on macOS now says "up to date" instead of printing nothing — chezmoi
+  is silent when there is nothing to change, and silence reads exactly like a
+  diff that failed.
+
 - **A fresh clone no longer ships a chat endpoint that resolves on one person's
   network (08/27/2026).** `services/stacks/agentmemory/.env.example` had
   `OPENAI_BASE_URL` and `OPENAI_MODEL` **active**, pointing at a private
