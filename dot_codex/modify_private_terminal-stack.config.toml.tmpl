@@ -67,4 +67,6 @@ state = state_sections(live)
 out = MANAGED.rstrip() + "\n"
 if state:
     out += "\n" + state + "\n"
-sys.stdout.write(out)
+# Binary: text mode would translate \n and accumulate a \r per apply on a
+# CRLF host. Same rule as modify_dot_zshenv.tmpl.
+sys.stdout.buffer.write(out.encode("utf-8"))

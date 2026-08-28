@@ -95,5 +95,11 @@ if block:
         body += "\n"
     body += block + "\n"
 
-sys.stdout.write(body)
+# BINARY stdout, never sys.stdout.write. Text mode translates every \n on the
+# way out, so on any host whose os.linesep is CRLF this returns a file whose
+# lines gained a \r -- and the NEXT apply reads those back, splits on \n,
+# rejoins with \n, and translates again, so a \r accumulates per apply. This
+# script's whole promise is that it is byte-preserving; that promise has to
+# include the bytes it writes.
+sys.stdout.buffer.write(body.encode("utf-8"))
 PY

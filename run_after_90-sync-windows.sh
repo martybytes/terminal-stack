@@ -355,7 +355,10 @@ repl = {
 }
 for k, v in repl.items():
     text = text.replace(k, v)
-sys.stdout.write(text)
+# Binary: this renders a file for the WINDOWS side, and text mode would decide
+# its line endings from whatever host Python happens to be running on rather
+# than from the template. Same rule as modify_dot_zshenv.tmpl.
+sys.stdout.buffer.write(text.encode("utf-8"))
 PY
       else
         # No sed fallback: it cannot substitute the multi-line __CC_TTS_*__

@@ -268,6 +268,27 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **Every `modify_` script grew a `\r` per apply on a CRLF host (08/28/2026).**
+  `sys.stdout.write` opens stdout in *text* mode, so each `\n` it writes becomes
+  `\r\n`; the next apply reads those back, splits on `\n`, rejoins with `\n` and
+  translates again. These scripts exist to be byte-preserving — `~/.zshenv` is
+  part-owned, `settings.json` is written by Claude Code itself — and the bytes
+  they write are part of that promise. All four apply-time writers
+  (`modify_dot_zshenv.tmpl`, `dot_claude/modify_settings.json.tmpl`,
+  `dot_codex/modify_private_terminal-stack.config.toml.tmpl` and the Windows sync
+  hook's renderer) use `sys.stdout.buffer.write` now, pinned by a test, with a
+  second test driving a CRLF `~/.zshenv` through two applies.
+
+  Surfaced by `pytest (windows-latest)`, which is the only place native Windows
+  runs — the idempotency test had been comparing a run against a
+  differently-terminated one and blaming the transport.
+
+- **`ghostty.binary()`'s WSL branch returned a host-flavoured path
+  (08/28/2026).** `/mnt/c/Program Files/...` is POSIX by definition — it exists
+  only inside WSL — and `str(Path(candidate))` re-renders it through whatever
+  path flavour the running host uses, so it became `\mnt\c\...` the moment
+  anything evaluated that branch on Windows.
+
 - **`Get-TsConfigPath` threw on every non-Windows pwsh (08/28/2026).**
   `Join-Path $env:LOCALAPPDATA …` is a terminating error when that variable is
   unset, so dot-sourcing `_config.ps1` and calling `Get-TsConfig` died before

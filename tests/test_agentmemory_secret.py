@@ -205,3 +205,46 @@ def test_check_capture_scans_what_this_change_added():
     body = repo_file("services/stacks/agentmemory/check-capture.sh").read_text(encoding="utf-8")
     assert "com.terminal-stack.agentmemory-secret.plist" in body
     assert "$HOME/.zshenv" in body
+
+
+def test_every_apply_time_script_writes_bytes_not_text():
+    """The bug this pins, found on windows-latest and real on any CRLF host.
+
+    A `modify_` script is handed the current target on stdin and chezmoi installs
+    whatever it writes. `sys.stdout.write` opens stdout in TEXT mode, which
+    translates every `\\n` on the way out -- so on a host whose `os.linesep` is
+    CRLF the installed file gains a `\\r` per line, the next apply reads those
+    back, splits on `\\n`, rejoins with `\\n` and translates again, and a `\\r`
+    accumulates on every apply. These scripts exist precisely to be
+    byte-preserving; the bytes they write are part of that promise.
+    """
+    offenders = []
+    for name in (
+        "modify_dot_zshenv.tmpl",
+        "dot_claude/modify_settings.json.tmpl",
+        "dot_codex/modify_private_terminal-stack.config.toml.tmpl",
+        "run_after_90-sync-windows.sh",
+    ):
+        body = (ROOT / name).read_text(encoding="utf-8")
+        for lineno, line in enumerate(body.splitlines(), 1):
+            code = line.split("#")[0]
+            if "sys.stdout.write(" in code:
+                offenders.append(f"{name}:{lineno} -- use sys.stdout.buffer.write(...encode())")
+    assert not offenders, "\n".join(offenders)
+
+
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+def test_crlf_in_the_existing_file_does_not_multiply():
+    """The failure mode above, driven end to end.
+
+    A `~/.zshenv` that already has CRLF (edited on Windows, synced from a
+    Windows box) must come back with the same count of `\\r`, not one more --
+    and the run after that must be identical again.
+    """
+    script = _render("on")
+    crlf = '. "$HOME/.cargo/env"\r\nexport EDITOR=micro\r\n'
+    once = _run(script, crlf)
+    twice = _run(script, once)
+    assert once == twice, "a second apply changed the file"
+    assert once.count("\r") == twice.count("\r")
+    assert once.count("terminal-stack-agentmemory-start") == 1

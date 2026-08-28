@@ -54,6 +54,24 @@ def drive(coro_factory):
     return asyncio.run(coro_factory())
 
 
+async def settle(pilot, predicate, what, tries=50):
+    """Pause until `predicate()` holds, rather than assuming one pause is enough.
+
+    Setting `Input.value` POSTS a Changed message; a single `pilot.pause()` runs
+    one cycle of the message pump, which on a fast machine happens to be enough
+    and on a loaded Windows runner is not. That made
+    test_the_dashboard_mounts_with_every_setting_and_filters_live fail on
+    windows-latest alone, reporting the row count from the PREVIOUS filter --
+    a real flake, not a product bug: refresh_table clears and refills in one
+    synchronous call, so the table is never partially populated.
+    """
+    for _ in range(tries):
+        if predicate():
+            return
+        await pilot.pause()
+    raise AssertionError(f"timed out waiting for {what}")
+
+
 def test_the_dashboard_mounts_with_every_setting_and_filters_live():
 
     async def script():
@@ -64,12 +82,11 @@ def test_the_dashboard_mounts_with_every_setting_and_filters_live():
             assert total == len(schema.SETTINGS)
 
             app.query_one("#filter", Input).value = "kokoro"
-            await pilot.pause()
+            await settle(pilot, lambda: table.row_count < total, "the filter to apply")
             assert 0 < table.row_count < total
 
             app.query_one("#filter", Input).value = ""
-            await pilot.pause()
-            assert table.row_count == total
+            await settle(pilot, lambda: table.row_count == total, "the filter to clear")
 
     drive(script)
 
