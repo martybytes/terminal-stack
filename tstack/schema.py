@@ -49,6 +49,12 @@ class Setting:
     # (`ccTtsKokoroTimeout` -> `timeoutSec`), so the derivation is wrong for most
     # of the TTS block and silently missed, falling through to the default.
     mirror: str = ""
+    # The name of a live-options provider in `tstack/choices.py`, for settings
+    # whose valid values are a fact about THIS machine rather than a fixed list:
+    # the voices a running kokoro serves, the presets the installed starship
+    # ships. A name rather than a callable, so the schema stays pure data and
+    # `snapshot()` stays JSON.
+    choices: str = ""
     flags: frozenset[str] = field(default_factory=frozenset)
 
     def validate(self, value: str) -> str | None:
@@ -136,6 +142,7 @@ SETTINGS: tuple[Setting, ...] = (
             "terminal-stack is this repo's own prompt; any other value is one of "
             "starship's built-in presets. `tstack config prompt list` renders each"
         ),
+        choices="starship-presets",
         flags=frozenset({SHELL}),
     ),
     Setting(
@@ -343,6 +350,7 @@ SETTINGS: tuple[Setting, ...] = (
         "am_adam",
         mirror="ccTts.kokoro.voice",
         note="`tstack config tts voices` lists what the server actually offers",
+        choices="kokoro-voices",
         flags=frozenset({STANDALONE}),
     ),
     Setting(
@@ -436,6 +444,7 @@ SETTINGS: tuple[Setting, ...] = (
         "",
         mirror="ccTts.say.voice",
         note="empty means the system voice; `tstack config tts voices` lists and samples them",
+        choices="say-voices",
         flags=frozenset({STANDALONE}),
     ),
     Setting(
@@ -669,6 +678,7 @@ def describe(key: str) -> dict[str, object]:
         "options": list(setting.options),
         "source": source_of(key),
         "note": setting.note,
+        "choices": setting.choices,
         "flags": sorted(setting.flags),
     }
 

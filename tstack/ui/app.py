@@ -22,6 +22,11 @@ from textual.widgets import DataTable, Footer, Header, Input, Label, Static
 
 from . import model
 
+# Escape must be distinguishable from choosing the empty value: an unset
+# `ccTtsSayVoice` MEANS "the system voice", so "" is a real answer and cannot
+# also mean cancelled.
+CANCELLED = "\x00cancelled"
+
 
 def elide(text: str, width: int) -> str:
     """Trim to a fixed column, marking that something was cut.
@@ -32,6 +37,91 @@ def elide(text: str, width: int) -> str:
     past review and then only fails on the platform nobody is testing on.
     """
     return text if len(text) <= width else text[: width - 2] + ".."
+
+
+class PickScreen(ModalScreen[str]):
+    """Choose from what this machine can actually offer, having seen or heard it.
+
+    The reason this exists rather than a text box: `ccTtsKokoroVoice` and
+    `starshipPreset` are `kind="text"` in the schema because their valid values
+    are not a fixed list -- they are the 68 voices a running kokoro happens to
+    serve and the presets the installed starship happens to ship. Typing a name
+    blind is exactly what `tstack config tts voices` and `tstack config prompt
+    list` exist to save you from, and the dashboard had no equivalent.
+
+    The options are probed when the screen opens, so a kokoro started since the
+    dashboard launched shows up on the next open.
+    """
+
+    BINDINGS: ClassVar[list[Binding]] = [
+        Binding("escape", "cancel", "cancel"),
+        Binding("s", "sample", "hear it"),
+    ]
+
+    def __init__(self, row: model.Row, options: list[tuple[str, str, str]]) -> None:
+        super().__init__()
+        self.row = row
+        self.options = options
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="pick-box"):
+            yield Label(f"{self.row.label}  [{self.row.key}]", id="pick-title")
+            yield DataTable(id="pick-table", cursor_type="row", zebra_stripes=True)
+            yield Static("", id="pick-preview")
+            # ASCII only. Every byte this program prints is pinned, because a
+            # Windows console on codepage 437 renders anything else as mojibake
+            # -- and `s` is advertised only where there is something to hear.
+            hear = "  -  s hear it" if model.can_sample(self.row) else ""
+            yield Static(f"Enter choose{hear}  -  Esc cancel", id="pick-help")
+
+    def on_mount(self) -> None:
+        table = self.query_one("#pick-table", DataTable)
+        table.add_column("value", width=34)
+        table.add_column("what it is", width=30)
+        here = 0
+        for index, (value, label, note) in enumerate(self.options):
+            marker = "*" if value == self.row.value else " "
+            table.add_row(f"{marker}{elide(label, 32)}", elide(note, 28))
+            if value == self.row.value:
+                here = index
+        table.move_cursor(row=here)
+        table.focus()
+        self.show_preview()
+
+    def current(self) -> str | None:
+        index = self.query_one("#pick-table", DataTable).cursor_row
+        if 0 <= index < len(self.options):
+            return self.options[index][0]
+        return None
+
+    def show_preview(self, message: str = "") -> None:
+        if message:
+            self.query_one("#pick-preview", Static).update(message)
+            return
+        value = self.current()
+        rendered = model.preview_of(self.row, value) if value is not None else None
+        # A preview is only meaningful for some providers. Where there is none,
+        # the row's own note is more use than an empty box.
+        self.query_one("#pick-preview", Static).update(rendered or self.row.note or "")
+
+    def on_data_table_row_highlighted(self, _: DataTable.RowHighlighted) -> None:
+        self.show_preview()
+
+    def on_data_table_row_selected(self, _: DataTable.RowSelected) -> None:
+        value = self.current()
+        if value is not None:
+            self.dismiss(value)
+
+    def action_sample(self) -> None:
+        value = self.current()
+        if value is None or not model.can_sample(self.row):
+            return
+        self.show_preview("listening...")
+        played, message = model.sample_of(self.row, value)
+        self.show_preview(message if played else f"could not play it: {message}")
+
+    def action_cancel(self) -> None:
+        self.dismiss(CANCELLED)
 
 
 class EditScreen(ModalScreen[str]):
@@ -60,7 +150,7 @@ class EditScreen(ModalScreen[str]):
         self.dismiss(event.value)
 
     def action_cancel(self) -> None:
-        self.dismiss("")
+        self.dismiss(CANCELLED)
 
 
 class SettingsApp(App[None]):
@@ -81,6 +171,15 @@ class SettingsApp(App[None]):
     #edit-title { text-style: bold; }
     #edit-note, #edit-options, #edit-default { color: $text-muted; }
     EditScreen { align: center middle; }
+    PickScreen { align: center middle; }
+    #pick-box {
+        width: 80%; height: 80%; padding: 1 2;
+        background: $panel; border: thick $accent;
+    }
+    #pick-title { text-style: bold; }
+    #pick-table { height: 1fr; }
+    #pick-preview { height: 4; padding: 1 0 0 0; }
+    #pick-help { color: $text-muted; }
     """
 
     BINDINGS: ClassVar[list[Binding]] = [
@@ -230,9 +329,16 @@ class SettingsApp(App[None]):
             return
 
         def done(value: str | None) -> None:
-            if value is not None and value != row.value:
-                self.commit(row.key, value)
+            if value is None or value == CANCELLED or value == row.value:
+                return
+            self.commit(row.key, value)
 
+        live = model.live_options(row)
+        if live:
+            self.push_screen(PickScreen(row, live), done)
+            return
+        # No provider, or the probe found nothing -- kokoro down, starship not
+        # installed yet. A text box is still better than refusing to edit.
         self.push_screen(EditScreen(row), done)
 
     def commit(self, key: str, value: str) -> None:

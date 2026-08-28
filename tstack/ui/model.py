@@ -35,6 +35,7 @@ class Row:
     source: str
     note: str
     options: tuple[str, ...]
+    choices: str
     flags: frozenset[str]
 
     @property
@@ -90,6 +91,7 @@ def rows() -> list[Row]:
             source=str(r["source"]),
             note=str(r["note"]),
             options=_strings(r["options"]),
+            choices=str(r["choices"]),
             flags=frozenset(_strings(r["flags"])),
         )
         for r in schema.snapshot()
@@ -157,6 +159,46 @@ def save(key: str, value: str) -> tuple[bool, str]:
     if code != 0:
         return (False, text[-1] if text else f"failed with exit {code}")
     return (True, f"saved {key} = {value or '(unset)'}")
+
+
+def live_options(row: Row) -> list[tuple[str, str, str]]:
+    """(value, label, note) for a setting whose options are a live fact.
+
+    Empty for everything else, and empty is also the honest answer when the
+    probe found nothing -- kokoro not running, starship not installed yet. A
+    caller falls back to a plain text field, which is what this replaced.
+    """
+    if not row.choices:
+        return []
+    from .. import choices as provider
+
+    return [(c.value, c.display(), c.note) for c in provider.options(row.choices)]
+
+
+def can_sample(row: Row) -> bool:
+    if not row.choices:
+        return False
+    from .. import choices as provider
+
+    return provider.can_sample(row.choices)
+
+
+def preview_of(row: Row, value: str) -> str | None:
+    """What `value` would look like, for the settings where looking is the point."""
+    if not row.choices:
+        return None
+    from .. import choices as provider
+
+    return provider.preview(row.choices, value)
+
+
+def sample_of(row: Row, value: str) -> tuple[bool, str]:
+    """Speak `value`, for the settings where hearing is the point."""
+    if not row.choices:
+        return (False, "nothing to hear for this setting")
+    from .. import choices as provider
+
+    return provider.sample(row.choices, value)
 
 
 def next_choice(row: Row, backwards: bool = False) -> str | None:

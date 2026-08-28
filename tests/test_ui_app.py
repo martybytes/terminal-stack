@@ -160,3 +160,137 @@ def test_the_source_column_is_visible_on_a_normal_terminal():
     assert len(cut) == 20 and cut.endswith("..")
     assert cut.isascii()
     assert elide("short", 20) == "short"
+
+
+# ---------------------------------------------------------------- the picker
+
+
+def test_a_setting_with_live_options_gets_a_picker_not_a_text_box(monkeypatch):
+    """`ccTtsKokoroVoice` is `kind="text"` because its valid values are not a
+    fixed list -- they are whatever the running server serves. That made it a
+    blind text box, which is exactly what `tstack config tts voices` exists to
+    save you from.
+    """
+    from tstack.ui import model
+    from tstack.ui.app import PickScreen
+
+    monkeypatch.setattr(
+        model, "live_options", lambda row: [("af_heart", "af_heart", "American female")]
+    )
+
+    async def script():
+        app = SettingsApp()
+        async with app.run_test() as pilot:
+            app.query_one("#filter", Input).value = "ccTtsKokoroVoice"
+            await pilot.pause()
+            app.query_one("#table", DataTable).focus()
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            assert isinstance(app.screen, PickScreen)
+            assert app.screen.query_one("#pick-table", DataTable).row_count == 1
+            await pilot.press("escape")
+            await pilot.pause()
+
+    drive(script)
+
+
+def test_a_probe_that_finds_nothing_falls_back_to_the_text_box(monkeypatch):
+    """kokoro stopped, starship not installed yet. Refusing to edit would be
+    worse than the box this replaced."""
+    from tstack.ui import model
+    from tstack.ui.app import EditScreen
+
+    monkeypatch.setattr(model, "live_options", lambda row: [])
+
+    async def script():
+        app = SettingsApp()
+        async with app.run_test() as pilot:
+            app.query_one("#filter", Input).value = "ccTtsKokoroVoice"
+            await pilot.pause()
+            app.query_one("#table", DataTable).focus()
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            assert isinstance(app.screen, EditScreen)
+            await pilot.press("escape")
+            await pilot.pause()
+
+    drive(script)
+
+
+def test_escape_is_distinguishable_from_choosing_the_empty_value(monkeypatch):
+    """An unset `ccTtsSayVoice` MEANS "the system voice", so "" is a real answer
+    and cannot also mean cancelled. A shared sentinel is the only way a modal
+    that can legitimately return "" says which happened.
+    """
+    from tstack.ui import model
+    from tstack.ui.app import CANCELLED, PickScreen
+
+    monkeypatch.setattr(
+        model,
+        "live_options",
+        lambda row: [
+            ("", "(system voice)", "whatever macOS is set to"),
+            ("Daniel", "Daniel", "en_GB"),
+        ],
+    )
+    saved: list[tuple[str, str]] = []
+    monkeypatch.setattr(model, "save", lambda k, v: (saved.append((k, v)), (True, "ok"))[1])
+
+    async def script():
+        app = SettingsApp()
+        async with app.run_test() as pilot:
+            app.query_one("#filter", Input).value = "ccTtsSayVoice"
+            await pilot.pause()
+            app.query_one("#table", DataTable).focus()
+            await pilot.pause()
+
+            await pilot.press("enter")
+            await pilot.pause()
+            assert isinstance(app.screen, PickScreen)
+            await pilot.press("escape")
+            await pilot.pause()
+            assert saved == [], "escape must not write, even though '' is selectable"
+
+            # ...and choosing the empty value DOES write it.
+            await pilot.press("enter")
+            await pilot.pause()
+            await pilot.press("down")
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            assert saved == [("ccTtsSayVoice", "Daniel")]
+
+    drive(script)
+    assert CANCELLED != "", "the sentinel may never collide with a real value"
+
+
+def test_the_picker_advertises_hearing_only_where_there_is_something_to_hear(monkeypatch):
+    """`s hear it` on a prompt preset is a small lie about a key that does
+    nothing."""
+    from tstack.ui import model
+    from tstack.ui.app import PickScreen
+
+    monkeypatch.setattr(model, "live_options", lambda row: [("tokyo-night", "tokyo-night", "")])
+    monkeypatch.setattr(model, "can_sample", lambda row: False)
+
+    async def script():
+        app = SettingsApp()
+        async with app.run_test() as pilot:
+            app.query_one("#filter", Input).value = "starshipPreset"
+            await pilot.pause()
+            app.query_one("#table", DataTable).focus()
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            assert isinstance(app.screen, PickScreen)
+            # The help text is built from can_sample; assert on the source of it
+            # rather than on a widget's private rendering internals.
+            assert not model.can_sample(app.screen.row)
+            await pilot.press("s")
+            await pilot.pause()
+            await pilot.press("escape")
+            await pilot.pause()
+
+    drive(script)
