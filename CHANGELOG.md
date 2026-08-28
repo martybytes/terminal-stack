@@ -4,6 +4,35 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+### Fixed
+
+- **Windows had no synthesis floor, so "on" could still mean silence
+  (08/28/2026).** `Invoke-CcTtsSynth`'s ladder ended at edge-tts and returned
+  `$false`: a native-Windows host with the daemon off, kokoro down and edge-tts
+  not installed produced nothing at all. That is the same gap `/usr/bin/say`
+  closed on macOS in August, left open on the platform this stack started on.
+
+  SAPI is the floor now, and it **speaks** rather than synthesising to a file.
+  The Windows playback path is `cc-tts-play.ps1`, which requires `ffplay` and
+  errors without it -- so a file-based floor would still be silent on exactly the
+  machine that needs one. SAPI is part of Windows and needs neither a file nor a
+  player. The daemon has done this since it shipped; this is the same rung for
+  the hook path, which is what runs when the daemon is off. Both early returns in
+  `Start-SpeakWorker` now reach it, and it cannot throw: the alternative is
+  silence, so a failure must leave things no worse.
+
+  **Not verified on Windows.** The COM call cannot run on the development Mac;
+  the change is parse-checked, pinned by a test, and structured so its worst case
+  is the silence it replaces. CI covers the rest.
+
+- **The one line explaining a voice change went to a discarded stream.**
+  `cc_tts_say_notice` printed to stderr, and `cc-tts-notify.sh` runs the worker
+  as `( _worker ) >/dev/null 2>&1 &` -- so the message that answers "why is it
+  speaking in a different voice" was written where nobody could read it, every
+  time. The reason now goes into the dated sentinel file the notice already
+  wrote, and `tstack config tts` reports it. Still once a day: the point is to
+  explain a change, not narrate every announcement.
+
 ### Added
 
 - **`say` is a real engine, and voices can be listed and heard (08/28/2026).**

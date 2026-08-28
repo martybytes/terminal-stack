@@ -209,6 +209,40 @@ function Invoke-CcTtsSynth {
     return $false
 }
 
+function Invoke-CcTtsSapiSpeak {
+    <#
+      The Windows floor, and the reason "on" can no longer mean silence here.
+
+      Invoke-CcTtsSynth's ladder ended at edge-tts and returned $false, so a
+      native-Windows host with the daemon off, kokoro down and edge-tts not
+      installed produced nothing at all -- the exact gap /usr/bin/say was added
+      to close on macOS, still open on the platform this stack started on.
+
+      It SPEAKS rather than synthesising to a file, deliberately. The Windows
+      playback path is cc-tts-play.ps1, which requires ffplay and errors without
+      it; a floor that depends on a package the user may not have is not a floor.
+      SAPI is part of Windows and needs neither a file nor a player.
+
+      The daemon already does exactly this (ttsd/playback.py) -- this is the same
+      rung for the hook path, which is what runs when the daemon is off.
+
+      Never throws: the caller's alternative is silence, so a failure here must
+      leave things no worse than they already were.
+    #>
+    param([string]$Text)
+    if (-not $Text) { return $false }
+    try {
+        # The system voice, deliberately: no ccTts* key selects a SAPI voice,
+        # and inventing one here would be a setting the schema does not describe
+        # and nothing else can read.
+        $sapi = New-Object -ComObject SAPI.SpVoice
+        $sapi.Speak($Text) | Out-Null
+        return $true
+    } catch {
+        return $false
+    }
+}
+
 function Parse-CcTtsInputHook {
     param([string]$InputJson, [string]$Event)
     $state = 'question'

@@ -2821,3 +2821,32 @@ def test_the_voice_pool_moved_out_of_the_way_of_listing():
     arm = arm[: arm.index("        voice-pool)")]
     assert "*,*)" in arm, "a CSV must be routed to voice-pool, not treated as a name"
     assert "ts_cc_tts_list_voices" in arm
+
+
+def test_windows_has_a_synthesis_floor_too():
+    """The macOS gap, still open on the platform this stack started on.
+
+    Invoke-CcTtsSynth's ladder ended at edge-tts and returned $false, so a
+    native-Windows host with the daemon off, kokoro down and edge-tts absent
+    produced nothing. SAPI is the floor, and it SPEAKS rather than writing a
+    file: the Windows playback path is cc-tts-play.ps1, which requires ffplay and
+    errors without it, so a file-based floor would still be silent on exactly the
+    machine that needs one.
+    """
+    lib = repo_file("windows/.claude/hooks/cc-tts-lib.ps1").read_text(encoding="utf-8")
+    assert "function Invoke-CcTtsSapiSpeak" in lib
+    fn = lib[lib.index("function Invoke-CcTtsSapiSpeak") :]
+    fn = fn[: fn.index("\nfunction ")]
+    assert "SAPI.SpVoice" in fn and ".Speak(" in fn
+    assert "OutFile" not in fn and "OutPath" not in fn, (
+        "the floor must not depend on a file, and so not on ffplay"
+    )
+    assert "catch" in fn, "a failing floor must leave things no worse than silence"
+
+    notify = repo_file("windows/.claude/hooks/cc-tts-notify.ps1").read_text(encoding="utf-8")
+    worker = notify[notify.index("function Start-SpeakWorker") :]
+    worker = worker[: worker.index("\nif ($Foreground)")]
+    # Both early returns were silence; both must now fall through to the floor.
+    assert worker.count("Invoke-CcTtsSapiSpeak") == 2, (
+        "every path that gave up before playing must reach the floor"
+    )

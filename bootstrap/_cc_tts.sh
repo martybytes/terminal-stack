@@ -110,6 +110,11 @@ ts_cc_tts_chatterbox_exaggeration() {
 
 # Probe Kokoro / Chatterbox HTTP endpoints (best-effort).
 ts_cc_tts_probe() {
+    local _notice
+    if _notice="$(ts_cc_tts_say_notice_recent)"; then
+        echo "$WARN today: $_notice"
+        echo "     engine: $(ts_cc_tts_get ccTtsEngine)   (tstack config tts voices lists what it can produce)"
+    fi
     local kurl curl_ok=0
     kurl="$(ts_cc_tts_get ccTtsKokoroUrl)"
     if command -v curl >/dev/null 2>&1; then
@@ -138,6 +143,18 @@ ts_cc_tts_probe() {
         echo "edge-tts: not installed (pip install edge-tts for fallback)"
     fi
     return 0
+}
+
+# Did an announcement quietly fall back to the system voice? The hooks cannot
+# tell you: cc-tts-notify.sh detaches the worker with `>/dev/null 2>&1`, so the
+# explanation went to a discarded stream. cc_tts_say_notice leaves it in a dated
+# file instead, and this is what reads it back.
+ts_cc_tts_say_notice_recent() {
+    local dir stamp
+    dir="${TMPDIR:-/tmp}"
+    stamp="${dir%/}/cc-tts-say-notice.$(date +%Y%m%d)"
+    [ -r "$stamp" ] || return 1
+    printf '%s' "$(cat "$stamp" 2>/dev/null)"
 }
 
 ts_cc_tts_show() {

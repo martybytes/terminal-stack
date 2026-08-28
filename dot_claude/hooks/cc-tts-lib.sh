@@ -589,12 +589,23 @@ cc_tts_synth_say() {
 # Tell the user ONCE A DAY that the system voice is standing in, so a changed
 # voice reads as "Kokoro is down", not "my config broke". Never fatal.
 cc_tts_say_notice() {
+    # The REASON goes in the file, not just a mark that it happened.
+    #
+    # This printed to stderr and nothing else, and cc-tts-notify.sh runs the
+    # worker as `( _worker ) >/dev/null 2>&1 &` -- so the one line that explains
+    # why the voice changed was written to a discarded stream, every time. The
+    # symptom that produces is "my TTS is speaking in a different voice and I
+    # cannot find out why", which is exactly the question the notice answers.
+    #
+    # `tstack config tts` reads this back. Still once a day: the point is to
+    # explain a change, not to narrate every announcement.
     local stamp dir
     dir="${TMPDIR:-/tmp}"
     stamp="${dir%/}/cc-tts-say-notice.$(date +%Y%m%d)"
     [ -e "$stamp" ] && return 0
-    : > "$stamp" 2>/dev/null || return 0
-    printf 'cc-tts: using the macOS system voice — Kokoro/Chatterbox/edge-tts were unavailable.\n' >&2
+    printf 'used the macOS system voice at %s: Kokoro/Chatterbox/edge-tts were all unavailable.\n' \
+        "$(date '+%H:%M')" > "$stamp" 2>/dev/null || return 0
+    printf 'cc-tts: using the macOS system voice - Kokoro/Chatterbox/edge-tts were unavailable.\n' >&2
     return 0
 }
 

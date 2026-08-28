@@ -106,7 +106,10 @@ Tried in order, first one that works wins:
    here installs it.
 2. **Chatterbox** — `http://127.0.0.1:8881`, same deal.
 3. **edge-tts** — `pip install edge-tts`. A cloud voice; needs network.
-4. **the offline floor** — `say` on macOS, SAPI on Windows.
+4. **the offline floor** — `say` on macOS, SAPI on Windows. Neither needs a
+   running service; SAPI also needs no player, which matters because the
+   Windows playback path requires `ffplay`. Linux has no floor: if every
+   engine is down there, it is silent.
 
 The wizard probes all of these and tells you which are reachable before you
 choose. If you hear the system voice instead of your usual one, the floor caught
