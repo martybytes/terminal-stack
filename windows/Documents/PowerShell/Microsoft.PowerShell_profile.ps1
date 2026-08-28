@@ -1106,7 +1106,9 @@ function Set-TerminalStackConfig {
     # child scope, so assignments in here would not reach the menu's copies and
     # the menu would keep printing the pre-wizard values.
     $runWizard = {
-        $w = Read-TsWizard
+        # The questionnaire is tstack/wizard/ now, run through the one helper the
+        # bootstrap also uses. It used to be Read-TsWizard, which no longer exists.
+        $w = Invoke-TsWizard -SourceDir $src -AskTerminals
         # A prompt that throws leaves $w null or half-filled, and Save-TsConfig would
         # then persist '' over real answers (ValidateSet only catches some of them).
         if (-not $w -or -not $w.Leader -or -not $w.Theme -or -not $w.Headroom) {
@@ -1122,11 +1124,36 @@ function Set-TerminalStackConfig {
             -MemoryBackend $w.MemoryBackend | Out-Null
         Set-TsMemoryComposeFile $w.MemoryBackend
         Export-CcTtsJson
-        Save-TsWorkspaceOverride $w.Workspace
+        # NOT $w.Workspace: the workspace root is not a wizard question and the
+        # JSON does not carry it, so that read was $null and this persisted an
+        # empty WORKSPACE_DIR. Same fix as windows-bootstrap.ps1.
+        Save-TsWorkspaceOverride (Read-TsWorkspaceDir)
         Invoke-TsSync $src
         Show-TsInstalledApps @($w.Apps)
         Write-Host '==> done.'
         return $w
+    }
+
+    # ── the menu's own prompts ──
+    # This menu is not the questionnaire: it edits ONE setting and re-applies,
+    # which is the whole reason to open it rather than re-run the wizard. Same
+    # options the wizard offers, but defaulting to what is currently SAVED --
+    # a menu's default is the value you already have. POSIX twin: menu_leader /
+    # menu_theme in bootstrap/ts-config.sh.
+    $menuLeader = {
+        Read-TsChoice -Title 'Leader key (WezTerm) - prefix for pane / tab / workspace commands:' `
+            -Default $leader -Options @(
+                @{ Key = 'ctrl-space'; Label = 'Ctrl+Space' },
+                @{ Key = 'ctrl-a';     Label = 'Ctrl+A'; Note = 'tmux muscle memory' },
+                @{ Key = 'ctrl-b';     Label = 'Ctrl+B'; Note = 'tmux default' },
+                @{ Key = 'alt-space';  Label = 'Alt+Space' })
+    }
+
+    $menuTheme = {
+        Read-TsChoice -Title 'Theme:' -Default $theme -Options @(
+            @{ Key = 'dark';   Label = 'dark';   Note = 'Catppuccin Mocha' },
+            @{ Key = 'light';  Label = 'light';  Note = 'VS Code Light Modern' },
+            @{ Key = 'follow'; Label = 'follow OS appearance'; Note = 'WezTerm switches live' })
     }
 
     $save = {
@@ -1171,10 +1198,13 @@ function Set-TerminalStackConfig {
                 Write-Host ''
                 Write-Host '  1) leader  2) theme  3) tmux prefix  4) apps  5) re-apply  6) Claude TTS  7) WezTerm mux  8) session restore  9) coding agents  t) WezTerm build  w) re-run wizard  q) quit'
                 switch (Read-Host 'Choose') {
-                    '1' { $leader = Read-TsLeader; & $save }
-                    '2' { $theme  = Read-TsTheme;  & $save }
+                    '1' { $leader = & $menuLeader; & $save }
+                    '2' { $theme  = & $menuTheme;  & $save }
                     '3' { $t = Read-Host 'tmux prefix chord (e.g. ctrl-a) [ctrl-b]'; $tmux = if ($t) { $t } else { 'ctrl-b' }; & $save }
-                    '4' { $apps = @(Read-TsApps); Install-TsApps $apps; Show-TsInstalledApps $apps; & $save }
+                    '4' {
+                        $picked = Invoke-TsWizard -SourceDir $src -Only apps
+                        if ($picked) { $apps = @($picked.Apps); Install-TsApps $apps; Show-TsInstalledApps $apps; & $save }
+                    }
                     '5' { & $save }
                     '6' {
                         Show-CcTtsConfig
@@ -1195,7 +1225,13 @@ function Set-TerminalStackConfig {
                         }
                     }
                     '7' { Invoke-TstackSub -Name 'mux' -Forwarded @('status') }
-                    '8' { $restore = Read-TsWeztermRestore; Save-TsConfig -WeztermRestore $restore | Out-Null; Invoke-TsSync $src; Write-Host '==> done.' }
+                    '8' {
+                        $restore = Read-TsChoice -Title 'WezTerm session restore (reopen the last session at startup):' `
+                            -Default (Get-TsProp (Get-TsConfig) weztermRestore 'off') -Options @(
+                                @{ Key = 'off'; Label = 'off'; Note = 'start clean every time' },
+                                @{ Key = 'on';  Label = 'on';  Note = 'reopen the last session' })
+                        Save-TsConfig -WeztermRestore $restore | Out-Null; Invoke-TsSync $src; Write-Host '==> done.'
+                    }
                     '9' {
                         & $agentsShow
                         $which = Read-Host 'Agent: headroom, caveman, agentmemory, or Enter to go back'
@@ -1240,7 +1276,13 @@ function Set-TerminalStackConfig {
                     'none'        { $apps = @() }
                     default       { $apps = ($Value -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
                 }
-            } else { $apps = @(Read-TsApps) }
+            } else {
+                # The picker is tstack/wizard/ now, like the rest of the
+                # questionnaire. POSIX twin: run_wizard_apps in ts-config.sh.
+                $picked = Invoke-TsWizard -SourceDir $src -Only apps
+                if (-not $picked) { return }
+                $apps = @($picked.Apps)
+            }
             Install-TsApps $apps; Show-TsInstalledApps $apps; & $save
         }
         'wezterm' {

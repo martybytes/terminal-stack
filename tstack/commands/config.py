@@ -90,12 +90,18 @@ NATIVE = (
 # prompt replaced by no prompt, with nothing in the diff to explain it.
 # Verbs Python does not implement itself. They are not unported so much as
 # UNPORTABLE by the plan's own rule: `apps` ends in a package-manager install,
-# `tts` is 25 sub-verbs over the daemon, and `reconfigure` is the bootstrap's
-# save sequence -- and REVAMP-PLAN.md lists the installer entry points as never
-# ported. Python routes them to the shell that owns them.
-DELEGATED = ("apps", "tts", "reconfigure")
+# `tts` is 25 sub-verbs over the daemon, and `wizard`/`reconfigure` are the
+# bootstrap's save-then-install sequence -- and REVAMP-PLAN.md lists the
+# installer entry points as never ported. Python routes them to the shell.
+#
+# `wizard` is here rather than in HANDOFF for a reason worth stating: `tstack
+# wizard` ASKS, and that is all it does. `tstack config wizard` asks and then
+# SAVES AND INSTALLS, which is ts-config.sh's `run_wizard` -- and which in turn
+# calls the Python questionnaire. Handing straight to `tstack wizard` collected
+# every answer and threw them away.
+DELEGATED = ("apps", "tts", "reconfigure", "wizard")
 # Handed to another ported command rather than reimplemented here.
-HANDOFF = {"mux": "mux", "wezterm": "wezterm", "ghostty": "ghostty", "wizard": "wizard"}
+HANDOFF = {"mux": "mux", "wezterm": "wezterm", "ghostty": "ghostty"}
 
 # The unknown-verb hint. ONE list, and it must be complete: the bash hint omits
 # `memory`, which it implements, and the pwsh one omits `atuin` instead.
@@ -325,6 +331,36 @@ def set_value(key: str, value: str, out: Out, dry_run: bool) -> int:
     return 0
 
 
+DELEGATED_HELP = {
+    "apps": (
+        "tstack config apps [<id> ...]\n"
+        "  Re-open the optional-app picker, save the selection, and install what\n"
+        "  is missing. Naming ids skips the picker. The install itself is the\n"
+        "  platform's package manager, which is why this half stays in the shell.\n"
+        "  List what is available:  tstack config show"
+    ),
+    "tts": (
+        "tstack config tts <sub-command>\n"
+        "  Voice notifications: on/off, engine, voices, voice-pool, message,\n"
+        "  test, status, doctor and the daemon verbs. Run it bare for the list.\n"
+        "  Full reference:  doc tts"
+    ),
+    "reconfigure": ("tstack config reconfigure\n  Alias for `tstack config wizard`. See that."),
+    "wizard": (
+        "tstack config wizard\n"
+        "  Re-ask every install question, SAVE the answers, and install what they\n"
+        "  imply -- the optional apps and the terminal emulator.\n"
+        "\n"
+        "  This is not the same command as `tstack wizard`, which only ASKS and\n"
+        "  prints or emits the answers for a bootstrap to save. If you want the\n"
+        "  questions without the consequences, run that one.\n"
+        "\n"
+        "  TS_ASSUME_YES=1  take every default without prompting\n"
+        "  TS_LEADER, TS_THEME, TS_APPS, ...  skip individual questions"
+    ),
+}
+
+
 def _delegate(verb: str, args: list[str]) -> int:
     """Hand a verb to the shell that owns it.
 
@@ -332,6 +368,14 @@ def _delegate(verb: str, args: list[str]) -> int:
     and REVAMP-PLAN.md lists the installer entry points as never ported. Calling
     the shell is the design, not a gap.
     """
+    if any(a in ("-h", "--help", "help") for a in args):
+        # NEVER forward this. `ts-config.sh` dispatches on `case "$1"` and simply
+        # ignores the rest, so `tstack config wizard -h` would have RUN the
+        # wizard -- asking every install question and installing packages -- for
+        # someone who typed a help flag. Answer it here instead.
+        print(DELEGATED_HELP[verb])
+        return 0
+
     try:
         source = paths.resolve_source_dir()
     except paths.CloneNotFound:

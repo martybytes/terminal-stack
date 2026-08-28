@@ -677,6 +677,98 @@ ts_win_user() {
 # this stack (run_after_90-sync-windows.sh refuses to render the Windows templates
 # without it), so a miss here is a broken install rather than a missing option.
 # Twin: _tstack_python in dot_zshrc, Get-TstackPython in $PROFILE.
+# ── terminal prompt primitives ───────────────────────────────────────────────
+# These live here, not in _wizard.sh, because they are not wizard questions.
+# `wso`, `ts-smb.sh`, `_smb_setup.sh`, `ts-rclone-config.sh`, `_cc_tts.sh`,
+# `_cleanup.sh` and the `tstack config` menu all prompt, and none of them is the
+# install questionnaire. Moving the questionnaire to Python took its whole file
+# with it and left every one of those callers referring to a function that no
+# longer existed -- the SMB setup, the rclone wizard, the TTS menu and five items
+# of the config menu all died with "command not found" the moment they prompted.
+# Sourcing _config.sh is what those files already do, so this is where the
+# primitives belong. `tests/test_shell_symbols.py` now fails on the next such
+# deletion instead of leaving it to be found by hand.
+
+# Prompt on the controlling terminal: under curl|bash, stdin is the script pipe,
+# so read from /dev/tty. Returns "" when there is no terminal (CI).
+ts_tty_prompt() {
+    local answer=""
+    # Read with readline (-e) so Backspace and the arrow keys edit the line
+    # instead of inserting raw control codes (^?, ^[[D); -p shows the prompt.
+    # Skip cleanly when there is no controlling terminal (CI / non-interactive).
+    if { true > /dev/tty; } 2>/dev/null; then
+        IFS= read -e -r -p "$1" answer < /dev/tty || answer=""
+    fi
+    echo "$answer"
+}
+
+# One definition of "is there a human here" for every prompt in the stack, so
+# headless behaviour cannot drift between them. pwsh twin: Test-TsInteractive.
+ts_is_interactive() { { true > /dev/tty; } 2>/dev/null; }
+
+# The menu prompt. Marks the default and says how to take it, accepts the
+# option's name as well as its number, and RE-PROMPTS on anything else -- the old
+# `case "$ans" in *) default ;; esac` silently selected option 1 for a typo, a
+# stray 'y', or a fat-fingered '9', which is the opposite of what a default is
+# for. Three invalid answers take the default rather than looping forever.
+#
+# usage: ts_prompt_choice <default-key> <title> <intro-or-empty> "key|label|note"...
+# Writes the menu to /dev/tty (the caller captures stdout for the chosen key).
+# Twin of bootstrap/_config.ps1 Read-TsChoice -- keep the rendered output identical.
+ts_prompt_choice() {
+    local def="$1" title="$2" intro="$3"; shift 3
+    local n=0 opt rest key label note mark suffix ans i lower
+    {
+        printf '\n%s\n' "$title"
+        [ -n "$intro" ] && printf '%s\n' "$intro"
+        for opt in "$@"; do
+            n=$((n + 1))
+            key="${opt%%|*}"; rest="${opt#*|}"
+            label="${rest%%|*}"; note="${rest#*|}"
+            [ "$note" = "$label" ] && note=""
+            mark=" "; suffix=""
+            [ -n "$note" ] && suffix="  ($note)"
+            if [ "$key" = "$def" ]; then mark=">"; suffix="$suffix  [default - press Enter]"; fi
+            printf ' %s  %d) %s%s\n' "$mark" "$n" "$label" "$suffix"
+        done
+    } > /dev/tty 2>/dev/null
+    n=0; for opt in "$@"; do n=$((n + 1)); done
+
+    if ! ts_is_interactive; then
+        printf 'Choose [1-%d, Enter=default]: (non-interactive - taking the default)\n' "$n" \
+            > /dev/tty 2>/dev/null
+        printf '%s\n' "$def"
+        return 0
+    fi
+    local tries=0
+    while [ "$tries" -lt 3 ]; do
+        tries=$((tries + 1))
+        ans="$(ts_tty_prompt "Choose [1-$n, Enter=default]: ")"
+        ans="$(printf '%s' "$ans" | tr -d '[:space:]')"
+        [ -z "$ans" ] && { printf '%s\n' "$def"; return 0; }
+        case "$ans" in
+            ''|*[!0-9]*) ;;
+            *)  if [ "$ans" -ge 1 ] && [ "$ans" -le "$n" ]; then
+                    i=0
+                    for opt in "$@"; do
+                        i=$((i + 1))
+                        [ "$i" = "$ans" ] && { printf '%s\n' "${opt%%|*}"; return 0; }
+                    done
+                fi ;;
+        esac
+        lower="$(printf '%s' "$ans" | tr 'A-Z' 'a-z')"
+        for opt in "$@"; do
+            key="${opt%%|*}"
+            [ "$lower" = "$(printf '%s' "$key" | tr 'A-Z' 'a-z')" ] \
+                && { printf '%s\n' "$key"; return 0; }
+        done
+        printf "  '%s' is not one of the choices - enter 1-%s, a name, or press Enter for the default.\n" \
+            "$ans" "$n" > /dev/tty 2>/dev/null
+    done
+    printf '  three invalid answers - taking the default.\n' > /dev/tty 2>/dev/null
+    printf '%s\n' "$def"
+}
+
 ts_python() {
     local p
     for p in python3 python; do

@@ -14,7 +14,7 @@ commands any more, and no aliases for them.
 | `tstack mux` | the WezTerm multiplexer domain |
 | `tstack wezterm` | WezTerm channel and updates |
 | `tstack ghostty` | the managed Ghostty config; `status`, `diff`, `on`, `off` |
-| `tstack wizard` | the install questionnaire; every question has a `TS_*` skip |
+| `tstack wizard` | ask the install questions and print the answers — it saves nothing |
 | `tstack smb` | SMB shares over rclone (POSIX only) - see `doc smb-shares` |
 | `tstack agents` | agent CLI wiring - see `doc agentmemory`, `doc headroom` |
 | `tstack agentmemory` | the agentmemory hook harness; `--check` reports reverted edits |
@@ -148,13 +148,21 @@ Run it bare for an interactive menu; `tstack config show` just prints the state.
 | `tstack config agents [show]` | saved Headroom / Caveman / AgentMemory state |
 | `tstack config agents <tool> on\|off\|status\|repair\|uninstall` | one tool, user scope; never edits a project or Docker |
 | `tstack config agents headroom cursor <mcp\|byok\|off>` | Cursor-only mode; `mcp` keeps subscription traffic direct |
-| `tstack config wizard` | re-run **every** install question and persist the lot |
+| `tstack config wizard` | ask them **and** save and install — see below |
 
 ## `tstack config wizard`
 
-The "start over as if installing" path — it re-asks leader, theme, terminal
-emulator, apps, mux, session restore, atuin, voice and the agent tools, then
-saves them all. `tstack config apps` re-asks only the apps question.
+The "start over as if installing" path — it re-asks the profile question,
+then leader, theme, terminal emulator, apps, prompt preset, mux, session
+restore, atuin, voice and the agent tools, saves them all, and installs what
+they imply. `tstack config apps` re-asks only the apps question.
+
+**`tstack wizard` is a different command.** It runs the same questionnaire and
+then *prints* or emits the answers; it writes no setting and installs nothing.
+The split is deliberate — the four bootstraps each need the answers before
+there is a config file to save them into, and each owns its own save order. So
+`tstack wizard` is the questionnaire and `tstack config wizard` is the
+questionnaire plus the consequences; `-h` on either one says which you have.
 
 `TS_ASSUME_YES=1 tstack config wizard` takes every default without prompting, and
 the per-question `TS_*` env vars still skip individual prompts

@@ -355,6 +355,31 @@ show() {
     echo "  agentmemory: $(ts_agent_get agentmemoryEnabled)"
 }
 
+# ── the menu's own prompts ──
+# The install questionnaire is Python now, so its per-question bash functions are
+# gone -- but this menu is not the questionnaire. It edits ONE setting at a time
+# and re-applies, which is the whole reason to open it rather than re-run the
+# wizard. These ask the same questions with the same options, and default to
+# whatever is currently SAVED: a menu's default is the value you already have,
+# not the value a fresh install would pick.
+menu_leader() {
+    ts_prompt_choice "$(cur leaderChord ctrl-space)" \
+        'Leader key (WezTerm) - prefix for pane / tab / workspace commands:' '' \
+        'ctrl-space|Ctrl+Space' 'ctrl-a|Ctrl+A|tmux muscle memory' \
+        'ctrl-b|Ctrl+B|tmux default' 'alt-space|Alt+Space'
+}
+
+menu_theme() {
+    ts_prompt_choice "$(cur themeMode dark)" 'Theme:' '' \
+        'dark|dark|Catppuccin Mocha' 'light|light|VS Code Light Modern' \
+        'follow|follow OS appearance|WezTerm switches live'
+}
+
+# usage: menu_on_off <settings-key> <title> <off-note> <on-note>
+menu_on_off() {
+    ts_prompt_choice "$(cur "$1" off)" "$2" '' "off|off|$3" "on|on|$4"
+}
+
 menu() {
     while true; do
         echo
@@ -363,16 +388,16 @@ menu() {
         echo "  1) leader key   2) theme   3) tmux prefix   4) apps   5) re-apply   6) Claude TTS   7) WezTerm mux   8) session restore   9) coding agents   a) atuin   g) ghostty   t) WezTerm build   w) re-run wizard   q) quit"
         local c; c="$(ts_tty_prompt 'Choose: ')"
         case "$c" in
-            1) set_leader "$(ts_prompt_leader)" ;;
-            2) set_theme  "$(ts_prompt_theme)" ;;
+            1) set_leader "$(menu_leader)" ;;
+            2) set_theme  "$(menu_theme)" ;;
             3) local t; t="$(ts_tty_prompt 'tmux prefix chord (e.g. ctrl-a) [ctrl-b]: ')"; set_tmux "${t:-ctrl-b}" ;;
-            4) set_apps "$(ts_prompt_apps)" ;;
+            4) local sel; sel="$(run_wizard_apps '')" && set_apps "$sel" ;;
             5) finish ;;
             6) ts_config_tts show; echo; ts_config_tts_menu ;;
             7) run_mux status ;;
-            8) local r; r="$(ts_prompt_wezterm_restore)"; set_restore "$r" ;;
+            8) set_restore "$(menu_on_off weztermRestore 'WezTerm session restore (reopen the last session at startup):' 'start clean every time' 'reopen the last session')" ;;
             9) agents_menu ;;
-            a|A) set_atuin "$(ts_prompt_atuin)" ;;
+            a|A) set_atuin "$(menu_on_off atuinEnabled 'atuin shell history (replaces Ctrl+R):' 'keep fzf on Ctrl+R' 'atuin owns Ctrl+R')" ;;
             g|G) run_ghostty status ;;
             t|T) run_wezterm status ;;
             w|W) run_wizard ;;

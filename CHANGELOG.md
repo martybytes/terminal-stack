@@ -268,6 +268,48 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **The wizard port deleted three prompt primitives that six non-wizard callers
+  used (08/28/2026).** Moving the install questionnaire into `tstack/wizard/`
+  correctly deleted 21 bash prompt functions and the `Read-Ts*` half of
+  `_config.ps1` — but `ts_prompt_choice`, `ts_tty_prompt` and `ts_is_interactive`
+  were never questions. They are the primitives every *other* prompt in the stack
+  is built from, and `wso` (six call sites), `tstack smb setup`, the rclone
+  wizard, the TTS menu and `_cleanup.sh` all call them. Each died with `command
+  not found` the moment it prompted. Five items of each `tstack config` menu —
+  leader, theme, apps, session restore, and on Windows the re-run-wizard item —
+  called questions that were likewise gone.
+
+  Nothing caught it: bash resolves a function name at *call* time, `bash -n`
+  checks syntax only, and PowerShell's parser is equally content with a command
+  that does not exist. `tests/test_shell_symbols.py` now resolves every
+  `ts_*` / `Read-Ts*` name statically, the way neither interpreter will, on both
+  shells. It immediately found a second, older instance: a rename to
+  `ts_smb_conn` had left one caller in `_smb_setup.sh` behind, so `tstack smb
+  setup` died at the point where it asks the host for its share list.
+
+  The primitives now live in `_config.sh` / `_config.ps1`, which every caller
+  already sources — not with the questionnaire that moved. The menus ask their
+  own single-setting questions (`menu_leader` / `$menuLeader`, and twins), with
+  the same options the wizard offers but defaulting to whatever is currently
+  *saved*: a menu's default is the value you already have.
+
+- **`tstack config wizard` collected every answer and threw them away
+  (08/28/2026).** It had been routed to `tstack wizard`, which only *asks* —
+  that is what lets the four bootstraps each own their own save order. The
+  variant under `config` is the one that also saves and installs, so it belongs
+  with `apps` and `tts` on the delegated path, where the shell's `run_wizard`
+  does the persisting. `-h` on any delegated verb is now answered in Python
+  rather than forwarded: `ts-config.sh` dispatches on `$1` and ignores the rest,
+  so `tstack config wizard -h` had been *running the installer*.
+
+- **`Save-TsWorkspaceOverride $w.Workspace` on the `$PROFILE` wizard path
+  (08/28/2026).** The workspace root is not a wizard question and the emitted
+  JSON never carried the key, so the read was `$null` and an empty
+  `WORKSPACE_DIR` was persisted over a real one. Both callers now go through one
+  `Invoke-TsWizard`, which is also what stops the two copies drifting again.
+
+### Fixed
+
 - **A Windows-side save silently deleted `starshipPreset` and `atuinEnabled`
   (08/27/2026).** `Save-TsConfig` rebuilds config.json from a fixed set of
   properties, so a key missing from that set is dropped on any save - the same

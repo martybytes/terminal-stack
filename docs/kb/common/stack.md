@@ -9,6 +9,9 @@
 | `tstack doctor [--repair]` | health-check / fix the install — see below |
 | `tstack config` | change leader, theme, tmux prefix, apps, TTS, agent tools, WezTerm mux/restore — see below |
 | `tstack config wizard` | re-run the whole install questionnaire from scratch — see below |
+| `tstack ui` | every setting in one screen; needs Textual, which it tells you how to install |
+| `tstack services` | the Docker stacks: up, down, test, doctor — `doc services` |
+| `tstack agents` | agent CLI wiring and probes — `doc agentmemory`, `doc headroom` |
 | `tstack mux` | WezTerm multiplexer domain: on/off, status, kill/restart/reset — see below |
 | `tstack smb` | SMB/CIFS shares over rclone: discover, interrogate, mount — `doc smb-shares` (macOS/Linux) |
 | `rclone config` / `rclone-stock config` | guided provider setup / untouched upstream wizard — `doc rclone` |

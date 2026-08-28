@@ -1256,7 +1256,11 @@ def test_pwsh_wizard_persists_the_workspace_answer():
     )
     cfg = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
     assert "function Save-TsWorkspaceOverride" in cfg
-    assert "Save-TsWorkspaceOverride $w.Workspace" in ps
+    # NOT $w.Workspace. The workspace root is not a wizard question -- it has no
+    # bash twin and the emitted JSON never carried the key -- so that read was
+    # $null and this persisted an EMPTY WORKSPACE_DIR over a real one. Ask for it
+    # the way windows-bootstrap.ps1 does.
+    assert "Save-TsWorkspaceOverride (Read-TsWorkspaceDir)" in ps
     # And a half-finished questionnaire must not be persisted over real answers.
     assert "did not complete" in ps
 
@@ -3092,12 +3096,21 @@ def test_the_profile_is_not_a_saved_setting():
 def test_there_is_only_one_wizard_to_keep_in_agreement():
     """This used to assert the bash and pwsh wizards asked the same questions.
     There is one implementation now, so the invariant is that neither shell has
-    grown a prompt back."""
+    grown a QUESTION back.
+
+    Note what is not on these lists: `ts_prompt_choice` / `Read-TsChoice`. Those
+    are prompt primitives, not questions, and six non-wizard callers use them --
+    `wso`, `tstack smb setup`, the rclone wizard, the TTS menu, `_cleanup.sh` and
+    each config menu. An earlier version of this test named them, which recorded
+    the deletion that broke every one of those as though it were the invariant.
+    They live in _config.{sh,ps1} and `tests/test_shell_symbols.py` holds the
+    real line: no script may call a function that is defined nowhere.
+    """
     sh = (ROOT / "bootstrap/_wizard.sh").read_text(encoding="utf-8")
     ps = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
-    for gone in ("ts_prompt_choice", "ts_prompt_multi", "ts_prompt_profile"):
+    for gone in ("ts_prompt_multi", "ts_prompt_profile", "ts_prompt_leader", "ts_prompt_apps"):
         assert gone not in sh, f"{gone} came back into the shell"
-    for gone in ("function Read-TsChoice", "function Read-TsMulti", "function Read-TsProfile"):
+    for gone in ("function Read-TsMulti", "function Read-TsProfile", "function Read-TsLeader"):
         assert gone not in ps, f"{gone} came back into PowerShell"
     # ...and every env-var escape hatch still works, from the one place.
     flow = (ROOT / "tstack/wizard/flow.py").read_text(encoding="utf-8")

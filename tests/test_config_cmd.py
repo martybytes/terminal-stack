@@ -282,8 +282,12 @@ def test_a_sub_commands_help_is_forwarded_not_swallowed(capsys):
     assert config.main(["-h"]) == 0
     assert "tstack config -" in capsys.readouterr().out
 
+    # A DELEGATED verb answers -h ITSELF. Forwarding it would have run the
+    # installer: ts-config.sh dispatches on $1 and ignores every later argument.
     assert config.main(["wizard", "-h"]) == 0
-    assert "tstack wizard -" in capsys.readouterr().out
+    got = capsys.readouterr().out
+    assert "tstack config wizard" in got and "SAVE" in got
+    assert "not the same command as `tstack wizard`" in got
 
     assert config.main(["ghostty", "-h"]) == 0
     assert "tstack ghostty -" in capsys.readouterr().out
@@ -361,3 +365,53 @@ def test_a_missing_docker_says_what_to_run_later_rather_than_failing(monkeypatch
 
     monkeypatch.setattr(agents_cmd, "main", lambda argv: 0)
     assert config.main(["memory", "headroom"]) == 0
+
+
+def test_config_wizard_saves_where_bare_wizard_only_asks(monkeypatch):
+    """Two commands, two jobs, and conflating them threw away every answer.
+
+    `tstack wizard` ASKS -- it collects and emits, and persists nothing, which is
+    what lets the four bootstraps own their own save order. `tstack config
+    wizard` asks and then SAVES AND INSTALLS, which is ts-config.sh's
+    `run_wizard`, which in turn calls the Python questionnaire. Handing straight
+    to `tstack wizard` collected the answers and discarded them.
+    """
+    assert "wizard" in config.DELEGATED
+    assert "wizard" not in config.HANDOFF
+
+    seen: list[list[str]] = []
+
+    class Done:
+        returncode = 0
+
+    monkeypatch.setattr(config.paths, "resolve_source_dir", lambda: ROOT)
+    monkeypatch.setattr(config.subprocess, "run", lambda argv, **kw: (seen.append(argv), Done())[1])
+    assert config.main(["wizard"]) == 0
+    assert seen and seen[0][-1] == "wizard"
+    assert "ts-config.sh" in seen[0][1], "it must reach run_wizard, not tstack wizard"
+
+    # ...and the shell arm that does the saving still exists.
+    body = (ROOT / "bootstrap/ts-config.sh").read_text(encoding="utf-8")
+    assert "wizard|reconfigure) run_wizard ;;" in body
+    run_wizard = body[body.index("run_wizard() {") :]
+    for setter in ("ts_save_config", "ts_memory_apply", "ts_atuin_set", "ts_starship_set"):
+        assert setter in run_wizard, f"run_wizard stopped calling {setter}"
+
+
+def test_help_on_a_delegated_verb_never_reaches_the_shell(monkeypatch):
+    """The near-miss worth a permanent test.
+
+    `ts-config.sh` dispatches on `case "$1"` and ignores everything after it, so
+    forwarding `-h` to it does not print help -- it RUNS the verb. For `wizard`
+    and `reconfigure` that means asking every install question and installing
+    packages because somebody typed a help flag.
+    """
+
+    def explode(*a, **kw):  # pragma: no cover - the point is that it is not called
+        raise AssertionError("-h reached the shell")
+
+    monkeypatch.setattr(config.subprocess, "run", explode)
+    for verb in config.DELEGATED:
+        for flag in ("-h", "--help", "help"):
+            assert config.main([verb, flag]) == 0, f"{verb} {flag}"
+    assert set(config.DELEGATED) <= set(config.DELEGATED_HELP), "a verb with no help text"

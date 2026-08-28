@@ -189,7 +189,7 @@ tstack doctor          # diagnose the install; --json for one record per check, 
 tstack config          # interactive settings menu
 tstack config theme follow
 tstack ui              # every setting in one screen (needs Textual)
-tstack wizard          # replay the install questionnaire
+tstack config wizard   # replay the install questionnaire and save the answers
 tstack ghostty         # the managed Ghostty config: status, diff, on, off
 tstack update          # pull the latest stack and re-apply
 tstack rollback        # undo that update

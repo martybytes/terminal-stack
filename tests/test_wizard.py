@@ -414,10 +414,12 @@ def test_the_shell_wizard_is_a_shim_now():
     sh = (ROOT / "bootstrap/_wizard.sh").read_text(encoding="utf-8")
     assert len(sh.splitlines()) < 80, "the questions moved; only the hand-off stays"
     assert "main.py" in sh and "--emit sh" in sh
-    assert "ts_prompt_choice" not in sh and "ts_prompt_multi" not in sh
+    # The QUESTIONS moved. The prompt primitives did not -- see
+    # test_shell_symbols.py; deleting those broke six non-wizard callers.
+    assert "ts_prompt_multi" not in sh and "ts_prompt_leader" not in sh
 
     ps = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
-    for gone in ("function Read-TsChoice", "function Read-TsMulti", "function Read-TsWizard"):
+    for gone in ("function Read-TsMulti", "function Read-TsWizard", "function Read-TsTheme"):
         assert gone not in ps, gone
 
 

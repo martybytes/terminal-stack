@@ -574,6 +574,68 @@ function Set-TsMemoryBackend([ValidateSet('agentmemory','headroom','none')][stri
 # probe in _wizard.sh ts_tty_prompt.
 function Test-TsInteractive { -not [Console]::IsInputRedirected }
 
+# ── terminal prompt primitives ──
+# Here, not in the wizard's own file, and for the reason the POSIX twin gives in
+# _config.sh: these are not wizard questions. `Set-TerminalStackConfig`'s menu
+# edits ONE setting at a time and still has to ask. Moving the questionnaire to
+# Python took the whole Read-Ts* half of this file with it, and five items of
+# that menu -- leader, theme, apps, session restore, re-run wizard -- were left
+# calling functions that no longer existed. `tests/test_shell_symbols.py` fails
+# on the next such deletion rather than leaving it to be found by hand.
+
+# Map one typed answer onto an option Key; $null when it matches nothing.
+# Split out from the prompt loop so the matching rules are testable without a
+# terminal.
+function Resolve-TsChoiceAnswer {
+    param([Parameter(Mandatory)][object[]]$Options, [string]$Answer)
+    $a = "$Answer".Trim()
+    if (-not $a) { return $null }
+    if ($a -match '^\d+$' -and [int]$a -ge 1 -and [int]$a -le $Options.Count) {
+        return $Options[[int]$a - 1].Key
+    }
+    $named = @($Options | Where-Object { $_.Key -ieq $a })
+    if ($named.Count) { return $named[0].Key }
+    return $null
+}
+
+# $Options is an ordered list of @{ Key; Label; Note }. Returns the chosen Key.
+# Twin of bootstrap/_wizard.sh ts_prompt_choice — keep the rendered output
+# identical (parse-time isolation forces the copy).
+function Read-TsChoice {
+    param(
+        [Parameter(Mandatory)][string]$Title,
+        [Parameter(Mandatory)][object[]]$Options,
+        [Parameter(Mandatory)][string]$Default,
+        [string[]]$Intro = @()
+    )
+    Write-Host ''
+    Write-Host $Title
+    foreach ($line in $Intro) { Write-Host $line }
+    for ($i = 0; $i -lt $Options.Count; $i++) {
+        $o = $Options[$i]
+        $note = $o['Note']   # index, not dot: Note is optional and dot access throws under strictness
+        $suffix = if ($note) { "  ($note)" } else { '' }
+        $mark = ' '
+        if ($o.Key -eq $Default) { $mark = '>'; $suffix += '  [default — press Enter]' }
+        Write-Host (" {0}  {1}) {2}{3}" -f $mark, ($i + 1), $o.Label, $suffix)
+    }
+    $range = "1-$($Options.Count)"
+    if (-not (Test-TsInteractive)) {
+        Write-Host "Choose [$range, Enter=default]: (non-interactive — taking the default)"
+        return $Default
+    }
+    for ($try = 0; $try -lt 3; $try++) {
+        $ans = "$(Read-Host "Choose [$range, Enter=default]")".Trim()
+        if (-not $ans) { return $Default }
+        $key = Resolve-TsChoiceAnswer -Options $Options -Answer $ans
+        if ($key) { return $key }
+        Write-Host "  '$ans' is not one of the choices — enter $range, a name, or press Enter for the default."
+    }
+    Write-Host '  three invalid answers — taking the default.'
+    return $Default
+}
+
+
 
 
 
@@ -880,6 +942,37 @@ function Get-TsPython {
 # windows-bootstrap.ps1 runs `tstack wizard --emit json` and reads the object.
 # The JSON keys are the PascalCase names the old hashtable used, so every $w.X
 # downstream is unchanged.
+
+# Run the questionnaire and return its answers as an object, or $null if the
+# user quit or it failed. ONE copy, because there are two callers -- the
+# bootstrap and `tstack config wizard` in $PROFILE -- and the last time each had
+# its own, $PROFILE was still calling a Read-TsWizard that no longer existed.
+#
+# -Only runs a single question ("apps"), which is what the config menu's apps
+# item needs; the POSIX twin is run_wizard_apps in bootstrap/ts-config.sh.
+function Invoke-TsWizard {
+    param([string]$SourceDir, [switch]$AskTerminals, [string]$Only)
+    $python = Get-TsPython
+    if (-not $python) {
+        Write-Warning 'python3 is required to run the install questionnaire.'
+        return $null
+    }
+    $out = Join-Path ([IO.Path]::GetTempPath()) ("tswiz-" + [guid]::NewGuid() + ".json")
+    $wizardArgs = @((Join-Path $SourceDir 'tstack\main.py'), 'wizard', '--emit', 'json', '--out', $out)
+    if ($Only) { $wizardArgs += @('--only', $Only) }
+    if ($AskTerminals) { $wizardArgs += '--ask-terminals' }
+    if ($env:TS_ASSUME_YES) { $wizardArgs += '--assume-yes' }
+    try {
+        & $python @wizardArgs
+        $rc = $LASTEXITCODE
+        # 3 is "quit at the review", which every caller treats as cancelled --
+        # not as a failure to report.
+        if ($rc -ne 0 -or -not (Test-Path -LiteralPath $out)) { return $null }
+        return (Get-Content -LiteralPath $out -Raw | ConvertFrom-Json)
+    } finally {
+        Remove-Item -LiteralPath $out -Force -ErrorAction SilentlyContinue
+    }
+}
 
 function Read-TsWorkspaceDir {
     if ($env:WORKSPACE_DIR) {
