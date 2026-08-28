@@ -283,7 +283,7 @@ npm start          # serve the built app
 | `SECRET_FILE` / `AGENTMEMORY_SECRET` | — | bearer for the console's own API calls (file wins; re-read on 401). Proxy traffic passes the caller's auth through untouched. |
 | `CAPTURE_BODIES` | `false` | ships off — request contents are never recorded; the proxy only inspects bounded JSON metadata for project/session attribution and streams agent tagging without buffering content |
 | `LLM_POLL_MS` | `3000` | cadence for local upstream LLM health/config telemetry; minimum 1000 ms |
-| `LLM_PROVIDER` / `LLM_ENDPOINT_LABEL` | `configured LLM` / — | safe display names, such as `OpenAI-compatible` and `<your-llm-host>` |
+| `LLM_PROVIDER` / `LLM_ENDPOINT_LABEL` | `configured LLM` / — | safe display names, such as `Ollama` and `local workstation`. `none` / `no chat provider configured` on a machine with no chat model, which is what the agentmemory stack's `.env.example` ships |
 | `LLM_MODEL` / `LLM_BASE_URL` | — | safe model and endpoint mirrors; never put credentials in the URL |
 | `LLM_TIMEOUT_MS` / `LLM_MAX_TOKENS` | — | display-only request ceiling and maximum output-token settings |
 | `LLM_SUMMARIZE_CONCURRENCY` / `LLM_GRAPH_BATCH_SIZE` | — | display-only summary worker and graph batch settings |

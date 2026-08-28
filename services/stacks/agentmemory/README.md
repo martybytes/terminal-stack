@@ -542,65 +542,95 @@ evidence — never the exit code.
 
 ---
 
-## Features, local embeddings, and the remote LLM
+## Features, local embeddings, and the optional chat model
 
-Embeddings remain local. Change-aware session summarization, bounded incremental graph extraction,
-and consolidation run against a remote chat-completions endpoint. AgentMemory speaks the OpenAI wire
-protocol, so the provider is a configuration choice rather than a code path: today that endpoint is
-**vLLM on <your-llm-host>**, and the OpenAI API remains a supported one-file rollback.
+Embeddings are local and always run. Change-aware session summarization, bounded incremental graph
+extraction, and consolidation run against a chat-completions endpoint **you choose, or none at all**.
+AgentMemory speaks the OpenAI wire protocol, so the provider is a configuration choice rather than a
+code path.
 
-| | Runs on | Needs network? |
-|---|---|---|
-| **Embeddings** (semantic search) | in this container, on CPU | no |
-| **LLM features** (graph, consolidation, summaries) | remote endpoint | yes — LAN for vLLM, internet for OpenAI |
+| | Runs on | Needs network? | Works with no chat model? |
+|---|---|---|---|
+| **Capture and storage** | this container | no | yes |
+| **Embeddings** (semantic search) | this container, on CPU | no | yes |
+| **Compression, summaries, graph, consolidation** | your chat endpoint | yes, unless the endpoint is on this machine | no — skipped |
 
-That split is deliberate. Embeddings run on *every* write, so search remains available offline and
-the persisted 384-dimension index does not change. LLM features are durable background work and
-resume after connectivity returns.
+That split is deliberate. Embeddings run on *every* write, so search stays available offline and the
+persisted 384-dimension index never changes. The chat-model features are durable background work and
+resume when the endpoint comes back.
 
-### vLLM on <your-llm-host> (current provider)
+`tstack agents llm` prints the same table for your machine, says which state you are in, and — when
+nothing is configured — probes the usual local ports and offers the two lines to paste.
 
-| | |
-|---|---|
-| Endpoint | `http://<tailnet-ip>:8000/v1` — over **Tailscale**, `VLLM_BASE_URL` in the repo-root `.env`. Find it with `tailscale ip -4 <your-llm-host>`. |
-| Model | `qwen3-8b-awq` (`Qwen/Qwen3-8B-AWQ`, AWQ-quantized, tensor-parallel across two A4000s) |
-| Context | **16,384 tokens** — every prompt bound in this stack is sized against this, not against cost |
-| Served by | vLLM 0.15.0, native `vllm.service` under systemd, `Restart=always`, enabled at boot |
-| Auth | enforced; the key is `VLLM_API_KEY`, mirrored into `OPENAI_API_KEY` (see below) |
-| Cost | none — this is local hardware |
+### Choosing a provider
 
-There is no cheap/expensive model split any more: one model serves summaries, graph extraction, and
-consolidation. `AGENTMEMORY_COMPRESSION_MODEL` is left unset so the provider falls back to
-`OPENAI_MODEL` rather than carrying a stale cloud model name.
+**A fresh clone ships with none, on purpose.** Unset is a clean skip that every check reports. An
+endpoint that is *set and does not answer* fails silently: the calls return empty, fail XML parsing,
+retry, and still log `outcome:"success"`. That asymmetry is the single most important thing in this
+section.
 
-**The credential must be set in the repo-root `.env`, not here.** Compose loads `agentmemory/.env`
-first and `../.env` second, so the root file is the only place an `OPENAI_API_KEY` can win. The vLLM
-key goes in under that name — the variable is named for the wire protocol, not the vendor.
+| Option | Cost | Good for | Watch out for |
+|---|---|---|---|
+| **None** | — | capture, search, and everything above | the four derived features never run |
+| **Local runtime** — Ollama, LM Studio, llama.cpp, vLLM | none beyond electricity | privacy, unmetered background work | context length; from inside the container `localhost` is the container |
+| **Self-hosted on another box** | none | a spare GPU machine | reachability from the *container*, which is not the same as from the host |
+| **Hosted API** — OpenAI and compatible gateways | per observation, unattended | no hardware, largest context | it is billed continuously; read [Authoritative cost reconciliation](#authoritative-cost-reconciliation) first |
 
-Managing vLLM and its models is out of scope for this repo; it lives on <your-llm-host>. The documented
-reversal there is `sudo systemctl stop vllm && sudo systemctl enable --now ollama` (Ollama's config
-and models are preserved but its service is stopped and disabled).
+**Which model.** An 8B instruct model at 4-bit is about the smallest thing that handles all four
+families well, and fits a 16 GB machine. `llmfit recommend --use-case coding` sizes candidates
+against your actual RAM and GPU and prints an ollama name; it is in the terminal-stack app catalog
+under *local model sizing* (`tstack config apps llmfit`), and `doc llmfit` has the rest.
 
-#### Three things that bite when switching providers
+**Context length is the bound that matters here, not price.** Every `AGENTMEMORY_*_MAX_*` in
+`.env.example` is sized against roughly 16k. A prompt over the window is rejected upstream and the
+run then logs `newInsights: 0` with `success: true` — see
+[The failure that reports success](#the-failure-that-reports-success-consolidations-reflect-stage),
+which is the single most expensive lesson in this file.
+
+### Setting one
+
+1. `OPENAI_BASE_URL` and `OPENAI_MODEL` in `agentmemory/.env`. The `/v1` suffix is part of the URL.
+   For a runtime on this machine use `http://host.docker.internal:11434/v1` (Ollama's port) rather
+   than `localhost` — the compose file maps that name on every platform.
+2. `OPENAI_API_KEY` in the **repo-root** `.env`. Compose loads `agentmemory/.env` first and `../.env`
+   second, so the root file is the only place a credential can win; setting it in the stack file has
+   no effect. Any non-empty string works for a local server that does not check it.
+3. `LLM_PROVIDER_LABEL` and `LLM_ENDPOINT_LABEL` in `agentmemory/.env`, or the console keeps
+   reporting the machine as unconfigured.
+4. `tstack services restart agentmemory`, then `tstack services test agentmemory`.
+
+**Verify from inside the container, never from the host.** A container's DNS is Docker's embedded
+resolver and its egress a separate path, so an endpoint your shell reaches may be unreachable from
+the server. `tstack services test agentmemory` dials from in there; `tstack agents llm` probes from
+the host and says so rather than claiming otherwise.
+
+There is no cheap/expensive model split unless you configure one:
+`AGENTMEMORY_COMPRESSION_MODEL` is left unset so the provider falls back to `OPENAI_MODEL`. Set it
+only if your provider bills differently for a smaller model.
+
+
+#### Three things that bite when you point this at a new provider
 
 **1. `OPENAI_REASONING_EFFORT` is truthy-checked, so `none` is not "off".** The deployment patch
 emits `if (this.reasoningEffort) body.reasoning_effort = this.reasoningEffort`. The string `none` is
-non-empty and therefore truthy, so leaving the OpenAI value in place sends
-`reasoning_effort: "none"` to vLLM on every request. **Set it to empty**, which omits the field. The
-neighbouring completion-token branch is already provider-aware: `max_completion_tokens` is sent only
-when the model name starts with `gpt-5.6`, so `qwen3-8b-awq` correctly receives plain `max_tokens`.
+non-empty and therefore truthy, so a leftover value sends `reasoning_effort: "none"` on every
+request — which most OpenAI-compatible servers reject outright. **Set it to empty**, which omits the
+field, unless your model genuinely takes the parameter. The neighbouring completion-token branch is
+already provider-aware: `max_completion_tokens` is sent only when the model name starts with
+`gpt-5.6`, so a local model correctly receives plain `max_tokens`.
 
-**2. `SUMMARIZE_CHUNK_SIZE` must come down with the context.** `250` was sized for a
-65,536-token endpoint. Nothing truncates an individual observation anywhere in the summary path, and
-`AGENTMEMORY_SUMMARY_MAX_OBSERVATIONS` caps the observation *count*, not their size — so the chunk
-size is the only real bound. At `25`, measured map/reduce prompts on this deployment peak at
-**5,147 prompt tokens** (~206 per observation) against a 16,384 context, leaving ~11k of headroom
-after the 2,048-token output reserve. Raise it only against observed
+**2. `SUMMARIZE_CHUNK_SIZE` must track the context window.** The value `250` was sized for a
+65,536-token endpoint; the shipped default of `25` is sized for roughly 16k. Nothing truncates an
+individual observation anywhere in the summary path, and `AGENTMEMORY_SUMMARY_MAX_OBSERVATIONS` caps
+the observation *count*, not their size — so the chunk size is the only real bound. At `25`, measured
+map/reduce prompts peak at **5,147 prompt tokens** (~206 per observation), leaving ~11k of headroom
+in a 16,384 context after the 2,048-token output reserve. Scale it against observed
 `[agentmemory] llm_usage` `promptTokens`, never by guessing.
 
-**3. `VLLM_MAX_TOKENS=16384` is a context length, not an output cap.** Copying it into AgentMemory's
-`MAX_TOKENS` would request the entire context as completion tokens and leave no room for the prompt.
-`MAX_TOKENS` stays at `2048`; `VLLM_MAX_TOKENS` is used only to *derive* the bound above.
+**3. A context length is not an output cap.** Your model's context (16,384 for an 8B served at
+default settings) bounds prompt *plus* completion. Copying it into AgentMemory's `MAX_TOKENS` would
+request the whole window as completion tokens and leave no room for the prompt. `MAX_TOKENS` stays at
+`2048`; the context length is used only to *derive* the bound above.
 
 #### The failure that reports success: consolidation's reflect stage
 
@@ -609,7 +639,8 @@ This one is worth knowing because *nothing* surfaces it. The consolidation pipel
 fact, lesson, and untruncated crystal narrative matching a concept cluster, with no caps anywhere —
 `AGENTMEMORY_SUMMARY_MAX_OBSERVATIONS` and `SUMMARIZE_CHUNK_SIZE` do not apply to it. With the
 semantic store past 1,400 facts, one cluster reached **105,926 chars / ~26,482 tokens** and was
-rejected instantly by the 16,384-token endpoint.
+rejected instantly by a 16,384-token endpoint. A larger window buys headroom; it does not remove the
+failure mode, because the cluster grows with the store.
 
 The stage then swallowed the error in a bare `catch { continue; }`, so the pipeline logged:
 
@@ -630,8 +661,8 @@ The deployment patch fixes this in three layers:
 | `AGENTMEMORY_LLM_MAX_INPUT_CHARS` | A ceiling inside the provider itself, applied to **every** family. Nothing can overflow the context regardless of which code path built the prompt, including `provider.compress` callers this stack does not individually bound (graph extraction, temporal extraction, query expansion). A clamp logs `llm_input_clamped`. |
 | logged `catch` | The reflect loop still continues past a bad cluster — one cluster must not abort the pipeline — but now logs `Reflect cluster failed` with the cluster shape and the error. |
 
-Result on this deployment: the same cluster went from a 26,482-token rejection producing **0
-insights** to a bounded prompt producing **5**.
+Measured result: the same cluster went from a 26,482-token rejection producing **0 insights** to a
+bounded prompt producing **5**.
 
 Two lessons generalise beyond this stage. **Bound by relevance before bounding by truncation** — the
 provider ceiling alone would cut mid-prompt and throw away the strongest facts, so the semantic caps
@@ -640,23 +671,25 @@ facts to 40, a cluster naming ~700 concepts still spent ~17.5k of a 25.5k-char p
 them, which is why `AGENTMEMORY_REFLECT_MAX_CONCEPTS` exists. That was only visible because the bound
 logs what it dropped.
 
-A fifth thing to watch is model-side rather than config-side: Qwen3 is a hybrid-reasoning model, and
-if the served chat template defaults to thinking mode, replies arrive wrapped in `<think>…</think>`,
-which burns the output budget and can break the XML-shaped summary and graph parsing. That is a vLLM
-flag on <your-llm-host>, not a setting here. Verified clean on this deployment — summaries come back as
-well-formed title/narrative/decisions/files with no reasoning tags.
+A fifth thing to watch is model-side rather than config-side. Hybrid-reasoning models — Qwen3 and
+its relatives — wrap replies in `<think>…</think>` when the served chat template defaults to thinking
+mode. That burns the output budget and can break the XML-shaped summary and graph parsing. It is a
+flag on **your inference server**, not a setting here; check it by reading one summary rather than by
+trusting the config. A correct one comes back as well-formed title/narrative/decisions/files with no
+reasoning tags.
 
 #### Per-observation compression
 
-`AGENTMEMORY_AUTO_COMPRESS=true`. It costs nothing on local hardware and it makes every *downstream*
-prompt smaller — summaries and graph batches consume compressed observations rather than raw
-captures, which is real headroom on a 16k context. Measured on this deployment: ~600-830 prompt
-tokens and ~200-300 completion tokens per observation, `qualityScore` 90, and no format retries.
+`AGENTMEMORY_AUTO_COMPRESS=true`. It makes every *downstream* prompt smaller — summaries and graph
+batches consume compressed observations rather than raw captures, which is real headroom on a 16k
+context — and on local hardware it costs nothing but time. On a **billed** provider it is one call
+per observation, so weigh it against the headroom it buys. Measured against an 8B model: ~600-830
+prompt tokens and ~200-300 completion tokens per observation, `qualityScore` 90, no format retries.
 
 The capture log states which path ran, and is the fastest way to confirm the flag took effect:
 
-```powershell
-docker logs agentmemory-agentmemory-1 --since 5m | Select-String 'Observation captured'
+```sh
+tstack services logs agentmemory -n 200 | grep 'Observation captured'
 ```
 
 `compress:"llm"` is the LLM path; `compress:"synthetic"` is the non-LLM fallback used when the flag
@@ -667,20 +700,27 @@ Note the runtime retries a compression once when the model returns invalid XML
 (`compressWithRetry`), so a malformed response costs two calls. Watch `"retried":true` in the
 `Observation compressed` lines if throughput matters.
 
-#### Switching back to the OpenAI API
+#### Switching to a larger-context or hosted provider
 
-Uncomment the cloud `OPENAI_API_KEY` line in the repo-root `.env` and comment the vLLM one, then in
-`agentmemory/.env` restore `OPENAI_BASE_URL`/`OPENAI_MODEL`, set `OPENAI_REASONING_EFFORT=none`,
-restore `SUMMARIZE_CHUNK_SIZE=250` and `AGENTMEMORY_COMPRESSION_MODEL=gpt-5.6-luna`, set
-`AGENTMEMORY_AUTO_COMPRESS=true`, and drop the two `LLM_*_LABEL` lines. Recreate with the command in
-[Authoritative cost reconciliation](#authoritative-cost-reconciliation). No tracked file needs
-reverting — the console label defaults already fall back to the OpenAI wording.
+Six values move together, and forgetting one is how a working deployment starts dead-lettering:
+
+| | Local ~16k model | Large-context hosted model |
+|---|---|---|
+| `OPENAI_BASE_URL` / `OPENAI_MODEL` | your endpoint, `/v1` suffix | the vendor's |
+| `OPENAI_API_KEY` (repo-root `.env`) | any non-empty string | the real key |
+| `OPENAI_REASONING_EFFORT` | **empty** | whatever the model takes |
+| `SUMMARIZE_CHUNK_SIZE` | `25` | `250` at 64k |
+| `AGENTMEMORY_REFLECT_MAX_*` | as shipped | may be raised |
+| `LLM_PROVIDER_LABEL` / `LLM_ENDPOINT_LABEL` | your runtime | the vendor |
+
+Then `tstack services restart agentmemory` and `tstack services test agentmemory`. No tracked file
+needs editing for any of it.
 
 ### API authentication, billing, and models
 
-Everything in this section applies to the **OpenAI API provider** — the rollback path, not the
-current deployment. It is kept intact because the billing, cost-sync, and key-rotation machinery is
-still wired up and still works; skip it while vLLM is serving.
+Everything in this section applies **only when your provider is the OpenAI API** (or a gateway that
+bills like it). Skip it entirely on a local runtime — nothing here is reachable without a billed
+account, and the cost-sync machinery stays dormant.
 
 AgentMemory is an unattended server process, so it uses a standard [OpenAI API key](https://platform.openai.com/api-keys).
 Codex OAuth authenticates the interactive Codex client and is not exported as a reusable credential
@@ -699,16 +739,18 @@ Replace the placeholder with `OPENAI_API_KEY=sk-proj-...`, then rebuild or recre
 To swap a key that is already in service, follow [Rotating either key](#rotating-either-key)
 instead — it covers the project-scoping requirement and the masked fingerprint the console shows.
 The environment file uses `KEY=value` syntax; this differs from the raw `.key` files described
-below. Never put the key in `agentmemory/.env` or either tracked `.env.example`. In OpenAI mode the
-split is `gpt-5.6-luna` for high-volume compression and `gpt-5.6-terra` for summaries, graph
-extraction, and consolidation; vLLM serves every family from one model instead.
+below. Never put the key in `agentmemory/.env` or either tracked `.env.example`. A hosted provider is
+where a cheap/expensive split earns its keep — `gpt-5.6-luna` for high-volume compression and
+`gpt-5.6-terra` for summaries, graph extraction and consolidation. A single local model serves every
+family instead, which is why `AGENTMEMORY_COMPRESSION_MODEL` ships unset.
 Organization limits vary; check the OpenAI platform [Limits page](https://platform.openai.com/settings/organization/limits)
 rather than copying a historical limit snapshot. This stack admits at most three provider calls
 concurrently and has only two queue consumers.
 
-The 2026-08-21 state-aware migration used 14 Terra calls and 2 Luna calls for an estimated `$0.33`.
-The code-only redeploy used no Terra calls and 7 Luna calls, adding less than one cent. These are
-workload measurements, not a monthly forecast. `reconcile-llm-queue.sh` previews planned calls and
+One measured migration used 14 Terra calls and 2 Luna calls for an estimated `$0.33`; a code-only
+redeploy used no Terra calls and 7 Luna calls, adding less than one cent. These are workload
+measurements from one deployment, not a forecast for yours — the driver is how many observations
+your agents produce. `reconcile-llm-queue.sh` previews planned calls and
 estimated cost before writing; review its pricing constants whenever OpenAI pricing changes.
 
 #### Authoritative cost reconciliation
@@ -856,9 +898,11 @@ re-downloads on every container recreate and can't start at all with no internet
 **`EMBEDDING_PROVIDER=local` is mandatory, not cosmetic.** Embedding-provider detection runs
 `GEMINI → OPENAI → VOYAGE → COHERE → OPENROUTER`. Because `OPENAI_API_KEY` and `OPENAI_BASE_URL` are
 both set for the *chat* LLM, detection would otherwise pick the **openai** embedding provider. On the
-OpenAI API that silently changed the vector model and persisted dimension. Against the current vLLM
-endpoint it is worse and louder: <your-llm-host> serves one **chat** model and no embedding model, so
-every embedding request would 404 and writes would stop being searchable. Pin it explicitly.
+OpenAI API that silently changed the vector model and persisted dimension. Against a local runtime it
+is worse and louder: vLLM, Ollama and LM Studio serve the **chat** model you loaded and no embedding
+model, so every embedding request would 404 and writes would stop being searchable. Pin it
+explicitly, and note that this trap arms itself the moment you configure a chat endpoint — a machine
+with no provider never hits it.
 
 The provider credential has one untracked source: repo-root `.env`. Compose loads `agentmemory/.env`
 first and `../.env` second, so the root `OPENAI_API_KEY` wins — which is why switching providers
@@ -874,17 +918,21 @@ Local is **384-dim**. If you ever switch providers, agentmemory **refuses to boo
 The only escape is `AGENTMEMORY_DROP_STALE_INDEX=true`, which discards the vectors and rebuilds from
 live observations. Decide before you accumulate memories, not after.
 
-### Local-provider rollback baseline
+### What a local provider actually costs in latency
 
-Before the OpenAI migration, an idle <your-llm-host> running
-`qwen3:30b-a3b-instruct-2507-q4_K_M` measured:
+Reference numbers, so "is a local model fast enough for this" has an answer other than a shrug. Taken
+on an idle two-GPU workstation running `qwen3:30b-a3b-instruct-2507-q4_K_M` under Ollama — a much
+larger model than the 8B this stack recommends, so treat these as a ceiling on quality and a floor on
+speed:
 
 - **2.2s** for an 83-token compression prompt and 189-token response
 - **3.8s** for a near-maximum 8KB observation (1,581 input + 335 output tokens)
 - **97.6/100** all-time compression quality
 
-The already-installed `gemma3:12b` is not a faster replacement on this host: the same 8KB prompt
-took **27.8s cold / 8.5s warm**. The 70–135s production latency was queue wait, not raw Qwen speed.
+A smaller model is not automatically faster: `gemma3:12b` on the same host took **27.8s cold / 8.5s
+warm** for that 8KB prompt. The 70–135s latency seen in production was queue wait, not raw model
+speed — which is the point worth carrying away, because it is a concurrency setting, not a hardware
+purchase.
 AgentMemory 0.9.29 launched every observation compression immediately, while summaries, graph
 extraction, and consolidation shared the same Ollama runner. The deployment patch now stores raw
 observations first, enqueues only their IDs in the file-backed `agentmemory-llm` iii queue, retries
@@ -936,12 +984,14 @@ suppressed, and destructive forget/delete/reset/restore actions are intentionall
 
 ### Bounded prompts and provider limits
 
-**The binding constraint is now context, not cost.** vLLM serves `qwen3-8b-awq` with a
-16,384-token context — a quarter of the 65,536-token endpoint these bounds were first written for,
-and far less than GPT-5.6. Nothing truncates an individual observation in the summary path, so the
-chunk size is the real bound. Measured peak on this deployment is 5,147 prompt tokens per map chunk:
+**On a local model the binding constraint is context, not cost.** An 8B served at default settings
+gives a 16,384-token context — a quarter of the 65,536-token endpoint these bounds were first written
+for, and far less than a large hosted model. Nothing truncates an individual observation in the
+summary path, so the chunk size is the real bound. Measured peak at these values is 5,147 prompt
+tokens per map chunk. The **Shipped** column is what `.env.example` carries; raise it against your
+own `llm_usage` numbers if your model has a larger window.
 
-| Setting | Default | Here | Why |
+| Setting | Upstream default | Shipped | Why |
 |---|---|---|---|
 | `MAX_TOKENS` | 4096 | `2048` | Dense summary chunks reached the 1,024 cap exactly; 2,048 avoids truncation while remaining bounded. |
 | `AGENTMEMORY_COMPRESSION_MAX_TOKENS` | n/a | `512` | Independent cap for per-observation compression. |
@@ -1062,8 +1112,8 @@ SQL functions while all existing memory state continued using the file KV.
 Therefore SQLite is not a safe configuration-only migration today. Keep the pinned file KV, clean
 orphan index generations only after a volume backup, and fix upstream generation garbage
 collection. Revisit SQLite when iii ships a real state adapter with import/export semantics. Redis
-is the only supported scale-out state adapter now, but it conflicts with this deployment's
-local-first/zero-ops goal.
+is the only supported scale-out state adapter now, but it conflicts with this stack's
+local-first, zero-ops goal.
 
 The fix for the current graph bottleneck is therefore not SQL: graph nodes, edges, name/edge
 indexes, and degree records are deterministically split across 64 KV scopes. Reads fan out eight at
@@ -1141,7 +1191,7 @@ Project profiles merge concepts from these session summaries, so large imported 
 the dashboard's Top Concepts without re-compressing every historical observation in one burst.
 
 Per-observation LLM compression is **enabled** (`AGENTMEMORY_AUTO_COMPRESS=true`) and, like every
-other family, goes through the durable file-backed queue to the single model vLLM serves. Hook bursts
+other family, goes through the durable file-backed queue to whichever model is configured. Hook bursts
 persist locally, while no more than three provider calls are admitted at once. Every prompt is
 bounded twice: by its family's own limit, and by the provider-wide
 `AGENTMEMORY_LLM_MAX_INPUT_CHARS` ceiling. To verify the bounded policy:

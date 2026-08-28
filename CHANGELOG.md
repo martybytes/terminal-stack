@@ -77,6 +77,26 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
   unchanged on purpose: an unlabelled provider is assessed as paid, and
   over-reporting cost is the safe direction to be wrong in.
 
+- **The agentmemory docs describe a provider you choose, not one you were given
+  (08/27/2026).** `services/stacks/agentmemory/README.md`'s LLM section was a
+  deployment record for one machine — "vLLM on <host> (current provider)", a
+  table of its GPUs, a rollback path to the account it migrated from. A reader
+  with an Ollama install and a question had nothing to copy.
+
+  Rewritten as *Choosing a provider* (none / local runtime / another box /
+  hosted, with what each costs and what bites), *Setting one* (the four values
+  and the order they load in), and a switching table for moving between a
+  ~16k local model and a large-context hosted one. Every hard-won failure
+  analysis is kept — the truthy `reasoning_effort`, the chunk size that must
+  track the context, the reflect stage that reports `success: true` with zero
+  insights — reframed from "what happened here" to "what will happen to you".
+
+  `services/.env.example` went the same way: the `VLLM_*` block was the author's
+  endpoint record, read by nothing in the repo, and is replaced by the two things
+  that actually go wrong when the endpoint is on another machine — host
+  reachability is not container reachability, and prefer an IP to an overlay-DNS
+  name.
+
   Also genericised in the same file: the embedding-provider warning and the
   reasoning-effort note were written against one specific vLLM deployment, and
   `LLM_HOST_BEARER_TOKEN` was a rollback credential for that host which nothing

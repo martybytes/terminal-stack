@@ -49,10 +49,16 @@ Docker's embedded resolver, not your host's, so a name that resolves in your
 shell may not resolve in a container.
 
 ```sh
-docker run --rm curlimages/curl:8.14.1 -sS -o /dev/null -w '%{http_code}' \
-  --max-time 8 http://<your-llm-host>:8000/v1/models
+docker run --rm curlimages/curl:8.14.1 -sS -o /dev/null -w '%{http_code}\n' \
+  --max-time 8 http://<your-endpoint>:8000/v1/models
 ```
 
-If the name fails but an IP works, use the IP.
+Any HTTP status means reachable (401 included — that is auth, not routing). `000`
+means no route. If a name fails but its IP works, use the IP.
+
+For a runtime on **this** machine, the container-side address is
+`host.docker.internal`, never `localhost` — inside a container `localhost` is the
+container. `tstack agents llm` probes the usual local ports and prints the right
+URL for you.
 
 See also: `doc services` · `doc troubleshooting` · `doc brew`
