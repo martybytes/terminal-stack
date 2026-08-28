@@ -50,11 +50,28 @@ python3 -m pytest tests/ --cov
 `.githooks/pre-commit` runs the first four; `.githooks/pre-push` adds coverage and
 the characterization fixtures. They only fire when the clone has
 `core.hooksPath=.githooks` - `ts_install_git_hooks` sets it, and until 2026-08-25
-nothing did, so the gate had never run anywhere. Check it in a fresh clone.
+nothing did, so the gate had never run anywhere. `tstack doctor` now reports it
+for the dev clone you are standing in, which is the only place it can be wrong.
+
+**The hooks find their tools three ways** (`.githooks/_gates.sh`): an importable
+module, then a binary on PATH, then `uvx`. Only the second shape is what this
+stack installs - `TS_APPS_RECOMMENDED` carries `ruff` and `uv` as formulae, and
+`ruff` has no importable module at all - so probing for the module alone printed
+"NOT RUN" for every gate and exited 0. If you add a gate, resolve it through
+`gate_runner` rather than a bare `import` probe; `tests/test_githooks.py` pins it.
+
+**On macOS, `brew install powershell`.** Five gates key off `shutil.which("pwsh")`
+and skip silently without it, including the AST scan for the `$foo`/`$Foo`
+collision that once killed the entire Windows wizard. They run pure PowerShell
+with `USERPROFILE`/`LOCALAPPDATA` overridden, so macOS pwsh satisfies all five.
 
 **Two platforms must both be green on the same commit**: native pwsh and WSL
-Ubuntu. macOS is covered only by `.github/workflows/ci.yml` and cannot be run from
-this machine.
+Ubuntu. Whichever machine you are on covers at most one of the four targets
+directly, so say which you ran rather than implying the rest: a Windows box has
+pwsh and WSL but no macOS and no native Linux; a Mac has macOS and, with the brew
+install above, pwsh - but no WSL, and `tests/parity/run.sh` needs bash 4+ for
+`declare -A` so it cannot run there either. `.github/workflows/ci.yml` is the only
+thing that covers all four.
 
 Native Linux is not one of those two, and WSL is not a stand-in for it -
 `tstack/platform.py` reports `wsl` there on purpose. Run it for real:

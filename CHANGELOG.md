@@ -2,7 +2,39 @@
 
 All notable changes captured here. Format loosely follows [Keep a Changelog](https://keepachangelog.com/). Dates are MM/DD/YYYY for display, `git log` is authoritative.
 
+## [Unreleased]
+
 ### Fixed
+
+- **The commit gate reported "NOT RUN" for every gate and exited 0 (08/28/2026).**
+  Both hooks probed for their tools with `python3 -c "import <tool>"` only, which
+  is the one shape this stack does not produce: `TS_APPS_RECOMMENDED` installs
+  `ruff` and `uv` as formulae, and `ruff` has no importable module at all. So on
+  a machine the stack itself provisioned, `pre-commit` printed NOT RUN four times
+  and exited 0 - the precise failure its own header warns about ("a gate you
+  believe is running and is not is worse than no gate"), one level up.
+
+  `.githooks/_gates.sh` now resolves a tool three ways - importable module, binary
+  on PATH, then `uvx` - and both hooks share it rather than each carrying a copy.
+  It also answers whether the chosen runner puts the working directory on
+  `sys.path`, because `uvx pytest` does not and `tests/` has no `__init__.py`
+  while its modules import each other, so collection failed outright.
+  `tests/test_githooks.py` pins all three shapes; verified the shape-2 test fails
+  against the old probe. Measured: the gate now runs in about 15 seconds here.
+
+- **`tstack doctor`'s git-hooks check could never fire.** It keyed off the
+  RESOLVED clone, and `resolve_source_dir()` refuses to return a dev clone by
+  design - dev trees are deliberately invisible so `tstack update` cannot pull
+  one. `is_dev_clone(src)` was therefore false by construction on any machine
+  with a runtime clone, and the check returned early every time. Its existing
+  tests could not see this: they pass a dev clone straight in, exercising the
+  body without the reachability. It now asks `paths.dev_clone_at()` - the git
+  toplevel of the working directory - which is where a developer actually is, and
+  a new test pins the reachability rather than the body.
+
+- **The `[Unreleased]` heading, dropped by the previous commit.** Its CHANGELOG
+  edit anchored on the heading and did not re-emit it, so the entries below sat
+  under no version at all.
 
 - **Every nested TTS key read the wrong place in the Windows mirror (08/28/2026).**
   The two stores spell the TTS block differently on purpose - chezmoi `[data]` is

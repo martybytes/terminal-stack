@@ -23,27 +23,37 @@ fi
 
 # A missing linter is reported, never silently skipped: a gate you believe is
 # running and is not is worse than no gate. Exit status still comes from pytest.
-run_optional() {
-    local label="$1"; shift
-    if python3 -c "import $1" >/dev/null 2>&1; then
-        shift
-        echo "pre-commit: $label"
-        ( cd "$root" && "$@" )
-    else
-        shift
-        echo "pre-commit: $label NOT RUN — install it with: python3 -m pip install --user $1" >&2
+# shellcheck source=_gates.sh
+. "$root/.githooks/_gates.sh"
+
+run_gate() {
+    label="$1"; module="$2"; shift 2
+    runner="$(gate_runner "$module")"
+    if [ -z "$runner" ]; then
+        echo "pre-commit: $label NOT RUN - install it (brew install $module, or uv), or: python3 -m pip install --user $module" >&2
+        return 0
     fi
+    echo "pre-commit: $label"
+    ( cd "$root" && $runner "$@" )
 }
 
-run_optional "ruff check"  ruff  python3 -m ruff check tstack tests
-run_optional "ruff format" ruff  python3 -m ruff format --check tstack
-run_optional "mypy"        mypy  python3 -m mypy
+run_gate "ruff check"  ruff  check tstack tests
+run_gate "ruff format" ruff  format --check tstack
+run_gate "mypy"        mypy
 
-if ! python3 -c 'import pytest' >/dev/null 2>&1; then
-    echo "pre-commit: pytest not installed — the suite did NOT run." >&2
-    echo "            install it with: python3 -m pip install --user pytest" >&2
+pytest_runner="$(gate_runner pytest)"
+if [ -z "$pytest_runner" ]; then
+    echo "pre-commit: pytest unavailable - the suite did NOT run." >&2
+    echo "            install uv (it is in the app catalog), or: python3 -m pip install --user pytest" >&2
     exit 0
 fi
 
 echo "pre-commit: pytest"
-python3 -m pytest -q "$root/tests"
+cd "$root"
+# tests/ has no __init__.py and its modules import each other, so the repo root
+# must be importable. `python3 -m pytest` adds cwd; uvx and a bare binary do not.
+if gate_needs_pythonpath "$pytest_runner"; then
+    PYTHONPATH="$root${PYTHONPATH:+:$PYTHONPATH}" $pytest_runner -q tests
+else
+    $pytest_runner -q tests
+fi

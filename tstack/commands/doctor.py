@@ -667,11 +667,21 @@ def check_git_hooks(report: Report, src: Path | None) -> None:
 
     Until 2026-08-25 nothing set core.hooksPath, so the repo's only automated
     gate had never run anywhere.
+
+    The clone to look at is the one the developer is STANDING IN. Keying off
+    `src` alone meant this check returned early on every machine and never once
+    fired: `resolve_source_dir()` deliberately refuses to return a dev clone, so
+    `is_dev_clone(src)` is false by construction wherever a runtime clone exists.
+    A dead check is worse than an absent one, because it reads as coverage -- and
+    the unit tests could not see it, since they pass a dev clone in directly and
+    so exercise the body without the reachability.
     """
-    if src is None or not paths.is_dev_clone(src):
+    target = src if src is not None and paths.is_dev_clone(src) else paths.dev_clone_at()
+    if target is None:
         return
-    if not (src / ".githooks").is_dir():
+    if not (target / ".githooks").is_dir():
         return
+    src = target
     got = _run(["git", "-C", str(src), "config", "--local", "--get", "core.hooksPath"])
     value = got.stdout.strip() if got and got.returncode == 0 else ""
     if value == ".githooks":

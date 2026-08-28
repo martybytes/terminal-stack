@@ -13,6 +13,17 @@ Run the automated gates first (`ruff check`, `ruff format --check`, `mypy`,
 the *post-install* smoke test for a fresh machine; this is the *pre-commit* pass for
 a change you just made.
 
+**On a macOS development clone, install pwsh.** `brew install powershell` (the
+formula; the `powershell` *cask* no longer exists and `powershell@preview` is not
+what you want). Five gates key off `shutil.which("pwsh")` and skip silently
+without it - the AST scan for a local shadowing a typed parameter, the two
+`_config.ps1` store tests, the wizard's exclusive-group twin, and the lone-dash
+splatting regression. Every one of them runs pure PowerShell with `USERPROFILE`
+and `LOCALAPPDATA` overridden, so macOS pwsh satisfies them; none needs Windows.
+Skipping is the failure mode that matters here, because the defects those gates
+exist for - a literal TAB in a `Join-Path`, a `$foo`/`$Foo` collision that coerced
+a scriptblock - all parse cleanly and are invisible to every other check.
+
 Every technique below was worked out the hard way. None of it needs a GUI, a second
 machine, or a real `chezmoi apply`.
 

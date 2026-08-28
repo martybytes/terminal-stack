@@ -35,6 +35,11 @@ def _isolate(monkeypatch, tmp_path):
     monkeypatch.setattr(store, "mirror", lambda: {})
     monkeypatch.setattr(store, "mirror_path", lambda: None)
     monkeypatch.setattr(doctor, "_probe_http", lambda *a, **k: False)
+    # check_git_hooks reads the AMBIENT working directory, which is a dev clone
+    # whenever the suite runs from one. Left live it makes every report in this
+    # module depend on where pytest was invoked from -- exactly what the module
+    # docstring says it does not do. Reachability gets its own test below.
+    monkeypatch.setattr(paths, "dev_clone_at", lambda *a, **k: None)
     yield
     store.clear_cache()
 
@@ -162,6 +167,30 @@ def test_git_hooks_are_only_checked_in_a_dev_clone(tmp_path):
     report = Report()
     doctor.check_git_hooks(report, runtime)
     assert report.results == [], "a runtime clone never commits, so it needs no hook"
+
+
+def test_git_hooks_is_reachable_when_the_resolved_clone_is_the_runtime_one(monkeypatch, tmp_path):
+    """The check was DEAD, and its other tests could not see it.
+
+    They pass a dev clone straight in, so they exercise the body. collect() can
+    only ever pass the RESOLVED clone, and resolve_source_dir() refuses to return
+    a dev clone by design -- so on any machine with a runtime clone the check
+    returned early and never fired. This pins the reachability rather than the
+    body: resolved clone is the runtime one, the developer is standing in a dev
+    clone, and the check must still report.
+    """
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    dev = tmp_path / "src" / "github.com" / "o" / "terminal-stack"
+    (dev / ".githooks").mkdir(parents=True)
+    monkeypatch.setattr(paths, "dev_clone_at", lambda *a, **k: dev)
+    monkeypatch.setattr(
+        doctor, "_run", lambda argv, **k: subprocess.CompletedProcess(argv, 1, "", "")
+    )
+    report = Report()
+    doctor.check_git_hooks(report, runtime)
+    assert statuses(report)["git-hooks"] == checks.FAIL
+    assert str(dev) in report.results[0].hint, "the hint must name the clone to fix"
 
 
 def test_git_hooks_missing_in_a_dev_clone_is_a_failure(monkeypatch, tmp_path):
