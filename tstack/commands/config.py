@@ -80,12 +80,13 @@ NATIVE = (
     "atuin",
     "memory",
     "agents",
+    "ghostty",
 )
 # `prompt` stays here rather than becoming a generic `set starshipPreset`: the
 # value has to be checked against `starship preset --list`, which is the
 # authority and grows, and an unknown name renders an EMPTY config -- a working
 # prompt replaced by no prompt, with nothing in the diff to explain it.
-DEFERRED = ("apps", "ghostty", "tts", "wizard", "reconfigure", "mux", "wezterm", "prompt")
+DEFERRED = ("apps", "tts", "wizard", "reconfigure", "mux", "wezterm", "prompt")
 
 # The unknown-verb hint. ONE list, and it must be complete: the bash hint omits
 # `memory`, which it implements, and the pwsh one omits `atuin` instead.
@@ -315,6 +316,22 @@ def set_value(key: str, value: str, out: Out, dry_run: bool) -> int:
     return 0
 
 
+def _ghostty(args: list[str], out: Out, dry_run: bool) -> int:
+    """The one implementation of the managed Ghostty config.
+
+    It replaces three: `bootstrap/ts-config.sh` covered macOS and the WSL view of
+    the Windows side, `$PROFILE`'s Set-TerminalStackConfig covered native
+    Windows, and each carried its own copy of the themeMode -> theme mapping.
+    Both shells now hand off here, the way `mux` and `wezterm` already do.
+    """
+    from . import ghostty as ghostty_cmd
+
+    sub = args[0] if args else "status"
+    if sub not in ghostty_cmd.VERBS:
+        return _usage("usage: tstack config ghostty [on|off|status|diff]")
+    return ghostty_cmd.main([sub, *(["--dry-run"] if dry_run else [])])
+
+
 def set_memory(backend: str, out: Out, dry_run: bool) -> int:
     """The ONLY writer of memoryBackend and its derived agentmemoryEnabled.
 
@@ -488,6 +505,9 @@ def main(argv: list[str]) -> int:
         paths.resolve_source_dir()
     except paths.CloneNotFound:
         return _fail("cannot locate the terminal-stack clone (set TERMINAL_STACK_DIR).")
+
+    if verb == "ghostty":
+        return _ghostty(args, out, dry_run)
 
     if verb == "memory":
         sub = args[0] if args else "status"

@@ -1765,15 +1765,22 @@ def test_windows_ghostty_drops_the_macos_only_directives():
     assert "cmd+" not in body, "there is no Cmd key on Windows"
 
 
-def test_ghostty_theme_mapping_is_the_same_in_both_sync_paths():
+def test_ghostty_theme_mapping_is_the_same_in_every_place_that_renders_it():
     """Ghostty's config format has no conditionals and Windows mirror files get
-    token substitution, so themeMode -> theme is resolved in the sync. That means
-    the mapping exists three times (bash sync, pwsh sync, tstack config diff) and all
-    of them must agree, or `tstack config ghostty diff` reports a phantom change."""
+    token substitution, so themeMode -> theme is resolved before the file is
+    written. The mapping therefore exists in more than one place and all of them
+    must agree, or `tstack ghostty diff` reports a phantom change.
+
+    It used to exist FOUR times -- both syncs, `bootstrap/ts-config.sh` and
+    `$PROFILE`. The last two are now one function, `tstack/ghostty.py`'s
+    `theme_tokens`, which both shells hand off to. The syncs keep their own copy
+    because they run where Python may not be, which is exactly why this test
+    still has to compare them.
+    """
     sources = {
         "run_after_90-sync-windows.sh": (ROOT / "run_after_90-sync-windows.sh"),
         "scripts/sync-windows.ps1": (ROOT / "scripts/sync-windows.ps1"),
-        "bootstrap/ts-config.sh": (ROOT / "bootstrap/ts-config.sh"),
+        "tstack/ghostty.py": (ROOT / "tstack/ghostty.py"),
     }
     for name, path in sources.items():
         body = path.read_text(encoding="utf-8")
@@ -1781,8 +1788,34 @@ def test_ghostty_theme_mapping_is_the_same_in_both_sync_paths():
             f"{name}: follow must use a split theme (it is what tracks the OS)"
         )
         assert "vs-code-light-modern" in body and "Catppuccin Mocha" in body, name
-        for wt in ("'light'", "'auto'", "'dark'"):
-            assert wt in body, f"{name}: missing window-theme value {wt}"
+        for wt in ("light", "auto", "dark"):
+            assert f"'{wt}'" in body or f'"{wt}"' in body, (
+                f"{name}: missing window-theme value {wt}"
+            )
+
+    # And the shells must no longer carry one of their own.
+    for gone in (
+        "bootstrap/ts-config.sh",
+        "windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1",
+    ):
+        body = (ROOT / gone).read_text(encoding="utf-8")
+        assert "dark:Catppuccin Mocha,light:vs-code-light-modern" not in body, (
+            f"{gone} grew a fifth copy of the mapping; it hands off to tstack ghostty"
+        )
+
+
+def test_both_shells_hand_ghostty_off_rather_than_reimplementing_it():
+    """~160 lines of bash and ~90 of PowerShell became one module, reached the
+    way `mux` and `wezterm` already are. A shell that starts doing the work again
+    is a fourth implementation of a mapping this file has to police."""
+    sh = (ROOT / "bootstrap/ts-config.sh").read_text(encoding="utf-8")
+    ps = (ROOT / "windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1").read_text(
+        encoding="utf-8"
+    )
+    assert "run_ghostty()" in sh and 'main.py" ghostty' in sh
+    assert "ghostty_paths" not in sh and "ghostty_status()" not in sh
+    assert "Invoke-TstackSub -Name 'ghostty'" in ps
+    assert "config.bak." not in ps, "the backup dance belongs to tstack/ghostty.py now"
 
 
 def test_ghostty_off_skips_the_windows_subtree_without_deleting_it():

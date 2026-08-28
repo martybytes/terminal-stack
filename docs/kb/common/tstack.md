@@ -13,6 +13,7 @@ commands any more, and no aliases for them.
 | `tstack services` | the Docker service stacks - see `doc services` |
 | `tstack mux` | the WezTerm multiplexer domain |
 | `tstack wezterm` | WezTerm channel and updates |
+| `tstack ghostty` | the managed Ghostty config; `status`, `diff`, `on`, `off` |
 | `tstack smb` | SMB shares over rclone (POSIX only) - see `doc smb-shares` |
 | `tstack agents` | agent CLI wiring - see `doc agentmemory`, `doc headroom` |
 | `tstack agentmemory` | the agentmemory hook harness; `--check` reports reverted edits |
@@ -23,7 +24,7 @@ commands any more, and no aliases for them.
 A subcommand reported as "not available on <platform>" is deliberate, not a
 broken install: `smb` has no PowerShell implementation.
 
-`doctor`, `services`, `mux`, `wezterm`, `agents` and `ui` are one Python program
+`doctor`, `services`, `mux`, `wezterm`, `agents`, `ghostty` and `ui` are one Python program
 that runs identically on Windows, WSL, Linux and macOS. `config`, `update`,
 `rollback`, `smb` and `agentmemory` are still shell, and `tstack` routes to
 whichever the registry (`tstack/commands.conf`) says - so the command you type
@@ -123,7 +124,7 @@ Run it bare for an interactive menu; `tstack config show` just prints the state.
 | `tstack config apps [recommended\|all\|none\|id,…]` | app catalog; no arg → picker. Installs, never uninstalls |
 | `tstack config prompt [status\|list\|<name>]` | which Starship prompt. `list` renders every option so you can see them |
 | `tstack config atuin <on\|off>` | atuin owns `Ctrl+R` — see `doc common/tools/atuin` |
-| `tstack config ghostty [on\|off\|status\|diff]` | managed Ghostty config, macOS — see `doc common/tools/ghostty` |
+| `tstack config ghostty [on\|off\|status\|diff]` | hand-off to `tstack ghostty` — see `doc common/tools/ghostty` |
 | `tstack config tts …` | agent voice — see `doc common/tts` |
 | `tstack config mux [on\|off\|…]` | hand-off to `tstack mux` (WezTerm multiplexer domain) |
 | `tstack config restore <on\|off>` | reopen the last WezTerm session at startup (default off) |
