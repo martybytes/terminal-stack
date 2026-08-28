@@ -132,3 +132,31 @@ def test_an_empty_filter_result_says_so_instead_of_showing_a_blank_screen():
             assert "no settings match" in app.detail_text
 
     drive(script)
+
+
+def test_the_source_column_is_visible_on_a_normal_terminal():
+    """`source` is the whole reason this screen exists -- a printed value cannot
+    tell you whether it came from chezmoi [data], the Windows mirror or nothing
+    at all, and on 2026-08-21 those three disagreed while every report looked
+    healthy. Auto-sized columns pushed it off the right edge at 110 columns.
+    """
+    from tstack.ui.app import elide
+
+    async def script():
+        app = SettingsApp()
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.pause()
+            table = app.query_one("#table", DataTable)
+            widths = [c.width for c in table.columns.values()]
+            assert sum(widths) <= 100, f"columns total {sum(widths)} on a 100-column terminal"
+            assert len(widths) == 5
+
+    drive(script)
+
+    # ASCII only: tests/test_agent_tools.py pins every byte this program prints,
+    # because a Windows console on codepage 437 renders anything else as
+    # mojibake. A one-character ellipsis is exactly what slips past review.
+    cut = elide("x" * 80, 20)
+    assert len(cut) == 20 and cut.endswith("..")
+    assert cut.isascii()
+    assert elide("short", 20) == "short"

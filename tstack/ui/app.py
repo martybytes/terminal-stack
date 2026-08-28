@@ -16,11 +16,22 @@ from typing import ClassVar
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
+from textual.containers import Vertical
 from textual.screen import ModalScreen
 from textual.widgets import DataTable, Footer, Header, Input, Label, Static
 
 from . import model
+
+
+def elide(text: str, width: int) -> str:
+    """Trim to a fixed column, marking that something was cut.
+
+    ASCII only: `tests/test_agent_tools.py` pins every byte this program can
+    print, because a Windows console on codepage 437 renders anything else as
+    mojibake. A single-character ellipsis is exactly the kind of thing that slips
+    past review and then only fails on the platform nobody is testing on.
+    """
+    return text if len(text) <= width else text[: width - 2] + ".."
 
 
 class EditScreen(ModalScreen[str]):
@@ -55,10 +66,14 @@ class EditScreen(ModalScreen[str]):
 class SettingsApp(App[None]):
     """Every saved setting, what it is now, and where that value came from."""
 
+    TITLE = "tstack"
+    SUB_TITLE = "saved settings"
+
     CSS = """
     Screen { layout: vertical; }
-    #filter { dock: top; height: 3; }
-    #detail { dock: bottom; height: 4; padding: 0 1; border-top: solid $accent; }
+    #filter { height: 3; }
+    #table { height: 1fr; }
+    #detail { height: 4; padding: 0 1; border-top: solid $accent; }
     #edit-box {
         width: 70%; height: auto; padding: 1 2;
         background: $panel; border: thick $accent;
@@ -71,7 +86,12 @@ class SettingsApp(App[None]):
     BINDINGS: ClassVar[list[Binding]] = [
         Binding("q", "quit", "quit"),
         Binding("slash", "focus_filter", "filter"),
-        Binding("enter", "edit", "edit"),
+        # `e` as well as Enter, and it is the one the footer advertises: a
+        # focused DataTable claims `enter` for its own select action, so the
+        # App-level binding is invisible there. The Enter path still works --
+        # on_data_table_row_selected -- it just cannot be shown.
+        Binding("e", "edit", "edit"),
+        Binding("enter", "edit", "edit", show=False),
         Binding("space", "cycle", "next value"),
         Binding("r", "reload", "reload"),
         Binding("d", "reset_default", "default"),
@@ -91,14 +111,21 @@ class SettingsApp(App[None]):
     def compose(self) -> ComposeResult:
         yield Header()
         yield Input(placeholder="filter: key, label, group, value or note", id="filter")
-        with Horizontal():
-            yield DataTable(id="table", cursor_type="row", zebra_stripes=True)
+        yield DataTable(id="table", cursor_type="row", zebra_stripes=True)
         yield Static("", id="detail")
         yield Footer()
 
     def on_mount(self) -> None:
         table = self.query_one("#table", DataTable)
-        table.add_columns("group", "setting", "value", "source", "then")
+        # Explicit widths. Auto-sizing to content pushed `source` off the right
+        # edge on an 110-column terminal -- and `source` is the whole reason this
+        # screen exists, because a printed value cannot tell you which layer it
+        # came from.
+        table.add_column("group", width=12)
+        table.add_column("setting", width=30)
+        table.add_column("value", width=38)
+        table.add_column("source", width=9)
+        table.add_column("then", width=9)
         self.action_reload()
         table.focus()
 
@@ -119,7 +146,9 @@ class SettingsApp(App[None]):
             # is not yours to set is the point of listing it.
             name = row.key if row.editable else f"{row.key} (derived)"
             marker = "*" if model.changed(row) else " "
-            table.add_row(row.group, name, f"{marker}{row.display}", row.source, row.after)
+            table.add_row(
+                row.group, name, f"{marker}{elide(row.display, 36)}", row.source, row.after
+            )
         if self.shown:
             table.move_cursor(row=min(keep, len(self.shown) - 1))
         self.show_detail()
