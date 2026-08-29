@@ -211,7 +211,16 @@ fi
 
 # 5. chezmoi apply
 echo "$INFO Running chezmoi apply -v"
-"$HOME/.local/bin/chezmoi" apply -v </dev/null
+APPLY_RC=0
+bash "$TARGET_DIR/bootstrap/ts-apply.sh" -v </dev/null || APPLY_RC=$?
+if [ "$APPLY_RC" = 4 ]; then
+    # Conflicts, explained above, nothing written. Everything else installed.
+    echo "$INFO Everything else is installed. Re-run the apply once you have decided."
+    exit 0
+elif [ "$APPLY_RC" != 0 ]; then
+    echo "$WARN chezmoi apply failed (exit $APPLY_RC)."
+    exit "$APPLY_RC"
+fi
 
 # 6. Health check (non-fatal): sourceDir + zshrc + tools; flags leftover clones.
 if command -v python3 >/dev/null 2>&1 && [ -f "$TARGET_DIR/tstack/main.py" ]; then

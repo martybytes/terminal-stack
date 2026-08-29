@@ -2727,3 +2727,78 @@ which has no interval expressions**, so the substitution silently matched nothin
 and returned the whole row. Explicit repetition instead. Testing on "Linux"
 means testing on the distro's own tools, not on one distro that happens to have
 the permissive ones.
+
+## Why the conflict question is asked by us, not by chezmoi
+
+chezmoi already asks. That is the problem:
+
+```
+.zshrc has changed since chezmoi last wrote it?
+> diff/overwrite/all-overwrite/skip/quit
+```
+
+There is no indication of which edit is at stake, no statement that `overwrite`
+is permanent, and no hint that the recurrence has a fix. `all-overwrite` is
+nearly always correct here — these files are stack-owned and rewritten every
+update, so an edit made directly to `~/.zshrc` was never going to survive — and
+a user with only that line to go on cannot know it.
+
+**Resolve first, then apply**, rather than `chezmoi apply --interactive` with
+better wording around it. `--interactive` prompts for *every* change, not just
+the contentious ones, and its wording is not ours to change. Instead
+`bootstrap/ts-apply.sh` reads `chezmoi status`, settles each conflict with
+`chezmoi apply --force -- <file>`, and only then runs the general apply — by
+which point chezmoi has nothing to ask. A residual-conflict guard refuses to run
+that final apply if anything is somehow left, because in an installer a
+re-prompt is the dead end described below.
+
+**Back up before overwriting.** A POSIX `chezmoi apply` writes no backup at all;
+the `.bak.YYYYMMDD[.N]` convention only ever fired in the Windows sync hook, the
+merge helpers, and `run_before_20-backup-ghostty.sh` — which exists precisely
+because of this gap. Taking one turns "overwrite" from a lossy answer into a
+recoverable one, which is what makes recommending "all" honest. The convention
+is now one helper, `ts_backup_file` in `_config.sh`, instead of the two
+open-coded copies it had grown.
+
+**`/dev/tty`, not stdin.** Every installer runs the apply with `</dev/null` on
+purpose — the `curl | bash` stdin-consumption defence, where a child reading the
+script pipe truncates the script still being read. That makes stdin a useless
+test for "can I ask a question", and it is the reason chezmoi failed here at all:
+
+```
+chezmoi: .zshrc: could not open a new TTY: open /dev/tty: no such device or address
+```
+
+A re-install over any hand-edited file hit that under `set -e` and aborted. The
+repo already had the right primitive — `ts_is_interactive`, which probes
+`/dev/tty` — and using it means the question still gets asked in a real terminal
+even though stdin is closed.
+
+**Exit 4 for "a decision is waiting".** Distinct from 0 and from a real failure,
+so a caller can tell the two apart: `tstack update` reports that the pull
+succeeded and the apply is pending, and the installers say everything else is
+installed and exit 0. A conflict is not a broken install, and a half-applied home
+directory is worse than an unapplied one — so nothing is written in that case.
+
+**The conflict predicate is column 1 alone.** `chezmoi status` prints two
+columns; the earlier zsh implementation required both to be non-space. Verified
+against chezmoi 2.72, the prompt fires on **column 1** — the destination
+differing from what chezmoi last wrote — whether or not the source changed:
+
+| case | status | chezmoi |
+|---|---|---|
+| user edited, source unchanged | `MM` | asks |
+| source changed, user did not touch it | ` M` | applies silently |
+| both changed | `MM` | asks |
+
+Both filters agree on these, so the old one was not producing wrong answers —
+it was describing the wrong rule, which is the kind of thing that stops being
+harmless the moment a fourth case shows up.
+
+**One implementation, four callers.** This lived in `dot_zshrc`, in zsh, so only
+`tstack update` had it. The three installers — where a conflict is *most* likely,
+because a re-install runs over whatever the previous one left behind — got the
+bare `chezmoi apply` instead. That asymmetry is the same shape as the
+`Invoke-TsWizard` duplication that killed the Windows install, and it is worth
+noticing that both were "the good version exists, and the path that needed it
+most could not reach it".

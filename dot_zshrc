@@ -621,64 +621,6 @@ _ts_src() {
 }
 _TS_STATE="${XDG_STATE_HOME:-$HOME/.local/state}/terminal-stack"
 
-_ts_chezmoi_conflicts() {
-  local cz="$1"
-  "$cz" status --path-style absolute --exclude scripts 2>/dev/null |
-    awk 'substr($0,1,1)!=" " && substr($0,2,1)!=" " { print substr($0,4) }'
-}
-
-_ts_chezmoi_apply_guided() {
-  local cz="$1" target ans conflict_text
-  local -a conflicts overwrite
-  while true; do
-    conflict_text="$(_ts_chezmoi_conflicts "$cz")"
-    [[ -n "$conflict_text" ]] || break
-    conflicts=("${(@f)conflict_text}")
-    echo "==> chezmoi found ${#conflicts} file(s) changed both locally and by terminal-stack."
-    if [[ ! -t 0 ]]; then
-      printf '  %s\n' "${conflicts[@]}"
-      echo "tstack update: rerun interactively to review; nothing was overwritten." >&2
-      return 1
-    fi
-    overwrite=()
-    for target in "${conflicts[@]}"; do
-      while true; do
-        echo
-        echo "Conflict: $target"
-        echo "  overwrite = discard live-only edits and install terminal-stack's version"
-        echo "  merge     = open chezmoi's three-way merge tool, then recheck"
-        "$cz" diff --no-pager -- "$target" || true
-        read -r "ans?Choose [o]verwrite, [m]erge, [v]iew again, or [q]uit (default): "
-        case "$ans" in
-          o|O|overwrite) overwrite+=("$target"); break ;;
-          m|M|merge)
-            "$cz" merge -- "$target" || { echo "tstack update: merge failed; nothing was overwritten." >&2; return 1; }
-            if ! _ts_chezmoi_conflicts "$cz" | grep -Fxq -- "$target"; then break; fi
-            echo "tstack update: $target still conflicts after merge; review it again." >&2 ;;
-          v|V|view) ;;
-          *) echo "tstack update: cancelled before general apply. Rerun tstack update to resume." >&2; return 1 ;;
-        esac
-      done
-    done
-    if (( ${#overwrite} )); then
-      echo "The following live-only edits will be discarded:"
-      printf '  %s\n' "${overwrite[@]}"
-      read -r "ans?Apply terminal-stack's versions to these files? [y/N]: "
-      [[ "$ans" == (y|Y|yes|YES) ]] || { echo "tstack update: cancelled; nothing was overwritten." >&2; return 1; }
-      "$cz" apply --force --no-tty -- "${overwrite[@]}" || return 1
-    fi
-  done
-  if ! "$cz" apply --dry-run --error-on-conflict --no-tty --no-pager; then
-    echo "tstack update: chezmoi dry-run failed; no general apply was attempted." >&2
-    echo "  Diagnose: chezmoi apply --dry-run --verbose --error-on-conflict" >&2
-    return 1
-  fi
-  if ! "$cz" apply --error-on-conflict --no-tty; then
-    echo "tstack update: chezmoi apply failed; later update steps were skipped." >&2
-    echo "  Rerun tstack update, or diagnose with the dry-run command shown above." >&2
-    return 1
-  fi
-}
 
 _ts_offer_zsh_restart() {
   local before="$1" after jobs_running ans
@@ -772,7 +714,20 @@ _tstack_update() {
   # script (incl. our 114-line sync hook) as a git-style diff on every run,
   # which looks like a pager opening on long-output. Use `chezmoi diff` if
   # you want to preview.
-  _ts_chezmoi_apply_guided "$cz" || return 1
+  # ONE implementation, in bootstrap/ts-apply.sh, shared with all three
+  # installers. It used to live here in zsh, so the install path -- which is
+  # where a conflict is most likely, because a re-install runs over whatever the
+  # last one left -- got a bare `chezmoi apply` and no explanation at all.
+  # Exit 4 is "conflicts are waiting for a decision", not a failure.
+  local _apply_rc=0
+  TERMINAL_STACK_CHEZMOI="$cz" bash "$src/bootstrap/ts-apply.sh" || _apply_rc=$?
+  if (( _apply_rc == 4 )); then
+    echo "tstack update: the pull succeeded; the apply is waiting on you (see above)." >&2
+    return 0
+  elif (( _apply_rc != 0 )); then
+    echo "tstack update: chezmoi apply failed; later update steps were skipped." >&2
+    return 1
+  fi
   # Config files are only half an update: a release that adds a CLI tool is
   # inert until the tool exists. Offer the gap rather than installing behind
   # your back, and stay silent when there is nothing to do.

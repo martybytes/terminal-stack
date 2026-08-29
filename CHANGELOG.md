@@ -6,6 +6,62 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **"…has changed since chezmoi last wrote it?" now says what it means, and
+  backs your file up (08/29/2026).** The whole prompt was:
+
+  ```
+  .zshrc has changed since chezmoi last wrote it?
+  > diff/overwrite/all-overwrite/skip/quit
+  ```
+
+  Nothing said which of your edits was at stake, that `overwrite` discards it
+  **permanently** (a POSIX `chezmoi apply` writes no backup at all), or that the
+  reason it keeps happening is that personal settings belong in `~/.zshrc.local`
+  rather than in a file the stack owns outright and rewrites every update. In
+  practice `all-overwrite` is nearly always the right answer, and there was no
+  way to know that.
+
+  `tstack apply` (`bootstrap/ts-apply.sh`) finds the conflicts *before* chezmoi
+  can ask, explains each option in terms of what you lose, copies your version to
+  `<file>.bak.YYYYMMDD[.N]`, and only then takes the stack's. `--overwrite` does
+  the lot non-interactively, `--check` reports and changes nothing. By the time
+  the real `chezmoi apply` runs there is nothing left for it to ask about, and a
+  residual-conflict guard refuses to run it if there somehow is.
+
+- **A re-install over a hand-edited file died with a TTY error (08/29/2026).**
+  All three installers ran `chezmoi apply -v </dev/null` — the `</dev/null` being
+  the deliberate `curl | bash` stdin-consumption defence. With no stdin chezmoi
+  cannot ask its question, so on any machine where a managed file had been edited
+  the install aborted under `set -e` with
+
+  ```
+  chezmoi: .zshrc: could not open a new TTY: open /dev/tty: no such device or address
+  ```
+
+  and no indication of what to do. They route through `tstack apply` now, which
+  probes **`/dev/tty`, not stdin** — the distinction is the point, since the user
+  is sitting at a terminal the whole time — so the question still gets asked. A
+  run with genuinely no terminal (CI, a pipe) lists the files, prints the options
+  and exits **4**, having changed nothing; the installers treat 4 as "a decision
+  is waiting", report that everything else installed, and exit 0 rather than
+  failing.
+
+- **The conflict handling had one implementation and three callers that could not
+  reach it (08/29/2026).** It lived in `dot_zshrc`, in zsh, so only `tstack
+  update` had it — while the *installers*, where a conflict is most likely
+  because a re-install runs over whatever the last one left behind, got the bare
+  `chezmoi apply` above. It is one bash entry point now, shared by all four, and
+  the zsh copy is deleted. The conflict predicate was wrong too: it required both
+  `chezmoi status` columns to be non-space, when the prompt actually fires on
+  **column 1 alone** (the destination differing from what chezmoi last wrote).
+  The two agree on today's cases and the old one describes the wrong rule.
+  Verified against chezmoi 2.72 in a container, all three status shapes.
+
+- **`ts_backup_file` (08/29/2026).** The `.bak.YYYYMMDD[.N]` convention that
+  `ARCHITECTURE.md` mandates had been open-coded in `_cc_tts.sh` and again in
+  `run_before_20-backup-ghostty.sh`. One helper in `bootstrap/_config.sh` now,
+  which is what makes "overwrite" a recoverable answer rather than a lossy one.
+
 - **Every fresh Windows install died before installing anything (08/28/2026).**
   `bootstrap/windows-bootstrap.ps1` ran `Join-Path $SourceDir 'tstack\main.py'`
   with nothing assigning `$SourceDir`: no `param()` entry, `install.ps1` calling

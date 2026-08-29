@@ -29,6 +29,28 @@ export USER
 # shellcheck source=_wezterm.sh
 . "$(dirname -- "${BASH_SOURCE[0]}")/_wezterm.sh"
 
+# The repo-wide backup convention, in one place: <path>.bak.YYYYMMDD, then .1,
+# .2 on a same-day re-run, never clobbering a same-day backup. ARCHITECTURE.md
+# states the rule; it had been open-coded in _cc_tts.sh and again in
+# run_before_20-backup-ghostty.sh, and `chezmoi apply` itself takes no backup at
+# all on POSIX -- which is what makes "overwrite" a destructive answer unless
+# something like this runs first.
+#
+# Prints the backup path on stdout so the caller can report it. Returns 1 when
+# there was nothing to back up.
+ts_backup_file() {
+    local f="$1" stamp base bak n=1
+    [ -f "$f" ] || return 1
+    stamp="$(date +%Y%m%d)"
+    base="$f.bak.$stamp"
+    bak="$base"
+    while [ -e "$bak" ]; do bak="$base.$n"; n=$((n + 1)); done
+    # cp, not mv: a failed apply must leave the original in place.
+    cp -p -- "$f" "$bak" 2>/dev/null || cp -- "$f" "$bak" || return 1
+    printf '%s
+' "$bak"
+}
+
 # ── App catalog ────────────────────────────────────────────────────────────────
 # The toggleable apps the wizard/picker offers, read from bootstrap/apps.conf.
 # Required prerequisites (zsh, git, curl, unzip, fontconfig, the Nerd Font,

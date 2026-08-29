@@ -383,13 +383,6 @@ ts_cc_tts_daemon_status() {
 TS_CC_TTS_SELF_START='<!-- terminal-stack-tts-start -->'
 TS_CC_TTS_SELF_END='<!-- terminal-stack-tts-end -->'
 
-ts_cc_tts_backup_file() {
-    local f="$1" b n=1
-    [ -f "$f" ] || return 0
-    b="$f.bak.$(date +%Y%m%d)"
-    while [ -e "$b" ]; do b="$f.bak.$(date +%Y%m%d).$n"; n=$((n + 1)); done
-    cp -p "$f" "$b" 2>/dev/null || cp "$f" "$b"
-}
 
 ts_cc_tts_self_strip() {
     # Print $1 minus the marker block (no-op passthrough when absent).
@@ -414,7 +407,7 @@ ts_cc_tts_self_install_one() {
     [ -f "$asset" ] || { echo "tts: speak-summary.md asset not found (run tstack update?)" >&2; return 1; }
     mkdir -p "$(dirname "$target")" 2>/dev/null || true
     if [ -f "$target" ]; then
-        ts_cc_tts_backup_file "$target"
+        ts_backup_file "$target"
         { ts_cc_tts_self_strip "$target"; echo; cat "$asset"; } > "$target.tmp" \
             && mv "$target.tmp" "$target"
     else
@@ -460,7 +453,7 @@ ts_cc_tts_self_remove() {
     for target in "${targets[@]}"; do
         [ -f "$target" ] || continue
         grep -qF "$TS_CC_TTS_SELF_START" "$target" || continue
-        ts_cc_tts_backup_file "$target"
+        ts_backup_file "$target"
         ts_cc_tts_self_strip "$target" > "$target.tmp" && mv "$target.tmp" "$target"
         echo "tts: spoken-summary instruction removed from $target"
     done
