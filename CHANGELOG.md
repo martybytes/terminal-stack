@@ -143,6 +143,15 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Changed
 
+- **`develop` is the default and integration branch; `main` is the protected
+  release branch (08/28/2026).** Phase branches are cut from `develop` and merge
+  back into it; `develop` reaches `main` only through a pull request with every
+  CI check green. `main` also refuses force-pushes and deletion. Admins are
+  exempt on purpose — a solo maintainer who locks themselves out has no second
+  account to let them back in. `AGENTS.md` § Branches is the authority.
+  `develop` was added to CI's push triggers, or the new integration branch would
+  have had no CI on a direct push.
+
 - **`tstack config` is the ported Python on POSIX (08/28/2026).** The row's two
   columns differ on purpose, which is what they are for. `apps`, `tts` and
   `reconfigure` are routed to `bootstrap/ts-config.sh` rather than reimplemented:
@@ -267,6 +276,18 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
   in the repo has ever read.
 
 ### Fixed
+
+- **A test passed only because this machine had no runtime clone (08/28/2026).**
+  `test_the_catalog_reader_survives_a_missing_file` pinned `TERMINAL_STACK_DIR`
+  at an empty directory, which is a *stale* pin, not a partial clone — and a
+  stale pin deliberately degrades rather than dead-ends, so resolution fell
+  through to the candidate search and found whatever clone the machine had. That
+  was nothing, until one was deployed to `~/.local/share/terminal-stack`; then
+  the catalog resolved, the assertion failed, and the pre-push hook was blocked
+  on the dev box while CI stayed green (CI has no runtime clone). The pin now
+  names a real clone that lacks the file, which is what the docstring always
+  claimed it was testing.
+
 
 - **Every `modify_` script grew a `\r` per apply on a CRLF host (08/28/2026).**
   `sys.stdout.write` opens stdout in *text* mode, so each `\n` it writes becomes

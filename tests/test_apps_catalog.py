@@ -255,8 +255,19 @@ def test_no_reader_carries_a_hardcoded_id_list_any_more():
 
 
 def test_the_catalog_reader_survives_a_missing_file(monkeypatch, tmp_path):
-    """A partial clone must not take the whole config store down with it."""
-    monkeypatch.setenv("TERMINAL_STACK_DIR", str(tmp_path))
+    """A partial clone must not take the whole config store down with it.
+
+    The pin must name a REAL clone that happens to lack the file -- which is
+    what "partial clone" means. Pointing it at a bare empty directory makes it a
+    *stale* pin, and a stale pin deliberately degrades rather than dead-ends:
+    resolution falls through to the candidate search and finds whatever clone
+    this machine has. That passed for as long as the dev box had no runtime
+    clone, and started failing the moment one was deployed to
+    ~/.local/share/terminal-stack -- on the machine, never in CI, which has none.
+    """
+    clone = tmp_path / "clone"
+    (clone / ".git").mkdir(parents=True)
+    monkeypatch.setenv("TERMINAL_STACK_DIR", str(clone))
     apps.clear_cache()
     assert apps.catalog() == ()
     assert apps.recommended() == [] and apps.groups() == []
