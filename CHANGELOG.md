@@ -6,6 +6,14 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **Docs caught up with `tstack apply` (08/29/2026).** README and INSTALL.md
+  still told people the macOS, WSL and Linux one-liners "end with `chezmoi
+  apply`". They end with `tstack apply`, and the difference — the conflict
+  question explained, your file backed up first — is the whole point of the
+  entry above. `tstack apply` is in the README command list and the `doc stack`
+  cheat sheet now, and the manual-install path in INSTALL.md carries a note on
+  which of the two to reach for on a machine whose files have been hand-edited.
+
 - **"…has changed since chezmoi last wrote it?" now says what it means, and
   backs your file up (08/29/2026).** The whole prompt was:
 
