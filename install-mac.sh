@@ -175,6 +175,11 @@ fi
 
 # 4. Bootstrap
 export SOURCE_DIR="$TARGET_DIR"
+# The Python side resolves the clone from TERMINAL_STACK_DIR first. The
+# questionnaire runs before chezmoi is configured, so without this a clone
+# outside the built-in candidate list gave an EMPTY app catalog and offered
+# no tools at all, silently.
+export TERMINAL_STACK_DIR="$TARGET_DIR"
 BOOTSTRAP="$TARGET_DIR/bootstrap/mac-bootstrap.sh"
 if [ ! -f "$BOOTSTRAP" ]; then
     echo "$WARN Expected bootstrap script not found at $BOOTSTRAP"
@@ -183,7 +188,32 @@ fi
 echo "$INFO Running $BOOTSTRAP"
 # `</dev/null` defends against the curl|bash stdin-consumption pitfall — see
 # the matching comment in install-wsl.sh. The bootstrap is non-interactive.
-bash "$BOOTSTRAP" </dev/null
+# rc 3 means the user quit at the wizard review. Anything else non-zero is a
+# real failure and `set -e` should still take us down.
+BOOT_RC=0
+bash "$BOOTSTRAP" </dev/null || BOOT_RC=$?
+if [ "$BOOT_RC" = 3 ]; then
+    echo "$INFO Install cancelled at the questionnaire; nothing was changed."
+    exit 0
+elif [ "$BOOT_RC" != 0 ]; then
+    echo "$WARN $BOOTSTRAP failed (exit $BOOT_RC)."
+    exit "$BOOT_RC"
+fi
+
+# 4. Sanity-check bootstrap output before chezmoi apply. Without chezmoi.toml,
+# `chezmoi apply` falls back to ~/.local/share/chezmoi and deploys the wrong
+# tree, or nothing -- reporting success either way. install-linux.sh and
+# install-wsl.sh have carried this check all along; this one did not.
+TOML="$HOME/.config/chezmoi/chezmoi.toml"
+if [ ! -f "$TOML" ]; then
+    echo "$WARN $TOML was not written by the bootstrap."
+    echo "    This means a step inside bootstrap/mac-bootstrap.sh failed silently"
+    echo "    before reaching the toml-writing block. Recovery:"
+    echo "      mkdir -p $(dirname "$TOML")"
+    echo "      printf 'sourceDir = \"%s\"\\n' \"$TARGET_DIR\" > $TOML"
+    echo "      chezmoi apply -v"
+    exit 1
+fi
 
 # 5. chezmoi apply
 echo "$INFO Running chezmoi apply -v"

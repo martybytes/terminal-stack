@@ -182,6 +182,11 @@ fi
 
 # 4. Bootstrap (non-interactive thanks to the env WIN_USER guard in wsl-bootstrap.sh)
 export SOURCE_DIR="$TARGET_DIR"
+# The Python side resolves the clone from TERMINAL_STACK_DIR first. The
+# questionnaire runs before chezmoi is configured, so without this a clone
+# outside the built-in candidate list gave an EMPTY app catalog and offered
+# no tools at all, silently.
+export TERMINAL_STACK_DIR="$TARGET_DIR"
 BOOTSTRAP="$TARGET_DIR/bootstrap/wsl-bootstrap.sh"
 if [ ! -f "$BOOTSTRAP" ]; then
     echo "$WARN Expected bootstrap script not found at $BOOTSTRAP"
@@ -192,7 +197,17 @@ echo "$INFO Running $BOOTSTRAP"
 # this script under `curl | bash` could otherwise read from the script pipe
 # and truncate our remaining source. The bootstrap is fully non-interactive
 # (WIN_USER comes from env), so closing stdin is safe.
-bash "$BOOTSTRAP" </dev/null
+# rc 3 means the user quit at the wizard review. Anything else non-zero is a
+# real failure and `set -e` should still take us down.
+BOOT_RC=0
+bash "$BOOTSTRAP" </dev/null || BOOT_RC=$?
+if [ "$BOOT_RC" = 3 ]; then
+    echo "$INFO Install cancelled at the questionnaire; nothing was changed."
+    exit 0
+elif [ "$BOOT_RC" != 0 ]; then
+    echo "$WARN $BOOTSTRAP failed (exit $BOOT_RC)."
+    exit "$BOOT_RC"
+fi
 
 # 5. chezmoi apply
 echo "$INFO Running chezmoi apply -v"

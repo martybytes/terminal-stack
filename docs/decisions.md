@@ -2647,3 +2647,83 @@ the winget pass and before the agent CLIs, in **both** `Install-TsApps` and
 and a new winget id is verified with `winget show --id <id> --exact` before it is
 written down. An id that always fails is worse than an honest "not available on
 this platform".
+
+## Why a gate has to RUN the installer, and what a parse gate cannot see
+
+A refactor that ported the wizard, the apps catalog, ghostty, mux and config to
+Python was done on macOS and merged. The first Windows install after it died on
+its third line:
+
+```
+windows-bootstrap.ps1: Cannot bind argument to parameter 'Path' because it is null.
+```
+
+`Join-Path $SourceDir 'tstack\main.py'`, with nothing assigning `$SourceDir`.
+Four separate things had to be true for that to reach `main`, and each is worth
+keeping in mind separately.
+
+**1. The bug was a duplicate, not a typo.** `_config.ps1` already had
+`Invoke-TsWizard`, and its own comment says *"ONE copy, because there are two
+callers -- the bootstrap and `tstack config wizard` in $PROFILE -- and the last
+time each had its own, $PROFILE was still calling a `Read-TsWizard` that no
+longer existed."* The bootstrap had re-inlined a third copy anyway. The comment
+was right about the failure mode and the code drifted back into it regardless.
+
+**2. The guard test named two callers and checked one.**
+`test_the_windows_wizard_runner_has_exactly_one_implementation` existed, for
+exactly this, and asserted only against `$PROFILE`. A test whose docstring
+describes an invariant it does not check is worse than no test: it is a claim
+that the thing is covered. (See also § "The claims audit".)
+
+**3. A parse gate would not have helped.** Every `.ps1` in the repo parses
+cleanly -- verified. PowerShell has no `bash -n` equivalent for undefined names,
+and CI had **no PowerShell job at all**: `bash -n` ran over every shell script on
+Linux, macOS, WSL and three distro containers, while `.ps1` was checked nowhere,
+with the Windows runner's syntax step explicitly `if: runner.os != 'Windows'`.
+
+What finds it is a scope-aware AST walk, and the one detail that decides whether
+it works: for a dot-sourced dependency it must count **script-level assignments
+only**. Counting that file's *function parameters* is precisely what made
+`$SourceDir` look defined -- `Invoke-TsWizard` has a parameter by that name. The
+first version of the scan did exactly that and reported nothing. Within the file
+under test, scriptblock `param()` blocks DO count, or `$mk = { param($ms) ... }`
+is a false positive.
+
+**4. Nothing in the repo ran an installer.** `tests/parity/run.sh` and the CI
+`parity` job both stop at `bash -n` plus pytest. That is a structural blind spot,
+not an oversight about one bug: `bash -n` cannot see an unset variable, and a
+static name resolver cannot see an empty catalog. The bash twin of the Windows
+bug was sitting in the tree at the same time -- `_wizard.sh` ran the questionnaire
+without pinning `TERMINAL_STACK_DIR`, and it runs *before* chezmoi is configured,
+so a clone at any path off the built-in candidate list produced an empty
+`apps.catalog()` and an install that finished successfully with no CLI tools.
+
+Hence `tests/parity/run.sh bootstrap`. Three things about it are load-bearing:
+
+- **A non-root user with passwordless sudo.** `common_require_non_root` refuses
+  uid 0, and the bootstrap shells out to `sudo` for apt and `chsh`.
+- **The clone goes at a path deliberately off the candidate list**
+  (`~/somewhere/odd/stack`). Every default location hides the resolution bugs.
+- **It asserts on the wizard's ANSWER, never on its console output.** The
+  questionnaire writes its menus to the terminal, so a "the app catalog is empty"
+  warning never reaches stdout. The first version grepped the log for that string
+  and therefore could not fail -- it passed with the bug deliberately reinstated.
+  It checks `TS_WIZ_APPS` instead, which is the thing the caller actually
+  consumes.
+
+It earned its place on the first run, with a bug none of the static gates could
+express: all three bootstraps printed `Detected: user $USER` under `set -u`, and
+`$USER` is set by **login** shells and nothing else. `docker run ... bash -c`,
+`su - -c`, cron and systemd units all aborted on line one. `_config.sh` derives
+it from `id -un` now.
+
+It is opt-in -- it installs packages and wants the network -- so a bare
+`tests/parity/run.sh` does not include it. Name it to run it.
+
+One more thing the containers caught, which is the older argument for them
+restated: the fix for `ts_app_desc`'s whitespace handling used an awk interval
+expression, `{4}`. Debian ships gawk and passed. **Ubuntu's default awk is mawk,
+which has no interval expressions**, so the substitution silently matched nothing
+and returned the whole row. Explicit repetition instead. Testing on "Linux"
+means testing on the distro's own tools, not on one distro that happens to have
+the permissive ones.

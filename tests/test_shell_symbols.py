@@ -167,6 +167,19 @@ def test_the_windows_wizard_runner_has_exactly_one_implementation():
     code = [ln for ln in ps.splitlines() if not ln.lstrip().startswith("#")]
     assert "$w.Workspace" not in "\n".join(code), "reading a key the wizard JSON does not emit"
 
+    # The OTHER caller. This test named two and checked one -- so when
+    # windows-bootstrap.ps1 grew a hand-inlined third copy of the runner,
+    # referencing a $SourceDir that nothing assigned, the guard written for
+    # exactly this bug could not see it, and every fresh Windows install died at
+    # the questionnaire.
+    boot = _read(ROOT / "bootstrap/windows-bootstrap.ps1")
+    boot_code = "\n".join(ln for ln in boot.splitlines() if not ln.lstrip().startswith("#"))
+    assert "Invoke-TsWizard" in boot_code, "windows-bootstrap.ps1 must use the shared runner"
+    assert "--emit" not in boot_code, (
+        "windows-bootstrap.ps1 is running the questionnaire itself again; "
+        "call Invoke-TsWizard instead"
+    )
+
 
 @pytest.mark.skipif(not shutil.which("pwsh"), reason="PowerShell 7 is unavailable")
 def test_the_config_helper_loads_where_there_is_no_windows_side():

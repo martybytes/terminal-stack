@@ -15,6 +15,15 @@
 : "${INFO:=$'\033[1;34m==>\033[0m'}"
 : "${WARN:=$'\033[1;33m!!\033[0m'}"
 
+# $USER is set by LOGIN shells, and nothing else guarantees it. All three
+# bootstraps run under `set -u` and print "Detected: user $USER" as their first
+# line, so on any non-login invocation -- `docker run ... bash -c`, `su - -c`,
+# cron, a systemd unit -- the installer aborted on line one with
+# `USER: unbound variable`. `id -un` is the actual source of truth; exported
+# because common_login_shell_zsh hands it to getent and chsh.
+: "${USER:="$(id -un 2>/dev/null || true)"}"
+export USER
+
 # shellcheck source=_cc_tts.sh
 . "$(dirname -- "${BASH_SOURCE[0]}")/_cc_tts.sh"
 # shellcheck source=_wezterm.sh
@@ -53,7 +62,12 @@ ts_apps_load() {
     local _plat
     case "$(uname -s 2>/dev/null)" in
         Darwin) _plat=macos ;;
-        *)      if [ -d /mnt/c/Users ]; then _plat=wsl; else _plat=linux; fi ;;
+        *)      # /proc/version, matching tstack/platform.py and _ts_is_wsl.
+                # `-d /mnt/c/Users` also matches a native-Linux box with an NTFS
+                # mount, and then bash said wsl while Python said linux -- so the
+                # picker offered nvtop and the installer's catalog lacked it.
+                if [ -r /proc/version ] && grep -qi microsoft /proc/version 2>/dev/null
+                then _plat=wsl; else _plat=linux; fi ;;
     esac
     TS_APPS_ROWS="$(printf '%s\n' "$TS_APPS_ROWS" | awk -v p="$_plat" '
         $4=="all" { print; next }
@@ -113,7 +127,7 @@ ts_app_group_of() {
 ts_app_desc() {
     ts_apps_load || return 0
     printf '%s\n' "$TS_APPS_ROWS" \
-        | awk -v id="$1" '$1==id{$1="";$2="";$3="";$4="";sub(/^ +/,"");print;exit}'
+        | awk -v id="$1" '$1==id{ sub(/^[[:space:]]*[^[:space:]]+[[:space:]]+[^[:space:]]+[[:space:]]+[^[:space:]]+[[:space:]]+[^[:space:]]+[[:space:]]+/, ""); print; exit }'
 }
 
 # The ids pre-ticked for a machine class. Neither set is a subset of the other:
