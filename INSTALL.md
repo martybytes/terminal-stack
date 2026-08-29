@@ -6,7 +6,7 @@ Two paths. Pick the one matching how much trust you have in the scripts.
 
 ### Quick install (one-liner per environment)
 
-The fastest path: a single command per environment, runnable from a fresh box. Installs prereqs, clones the repo, runs the bootstrap, and ends with `chezmoi apply`. Idempotent.
+The fastest path: a single command per environment, runnable from a fresh box. Installs prereqs, clones the repo, runs the bootstrap, and ends with `tstack apply` (`chezmoi apply`, with any conflict explained and your version backed up first). Idempotent.
 
 ```powershell
 # Windows 11 — PowerShell 7+
@@ -251,6 +251,12 @@ The WSL bootstrap already wrote `~/.config/chezmoi/chezmoi.toml` with `sourceDir
 # Inside WSL
 ~/.local/bin/chezmoi apply -v
 ```
+
+> On a machine where a managed file has been hand-edited, run `tstack apply`
+> instead. It lists what differs, says what each answer costs, and copies your
+> version to `<file>.bak.YYYYMMDD` before overwriting it; a bare `chezmoi apply`
+> asks a one-line question and keeps no backup. `tstack apply --overwrite` takes
+> the stack's version everywhere, backing yours up. See `doc tstack`.
 
 The Linux and macOS bootstraps likewise write `~/.config/chezmoi/chezmoi.toml`
 (no `windowsUsername` — there's no Windows side). If you skipped the bootstrap,

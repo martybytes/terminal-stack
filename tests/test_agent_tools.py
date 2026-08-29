@@ -137,20 +137,54 @@ def test_launch_wrappers_are_process_local_and_have_stock_escape_hatches():
 
 
 def test_ts_update_owns_chezmoi_conflict_handling_and_runtime_guard():
+    """The conflict question has ONE implementation, and `tstack update` uses it.
+
+    It used to live in `dot_zshrc`, in zsh, which meant the three INSTALLERS --
+    where a conflict is most likely, because a re-install runs over whatever the
+    last one left behind -- got a bare `chezmoi apply -v </dev/null` instead.
+    With no TTY chezmoi cannot ask, so that died with "could not open a new TTY"
+    under `set -e` and took the install with it.
+    """
     zsh = (ROOT / "dot_zshrc").read_text(encoding="utf-8")
     ps = (ROOT / "windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1").read_text(
         encoding="utf-8"
     )
-    update = zsh[zsh.index("_ts_chezmoi_conflicts() {") : zsh.index("_tstack_rollback() {")]
-    assert "status --path-style absolute --exclude scripts" in update
-    assert "[o]verwrite, [m]erge, [v]iew again, or [q]uit" in update
-    assert "apply --dry-run --error-on-conflict --no-tty" in update
-    assert "apply --error-on-conflict --no-tty" in update
-    assert "apply --force --no-tty" in update
+    apply = (ROOT / "bootstrap/ts-apply.sh").read_text(encoding="utf-8")
+
+    # The logic, in the one place it now lives.
+    assert "status --path-style absolute --exclude scripts" in apply
+    assert "[o]verwrite  [a]ll  [d]iff  [m]erge  [q]uit" in apply
+    assert "apply --force --no-tty" in apply
+    # Backups are what make "overwrite" a recoverable answer: chezmoi itself
+    # writes none on POSIX.
+    assert "ts_backup_file" in apply
+    # /dev/tty, not stdin -- every installer runs `</dev/null` on purpose.
+    assert "ts_is_interactive" in apply
+    assert "exit 4" in apply, "conflicts need a distinct exit code from failure"
+
+    # And nowhere else.
+    assert "_ts_chezmoi_apply_guided" not in zsh
+    assert "_ts_chezmoi_conflicts" not in zsh
+
+    # From the restart helper through the end of _tstack_update: the two belong
+    # to the same flow, and the restart offer is what makes an update take
+    # effect in the shell you ran it from.
+    update = zsh[zsh.index("_ts_offer_zsh_restart() {") : zsh.index("_tstack_rollback() {")]
+    assert "bootstrap/ts-apply.sh" in update
+    assert "_apply_rc == 4" in update, "a waiting decision is not an update failure"
     assert "runtime clone has uncommitted changes" in update
     assert "Shell configuration changed" in update
     assert "Restart this shell now to activate the update? [Y/n]" in update
     assert "jobs -p" in update and "exec zsh" in update
+
+    # Every installer routes through it, and none of them still calls chezmoi raw.
+    for name in ("install-linux.sh", "install-mac.sh", "install-wsl.sh"):
+        text = (ROOT / name).read_text(encoding="utf-8")
+        code = "\n".join(ln for ln in text.splitlines() if not ln.lstrip().startswith("#"))
+        assert "bootstrap/ts-apply.sh" in code, name
+        assert "chezmoi apply -v </dev/null" not in code, name
+        assert 'APPLY_RC" = 4' in code, f"{name} must treat 4 as 'decisions waiting'"
+
     assert "runtime clone has uncommitted changes" in ps
     assert "PowerShell profile changed" in ps
     assert "Open a new PowerShell tab" in ps

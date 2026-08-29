@@ -160,6 +160,11 @@ fi
 
 # 3. Bootstrap
 export SOURCE_DIR="$TARGET_DIR"
+# The Python side resolves the clone from TERMINAL_STACK_DIR first. The
+# questionnaire runs before chezmoi is configured, so without this a clone
+# outside the built-in candidate list gave an EMPTY app catalog and offered
+# no tools at all, silently.
+export TERMINAL_STACK_DIR="$TARGET_DIR"
 BOOTSTRAP="$TARGET_DIR/bootstrap/linux-bootstrap.sh"
 if [ ! -f "$BOOTSTRAP" ]; then
     echo "$WARN Expected bootstrap script not found at $BOOTSTRAP"
@@ -170,7 +175,17 @@ echo "$INFO Running $BOOTSTRAP"
 # child of this script could otherwise read from the script pipe and truncate
 # our remaining source. The bootstrap is non-interactive, so closing stdin is
 # safe. Same applies to the chezmoi apply below.
-bash "$BOOTSTRAP" </dev/null
+# rc 3 means the user quit at the wizard review. Anything else non-zero is a
+# real failure and `set -e` should still take us down.
+BOOT_RC=0
+bash "$BOOTSTRAP" </dev/null || BOOT_RC=$?
+if [ "$BOOT_RC" = 3 ]; then
+    echo "$INFO Install cancelled at the questionnaire; nothing was changed."
+    exit 0
+elif [ "$BOOT_RC" != 0 ]; then
+    echo "$WARN $BOOTSTRAP failed (exit $BOOT_RC)."
+    exit "$BOOT_RC"
+fi
 
 # 4. Sanity-check bootstrap output before chezmoi apply.
 # If the bootstrap aborted mid-way (e.g. Nerd Font download or Starship installer
@@ -189,7 +204,16 @@ fi
 
 # 5. chezmoi apply
 echo "$INFO Running chezmoi apply -v"
-"$HOME/.local/bin/chezmoi" apply -v </dev/null
+APPLY_RC=0
+bash "$TARGET_DIR/bootstrap/ts-apply.sh" -v </dev/null || APPLY_RC=$?
+if [ "$APPLY_RC" = 4 ]; then
+    # Conflicts, explained above, nothing written. Everything else installed.
+    echo "$INFO Everything else is installed. Re-run the apply once you have decided."
+    exit 0
+elif [ "$APPLY_RC" != 0 ]; then
+    echo "$WARN chezmoi apply failed (exit $APPLY_RC)."
+    exit "$APPLY_RC"
+fi
 
 # 6. Sanity-check that our dot_zshrc actually landed (chezmoi apply can silently
 # skip files on permissions / template errors).

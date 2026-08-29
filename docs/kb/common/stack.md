@@ -19,11 +19,14 @@
 | `tstack wezterm` | WezTerm build info, upstream comparison, channel switching — see below |
 | `plain` | vanilla shell, no rc/profile (no oh-my-zsh/starship/aliases) — `exit` to return |
 | `chezmoi diff` / `chezmoi apply -v` | preview / apply configs (run from inside WSL on Windows) |
+| `tstack apply` | the same apply, with any conflict explained and your version backed up — `doc tstack` |
 | `chezmoi re-add ~/.zshrc` | capture a hand-edit of a managed file back into the repo |
 | `scripts\sync-windows.ps1 -SourceDir <clone>` | Windows-side deploy — see `doc wezterm/dev-config` |
 
 Ported subcommands run the same Python on every platform: `doctor`, `services`,
 `mux`, `wezterm`, `agents`, `ghostty`, `wizard`, `ui`, and `config` on POSIX.
+`apply` is bash (`bootstrap/ts-apply.sh`) and POSIX-only — Windows has no
+`chezmoi apply` step; `scripts\sync-windows.ps1` deploys that side.
 What is left in pwsh is what has not been ported: `Update-TerminalStack`,
 `Restore-TerminalStack`, and `Set-TerminalStackConfig` (Windows `config` only) -
 and they are reached through `tstack <name>`, never by their own names.

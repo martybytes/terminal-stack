@@ -63,7 +63,10 @@ _ts_persist_wizard() {
 }
 TS_PERSIST_HOOK=_ts_persist_wizard
 
-common_install_all
+# rc 3 is the wizard's "user quit at the review". Under `set -e` a bare call
+# aborts here with no message; 3 is propagated so the installer can tell a
+# cancellation from a genuine failure.
+common_install_all || { _rc=$?; [ "$_rc" = 3 ] && exit 3; exit "$_rc"; }
 
 # The agent WIRING half: needs the claude/codex CLIs, so unlike the settings it
 # has to wait until after the app install.

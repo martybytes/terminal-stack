@@ -1375,7 +1375,8 @@ function Set-TerminalStackConfig {
             $entry  = Join-Path $src 'tstack\main.py'
             if ($python -and (Test-Path -LiteralPath $entry)) {
                 Write-Host '  restarting headroom so the change takes effect...'
-                & $python $entry services restart headroom | Out-Host
+                Invoke-TstackPython -Python $python -SourceDir $src `
+                    -Forwarded @('services', 'restart', 'headroom') | Out-Host
                 if ($LASTEXITCODE -ne 0) { Write-Warning 'headroom restart failed - run: tstack services restart headroom' }
             }
         }
@@ -1440,7 +1441,26 @@ function Set-TerminalStackConfig {
             $muxArgs = @(@($Value) + @($Rest) | Where-Object { $_ })
             Invoke-TstackSub -Name 'mux' -Forwarded $muxArgs
         }
-        default { Write-Warning "tstack config: unknown command '$Action' (show, leader, theme, tmux, apps, tts, mux, restore, memory, agents, wezterm, wizard)" }
+        # get/set/atuin/prompt are NATIVE in tstack/commands/config.py and were
+        # simply missing here, so all four fell through to "unknown command" on
+        # Windows while working everywhere else. atuin in particular has an
+        # explicit Windows branch in config.py that could never be reached.
+        'get' {
+            Invoke-TstackSub -Name 'config' -Forwarded (@('get') + @($Value) + @($Rest) | Where-Object { $_ })
+        }
+        'set' {
+            Invoke-TstackSub -Name 'config' -Forwarded (@('set') + @($Value) + @($Rest) | Where-Object { $_ })
+        }
+        'prompt' {
+            Invoke-TstackSub -Name 'config' -Forwarded (@('prompt') + @($Value) + @($Rest) | Where-Object { $_ })
+        }
+        'atuin' {
+            if ($Value -notin 'on', 'off') { Write-Warning 'usage: tstack config atuin <on|off>'; return }
+            Save-TsConfig -AtuinEnabled $Value | Out-Null
+            Invoke-TsSync $src
+            Write-Host '==> done. (atuin has no PowerShell integration; this affects WSL shells only.)'
+        }
+        default { Write-Warning "tstack config: unknown command '$Action' (show, get, set, leader, theme, tmux, apps, tts, mux, restore, atuin, prompt, ghostty, memory, agents, wezterm, wizard)" }
     }
 }
 
@@ -1542,7 +1562,7 @@ function Invoke-TstackSub {
     if (-not $src) { Write-Warning "tstack ${Name}: no terminal-stack clone found."; return }
     $python = Get-TstackPython
     if (-not $python) { Write-Warning 'tstack: python3 not found on PATH.'; return }
-    & $python (Join-Path $src 'tstack\main.py') $Name @Forwarded
+    Invoke-TstackPython -Python $python -SourceDir $src -Forwarded (@($Name) + $Forwarded)
 }
 
 function Invoke-Tstack {

@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Run the suite on real native-Linux targets, locally, in seconds.
 #
-#   tests/parity/run.sh              every target
+#   tests/parity/run.sh              every suite target
 #   tests/parity/run.sh debian13     one target
 #   tests/parity/run.sh --shell debian13   a shell inside the target, to poke about
+#   tests/parity/run.sh bootstrap    RUN linux-bootstrap.sh, end to end
 #
 # Why this exists: WSL is not native Linux here. /mnt/c exists, interop exists,
 # and tstack/platform.py reports `wsl` rather than `linux` on purpose -- so every
@@ -27,12 +28,19 @@ declare -A TARGETS=(
     [ubuntu2204]="ubuntu:22.04"
     # Handled specially below: syntax gate only, no Python in the image.
     [bash32]="bash:3.2"
+    # Handled specially below: runs the INSTALLER, not the suite. Not in the
+    # default set -- it installs packages and wants the network, so it is opted
+    # into rather than paid for on every run.
+    [bootstrap]="debian:13-slim"
 )
+
+# The default set. `bootstrap` is deliberately absent; name it to run it.
+DEFAULT_TARGETS=(debian13 ubuntu2404 ubuntu2204 bash32)
 
 shell_mode=0
 if [ "${1:-}" = "--shell" ]; then shell_mode=1; shift; fi
 wanted=("${@:-}")
-[ -z "${wanted[0]:-}" ] && wanted=("${!TARGETS[@]}")
+[ -z "${wanted[0]:-}" ] && wanted=("${DEFAULT_TARGETS[@]}")
 
 failed=()
 for name in "${wanted[@]}"; do
@@ -55,6 +63,34 @@ for name in "${wanted[@]}"; do
     # under LANG=en_US.UTF-8, because musl handles locales differently from
     # Darwin. That trap is covered instead by the test that greps for $var
     # followed by non-ASCII, which works on every platform.
+    # Run the installer for real. The suite targets above prove the code
+    # PARSES and that its names RESOLVE; this proves it RUNS. `bash -n` cannot
+    # see an unset variable and a static resolver cannot see an empty catalog,
+    # which is how the wizard came to be invoked with no TERMINAL_STACK_DIR and
+    # offer no tools at all.
+    # Run the installer for real. The suite targets prove the code PARSES and
+    # that its names RESOLVE; this proves it RUNS. `bash -n` cannot see an unset
+    # variable and a static resolver cannot see an empty catalog -- which is how
+    # `USER` came to be read unguarded under `set -u` (fine in a login shell,
+    # fatal under `docker run`, `su -c`, cron or systemd) and how the wizard came
+    # to be invoked with no clone pinned.
+    if [ "$name" = bootstrap ]; then
+        echo "==> $name (linux-bootstrap.sh, for real, on $base)"
+        docker build -q -f tests/parity/Dockerfile.bootstrap             --build-arg "BASE=$base" -t "$image" . >/dev/null
+        # Every answer through the environment, so the questionnaire never
+        # blocks. TS_APPS=none keeps the RUN about control flow -- wizard, config
+        # save, chezmoi apply -- rather than about spending ten minutes pulling
+        # thirty packages; the recommended set is still resolved and asserted on
+        # inside bootstrap-check.sh, which is where the interesting bug lives.
+        if docker run --rm -v "$root:/repo:ro"                 -e TS_ASSUME_YES=1 -e TS_HEADLESS_RESOLVED=1                 -e TS_PROFILE=shell -e TS_DEVELOPMENT=no -e TS_APPS=none                 -e TS_THEME=dark -e TS_LEADER=ctrl-space -e TS_TMUX=ctrl-b                 -e TS_ATUIN=off -e TS_CC_TTS=off -e TS_MEMORY_BACKEND=none                 -e TS_HEADROOM=off -e TS_CAVEMAN=off -e TS_AGENTMEMORY=off                 "$image" bash /repo/tests/parity/bootstrap-check.sh; then
+            echo "    $name OK"
+        else
+            echo "    $name FAILED"
+            failed+=("$name")
+        fi
+        continue
+    fi
+
     if [ "$name" = bash32 ]; then
         echo "==> $name (bash 3.2 syntax gate for services/**)"
         if docker run --rm -v "$root:/repo:ro" bash:3.2 bash -c '

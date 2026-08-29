@@ -6,6 +6,167 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **Docs caught up with `tstack apply` (08/29/2026).** README and INSTALL.md
+  still told people the macOS, WSL and Linux one-liners "end with `chezmoi
+  apply`". They end with `tstack apply`, and the difference — the conflict
+  question explained, your file backed up first — is the whole point of the
+  entry above. `tstack apply` is in the README command list and the `doc stack`
+  cheat sheet now, and the manual-install path in INSTALL.md carries a note on
+  which of the two to reach for on a machine whose files have been hand-edited.
+
+- **"…has changed since chezmoi last wrote it?" now says what it means, and
+  backs your file up (08/29/2026).** The whole prompt was:
+
+  ```
+  .zshrc has changed since chezmoi last wrote it?
+  > diff/overwrite/all-overwrite/skip/quit
+  ```
+
+  Nothing said which of your edits was at stake, that `overwrite` discards it
+  **permanently** (a POSIX `chezmoi apply` writes no backup at all), or that the
+  reason it keeps happening is that personal settings belong in `~/.zshrc.local`
+  rather than in a file the stack owns outright and rewrites every update. In
+  practice `all-overwrite` is nearly always the right answer, and there was no
+  way to know that.
+
+  `tstack apply` (`bootstrap/ts-apply.sh`) finds the conflicts *before* chezmoi
+  can ask, explains each option in terms of what you lose, copies your version to
+  `<file>.bak.YYYYMMDD[.N]`, and only then takes the stack's. `--overwrite` does
+  the lot non-interactively, `--check` reports and changes nothing. By the time
+  the real `chezmoi apply` runs there is nothing left for it to ask about, and a
+  residual-conflict guard refuses to run it if there somehow is.
+
+- **A re-install over a hand-edited file died with a TTY error (08/29/2026).**
+  All three installers ran `chezmoi apply -v </dev/null` — the `</dev/null` being
+  the deliberate `curl | bash` stdin-consumption defence. With no stdin chezmoi
+  cannot ask its question, so on any machine where a managed file had been edited
+  the install aborted under `set -e` with
+
+  ```
+  chezmoi: .zshrc: could not open a new TTY: open /dev/tty: no such device or address
+  ```
+
+  and no indication of what to do. They route through `tstack apply` now, which
+  probes **`/dev/tty`, not stdin** — the distinction is the point, since the user
+  is sitting at a terminal the whole time — so the question still gets asked. A
+  run with genuinely no terminal (CI, a pipe) lists the files, prints the options
+  and exits **4**, having changed nothing; the installers treat 4 as "a decision
+  is waiting", report that everything else installed, and exit 0 rather than
+  failing.
+
+- **The conflict handling had one implementation and three callers that could not
+  reach it (08/29/2026).** It lived in `dot_zshrc`, in zsh, so only `tstack
+  update` had it — while the *installers*, where a conflict is most likely
+  because a re-install runs over whatever the last one left behind, got the bare
+  `chezmoi apply` above. It is one bash entry point now, shared by all four, and
+  the zsh copy is deleted. The conflict predicate was wrong too: it required both
+  `chezmoi status` columns to be non-space, when the prompt actually fires on
+  **column 1 alone** (the destination differing from what chezmoi last wrote).
+  The two agree on today's cases and the old one describes the wrong rule.
+  Verified against chezmoi 2.72 in a container, all three status shapes.
+
+- **`ts_backup_file` (08/29/2026).** The `.bak.YYYYMMDD[.N]` convention that
+  `ARCHITECTURE.md` mandates had been open-coded in `_cc_tts.sh` and again in
+  `run_before_20-backup-ghostty.sh`. One helper in `bootstrap/_config.sh` now,
+  which is what makes "overwrite" a recoverable answer rather than a lossy one.
+
+- **Every fresh Windows install died before installing anything (08/28/2026).**
+  `bootstrap/windows-bootstrap.ps1` ran `Join-Path $SourceDir 'tstack\main.py'`
+  with nothing assigning `$SourceDir`: no `param()` entry, `install.ps1` calling
+  `& $bootstrap` with no arguments, and only a *function parameter* of that name
+  in the dot-sourced `_config.ps1`. `Join-Path -Path $null` is terminating, so
+  the installer stopped at the questionnaire.
+
+  The cause was duplication. `_config.ps1` already had `Invoke-TsWizard`, whose
+  own comment reads "ONE copy, because there are two callers" — and the bootstrap
+  had re-inlined a third. It calls the shared runner now, which gained an
+  `-ExitCode` out-parameter so a caller can still tell "the user quit" (3) from
+  "it failed"; `install.ps1` passes `-SourceDir` explicitly, as it already did
+  for `sync-windows.ps1`. The guard test for exactly this invariant named two
+  callers and only ever read one of them; it reads both now.
+
+- **`apps` came back from the Windows mirror as a Python repr (08/28/2026).**
+  `store.mirror_value()` ended in `str(node)` with no list branch, so
+  `store.get("apps")` returned `"['eza', 'fzf', ...]"` — one token that every
+  caller then split into garbage. On a Windows-standalone install (no chezmoi, so
+  the mirror is the only source) it compounded: the wizard offered "keep this
+  machine's current selection" and defaulted to the garbage, the bootstrap
+  matched none of it and reported "no Windows package available" for every tool,
+  and the save wrote it back. `chezmoi_data()` has carried the matching branch
+  since the day `apps` was added; the mirror path never got it.
+
+- **`tstack config` died on four of its own verbs (08/28/2026).** `$PROFILE`
+  invoked `& $python` on the `[pscustomobject]` that `Get-TstackPython` returns,
+  rather than on `$python.Exe` — so the mux-status and coding-agent menu items,
+  `tstack config agents …` and `tstack config memory` all threw
+  `CommandNotFoundException`. Both sites route through `Invoke-TstackPython` now,
+  which unpacks it correctly and was sitting in the same file.
+
+- **`tstack config prompt` exited 127 on POSIX (08/28/2026).** `prompt_status`,
+  `prompt_list`, `prompt_preview` and `prompt_set` were deleted as collateral by
+  the ghostty port; zero definitions remained and all four call sites stayed,
+  while `-h` went on advertising the verb. It hands off to
+  `tstack/commands/config.py` like its `ghostty`/`mux`/`wezterm` siblings now.
+
+- **The questionnaire could offer no tools at all, silently (08/28/2026).**
+  `bootstrap/_wizard.sh` ran the wizard without pinning `TERMINAL_STACK_DIR`, and
+  it runs *before* chezmoi is configured — so on a clone at any path off the
+  built-in candidate list `apps.catalog()` was empty and the install completed,
+  successfully, with no CLI tools. The shim pins the clone it is standing in now,
+  and all three `install-*.sh` export `TERMINAL_STACK_DIR` beside `SOURCE_DIR`.
+
+- **The Linux and macOS bootstraps aborted on line one outside a login shell
+  (08/28/2026).** All three printed `Detected: user $USER` under `set -u`, and
+  `$USER` is set by *login* shells and nothing else — so `docker run … bash -c`,
+  `su - -c`, cron and systemd all failed with `USER: unbound variable` before
+  doing anything at all. `_config.sh` derives it from `id -un` now. Found by the
+  new container target, which is the first thing in this repo ever to run an
+  installer end to end.
+
+- **A wizard re-run wiped every tuned TTS setting on Windows (08/28/2026).**
+  `Set-CcTtsWizardChoice` called `Get-CcTtsDefaults` unconditionally, so voice,
+  engine, templates, port, voice pool, music/duck and summarizer all went back to
+  stock on every `windows-bootstrap.ps1` run. Its bash twin fixed exactly this and
+  carries the comment saying so; the pwsh side kept the pre-fix behaviour. It
+  seeds defaults only on a host that has never been configured now, and applies
+  the `CcTtsMessage` answer Windows previously asked for and discarded.
+
+- **Windows dropped three wizard answers (08/28/2026).** `Tmux`, `Atuin` and
+  `CcTtsMessage` were read by nobody on that side while all three POSIX
+  bootstraps applied them; `Save-TsConfig` had the parameters all along. The three
+  hand-copied 300-character save calls are one splatted argument set now — which
+  is how two of them came to be missing from all three in the first place.
+
+- **A cancelled wizard was reported as a failed install (08/28/2026).** Exit 3
+  means "the user quit at the review". `mac-bootstrap.sh` turned *any* non-zero
+  into `exit 0` — including "python3 is required" — and `install-mac.sh` then ran
+  `chezmoi apply` against a `chezmoi.toml` nobody had written, because it was the
+  one installer of three with no sanity check for it. `_common-debian.sh` went the
+  other way and reported someone typing `q` as "a step failed silently". All three
+  distinguish 3 now, and `install-mac.sh` has the check its siblings had.
+
+- **`tstack config` verb drift between the platforms (08/28/2026).** `get`, `set`,
+  `atuin` and `prompt` are native on POSIX and hit "unknown command" on Windows;
+  `atuin` in particular had a Windows branch in `config.py` that could never be
+  reached. All four are wired up. `config.py`'s help listed eleven of the nineteen
+  verbs it dispatches, and the three unknown-verb hints had each drifted
+  differently — bash omitted `memory` and `prompt`, pwsh omitted four, Python
+  omitted `reconfigure`. The hint is derived from the dispatch tables now.
+
+- **Smaller ones (08/28/2026).** `$canonRemote?` in `_cleanup.ps1` interpolated to
+  nothing — `?` is legal in a PowerShell variable name — so the prompt asked the
+  user to confirm setting their git origin to an empty string. `_config.sh`
+  detected WSL with `-d /mnt/c/Users` where the rest of the repo reads
+  `/proc/version`, so a native-Linux box with an NTFS mount disagreed with Python
+  about which tools it could install. `apps.catalog()` raised on a malformed row
+  where both shell readers shrug, taking the questionnaire down mid-install;
+  `parse()` stays strict for the tests, the installer path warns and skips.
+  `ts_app_desc` collapsed internal whitespace, which would have broken the
+  three-reader agreement the first time anyone aligned a description. And
+  `windows-bootstrap.ps1`'s private `Find-Python` — a copy of `Get-TsPython` minus
+  the `py -3` probe and the 3.10 floor, so it could resolve the Microsoft Store
+  stub and silently no-op the agent wiring — is gone.
+
 - **Ghostty: backspace and Delete work over ssh again (08/28/2026).** ssh into
   any Linux host from Ghostty and backspace inserted junk instead of erasing,
   while Delete did nothing. Ghostty announces `TERM=xterm-ghostty` and `ssh`
@@ -59,6 +220,32 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
   "accepted" is meaningless.
 
 ### Added
+
+- **A container target that actually runs the installer (08/28/2026).**
+  `tests/parity/run.sh bootstrap` builds `Dockerfile.bootstrap` — a non-root user
+  with passwordless sudo, because `common_require_non_root` refuses uid 0 — and
+  runs `linux-bootstrap.sh` end to end on real native Linux, from a clone at a
+  path deliberately off the candidate list, then asserts on what it left behind.
+  Nothing in this repo had ever executed an install path on any platform; `bash
+  -n` checks syntax and the static resolvers check names, and neither can see an
+  unset variable or an empty catalog. It found the `$USER` bug on its first run.
+  It asserts on the wizard's ANSWER rather than its console output, because the
+  questionnaire writes its menus to the terminal — an earlier version of the check
+  grepped stdout for a warning that never arrives there, and so could not fail.
+  Opt-in: it installs packages and wants the network, so it is not in the default
+  target set.
+
+- **The PowerShell gates that were missing entirely (08/28/2026).** CI ran `bash
+  -n` over every shell script on four platforms and checked `.ps1` *nowhere*, with
+  the Windows job's syntax step explicitly skipped. Every `.ps1` in the repo
+  parses, so a parse gate alone would not have caught `$SourceDir` either.
+  `tests/test_shell_scope.py` walks the AST for script-scope variables nothing
+  assigns — counting a dot-sourced file's script-level assignments only, because
+  counting its *function parameters* is precisely what made `$SourceDir` look
+  defined — and for `"$var?"`, where PowerShell swallows the `?` into the name.
+  `tests/test_shell_bash_helpers.py` resolves snake_case helper calls, which the
+  existing `ts_`-prefixed check could not see. CI gains a parse gate on all three
+  runners.
 
 - **The dashboard configures all of it now, not just the settings
   (08/28/2026).** Three settings were blind text boxes and one was a

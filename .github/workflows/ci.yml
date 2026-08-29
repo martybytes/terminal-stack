@@ -80,6 +80,28 @@ jobs:
             bash -n "$f"
           done
           zsh -n dot_zshrc
+      # The `bash -n` loop above has no PowerShell counterpart, and .ps1 was
+      # checked NOWHERE in this workflow -- which is how windows-bootstrap.ps1
+      # shipped reading a $SourceDir nothing assigned, killing every fresh
+      # Windows install. Every runner has pwsh, so this is not a Windows-only
+      # step: the two AST gates in tests/ skip silently without it, and skipping
+      # on three of four platforms is what let the gap open.
+      - name: PowerShell parse gate
+        shell: pwsh
+        run: |
+          $bad = 0
+          Get-ChildItem -Recurse -Filter *.ps1 |
+            Where-Object { $_.FullName -notmatch '\.git' } |
+            ForEach-Object {
+              $errors = $null; $tokens = $null
+              [void][System.Management.Automation.Language.Parser]::ParseFile(
+                  $_.FullName, [ref]$tokens, [ref]$errors)
+              if ($errors.Count) {
+                $bad = 1
+                Write-Host "::error file=$($_.FullName)::$($errors[0].Message)"
+              }
+            }
+          exit $bad
       - name: pytest
         run: python -m pytest tests/ --cov --cov-report=term-missing
 

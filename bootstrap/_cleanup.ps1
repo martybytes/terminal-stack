@@ -137,7 +137,7 @@ function Move-TsClone {
     $origin = (& git -C $Dest config --get remote.origin.url 2>$null)
     if ($origin -and $origin -ne $canonRemote -and $origin -notmatch 'git@github\.com:martybytes/terminal-stack') {
         if (-not [Console]::IsInputRedirected) {
-            $a = Read-Host "Origin is '$origin' — set it to $canonRemote? [Y/n]"
+            $a = Read-Host "Origin is '$origin' — set it to ${canonRemote}? [Y/n]"
             if ($a -notmatch '^(n|no)$') {
                 & git -C $Dest remote set-url origin $canonRemote
                 Write-Host "==> origin -> $canonRemote"

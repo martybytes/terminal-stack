@@ -156,7 +156,7 @@ run_wizard_apps() {
     local spec="${1:-}" wiz rc=0
     wiz="$(mktemp "${TMPDIR:-/tmp}/tsapps.XXXXXX")" || return 1
     if [ -n "$spec" ]; then export TS_APPS="$spec"; fi
-    if "$(ts_python)" "$SRC/tstack/main.py" wizard --only apps --emit sh --out "$wiz"; then
+    if run_py wizard --only apps --emit sh --out "$wiz"; then
         # shellcheck disable=SC1090
         . "$wiz"
         rm -f "$wiz"
@@ -168,26 +168,37 @@ run_wizard_apps() {
     fi
 }
 
+# Every hand-off to the Python implementation goes through here. ts_python
+# returns 1 and prints nothing when there is no interpreter; unguarded,
+# `"$(ts_python)" ...` then expands to an empty command word and `set -e` kills
+# the script with a bare `: command not found`.
+run_py() {
+    local _py
+    _py="$(ts_python)" || {
+        echo "tstack config: python3 (3.10+) is required for this command." >&2
+        return 1
+    }
+    TERMINAL_STACK_DIR="$SRC" TERMINAL_STACK_CHEZMOI="$CZ" \
+        "$_py" "$SRC/tstack/main.py" "$@"
+}
+
 # Ghostty. One implementation in tstack/ghostty.py, reached the same way mux and
 # wezterm are: this used to be ~160 lines here, ~90 more in $PROFILE, and a third
 # copy of the themeMode -> theme mapping in each. macOS only -- the command says
 # so itself on any other platform.
 run_ghostty() {
-    TERMINAL_STACK_DIR="$SRC" TERMINAL_STACK_CHEZMOI="$CZ" \
-        "$(ts_python)" "$SRC/tstack/main.py" ghostty "$@"
+    run_py ghostty "$@"
 }
 
 # The mux has its own verbs (kill/restart/reset), so tstack config just hands off.
 run_mux() {
-    TERMINAL_STACK_DIR="$SRC" TERMINAL_STACK_CHEZMOI="$CZ" \
-        "$(ts_python)" "$SRC/tstack/main.py" mux "$@"
+    run_py mux "$@"
 }
 
 # WezTerm build info / channel switching. Hand-off like run_mux: the logic lives
 # in tstack/commands/wezterm.py so `tstack wezterm` works standalone too.
 run_wezterm() {
-    TERMINAL_STACK_DIR="$SRC" TERMINAL_STACK_CHEZMOI="$CZ" \
-        "$(ts_python)" "$SRC/tstack/main.py" wezterm "$@"
+    run_py wezterm "$@"
 }
 
 # ── memory backend ───────────────────────────────────────────────────────────
@@ -237,7 +248,7 @@ memory_set() {
     # file is exactly the silent mismatch this whole change exists to remove.
     if command -v docker >/dev/null 2>&1; then
         echo "  restarting headroom so the change takes effect..."
-        "$(ts_python)" "$SRC/tstack/main.py" services restart headroom || \
+        run_py services restart headroom || \
             echo "  $WARN headroom restart failed — run: tstack services restart headroom" >&2
     else
         echo "  no docker on PATH; apply it later with: tstack services restart headroom"
@@ -253,7 +264,7 @@ agents_show() {
 
 run_agent_adapter() {
     local tool="$1" action="$2" cursor_mode="${3:-$(ts_agent_get headroomCursorMode)}"
-    "$(ts_python)" "$SRC/tstack/main.py" agents "$tool" "$action" "$cursor_mode"
+    run_py agents "$tool" "$action" "$cursor_mode"
 }
 
 agents_set() {
@@ -339,9 +350,12 @@ show() {
     echo "  wezmux     : $(ts_wez_mux_get)   (tstack mux on|off|status)"
     echo "  wezrestore : $(ts_wez_restore_get)   (tstack config restore on|off)"
     echo "  atuin      : $(ts_atuin_get)   (tstack config atuin on|off)"
-    if [ "$(uname -s)" = Darwin ]; then
-        echo "  ghostty    : $(ts_ghostty_get)   (tstack config ghostty on|off)"
-    fi
+    # Not Darwin-gated. tstack/commands/config.py dropped the same gate because a
+    # WSL user's Ghostty setting was invisible in `show` while `tstack config
+    # ghostty` still worked -- and this menu offers `g) ghostty` on every
+    # platform, so gating only the display let you toggle a setting you could
+    # not see. ts_ghostty_get returns a sane value everywhere.
+    echo "  ghostty    : $(ts_ghostty_get)   (tstack config ghostty on|off)"
     echo "  wezterm    : $(ts_wezterm_channel)$(_ts_cfg_wezterm_built)   (tstack config wezterm)"
     echo "  headroom   : $(ts_agent_get headroomEnabled)   (Cursor: $(ts_agent_get headroomCursorMode))"
     echo "  caveman    : $(ts_agent_get cavemanEnabled)"
@@ -431,12 +445,11 @@ case "${1:-}" in
             echo "usage: tstack config atuin <on|off>" >&2; exit 2 ;; esac
         set_atuin "$2" ;;
     prompt)
-        case "${2:-status}" in
-            status|show|"")  prompt_status ;;
-            list)            prompt_list ;;
-            preview)         prompt_preview "${3:-}" ;;
-            *)               prompt_set "$2" ;;
-        esac ;;
+        # prompt_status/_list/_preview/_set were deleted with the ghostty port and
+        # never replaced, so every one of these was a `command not found` exit 127.
+        # tstack/commands/config.py owns the verb; hand off like ghostty/mux/wezterm.
+        shift
+        run_py config prompt "$@" ;;
     ghostty)
         shift
         run_ghostty "$@" ;;
@@ -463,5 +476,5 @@ case "${1:-}" in
         echo "  wizard           re-run the whole install questionnaire (TS_ASSUME_YES=1 to accept defaults)"
         echo "  agents headroom cursor <mcp|byok|off> | dashboard"
         ;;
-    *) echo "tstack config: unknown command '$1' (try: show, leader, theme, tmux, apps, tts, mux, restore, atuin, ghostty, agents, wezterm, wizard)" >&2; exit 2 ;;
+    *) echo "tstack config: unknown command '$1' (try: show, get, set, leader, theme, tmux, apps, tts, mux, restore, atuin, prompt, ghostty, memory, agents, wezterm, wizard)" >&2; exit 2 ;;
 esac

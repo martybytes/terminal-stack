@@ -2647,3 +2647,158 @@ the winget pass and before the agent CLIs, in **both** `Install-TsApps` and
 and a new winget id is verified with `winget show --id <id> --exact` before it is
 written down. An id that always fails is worse than an honest "not available on
 this platform".
+
+## Why a gate has to RUN the installer, and what a parse gate cannot see
+
+A refactor that ported the wizard, the apps catalog, ghostty, mux and config to
+Python was done on macOS and merged. The first Windows install after it died on
+its third line:
+
+```
+windows-bootstrap.ps1: Cannot bind argument to parameter 'Path' because it is null.
+```
+
+`Join-Path $SourceDir 'tstack\main.py'`, with nothing assigning `$SourceDir`.
+Four separate things had to be true for that to reach `main`, and each is worth
+keeping in mind separately.
+
+**1. The bug was a duplicate, not a typo.** `_config.ps1` already had
+`Invoke-TsWizard`, and its own comment says *"ONE copy, because there are two
+callers -- the bootstrap and `tstack config wizard` in $PROFILE -- and the last
+time each had its own, $PROFILE was still calling a `Read-TsWizard` that no
+longer existed."* The bootstrap had re-inlined a third copy anyway. The comment
+was right about the failure mode and the code drifted back into it regardless.
+
+**2. The guard test named two callers and checked one.**
+`test_the_windows_wizard_runner_has_exactly_one_implementation` existed, for
+exactly this, and asserted only against `$PROFILE`. A test whose docstring
+describes an invariant it does not check is worse than no test: it is a claim
+that the thing is covered. (See also § "The claims audit".)
+
+**3. A parse gate would not have helped.** Every `.ps1` in the repo parses
+cleanly -- verified. PowerShell has no `bash -n` equivalent for undefined names,
+and CI had **no PowerShell job at all**: `bash -n` ran over every shell script on
+Linux, macOS, WSL and three distro containers, while `.ps1` was checked nowhere,
+with the Windows runner's syntax step explicitly `if: runner.os != 'Windows'`.
+
+What finds it is a scope-aware AST walk, and the one detail that decides whether
+it works: for a dot-sourced dependency it must count **script-level assignments
+only**. Counting that file's *function parameters* is precisely what made
+`$SourceDir` look defined -- `Invoke-TsWizard` has a parameter by that name. The
+first version of the scan did exactly that and reported nothing. Within the file
+under test, scriptblock `param()` blocks DO count, or `$mk = { param($ms) ... }`
+is a false positive.
+
+**4. Nothing in the repo ran an installer.** `tests/parity/run.sh` and the CI
+`parity` job both stop at `bash -n` plus pytest. That is a structural blind spot,
+not an oversight about one bug: `bash -n` cannot see an unset variable, and a
+static name resolver cannot see an empty catalog. The bash twin of the Windows
+bug was sitting in the tree at the same time -- `_wizard.sh` ran the questionnaire
+without pinning `TERMINAL_STACK_DIR`, and it runs *before* chezmoi is configured,
+so a clone at any path off the built-in candidate list produced an empty
+`apps.catalog()` and an install that finished successfully with no CLI tools.
+
+Hence `tests/parity/run.sh bootstrap`. Three things about it are load-bearing:
+
+- **A non-root user with passwordless sudo.** `common_require_non_root` refuses
+  uid 0, and the bootstrap shells out to `sudo` for apt and `chsh`.
+- **The clone goes at a path deliberately off the candidate list**
+  (`~/somewhere/odd/stack`). Every default location hides the resolution bugs.
+- **It asserts on the wizard's ANSWER, never on its console output.** The
+  questionnaire writes its menus to the terminal, so a "the app catalog is empty"
+  warning never reaches stdout. The first version grepped the log for that string
+  and therefore could not fail -- it passed with the bug deliberately reinstated.
+  It checks `TS_WIZ_APPS` instead, which is the thing the caller actually
+  consumes.
+
+It earned its place on the first run, with a bug none of the static gates could
+express: all three bootstraps printed `Detected: user $USER` under `set -u`, and
+`$USER` is set by **login** shells and nothing else. `docker run ... bash -c`,
+`su - -c`, cron and systemd units all aborted on line one. `_config.sh` derives
+it from `id -un` now.
+
+It is opt-in -- it installs packages and wants the network -- so a bare
+`tests/parity/run.sh` does not include it. Name it to run it.
+
+One more thing the containers caught, which is the older argument for them
+restated: the fix for `ts_app_desc`'s whitespace handling used an awk interval
+expression, `{4}`. Debian ships gawk and passed. **Ubuntu's default awk is mawk,
+which has no interval expressions**, so the substitution silently matched nothing
+and returned the whole row. Explicit repetition instead. Testing on "Linux"
+means testing on the distro's own tools, not on one distro that happens to have
+the permissive ones.
+
+## Why the conflict question is asked by us, not by chezmoi
+
+chezmoi already asks. That is the problem:
+
+```
+.zshrc has changed since chezmoi last wrote it?
+> diff/overwrite/all-overwrite/skip/quit
+```
+
+There is no indication of which edit is at stake, no statement that `overwrite`
+is permanent, and no hint that the recurrence has a fix. `all-overwrite` is
+nearly always correct here — these files are stack-owned and rewritten every
+update, so an edit made directly to `~/.zshrc` was never going to survive — and
+a user with only that line to go on cannot know it.
+
+**Resolve first, then apply**, rather than `chezmoi apply --interactive` with
+better wording around it. `--interactive` prompts for *every* change, not just
+the contentious ones, and its wording is not ours to change. Instead
+`bootstrap/ts-apply.sh` reads `chezmoi status`, settles each conflict with
+`chezmoi apply --force -- <file>`, and only then runs the general apply — by
+which point chezmoi has nothing to ask. A residual-conflict guard refuses to run
+that final apply if anything is somehow left, because in an installer a
+re-prompt is the dead end described below.
+
+**Back up before overwriting.** A POSIX `chezmoi apply` writes no backup at all;
+the `.bak.YYYYMMDD[.N]` convention only ever fired in the Windows sync hook, the
+merge helpers, and `run_before_20-backup-ghostty.sh` — which exists precisely
+because of this gap. Taking one turns "overwrite" from a lossy answer into a
+recoverable one, which is what makes recommending "all" honest. The convention
+is now one helper, `ts_backup_file` in `_config.sh`, instead of the two
+open-coded copies it had grown.
+
+**`/dev/tty`, not stdin.** Every installer runs the apply with `</dev/null` on
+purpose — the `curl | bash` stdin-consumption defence, where a child reading the
+script pipe truncates the script still being read. That makes stdin a useless
+test for "can I ask a question", and it is the reason chezmoi failed here at all:
+
+```
+chezmoi: .zshrc: could not open a new TTY: open /dev/tty: no such device or address
+```
+
+A re-install over any hand-edited file hit that under `set -e` and aborted. The
+repo already had the right primitive — `ts_is_interactive`, which probes
+`/dev/tty` — and using it means the question still gets asked in a real terminal
+even though stdin is closed.
+
+**Exit 4 for "a decision is waiting".** Distinct from 0 and from a real failure,
+so a caller can tell the two apart: `tstack update` reports that the pull
+succeeded and the apply is pending, and the installers say everything else is
+installed and exit 0. A conflict is not a broken install, and a half-applied home
+directory is worse than an unapplied one — so nothing is written in that case.
+
+**The conflict predicate is column 1 alone.** `chezmoi status` prints two
+columns; the earlier zsh implementation required both to be non-space. Verified
+against chezmoi 2.72, the prompt fires on **column 1** — the destination
+differing from what chezmoi last wrote — whether or not the source changed:
+
+| case | status | chezmoi |
+|---|---|---|
+| user edited, source unchanged | `MM` | asks |
+| source changed, user did not touch it | ` M` | applies silently |
+| both changed | `MM` | asks |
+
+Both filters agree on these, so the old one was not producing wrong answers —
+it was describing the wrong rule, which is the kind of thing that stops being
+harmless the moment a fourth case shows up.
+
+**One implementation, four callers.** This lived in `dot_zshrc`, in zsh, so only
+`tstack update` had it. The three installers — where a conflict is *most* likely,
+because a re-install runs over whatever the previous one left behind — got the
+bare `chezmoi apply` instead. That asymmetry is the same shape as the
+`Invoke-TsWizard` duplication that killed the Windows install, and it is worth
+noticing that both were "the good version exists, and the path that needed it
+most could not reach it".

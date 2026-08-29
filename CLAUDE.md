@@ -29,7 +29,7 @@ chezmoi re-add ~/.zshrc
 
 **The one `re-add` rule.** Correct **only** when the stack owns the target outright **and** its source is not a template. `~/.zshrc`: safe. Part-owned (`~/.claude/settings.json`, `~/.cursor/hooks.json`): never, they hold another tool's state. Templated (`*.tmpl` source): never, re-add writes back the *rendered* file and destroys the directives. ARCHITECTURE.md and AGENTS.md each state one case; scope was the missing word.
 
-CI covers macOS, which no local run can; `tests/parity/run.sh` covers native Debian/Ubuntu locally in containers, on each distro's own Python. It does not replace `docs/verifying-changes.md`, which holds what a machine cannot assert for you (headless WezTerm load test, throwaway config stores, the Nerd Font glyph check); `INSTALL.md` § Phase 9 is the fresh-machine smoke test.
+CI covers macOS, which no local run can; `tests/parity/run.sh` covers native Debian/Ubuntu locally in containers, on each distro's own Python, and `tests/parity/run.sh bootstrap` (opt-in) is the only gate that RUNS an installer rather than parsing it - `bash -n` cannot see an unset variable and the static resolvers cannot see an empty catalog. It does not replace `docs/verifying-changes.md`, which holds what a machine cannot assert for you (headless WezTerm load test, throwaway config stores, the Nerd Font glyph check); `INSTALL.md` § Phase 9 is the fresh-machine smoke test.
 
 ## The architectural twist: one source repo, three targets
 
