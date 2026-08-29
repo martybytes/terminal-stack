@@ -1,16 +1,16 @@
 """The managed Ghostty config: where it lives, what it should say, and `off`.
 
-ONE implementation of what used to be three. `bootstrap/ts-config.sh` covered
-macOS and the WSL view of the Windows side; `$PROFILE`'s
-`Set-TerminalStackConfig` covered native Windows; and the themeMode -> theme
-mapping existed a third time in each sync script. Three copies of a mapping that
-must agree, or `tstack config ghostty diff` reports a phantom change -- which is
-why `tests/test_agent_tools.py` had to pin them against each other.
+ONE implementation of what used to be three, and now one PLATFORM as well. Both
+shell entry points hand off here, the way `tstack config mux` and
+`tstack config wezterm` already do.
 
-The two shell entry points now hand off here, the way `tstack config mux` and
-`tstack config wezterm` already do. The sync scripts keep their own copy of the
-mapping because they run where Python may not be, and the test that compares them
-stays.
+MACOS ONLY, DELIBERATELY
+
+This stack briefly configured Ghostty on Windows too, through noctty. That target
+is gone: the Windows mirror file, the themeMode -> theme token mapping each sync
+carried, and the interop binary probe went with it. Native-Linux hosts here are
+headless and never had a GUI to configure. So there is exactly one target, and
+`target()` returning None is a refusal rather than a branch.
 
 WHY `off` REMOVES FILES ITSELF
 
@@ -23,7 +23,6 @@ removes for the machine you ran it on, because that is the machine that asked.
 
 from __future__ import annotations
 
-import difflib
 import shutil
 import subprocess
 from collections.abc import Callable
@@ -40,9 +39,6 @@ from . import store
 Say = Callable[[str], None]
 Apply = Callable[[], None]
 
-DARWIN = "darwin"
-WINDOWS = "windows"
-
 # The marker the rendered config carries. A config without it is someone's own
 # file, and saying so is the difference between "apply will update this" and
 # "apply will replace this".
@@ -52,16 +48,19 @@ OURS = "managed by terminal-stack"
 # and naming only one of them was already misleading when the shells split this
 # three ways. "macOS or WSL" was the old bash implementation's reach, not the
 # feature's -- native Windows was the pwsh half.
-UNSUPPORTED = """ghostty: macOS, Windows and WSL only. Ghostty runs on macOS, and on
-  Windows as noctty/winghostty; this stack's native-Linux hosts are
-  headless, so there is no GUI here to configure."""
+UNSUPPORTED = """ghostty: macOS only. This stack configures no Windows Ghostty, and
+  its native-Linux hosts are headless, so there is no GUI here to
+  configure."""
 
 
 @dataclass(frozen=True)
 class Target:
-    """Which Ghostty this machine configures, and where its files are."""
+    """Where this machine's Ghostty files are.
 
-    kind: str
+    No `kind` field: there is one target now. It carried `darwin` vs `windows`
+    while the mirror existed, and every branch on it has gone with the mirror.
+    """
+
     directory: Path
 
     @property
@@ -76,64 +75,18 @@ class Target:
 def target() -> Target | None:
     """The Ghostty this machine owns, or None when there is not one.
 
-    `%LOCALAPPDATA%\\ghostty\\`, never the app-named directory. noctty reads both
-    its own `%LOCALAPPDATA%\\<appname>\\config.ghostty` and the
-    upstream-compatible path; `<appname>` is `winghostty` today and `noctty` the
-    day the rename ships, so only this one survives the upgrade.
-
-    WSL resolves to the same Windows path, which is the point: a combined machine
-    has one Ghostty, and it is the Windows one.
+    None everywhere but macOS -- including WSL, which used to resolve to the
+    Windows install. Callers turn that into the refusal above rather than
+    guessing at a path no Ghostty on this machine would read.
     """
-    kind = plat.kind()
-    if kind == plat.MACOS:
-        return Target(DARWIN, Path.home() / ".config" / "ghostty")
-    if kind in (plat.WINDOWS, plat.WSL):
-        local = plat.local_app_data()
-        if local is None:
-            return None
-        return Target(WINDOWS, local / "ghostty")
+    if plat.kind() == plat.MACOS:
+        return Target(Path.home() / ".config" / "ghostty")
     return None
 
 
 def setting() -> str:
     value = store.get("ghosttyConfig", "on")
     return value if value in ("on", "off") else "on"
-
-
-def theme_tokens(mode: str) -> tuple[str, str]:
-    """`themeMode` -> the two values the Windows template's tokens take.
-
-    Ghostty's config format has no conditionals and the Windows mirror gets token
-    substitution rather than Go templates, so this mapping is resolved before the
-    file is written -- exactly as `tmuxPrefixResolved` is.
-
-    `follow` MUST be a split `dark:...,light:...` theme. That form is what tracks
-    the OS, so it cannot be expressed by pinning `window-theme`; and an explicit
-    mode cannot be expressed by a split theme. The two directives are not
-    interchangeable, which is why both are substituted rather than one derived
-    from the other.
-    """
-    if mode == "light":
-        return ("vs-code-light-modern", "light")
-    if mode == "follow":
-        return ("dark:Catppuccin Mocha,light:vs-code-light-modern", "auto")
-    return ("Catppuccin Mocha", "dark")
-
-
-def render_windows(source: Path) -> str | None:
-    """The Windows template as the sync would write it.
-
-    Blind token substitution, which is safe for exactly these two: both values
-    are single-line and neither can contain a `#`. The sync's own no-substitution
-    rule is about the multi-line `__CC_TTS_*__` blocks and does not apply here.
-    """
-    template = source / "windows" / "AppData" / "Local" / "ghostty" / "config.tmpl"
-    try:
-        body = template.read_text(encoding="utf-8")
-    except OSError:
-        return None
-    theme, window = theme_tokens(store.get("themeMode", "dark"))
-    return body.replace("__GHOSTTY_THEME__", theme).replace("__GHOSTTY_WINDOW_THEME__", window)
 
 
 def newest_backup(directory: Path) -> Path | None:
@@ -163,34 +116,10 @@ def is_ours(config: Path) -> bool | None:
 
 
 def binary() -> str | None:
-    """The Ghostty executable this machine would use, or None.
-
-    On the Windows side both names are probed, post-rename first: `winghostty`
-    today, `noctty` once the rename ships.
-    """
-    spot = target()
-    if spot is None:
+    """The Ghostty executable this machine would use, or None."""
+    if target() is None:
         return None
-    if spot.kind == DARWIN:
-        return shutil.which("ghostty")
-    if plat.kind() == plat.WINDOWS:
-        for name in ("noctty", "winghostty"):
-            found = shutil.which(name)
-            if found:
-                return found
-        return None
-    # WSL, reaching the Windows install through interop. Return the literal
-    # string, never str(Path(...)): /mnt/c/... is a POSIX path by definition --
-    # it exists only inside WSL -- and re-rendering it through the HOST's path
-    # flavour turns it into \mnt\c\... the moment anything evaluates this
-    # branch on Windows, which is what the interop test does.
-    for candidate in (
-        "/mnt/c/Program Files/noctty/noctty.com",
-        "/mnt/c/Program Files/winghostty/winghostty.com",
-    ):
-        if Path(candidate).is_file():
-            return candidate
-    return None
+    return shutil.which("ghostty")
 
 
 def _run(argv: list[str], timeout: int = 20) -> subprocess.CompletedProcess[str] | None:
@@ -214,7 +143,7 @@ def status(source: Path, say: Say) -> int:
     spot = target()
     if spot is None:
         return _unsupported(say)
-    say(f"ghostty config: {setting()}   (target: {spot.kind})")
+    say(f"ghostty config: {setting()}")
 
     ours = is_ours(spot.config)
     if ours is None:
@@ -231,25 +160,13 @@ def status(source: Path, say: Say) -> int:
 
     exe = binary()
     if exe is None:
-        if spot.kind == DARWIN:
-            say("  ghostty: not installed (tstack config wizard installs the cask)")
-        else:
-            say("  noctty/winghostty: not installed")
-            say("    releases: https://github.com/amanthanvi/noctty/releases")
+        say("  ghostty: not installed (tstack config wizard installs the cask)")
         return 0
 
     got = _run([exe, "--version"])
     version = got.stdout.splitlines()[0].strip() if got and got.stdout.strip() else "unknown"
     say(f"  {Path(exe).stem}: {version}")
 
-    if spot.kind != DARWIN:
-        # NO validate step, deliberately. `+validate-config` fails with
-        # FileTooBig on winghostty 1.3.123 even for a 14-byte config, and
-        # `+show-config` reports nothing at all for an unknown key or a bad
-        # value -- so unlike macOS there is no honest syntax gate to run here.
-        # Printing "validate: ok" would be a lie.
-        say("  validate: unavailable on this build (see docs/decisions.md)")
-        return 0
     if not spot.config.exists():
         return 0
     check = _run([exe, "+validate-config", f"--config-file={spot.config}"])
@@ -263,62 +180,34 @@ def status(source: Path, say: Say) -> int:
 
 
 def diff(source: Path, say: Say) -> int:
+    """What an apply would change. chezmoi owns both files, so its diff is it.
+
+    There is no second route any more. The Windows copy was mirrored by the sync
+    rather than managed by chezmoi, so it needed its own rendered-template
+    comparison; with that target gone, so is the comparison.
+    """
     spot = target()
     if spot is None:
         return _unsupported(say)
-    if spot.kind == DARWIN:
-        # chezmoi owns both files here, so its own diff is the honest answer.
-        chezmoi = plat.find_chezmoi()
-        if not chezmoi:
-            say("chezmoi is not installed, so there is nothing to diff against.")
-            return 1
-        got = subprocess.run(
-            [chezmoi, "diff", "--", str(spot.config), str(spot.theme)],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=120,
-        )
-        if got.stdout.strip():
-            print(got.stdout, end="" if got.stdout.endswith("\n") else "\n")
-        else:
-            # chezmoi prints nothing when there is nothing to change, and so did
-            # the shell this replaces. "What would an apply do?" deserves an
-            # answer rather than silence, and the Windows branch already gives
-            # one.
-            say("ghostty config: up to date")
-        return 0
-
-    # The Windows copy is NOT chezmoi-managed -- `windows/**` is chezmoi-ignored
-    # and mirrored by the sync -- so the comparison is against the rendered
-    # template rather than against chezmoi's idea of the target.
-    want = render_windows(source)
-    if want is None:
-        say("ghostty config: the Windows template is missing from the clone.")
+    chezmoi = plat.find_chezmoi()
+    if not chezmoi:
+        say("chezmoi is not installed, so there is nothing to diff against.")
         return 1
-    _diff_one(spot.config, want, "ghostty config", say)
-    theme_src = source / "windows" / "AppData" / "Local" / "ghostty" / "themes"
-    theme_src = theme_src / "vs-code-light-modern"
-    try:
-        _diff_one(spot.theme, theme_src.read_text(encoding="utf-8"), "ghostty theme", say)
-    except OSError:
-        say("ghostty theme: the source theme is missing from the clone.")
+    got = subprocess.run(
+        [chezmoi, "diff", "--", str(spot.config), str(spot.theme)],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=120,
+    )
+    if got.stdout.strip():
+        print(got.stdout, end="" if got.stdout.endswith("\n") else "\n")
+    else:
+        # chezmoi prints nothing when there is nothing to change, and so did the
+        # shell this replaces. "What would an apply do?" deserves an answer
+        # rather than silence.
+        say("ghostty config: up to date")
     return 0
-
-
-def _diff_one(live: Path, want: str, label: str, say: Say) -> None:
-    if not live.exists():
-        say(f"{label}: {live} would be created")
-        return
-    have = live.read_text(encoding="utf-8", errors="replace")
-    if have == want:
-        say(f"{label}: up to date")
-        return
-    say(f"{label}: {live} differs from the rendered template -")
-    for line in difflib.unified_diff(
-        have.splitlines(), want.splitlines(), "deployed", "rendered", lineterm=""
-    ):
-        say(f"  {line}")
 
 
 def turn_on(source: Path, say: Say, apply: Apply) -> int:
@@ -359,10 +248,8 @@ def turn_off(source: Path, say: Say, apply: Apply) -> int:
     return 0
 
 
-def reload_hint(spot: Target) -> str:
-    if spot.kind == DARWIN:
-        return "Reload Ghostty with Cmd+Shift+, (or restart it)."
-    return "Reload with Ctrl+Shift+, (or restart it)."
+def reload_hint(_spot: Target) -> str:
+    return "Reload Ghostty with Cmd+Shift+, (or restart it)."
 
 
 def _unsupported(say: Say) -> int:

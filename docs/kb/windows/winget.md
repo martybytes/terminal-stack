@@ -16,11 +16,8 @@ first — they install to the same place. `tstack config wezterm` shows your bui
 its date, the newest on each channel, and what changed in between; nothing
 upgrades on its own. Note nightly's manifest is republished more often than its
 hash is refreshed, so `Installer hash does not match` is a routine outcome — the
-failure is reported rather than hidden. Ghostty is offered here too — as
-[noctty](https://github.com/amanthanvi/noctty), which still ships its release
-assets under the former name winghostty (`AmanThanvi.winghostty`) — but like the
-WezTerm channels it is asked, never installed for you, so it has no entry in the
-terminal winget table. Every
+failure is reported rather than hidden. Ghostty is not offered on Windows: this stack configures it on macOS only,
+so there is no winget id for it here. Every
 package that failed is reprinted at the end of the run with the command to retry
 it, so a failure can't scroll past unnoticed.
 

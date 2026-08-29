@@ -17,8 +17,6 @@
 #   __THEME_RESOLVED__  baked palette light|dark (from resolvedTheme)
 #   __TMUX_PREFIX__     tmux prefix spec     (from tmuxPrefixResolved)
 #   __WEZ_MUX__         on|off WezTerm mux domain (from weztermMux; see tstack mux)
-#   __GHOSTTY_THEME__   Ghostty `theme` value derived from themeMode
-#   __GHOSTTY_WINDOW_THEME__  its Windows-only DWM title-bar counterpart
 #   __WEZ_RESTORE__     on|off reopen last session (from weztermRestore)
 #   __CC_TTS_STOP_HOOK__ / __CC_TTS_STOPFAILURE_HOOK__ / __CC_TTS_CURSOR_HOOKS__ /
 #   __CC_TTS_PRETOOLUSE_TTS__ / __CC_TTS_INPUT_HOOKS__  optional cc-speak hooks (when ccTtsEnabled)
@@ -99,19 +97,7 @@ THEME_RESOLVED="$(cfg resolvedTheme 'dark')"
 TMUX_PREFIX="$(cfg tmuxPrefixResolved 'C-b')"
 WEZ_MUX="$(cfg weztermMux 'off')"
 WEZ_RESTORE="$(cfg weztermRestore 'off')"
-GHOSTTY_CFG_ON="$(cfg ghosttyConfig 'on')"
 STARSHIP_PRESET="$(cfg starshipPreset 'terminal-stack')"
-# Ghostty's config format has no conditionals and Windows mirror files get token
-# substitution, not Go templates - so the themeMode -> theme mapping is resolved
-# here, exactly as tmuxPrefixResolved is. A split `dark:...,light:...` theme always
-# tracks the OS, which is why `follow` cannot be expressed by pinning window-theme
-# and an explicit mode cannot be expressed by a split theme.
-case "$THEME_MODE" in
-  light)  GHOSTTY_THEME='vs-code-light-modern'; GHOSTTY_WINDOW_THEME='light' ;;
-  follow) GHOSTTY_THEME='dark:Catppuccin Mocha,light:vs-code-light-modern'
-          GHOSTTY_WINDOW_THEME='auto' ;;
-  *)      GHOSTTY_THEME='Catppuccin Mocha';     GHOSTTY_WINDOW_THEME='dark' ;;
-esac
 CC_TTS_ENABLED="$(cfg ccTtsEnabled false)"
 HEADROOM_ENABLED="$(cfg headroomEnabled off)"
 HEADROOM_CURSOR_MODE="$(cfg headroomCursorMode mcp)"
@@ -298,16 +284,6 @@ sync_tree() {
   while IFS= read -r -d '' src; do
     rel="${src#"$src_root"/}"
 
-    # ghosttyConfig=off: skip the Ghostty subtree rather than deleting it.
-    # Same rule as the macOS .chezmoiignore gate - turning it off stops the
-    # config being re-rendered; removing what is already there is
-    # tstack config's job, so a hand-written config on a box that never opted
-    # in is never touched by a sync.
-    case "$rel" in
-      AppData/Local/ghostty/*)
-        [ "$GHOSTTY_CFG_ON" = "on" ] || continue ;;
-    esac
-
     is_modifier=0
     modified=""
     [[ "${rel##*/}" == modify_* ]] && is_modifier=1
@@ -329,7 +305,6 @@ sync_tree() {
         WIN_USER="$WIN_USER" LEADER_KEY="$LEADER_KEY" LEADER_MODS="$LEADER_MODS" \
         THEME_MODE="$THEME_MODE" THEME_RESOLVED="$THEME_RESOLVED" TMUX_PREFIX="$TMUX_PREFIX" \
         WEZ_MUX="$WEZ_MUX" WEZ_RESTORE="$WEZ_RESTORE" \
-        GHOSTTY_THEME="$GHOSTTY_THEME" GHOSTTY_WINDOW_THEME="$GHOSTTY_WINDOW_THEME" \
         CC_TTS_STOP_HOOK="$CC_TTS_STOP_HOOK" CC_TTS_STOPFAILURE_HOOK="$CC_TTS_STOPFAILURE_HOOK" \
         CC_TTS_CURSOR_HOOKS="$CC_TTS_CURSOR_HOOKS" CC_TTS_PRETOOLUSE_TTS="$CC_TTS_PRETOOLUSE_TTS" \
         CC_TTS_INPUT_HOOKS="$CC_TTS_INPUT_HOOKS" \
@@ -345,8 +320,6 @@ repl = {
     "__TMUX_PREFIX__": os.environ.get("TMUX_PREFIX", ""),
     "__WEZ_MUX__": os.environ.get("WEZ_MUX", "off"),
     "__WEZ_RESTORE__": os.environ.get("WEZ_RESTORE", "off"),
-    "__GHOSTTY_THEME__": os.environ.get("GHOSTTY_THEME", "Catppuccin Mocha"),
-    "__GHOSTTY_WINDOW_THEME__": os.environ.get("GHOSTTY_WINDOW_THEME", "dark"),
     "__CC_TTS_STOP_HOOK__": os.environ.get("CC_TTS_STOP_HOOK", ""),
     "__CC_TTS_STOPFAILURE_HOOK__": os.environ.get("CC_TTS_STOPFAILURE_HOOK", ""),
     "__CC_TTS_CURSOR_HOOKS__": os.environ.get("CC_TTS_CURSOR_HOOKS", "{}"),

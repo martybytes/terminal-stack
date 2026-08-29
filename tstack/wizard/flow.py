@@ -482,14 +482,12 @@ def _terminals(ask: Asker) -> list[str]:
     options = [
         ("wezterm-nightly", "WezTerm nightly", "current builds; what this stack configures"),
         ("wezterm-stable", "WezTerm stable", "20240203 - upstream has not cut one since"),
-        ("ghostty", "Ghostty", "GPU-accelerated, platform-native UI"),
     ]
-    if plat.kind() == plat.WINDOWS:
-        options[2] = (
-            "ghostty",
-            "Ghostty",
-            "via noctty/winghostty; you install it, we configure it",
-        )
+    # Ghostty is a macOS row. Windows has no Ghostty this stack configures, and
+    # a headless Linux host has no GUI at all -- offering it there would take an
+    # answer and then do nothing with it.
+    if plat.kind() == plat.MACOS:
+        options.append(("ghostty", "Ghostty", "GPU-accelerated, platform-native UI"))
     return ask.tick(
         "Terminal emulator:",
         options,

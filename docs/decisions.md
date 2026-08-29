@@ -1124,9 +1124,48 @@ show it. `run_before_20-backup-ghostty.sh` takes the backup, skipping any file t
 carries our marker so a managed config does not spawn a new `.bak` on every apply. That
 backup is also what makes `off` a restore rather than a delete.
 
-**No PowerShell twin**, for the same reason `tstack smb` has none: Ghostty ships no Windows
-build, so there is nothing there to configure. Stated in `-h` so the absence reads as a
-decision rather than drift.
+**macOS only**, for the same reason `tstack smb` is POSIX only: there is no Ghostty on the
+other targets that this stack configures. `tstack/commands.conf` says `-` in the Windows
+column so the shim reports "not supported on this platform" rather than a missing command,
+and `-h` says it too, so the absence reads as a decision rather than drift. This was briefly
+untrue — see § "Why the Windows Ghostty target was dropped".
+
+## Why the Ghostty config opts into the ssh integration
+
+Symptom: ssh into any Linux host from Ghostty and backspace inserts junk or walks the
+cursor forward instead of erasing, and Delete does nothing at all. Nothing else is wrong;
+local panes are fine.
+
+The chain is short and entirely outside this repo. Ghostty announces `TERM=xterm-ghostty`.
+`ssh` forwards `TERM` to the remote. The remote's terminfo database has no `xterm-ghostty`
+entry, so ncurses cannot resolve `kbs=\177` or `kdch1=\E[3~`, and readline falls back to
+something that gets both keys wrong.
+
+**`tstack config ghostty off` is not a diagnostic for this**, which is what made it
+confusing: stock Ghostty with no config from us defaults to the same `TERM`, so turning the
+managed config off changes nothing and looks like an acquittal. WezTerm never had the
+problem for an unrelated reason — neither `.wezterm.lua` sets `config.term`, so it reports
+`xterm-256color`, a name every host already knows.
+
+The fix is `shell-integration-features = …,ssh-env,ssh-terminfo`. Two things about that
+line are easy to get wrong:
+
+- **Naming any value replaces Ghostty's default set.** The features are not additive to a
+  default; `no-cursor,sudo,title` was already an explicit set, and neither ssh feature is
+  in Ghostty's defaults anyway. They have to be spelled out or they are simply off.
+- **Both, not one.** `ssh-terminfo` uploads the real entry per host and keeps Ghostty's full
+  capability set there, but it needs `tic` on the remote and a writable home. `ssh-env` is
+  the fallback that sets `TERM=xterm-256color` where that cannot happen. Terminfo alone
+  leaves minimal containers and jump hosts broken; env alone gives up Ghostty's own
+  capabilities on every remote.
+
+The blunt alternative, `term = xterm-256color`, was rejected: it fixes ssh by lying about
+`TERM` in **local** panes too, giving up Ghostty's terminfo everywhere to fix it somewhere.
+A test pins both features present and pins the absence of a global `term` line.
+
+`ghostty +ssh-cache` lists and clears the per-host cache — useful when a host is reinstalled
+and the cached "already done" is stale. The manual equivalent, for a host reached some other
+way, is `infocmp -x xterm-ghostty | ssh <host> -- tic -x -`.
 
 What is still WezTerm-only: the tab bar (Claude pane tints, fleet counters, status line) is
 `.wezterm.lua` Lua with no Ghostty equivalent.
@@ -1632,111 +1671,45 @@ per-shell entry, a manual prepend) survives. It is the pwsh counterpart of
 `ts_load_node_env`'s role in `ts_apps_pending`, and it is wrapped in a `try` that
 swallows everything: a stale PATH costs an inaccurate report, never an install.
 
-## Why Ghostty is managed on Windows too
+## Why the Windows Ghostty target was dropped
 
-`tstack config ghostty` used to refuse anywhere but macOS, and `.chezmoiignore` said
-"Ghostty has no Windows build". That was true when it was written and is not any
-more: [noctty](https://github.com/amanthanvi/noctty) is Ghostty's terminal core
-wrapped in a native Win32 app — tabs, splits, session restore, an OpenGL
-renderer, and most of Ghostty's config surface. It was renamed from **WingHostty**
-in main on 2026-08-20 after a trademark request from the Ghostty team, but that
-landed *after* the v1.3.123 tag, so every release asset published so far is still
-named `winghostty-…`. Installing "winghostty" from the noctty releases page is
-therefore current, not stale — a distinction worth stating, because the repo, the
-release title and the downloaded file disagree with each other by design.
+It existed for four days and is worth one paragraph so nobody rebuilds it by
+accident. [noctty](https://github.com/amanthanvi/noctty) — Ghostty's terminal
+core in a native Win32 app, renamed from **WingHostty** in main on 2026-08-20 but
+still shipping release assets under the old name — was a real Ghostty for
+Windows, and the stack mirrored a config to `%LOCALAPPDATA%\ghostty\` for it.
+The owner of this stack does not use it, so the whole target is gone rather than
+left to rot: the mirror file and its generated theme, the `__GHOSTTY_THEME__` /
+`__GHOSTTY_WINDOW_THEME__` substitution in **both** sync scripts, the
+subtree-skip that implemented `ghosttyConfig=off` on that side, the interop
+binary probe, the pwsh terminal-picker row and the `Set-TerminalStackConfig`
+branch.
 
-**The config goes to `%LOCALAPPDATA%\ghostty\config`, not the app-named dir.**
-This is the whole reason the integration is cheap. Verified against 1.3.123: the
-app reads *two* locations, its own `%LOCALAPPDATA%\<appname>\config.ghostty` and
-the upstream-compatible `%LOCALAPPDATA%\ghostty\config`, with the latter loaded
-first and the former winning on conflict. `<appname>` is `winghostty` today and
-`noctty` the day the rename ships, so writing to the app-named path would
-silently stop being read on upgrade day, with no error and nothing in any log.
-The upstream path is read by both, needs no migration, and — because it is
-`ghostty/config` plus `ghostty/themes/` — is the *same relative layout* as macOS
-`~/.config/ghostty/`. The generated `vs-code-light-modern` theme file ports
-byte-for-byte; a test pins the two copies together, and the existing test pinning
-the macOS copy to WezTerm's `PALETTES.light` then covers Windows transitively.
+Three things that removal bought, none of which is only about Ghostty:
 
-**It is a `windows/` mirror file, not a chezmoi target.** chezmoi only manages
-`$HOME` on the machine it runs on, so the Windows copy rides the same
-relative-path-preserving sync as `$PROFILE` and `.wezterm.lua`:
-`windows/AppData/Local/ghostty/…` → `C:\Users\<you>\AppData\Local\ghostty\…`.
-That also means the `ghosttyConfig=off` switch needed a second implementation —
-a path skip in both sync paths — rather than the `.chezmoiignore` gate the macOS
-side uses. Both skip; neither deletes. Deleting stays `tstack config`'s job for the
-same reason it does on macOS: a sync-side removal runs on *every* machine and
-would wipe a hand-written config on a box that never opted in.
+- **The themeMode → theme mapping is gone entirely**, not merely deduplicated. It
+  existed once per renderer because Ghostty's config format has no conditionals
+  and Windows mirror files get token substitution rather than Go templates; a
+  test had to pin the copies against each other, because a drift between them
+  showed up as `tstack config ghostty diff` reporting a phantom change forever.
+- **`target()` returning None is a refusal now, not a branch.** WSL used to
+  resolve to the Windows install, which was correct then and is a silent bug
+  now — writing to a `/mnt/c` path that nothing on the machine reads, and
+  reporting success. A parametrised test pins the refusal on Linux, WSL and
+  Windows alike, and asserts the message mentions neither `/mnt/c` nor
+  `LOCALAPPDATA`.
+- **There is one syntax gate again.** macOS has a real one (`ghostty
+  +validate-config` exits 1 on error). The Windows build had none: on 1.3.123
+  `+validate-config` failed with `FileTooBig` even for a 14-byte config, and
+  `+show-config` reported *nothing* for an unknown key or a bad value on a real
+  key. That trap outlives the removal — never treat `+show-config` as a
+  validator, on any build; every "accepted" it returns is meaningless.
 
-**The theme is resolved in the sync, not branched in the template.** Ghostty's
-config format has no conditionals, and Windows mirror files get plain token
-substitution with no template engine — so `{{ if }}` would be copied through
-literally. `themeMode` therefore maps to two computed tokens,
-`__GHOSTTY_THEME__` and `__GHOSTTY_WINDOW_THEME__`, exactly as
-`tmuxPrefixResolved` is derived. The mapping now exists three times (bash sync,
-pwsh sync, `tstack config ghostty diff`) and a test pins them together, because a
-drift between them shows up as `diff` reporting a phantom change forever.
-
-`follow` cannot be expressed by pinning `window-theme`, and an explicit mode
-cannot be expressed by a split theme: a `dark:…,light:…` theme *always* tracks
-the OS. That is why the two values move together rather than one deriving from
-the other.
-
-**Windows drops four macOS directives and gains one.** `font-thicken` and
-`window-colorspace = display-p3` are macOS rendering niceties; the three `cmd+…`
-readline chords have no Cmd key to hang off (`Home`/`End`/`Ctrl+U` are the
-natives); and `macos-option-as-alt` is absent from the Windows option set
-entirely. That last one is worth stating precisely: it is *silently ignored*, not
-diagnosed, so shipping it would have cost nothing — it is dropped because a
-config that pretends to set something it cannot is a lie to the next reader.
-Windows gains `window-theme`, which drives the DWM title bar.
-
-**There is no honest syntax gate on Windows.** On macOS `ghostty
-+validate-config` exits 1 on error and `tstack config ghostty status` runs it as a
-real check. Neither Windows equivalent works on 1.3.123: `+validate-config` fails
-with `FileTooBig` even for a 14-byte config, and `+show-config` reports *nothing*
-for an unknown key or for a bad value on a real key — it silently drops both.
-Every "accepted" result from probing options that way is therefore meaningless,
-which is a trap worth remembering the next time someone reaches for
-`+show-config` as a validator. `status` prints `validate: unavailable on this
-build` rather than a check it did not run.
-
-**Offered, never installed.** The terminal question now lists Ghostty on Windows
-and pre-ticks it when the executable is present, the same shape as the WezTerm
-channels — and like them it is deliberately absent from `$TsTerminalWingetIds`,
-so ticking it prints the install command instead of running it. winget does carry
-`AmanThanvi.winghostty`, currently the same 1.3.123 the releases page ships, so
-either source is fine; the managed config lands the same way regardless, and
-lands whether or not the app is installed at all.
-
-One PowerShell trap this uncovered, unrelated to Ghostty but caught by it: a
-`switch` unrolls a one-element array to a **scalar**, so `$preticked += 'ghostty'`
-concatenated strings instead of appending and produced the single nonsense key
-`wezterm-nightlyghostty` — leaving the entire question unticked. The `@( )` around
-the switch is load-bearing, and a test pins it.
-
-**The Windows config pins pwsh and goes opaque, and both are deliberate.**
-`command = pwsh.exe -NoLogo` mirrors WezTerm's `default_prog`, because noctty's
-picker will happily hand you "Windows PowerShell" — PowerShell **5.1**, which
-this stack configures not at all (the managed profile is
-`Documents\PowerShell\Microsoft.PowerShell_profile.ps1`, pwsh 7 only). Worse,
-5.1 carries its own execution policy, tracked separately from pwsh 7's, and
-defaults to Restricted on client Windows, so it refuses to dot-source *any*
-profile — ours, or the unrelated `Documents\WindowsPowerShell\profile.ps1` that
-other installers drop there. The result is a wall of `SecurityError` on every
-launch that looks like a terminal fault and is not one. Pinning the shell avoids
-it; raising the policy is a machine decision and stays the user's.
-
-Opacity is the second divergence: the macOS twin's `background-opacity = 0.97`
-plus `background-blur = 20` reads well on a Mac, but on Windows
-`shouldUseSystemBackdrop` turns exactly that pair into a DWM tabbed backdrop, and
-the backdrop is painted under the **Win32 chrome** as well as the terminal
-surface — washing out the overlay surfaces, most visibly the `Ctrl+Shift+P`
-command palette. The Windows config therefore sets `background-opacity = 1` and
-leaves `background-blur` unset, which fails both halves of that condition. It
-also matches WezTerm on Windows, which is fully opaque already. A test pins the
-pair *and* asserts macOS is still translucent, so the divergence stays visible
-rather than quietly converging.
+**Removal is not deletion on the machines that had it.** The code that *wrote*
+`%LOCALAPPDATA%\ghostty\` is gone; the files an earlier apply already put there
+stay, unmanaged. Deleting them from a sync would run that deletion on every
+machine — the same reason `off` was never a `.chezmoiremove` rule. Anyone who
+wants them gone removes that directory by hand, once.
 
 ## Why the pwsh profile caches tool init instead of running it
 

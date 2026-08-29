@@ -1,7 +1,7 @@
 # ghostty (GPU-accelerated terminal)
 
 Fast, GPU-accelerated terminal emulator with platform-native UI — a real macOS
-window on macOS, GTK on Linux. No Windows build.
+window on macOS, GTK on Linux. Configured by this stack on macOS only.
 
 ## How this stack wires it
 
@@ -38,53 +38,52 @@ POSIX, so without that hook a hand-written config would vanish silently. `off`
 restores the newest backup; if there never was one, it removes ours and Ghostty
 falls back to its own defaults.
 
-### Windows: noctty (still shipping as winghostty)
+### ssh, and why backspace breaks without this
 
-There *is* a Ghostty for Windows — not from upstream, but
-[noctty](https://github.com/amanthanvi/noctty): Ghostty's terminal core wrapped
-in a native Win32 app, with tabs, splits, session restore and a command palette.
-The project was renamed from **WingHostty** in main on 2026-08-20 after a
-trademark request, but that landed *after* the v1.3.123 tag, so the release
-assets are still `winghostty-<ver>-windows-x64-setup.exe`. Install it with
-`winget install AmanThanvi.winghostty` or from the releases page — the stack
-offers it in the terminal question but never installs it, exactly like the
-WezTerm channels.
+Ghostty announces `TERM=xterm-ghostty`. `ssh` forwards `TERM` to the remote, and
+a host whose terminfo database has no `xterm-ghostty` entry cannot resolve
+`kbs` or `kdch1` — so **backspace inserts junk instead of erasing and Delete
+does nothing**. Local panes are unaffected, which is what makes it puzzling.
 
-The managed config lands at **`%LOCALAPPDATA%\ghostty\config`**, with the custom
-light theme beside it in `themes\`. That is the *upstream* path, and the choice
-is deliberate: noctty reads both that and its own
-`%LOCALAPPDATA%\<appname>\config.ghostty`, and `<appname>` is `winghostty`
-today and `noctty` the day the rename ships — so the app-named path would
-silently stop being read on upgrade day.
+The managed config fixes it with two shell-integration features:
 
-`tstack config ghostty` works on Windows and from WSL (where it drives the
-Windows-side copy over `/mnt/c/`). Two differences from macOS worth knowing:
+    shell-integration-features = no-cursor,sudo,title,ssh-env,ssh-terminfo
 
-- **There is no working syntax gate.** `+validate-config` fails with
-  `FileTooBig` on 1.3.123 even for a 14-byte config, and `+show-config` reports
-  *nothing* for an unknown key or a bad value. `status` says
-  `validate: unavailable on this build` rather than claiming a check it did not
-  run.
-- **The shell is pinned to `pwsh.exe -NoLogo`**, matching WezTerm. The picker
-  still offers the others, but do not pick **Windows PowerShell** expecting the
-  stack: that is PowerShell 5.1, which nothing here configures — no Starship, no
-  `ws`/`doc`/`cc` — and it runs under its own execution policy (tracked
-  separately from pwsh 7's), which defaults to Restricted and refuses to
-  dot-source *any* profile:
-  `... cannot be loaded because running scripts is disabled on this system`.
-  If you want 5.1 usable in its own right, that is a machine setting:
-  `powershell.exe -Command "Set-ExecutionPolicy -Scope CurrentUser RemoteSigned"`.
-- **It is opaque here**, unlike the macOS twin's `background-opacity = 0.97` +
-  `background-blur = 20`. noctty turns opacity-below-1 *plus* a blur into a DWM
-  tabbed backdrop, and that backdrop is painted under the Win32 chrome as well as
-  the terminal — which washes out the overlay surfaces, the `Ctrl+Shift+P`
-  command palette worst of all. Put the pair back if you want the macOS look and
-  can live with the palette.
-- **A few macOS directives are dropped**, not carried: `macos-option-as-alt`
-  (absent from the Windows option set — silently ignored, not diagnosed),
-  `font-thicken` and `window-colorspace` (macOS rendering), and the `cmd+…`
-  readline chords (no Cmd key; `Home`/`End`/`Ctrl+U` are the natives). Windows
-  gains `window-theme`, which drives the DWM title bar.
+`ssh-terminfo` uploads the real entry to each host on first connect (it needs
+`tic` there) and keeps Ghostty's full capability set; `ssh-env` is the fallback
+that sets `TERM=xterm-256color` where the upload cannot happen — a minimal
+container, a read-only home, a jump host. Both are listed on purpose: either one
+alone leaves a class of hosts broken.
+
+Two things worth knowing:
+
+- **`tstack config ghostty off` does not test this.** Stock Ghostty defaults to
+  the same `TERM`, so turning the managed config off changes nothing and looks
+  like the config is innocent.
+- **Naming any value for `shell-integration-features` replaces the default set**,
+  so both features have to be spelled out or they are off.
+
+Useful commands:
+
+| Command | What it does |
+|---|---|
+| `ghostty +ssh-cache` | list hosts whose terminfo is already installed |
+| `ghostty +ssh-cache --clear` | forget them all (a reinstalled host needs this) |
+| `infocmp -x xterm-ghostty \| ssh HOST -- tic -x -` | do it by hand, once, for one host |
+
+If a remote still misbehaves, check `echo $TERM` there. `xterm-ghostty` means
+the upload landed; `xterm-256color` means the fallback did. Either is fine —
+`xterm-ghostty` *with* broken keys means the upload silently failed.
+
+### Not on Windows
+
+This stack configures Ghostty on **macOS only**. `tstack ghostty` says so on any
+other platform rather than guessing at a path, and its native-Linux hosts are
+headless anyway. There was briefly a Windows target, through the third-party
+noctty build; it was removed. See `docs/decisions.md` § "Why the Windows Ghostty
+target was dropped" — including the note that removing the code that wrote
+`%LOCALAPPDATA%\ghostty\` does not delete files an earlier apply already put
+there.
 
 ### What it sets
 

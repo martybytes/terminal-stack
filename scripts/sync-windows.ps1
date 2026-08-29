@@ -144,18 +144,6 @@ $ccTtsInputHooks = if ($ccTtsEnabled) {
     ]
 "@
 } else { '' }
-# Ghostty's config format has no conditionals and Windows mirror files get token
-# substitution, not Go templates, so themeMode is mapped to a theme here - the
-# twin of the `case` in run_after_90-sync-windows.sh. A split `dark:...,light:...`
-# theme always tracks the OS, so `follow` cannot be expressed by pinning
-# window-theme and an explicit mode cannot be expressed by a split theme.
-$script:tsGhosttyOn = if ($tsCfg.ghosttyConfig) { $tsCfg.ghosttyConfig } else { 'on' }
-$ghosttyThemeMode = if ($tsCfg.themeMode) { $tsCfg.themeMode } else { 'dark' }
-$ghosttyTheme, $ghosttyWindowTheme = switch ($ghosttyThemeMode) {
-    'light'  { 'vs-code-light-modern', 'light' }
-    'follow' { 'dark:Catppuccin Mocha,light:vs-code-light-modern', 'auto' }
-    default  { 'Catppuccin Mocha', 'dark' }
-}
 $tok = @{
     '__WIN_USER__'               = $WinUser
     '__LEADER_KEY__'             = if ($tsCfg.leaderKey)          { $tsCfg.leaderKey }          else { 'phys:Space' }
@@ -165,8 +153,6 @@ $tok = @{
     '__TMUX_PREFIX__'            = if ($tsCfg.tmuxPrefixResolved) { $tsCfg.tmuxPrefixResolved } else { 'C-b' }
     '__WEZ_MUX__'                = if ($tsCfg.weztermMux)         { $tsCfg.weztermMux }         else { 'off' }
     '__WEZ_RESTORE__'            = if ($tsCfg.weztermRestore)     { $tsCfg.weztermRestore }     else { 'off' }
-    '__GHOSTTY_THEME__'          = $ghosttyTheme
-    '__GHOSTTY_WINDOW_THEME__'   = $ghosttyWindowTheme
     '__CC_TTS_STOP_HOOK__'       = $ccTtsStopHook
     '__CC_TTS_STOPFAILURE_HOOK__'= $ccTtsStopFailureHook
     '__CC_TTS_CURSOR_HOOKS__'    = $ccTtsCursorHooks
@@ -206,13 +192,6 @@ function Sync-MirrorTree {
     } | ForEach-Object {
             $src = $_.FullName
             $rel = $src.Substring($SrcRoot.Length).TrimStart('\','/')
-
-            # ghosttyConfig=off: skip the subtree, never delete it. Twin of the
-            # same guard in run_after_90-sync-windows.sh; removing what is already
-            # there is tstack config's job, so a hand-written config on a box that
-            # never opted in is untouched by a sync.
-            if ($script:tsGhosttyOn -ne 'on' -and
-                ($rel -replace '\\', '/') -like 'AppData/Local/ghostty/*') { return }
             $rendered = $null
             $modified = $null
 

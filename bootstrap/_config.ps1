@@ -411,15 +411,6 @@ function Get-TsWeztermRestore {
     return 'off'
 }
 
-# Managed Ghostty config. Defaults ON, unlike the other toggles: it only ever
-# writes when a Ghostty is actually there to read it, and `off` is a real revert.
-# POSIX twin: bootstrap/_config.sh ts_ghostty_get.
-function Get-TsGhosttyConfig {
-    $v = (Get-TsConfig).ghosttyConfig
-    if ($v -eq 'off') { return 'off' }
-    return 'on'
-}
-
 function Save-TsConfig {
     param(
         [string]$LeaderChord = 'ctrl-space',
@@ -883,12 +874,6 @@ function Update-TsWezterm {
 $script:TsTerminalCandidates = @(
     @{ Key = 'wezterm-nightly'; Label = 'WezTerm nightly'; Note = 'current builds; what this stack configures' }
     @{ Key = 'wezterm-stable';  Label = 'WezTerm stable';  Note = '20240203 — upstream has not cut one since' }
-    # Ghostty DOES run on Windows: noctty (github.com/amanthanvi/noctty) is
-    # Ghostty's terminal core in a native Win32 app, still shipping its release
-    # assets under the former name winghostty. Offered, never installed for you —
-    # the same rule as the WezTerm channels, so it is absent from
-    # $script:TsTerminalWingetIds below on purpose.
-    @{ Key = 'ghostty';         Label = 'Ghostty';         Note = 'via noctty/winghostty; you install it, we configure it' }
 )
 $script:TsTerminalWingetIds = @{ 'wezterm-nightly' = 'wez.wezterm.nightly'; 'wezterm-stable' = 'wez.wezterm' }
 
@@ -899,15 +884,6 @@ function Get-TsTerminalsChannel([string[]]$Selected) {
     return ''
 }
 
-# The installed noctty/winghostty executable, or $null. Post-rename name first:
-# the rebrand is in main but has not shipped in a release yet, so today this
-# finds the winghostty path and will find the other one without a code change.
-function Get-TsGhosttyExe {
-    @(
-        (Join-Path $env:ProgramFiles 'noctty\noctty.exe'),
-        (Join-Path $env:ProgramFiles 'winghostty\winghostty.exe')
-    ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
-}
 
 
 
@@ -1118,20 +1094,6 @@ function Install-TsTerminals {
         Install-TsWezterm $channel
     } else {
         Write-Host '==> WezTerm: not selected — skipped'
-    }
-    if ($Selected -contains 'ghostty') {
-        # Offered but never installed, exactly like the WezTerm channels. The
-        # managed config is written by the sync whether or not it is installed,
-        # so there is nothing to undo if you change your mind.
-        $exe = Get-TsGhosttyExe
-        if ($exe) {
-            Write-Host "==> Ghostty: already installed ($exe)"
-        } else {
-            Write-Host '==> Ghostty on Windows is noctty (ships as winghostty today):'
-            Write-Host '      winget install AmanThanvi.winghostty'
-            Write-Host '      or https://github.com/amanthanvi/noctty/releases'
-            Write-Host '    The managed config is written by the sync either way.'
-        }
     }
 }
 
