@@ -19,10 +19,20 @@ invariants are in `CLAUDE.md`; the two are deliberately separate.
 
 ## Branches
 
-- **One branch per phase**, named for the work (`feat/…`, `fix/…`, `docs/…`).
-- Merge with `git merge --no-ff` into `main`. Never commit straight to `main`,
-  never force-push.
-- **Push the phase branch, not `main`.** The user pulls it deliberately.
+`develop` is the default branch and the integration branch. `main` is the
+release branch: **protected**, and reachable only through a pull request whose
+CI is green.
+
+- **One branch per phase**, named for the work (`feat/…`, `fix/…`, `docs/…`),
+  cut from `develop`.
+- Merge with `git merge --no-ff` into `develop`. Never commit straight to
+  `main`, never force-push.
+- **Push the phase branch, not `develop` or `main`.** The user pulls it
+  deliberately.
+- `develop` → `main` is a pull request, always. Protection on `main` requires
+  one and requires every CI check to pass, so this is not a convention that can
+  be forgotten — but note that admins are exempt, which makes it a rule you keep
+  rather than one that keeps you.
 - The port described in `REVAMP-PLAN.md` is phased; each phase is its own branch
   and must meet the completion contract below before the next one starts.
 
