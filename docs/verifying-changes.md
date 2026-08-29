@@ -603,28 +603,25 @@ foreach ($k in ($script:TsWingetIds.Keys | Sort-Object)) {
 }
 ```
 
-**A Ghostty change now has two targets, and only one of them can be checked.**
-macOS has a real gate — `ghostty +validate-config` exits 1 on error. The Windows
-build (noctty, shipping as winghostty) has none: `+validate-config` fails with
-`FileTooBig` on 1.3.123 even for a 14-byte config, and `+show-config` silently
-reports **nothing** for an unknown key or a bad value on a real key. So never
-treat `+show-config` as a validator — probing options that way returns
-"accepted" for garbage. What you can check is that the file *renders* and that
-the values you set actually land:
+**A Ghostty change has one target and one real gate.** macOS: `ghostty
++validate-config` exits 1 on error, and `tstack ghostty status` runs it for you.
+There is nothing to check on Windows — that target was removed
+(`docs/decisions.md` § "Why the Windows Ghostty target was dropped"), so a
+Ghostty edit is a macOS-only change and `tstack ghostty diff` shows all of it.
 
-```powershell
-# render the mirror template the way the sync will, then read it back
-$t = (Get-Content windows\AppData\Local\ghostty\config.tmpl -Raw).
-     Replace('__GHOSTTY_THEME__','Catppuccin Mocha').Replace('__GHOSTTY_WINDOW_THEME__','dark')
-$t | Set-Content "$env:LOCALAPPDATA\ghostty\config" -NoNewline -Encoding utf8
-& 'C:\Program Files\winghostty\winghostty.com' +show-config |
-    Select-String '^(theme|window-theme|font-family|background) ='
+One trap outlives the removal: **never treat `ghostty +show-config` as a
+validator**, on any build. It reports *nothing* for an unknown key or for a bad
+value on a real key, so every "accepted" it returns is meaningless.
+
+The ssh integration cannot be checked by validating the file — a valid config
+that has the feature list wrong is still valid. Check the behaviour:
+
+```sh
+ghostty +ssh-cache --clear      # forget any already-installed hosts
+# open a new Ghostty window, then:
+ssh <host>                      # backspace and Delete must both work
+ghostty +ssh-cache              # the host should now be listed
 ```
-
-A directive that is absent from the output was **not** applied. And remember the
-mirror gets blind token substitution: any `__TOKEN__` the sync knows about is
-replaced even inside a comment (a comment mentioning the tmux-prefix token was
-rewritten to `C-b` mid-sentence). A test pins the token set.
 
 And check the id's **binary name**, which is a separate claim: winget's
 `aristocratos.btop4win` installs `btop4win.exe`, so probing for `btop` reported

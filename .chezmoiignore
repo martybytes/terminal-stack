@@ -94,9 +94,8 @@ Library
 Library/**
 {{ end }}
 {{- /* Ghostty config, off switch. Two independent gates: the darwin one above
-       (this path is chezmoi's, and chezmoi only manages $HOME here; the WINDOWS
-       Ghostty config is a different file, windows/AppData/Local/ghostty/, carried
-       by the sync — native-Linux hosts are headless and get neither),
+       (macOS is the only Ghostty this stack configures — the Windows target went
+       with noctty, and native-Linux hosts are headless),
        and this one, which is how `tstack config ghostty off` stops the config being
        re-rendered. Turning it off does NOT delete anything from $HOME — that is
        tstack config's job, deliberately, because .chezmoiignore is evaluated on

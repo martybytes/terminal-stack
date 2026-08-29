@@ -81,4 +81,25 @@ link-url = true
 auto-update = off
 # no-cursor: the shell already manages cursor shape via the prompt, and letting
 # both do it makes the cursor flicker between styles.
-shell-integration-features = no-cursor,sudo,title
+#
+# ssh-env and ssh-terminfo are the two that make REMOTE shells usable, and they
+# are the reason this line is not just the default set. Ghostty announces
+# TERM=xterm-ghostty; ssh forwards TERM; a host with no xterm-ghostty entry in
+# its terminfo database cannot resolve kbs=\177 or kdch1=\E[3~ — so backspace
+# inserts junk instead of erasing and Delete does nothing at all. Nothing about
+# the rest of this file causes or fixes that: stock Ghostty with no config here
+# behaves identically, which is why turning the managed config off is not a
+# diagnostic. WezTerm never had the problem because it reports xterm-256color.
+#
+# ssh-terminfo uploads `infocmp -x xterm-ghostty` to each host on first connect
+# and keeps the full Ghostty capability set there; it needs `tic` on the remote.
+# ssh-env is the fallback for every host where that upload cannot happen — no
+# tic, a read-only home, a jump host — and simply sets TERM=xterm-256color for
+# the session. Both are listed: terminfo is tried first, env catches the rest.
+#
+# Both are shell-integration features, so they work from the zsh this stack
+# configures and are inert under a shell Ghostty does not integrate with.
+# `ghostty +ssh-cache` lists and clears the per-host cache. The manual
+# equivalent, if you ever need to do it by hand, is:
+#     infocmp -x xterm-ghostty | ssh <host> -- tic -x -
+shell-integration-features = no-cursor,sudo,title,ssh-env,ssh-terminfo

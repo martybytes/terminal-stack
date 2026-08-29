@@ -4,6 +4,60 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+### Fixed
+
+- **Ghostty: backspace and Delete work over ssh again (08/28/2026).** ssh into
+  any Linux host from Ghostty and backspace inserted junk instead of erasing,
+  while Delete did nothing. Ghostty announces `TERM=xterm-ghostty` and `ssh`
+  forwards it; a host with no `xterm-ghostty` terminfo entry cannot resolve
+  `kbs` or `kdch1`, and readline gets both keys wrong. Nothing in the managed
+  config caused it — stock Ghostty defaults to the same `TERM`, which is why
+  `tstack config ghostty off` was not a diagnostic and looked like an acquittal.
+
+  The config now sets
+  `shell-integration-features = no-cursor,sudo,title,ssh-env,ssh-terminfo`.
+  `ssh-terminfo` uploads the real entry per host on first connect (it needs
+  `tic` there) and keeps Ghostty's full capability set; `ssh-env` is the
+  fallback that sets `TERM=xterm-256color` where the upload cannot happen. Both,
+  because either alone leaves a class of hosts broken — and note that naming any
+  value for that key **replaces** Ghostty's defaults rather than adding to them.
+  `ghostty +ssh-cache` lists and clears the per-host cache. Rejected the blunt
+  `term = xterm-256color`, which fixes ssh by giving up Ghostty's terminfo in
+  local panes too. Tests pin both features present and the absence of a global
+  `term` line. WezTerm was never affected: it reports `xterm-256color` already.
+
+### Removed
+
+- **The Windows Ghostty target, and everything that fed it (08/28/2026).** The
+  noctty integration added on 08/24 is gone: the `windows/AppData/Local/ghostty/`
+  mirror and its generated theme, the `__GHOSTTY_THEME__` /
+  `__GHOSTTY_WINDOW_THEME__` substitution in **both** sync scripts, the
+  subtree-skip that implemented `ghosttyConfig=off` on that side, the interop
+  binary probe, the pwsh terminal-picker row and `Get-TsGhosttyExe`, and the
+  `Set-TerminalStackConfig ghostty` branch. `tstack/commands.conf` now says `-`
+  in the Windows column, so the shim reports "not supported on this platform"
+  rather than a missing command.
+
+  Three things this simplified beyond Ghostty itself. The themeMode → theme
+  mapping is **gone**, not merely deduplicated — it existed once per renderer and
+  needed a test pinning the copies together, because drift between them showed up
+  as `tstack config ghostty diff` reporting a phantom change forever.
+  `ghostty.target()` returning None is now a **refusal** rather than a branch,
+  which matters most on WSL: it used to resolve to the Windows install, and would
+  otherwise now write to a `/mnt/c` path nothing on the machine reads while
+  reporting success. And `status` runs a real syntax gate unconditionally, since
+  the build with no working `+validate-config` is no longer a target.
+  `tstack/ghostty.py` lost 30% of its lines; 11 tests went with the target.
+
+  **This does not delete files on a machine that already had them.** The code
+  that wrote `%LOCALAPPDATA%\ghostty\` is gone; whatever an earlier apply put
+  there stays, unmanaged. A sync-side deletion would run on every machine — the
+  same reason `tstack config ghostty off` was never a `.chezmoiremove` rule. To
+  clean up, delete that directory by hand, once. The one trap worth keeping from
+  the whole episode: **never treat `ghostty +show-config` as a validator**, on
+  any build — it reports nothing for an unknown key or a bad value, so every
+  "accepted" is meaningless.
+
 ### Added
 
 - **The dashboard configures all of it now, not just the settings
