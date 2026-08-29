@@ -219,10 +219,11 @@ def show(out: Out) -> int:
         )
     )
     out.say(_row("atuin", store.get("atuinEnabled", "off"), "tstack config atuin on|off"))
-    # Ghostty is printed wherever its config path resolves -- macOS, WSL and
-    # Windows. The shell gated this on Darwin alone, so a WSL user's Ghostty
-    # setting was invisible in `show` while `tstack config ghostty` still worked.
-    if plat.kind() in (plat.MACOS, plat.WSL, plat.WINDOWS):
+    # macOS alone, matching the one target `tstack ghostty` still has. This was
+    # briefly widened to WSL and Windows for the noctty mirror; that mirror is
+    # gone, so printing the row anywhere else would advertise a setting that
+    # changes nothing on the machine reading it.
+    if plat.kind() == plat.MACOS:
         out.say(_row("ghostty", store.get("ghosttyConfig", "on"), "tstack config ghostty on|off"))
     out.say(_row("wezterm", _wezterm_cell(), "tstack config wezterm"))
     out.say(

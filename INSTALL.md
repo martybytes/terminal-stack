@@ -163,7 +163,7 @@ cd $env:LOCALAPPDATA\terminal-stack\stack
 
 It runs the wizard (leader key / theme / terminal emulator / mux / apps / TTS + optional tray daemon / workspace — see **Install wizard** above; set `$env:TS_PROFILE`/`TS_DEVELOPMENT`/`TS_STARSHIP_PRESET`/`TS_LEADER`/`TS_THEME`/`TS_TERMINALS`/`TS_WEZ_MUX`/`TS_WEZ_RESTORE`/`TS_APPS`/`TS_CC_TTS`/`TS_CC_TTS_DAEMON` to skip prompts), shows the review, and only then installs:
 - **Always:** JetBrainsMono Nerd Font (`DEVCOM.JetBrainsMonoNerdFont`), Starship (`Starship.Starship`), chezmoi (`twpayne.chezmoi`)
-- **WezTerm, if you ticked it:** `wez.wezterm.nightly` or `wez.wezterm`, whichever channel you picked. Switching channel uninstalls the other package first — they install to the same place. Ghostty is offered here too, but never installed for you: on Windows it is [noctty](https://github.com/amanthanvi/noctty), whose releases still carry the former name winghostty (`winget install AmanThanvi.winghostty`). Tick it and the managed config is written either way
+- **WezTerm, if you ticked it:** `wez.wezterm.nightly` or `wez.wezterm`, whichever channel you picked. Switching channel uninstalls the other package first — they install to the same place. Ghostty is not offered on Windows — this stack configures it on macOS only
 - **Selected apps** (recommended set by default): eza, fzf, bat, delta, ripgrep, zoxide, glow, micro, neovim, gh, ghq, lazygit, prettymark; optionally `zed` (one winget install)
 
 It saves your choices to `%LOCALAPPDATA%\terminal-stack\config.json`. Any package that failed is **listed again at the end with the command to retry it**, so a failure can't scroll past unnoticed. Pass `-WhatIf` to preview without installing. UAC prompts on machine-scope installs; approve each.

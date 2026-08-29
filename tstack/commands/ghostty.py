@@ -22,9 +22,8 @@ Usage:
   tstack ghostty on         manage it, and render it now
   tstack ghostty off        stop, and RESTORE your backup (or remove ours)
 
-macOS and Windows only. Ghostty runs on macOS, and on Windows as
-noctty/winghostty; this stack's native-Linux hosts are headless. On WSL the
-target is the Windows install, because that is the one with a GUI.
+macOS only. This stack configures no Windows Ghostty, and its native-Linux hosts
+are headless, so there is no GUI there to configure.
 
 `off` is a real revert rather than "stop managing", and it acts on THIS machine
 only: a .chezmoiremove rule or a sync-side delete would run everywhere and wipe a
@@ -38,28 +37,12 @@ def say(message: str) -> None:
 
 
 def _apply() -> None:
-    """Re-render after a save, by whichever route this platform applies.
+    """Re-render after a save.
 
-    On Windows there is no chezmoi: `scripts/sync-windows.ps1` is the apply, and
-    it is what writes the Ghostty files on that side.
+    One route: these files are chezmoi's. The Windows branch that drove
+    `scripts/sync-windows.ps1` went with the mirror it used to write.
     """
     store.chezmoi_init()
-    if plat.kind() == plat.WINDOWS:
-        pwsh = plat.find_pwsh()
-        try:
-            source = paths.resolve_source_dir()
-        except paths.CloneNotFound:
-            return
-        script = source / "scripts" / "sync-windows.ps1"
-        if pwsh and script.is_file():
-            print("==> applying...")
-            subprocess.run(
-                [pwsh, "-NoLogo", "-NoProfile", "-File", str(script), "-SourceDir", str(source)],
-                check=False,
-                timeout=900,
-            )
-            print("==> done.")
-        return
     chezmoi = plat.find_chezmoi()
     if chezmoi:
         print("==> applying...")

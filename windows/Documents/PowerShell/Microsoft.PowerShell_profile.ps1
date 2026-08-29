@@ -1435,29 +1435,12 @@ function Set-TerminalStackConfig {
             Invoke-TsSync $src
             Write-Host '==> done.'
         }
-        # Managed Ghostty config. There IS a Ghostty for Windows: noctty
-        # (github.com/amanthanvi/noctty), Ghostty's terminal core in a native
-        # Win32 app, still shipping release assets under its former name
-        # winghostty. POSIX twin: the ghostty_* functions in bootstrap/ts-config.sh
-        # — keep the verbs and the reported facts aligned.
-        #
-        # NOTE for a combined WSL+Windows box: prefer running this from WSL. Its
-        # chezmoi apply is authoritative for the Windows-side files, same caveat
-        # as the rest of tstack config.
-        # Ghostty. One implementation in tstack/ghostty.py, reached the same way
-        # mux does: this branch was ~90 lines and carried its own copy of the
-        # themeMode -> theme mapping, which had to be kept in agreement with the
-        # bash side and both syncs by a test.
-        'ghostty' {
-            $gArgs = @(@($Value) + @($Rest) | Where-Object { $_ })
-            Invoke-TstackSub -Name 'ghostty' -Forwarded $gArgs
-        }
         # The mux has its own verbs (kill/restart/reset), so tstack config just hands off.
         'mux'    {
             $muxArgs = @(@($Value) + @($Rest) | Where-Object { $_ })
             Invoke-TstackSub -Name 'mux' -Forwarded $muxArgs
         }
-        default { Write-Warning "tstack config: unknown command '$Action' (show, leader, theme, tmux, apps, tts, mux, restore, ghostty, memory, agents, wezterm, wizard)" }
+        default { Write-Warning "tstack config: unknown command '$Action' (show, leader, theme, tmux, apps, tts, mux, restore, memory, agents, wezterm, wizard)" }
     }
 }
 

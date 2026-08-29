@@ -81,7 +81,7 @@ Pick your row. Everything in the third column is installed for you.
 |---|---|---|
 | **Windows 11** | winget (App Installer); PowerShell 7+ recommended | winget packages, `$PROFILE`, Nerd Font, Starship, and WezTerm if you keep it ticked |
 | **WSL2 Ubuntu** | WSL2 with Ubuntu (run the Windows step first — see below) | apt packages, oh-my-zsh, chezmoi, Starship |
-| **Debian / Ubuntu** | `sudo` and `curl` | the same shell stack (apt packages, oh-my-zsh, chezmoi, Starship); a desktop also gets WezTerm, but the WezTerm and Ghostty GUI configs are macOS/Windows-only |
+| **Debian / Ubuntu** | `sudo` and `curl` | the same shell stack (apt packages, oh-my-zsh, chezmoi, Starship); a desktop also gets WezTerm, but the WezTerm GUI config is macOS/Windows-only and the Ghostty one is macOS-only |
 | **macOS** | an admin account (Homebrew needs `sudo`; it is installed for you if absent) | brew formulae and casks, oh-my-zsh, chezmoi, Starship |
 
 Docker is **optional**. It is only needed for the memory, compression, voice and
@@ -273,7 +273,7 @@ Other subcommands, each with `-h`:
 <details open>
 <summary><b>Terminal and prompt</b></summary>
 
-- **WezTerm** (nightly or stable, your pick) with a taller hand-drawn tab bar on Windows, WSL and macOS: the active tab is a solid accent block, each tab carries an index, an icon and a deliberately short title. Desktop Linux installs WezTerm but keeps its stock config. **Ghostty** is the macOS alternative — installed, with a managed `~/.config/ghostty/config`; Windows gets the same managed config at `%LOCALAPPDATA%\ghostty\`, and on Linux the installer points you at ghostty.org rather than installing it.
+- **WezTerm** (nightly or stable, your pick) with a taller hand-drawn tab bar on Windows, WSL and macOS: the active tab is a solid accent block, each tab carries an index, an icon and a deliberately short title. Desktop Linux installs WezTerm but keeps its stock config. **Ghostty** is the macOS alternative — installed, with a managed `~/.config/ghostty/config` that also carries the `ssh-terminfo`/`ssh-env` shell-integration features, without which backspace and Delete break over ssh. macOS only: on Linux the installer points you at ghostty.org rather than installing it, and there is no Windows target.
 - **`F1`–`F4` are directions** — focus the pane that way, or split one into existence if none is there. `F5` jumps via a labelled overlay, `F6` swaps.
 - **A no-timeout leader** (`Ctrl+Space` by default) drives splits and arrow-key repeatable modes for move, resize, rotate, tab-switch and font-size, each with an on-screen badge that auto-exits when idle. `Ctrl+Space p` fuzzy-picks a project from the `wso` tree (needs `fd`); `Ctrl+Space S`/`L` save and restore a session.
 - **Starship prompt** on both zsh and PowerShell, with the palette baked to your theme.

@@ -14,7 +14,7 @@
 #   tstack config mux [on|off|...]  hand-off to tstack mux (WezTerm multiplexer domain)
 #   tstack config restore <on|off>  reopen the last WezTerm session at startup
 #   tstack config atuin   <on|off>  atuin shell history (owns Ctrl+R when on)
-#   tstack config ghostty [on|off|status|diff]   managed Ghostty config (macOS/Windows)
+#   tstack config ghostty [on|off|status|diff]   managed Ghostty config (macOS)
 #   tstack config agents [show|<tool> on|off|status|repair|uninstall]
 #   tstack config wezterm [status|changes|install <chan>|upgrade]
 #   tstack config wizard          re-run the whole install questionnaire
@@ -93,18 +93,10 @@ install_terminals() {
     [ -n "$sel" ] || { echo "==> Terminal emulator: none selected; skipping."; return 0; }
     channel="$(ts_terminals_channel "$sel")"
     [ -n "$channel" ] && ts_wezterm_install "$channel"
+    # Ghostty is a macOS row in the picker, so this is the only arm it needs.
     case " $sel " in *" ghostty "*)
         if [ "$(uname -s)" = Darwin ] && command -v brew >/dev/null 2>&1; then
             brew list --cask ghostty >/dev/null 2>&1 || brew install --cask ghostty || true
-        elif [ -d /mnt/c/Users ]; then
-            # Windows: noctty/winghostty is offered but never installed for you.
-            # winget carries AmanThanvi.winghostty, currently the same 1.3.123 the
-            # releases page ships. Either is fine; the managed config lands the same
-            # way. Same rule as WezTerm: asked, never forced.
-            echo "==> Ghostty on Windows is noctty (ships as winghostty today):"
-            echo "      winget install AmanThanvi.winghostty"
-            echo "      or https://github.com/amanthanvi/noctty/releases"
-            echo "    The managed config is written by the sync either way."
         fi ;;
     esac
 }
@@ -178,7 +170,8 @@ run_wizard_apps() {
 
 # Ghostty. One implementation in tstack/ghostty.py, reached the same way mux and
 # wezterm are: this used to be ~160 lines here, ~90 more in $PROFILE, and a third
-# copy of the themeMode -> theme mapping in each.
+# copy of the themeMode -> theme mapping in each. macOS only -- the command says
+# so itself on any other platform.
 run_ghostty() {
     TERMINAL_STACK_DIR="$SRC" TERMINAL_STACK_CHEZMOI="$CZ" \
         "$(ts_python)" "$SRC/tstack/main.py" ghostty "$@"
