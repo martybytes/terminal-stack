@@ -40,6 +40,17 @@ SYSADMIN = "sysadmin"
 ALL, POSIX, LINUX, WINDOWS = "all", "posix", "linux", "windows"
 PLATFORMS = (ALL, POSIX, LINUX, WINDOWS)
 
+# The distro veto. `platforms` answers "can this OS install it"; this answers
+# "should this DISTRO offer it", and there is exactly one case: Omarchy
+# standardises on mise for language runtimes, so a second version manager here
+# competes for the same binaries with PATH order deciding the winner.
+#
+# Vetoed rather than merely skipped at install time, because an id that is
+# offered, ticked and then skipped is one `ts_apps_pending` reports as missing on
+# every update, forever. Twin of the awk filter in ts_apps_load
+# (bootstrap/_config.sh); tests/test_apps_catalog.py runs both and compares.
+MISE_OWNED = frozenset({"fnm", "node", "python"})
+
 
 @dataclass(frozen=True)
 class App:
@@ -51,6 +62,8 @@ class App:
 
     def installable(self, machine: str) -> bool:
         """`machine` is a tstack.platform kind: macos, linux, wsl or windows."""
+        if machine == plat.LINUX and self.id in MISE_OWNED and plat.is_omarchy():
+            return False
         if self.platforms == ALL:
             return True
         if self.platforms == WINDOWS:

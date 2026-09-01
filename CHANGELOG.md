@@ -4,6 +4,78 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+### Added
+
+- **Arch and Omarchy are a supported target (08/31/2026).** `install-linux.sh`
+  died on every Arch host at `sudo apt-get update` -- the FIRST call in
+  `common_install_all`, under `set -euo pipefail` -- before the questionnaire,
+  before chezmoi, before a byte was written, with `sudo: apt-get: command not
+  found` as the entire explanation. A `grep -rln "Arch Linux|pacman|Omarchy"`
+  over every `.md`, `.sh`, `.py` and `.conf` in the repo returned nothing: the
+  platform was not unsupported, it was unimagined.
+  - **Detection is a SECOND axis, not a fifth `plat.kind()`.** `plat.distro()` /
+    `is_arch()` / `is_omarchy()` and the shell twins `ts_distro_id` /
+    `ts_is_arch` / `ts_is_omarchy` read `/etc/os-release` (Omarchy 4.0.1:
+    `ID=omarchy`, `ID_LIKE=arch`). Every existing switch on `kind()` asks "is
+    this a POSIX box with no Windows side", which Arch answers `linux` to
+    exactly as Debian does. `TS_DISTRO_ID` / `TS_DISTRO_LIKE` / `TS_PKG_MANAGER`
+    override all of it, and an override that is SET BUT EMPTY means "no ID" --
+    `[ -n "$VAR" ]` conflated that with unset and made bash disagree with
+    Python, which is the same two-readers-one-rule failure the `platforms`
+    column was introduced to end.
+  - **The installer contract is split.** `bootstrap/_common-posix.sh` holds
+    everything shared, including `common_install_all` -- whose ORDERING encodes
+    two separate incidents and would have been copied wholesale otherwise. Each
+    distro half (`_common-debian.sh`, the new `_common-arch.sh`) supplies
+    exactly six functions, picked by `ts_common_lib` in `_detect.sh`.
+  - **Packages come from pacman**, through `omarchy-pkg-add` where it exists.
+    Every catalog tool but `llmfit` is in Arch `extra`, and ~20 are already in
+    `omarchy-base.packages` -- so the whole GitHub-release/PPA/third-party-repo
+    apparatus that is most of the Debian file collapses to one package list, and
+    the `batcat`/`fdfind` symlink repairs disappear (Arch names both correctly).
+    `ts_arch_pkg` carries the six ids whose package name differs; a test asserts
+    the mapping is total, because a quietly missing tool is this repo's
+    recurring failure.
+  - **Omarchy is bash-first: the bootstrap does not `chsh` there.** Its aliases,
+    functions and shell init all hang off `~/.bashrc` ->
+    `$OMARCHY_PATH/default/bash/rc`, and it ships an official `omarchy-zsh`
+    package rather than expecting a `chsh`. zsh is still installed and
+    `~/.zshrc` still applied; `zsh -l` gets you the stack's shell. Plain Arch
+    still switches, which is ordinary Arch behaviour.
+  - **tmux moved to the XDG path on Omarchy, and sources Omarchy's config
+    first.** Probed on tmux 3.7c in a scratch `$HOME`: with both files present
+    `$XDG_CONFIG_HOME/tmux/tmux.conf` WINS over `~/.tmux.conf`. Omarchy ships
+    its config there, so the stack was applying a `~/.tmux.conf` tmux never
+    read -- the wizard's tmux-prefix answer had no effect, with no error and
+    nothing missing from the diff. Both paths now share one body through
+    `.chezmoitemplates`, and `.chezmoiignore` gates them against each other on a
+    new derived `distroId` key so exactly one is ever written.
+  - **mise owns the language runtimes on Omarchy.** `fnm`, `node` and `python`
+    are vetoed from the catalog in both readers rather than merely skipped at
+    install time -- an id that is offered, ticked and then skipped is one
+    `ts_apps_pending` reports missing on every update, forever. `uv`, `pipx`,
+    `ruff` and `ipython` stay; they are tools, not version managers.
+  - `chezmoi` and `starship` come from pacman. The starship one matters: the
+    curl installer writes `/usr/local/bin`, which PRECEDES `/usr/bin` on PATH,
+    so it would shadow the packaged binary with an unmanaged copy `omarchy
+    update` can never upgrade.
+  - `tstack/commands/wezterm.py` learned pacman: `extra/wezterm` is stable,
+    AUR `wezterm-git` is nightly. Without it `channel()` fell through to
+    "unknown" on Arch and `install()` refused to touch an ordinary package,
+    reporting it as hand-placed. It prints the AUR command rather than running
+    an AUR helper -- `wezterm-git` builds from source, unattended, inside what
+    the user thinks is a dotfiles install.
+  - **Four new parity targets**: `arch` and `omarchy` (in the default set) and
+    `arch-bootstrap` / `omarchy-bootstrap` (opted into, like the apt one). The
+    omarchy image carries Omarchy's os-release, its pacman repo and the REAL
+    `omarchy-pkg-*` scripts extracted from the real package -- a stub would
+    agree with whatever we assumed. `run.sh` escalates to `sudo docker` on its
+    own when the daemon is unreachable as this user, because Omarchy
+    deliberately does not grant the `docker` group and the gate would otherwise
+    be unavailable on the platform it gates. 26 new tests in
+    `tests/test_distro.py`; `docs/omarchy.md` is the map and `docs/decisions.md`
+    gains four sections.
+
 ### Fixed
 
 - **Docs caught up with `tstack apply` (08/29/2026).** README and INSTALL.md

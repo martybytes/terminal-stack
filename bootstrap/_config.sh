@@ -28,6 +28,12 @@ export USER
 . "$(dirname -- "${BASH_SOURCE[0]}")/_cc_tts.sh"
 # shellcheck source=_wezterm.sh
 . "$(dirname -- "${BASH_SOURCE[0]}")/_wezterm.sh"
+# Distro detection, for the catalog's distro veto below. _detect.sh is also
+# sourced by _common-posix.sh; sourcing it here too is harmless (it only defines
+# functions) and it is what lets `tstack config apps` and the picker answer the
+# same question the installer does, from any entry point.
+# shellcheck source=_detect.sh
+. "$(dirname -- "${BASH_SOURCE[0]}")/_detect.sh"
 
 # The repo-wide backup convention, in one place: <path>.bak.YYYYMMDD, then .1,
 # .2 on a same-day re-run, never clobbering a same-day backup. ARCHITECTURE.md
@@ -96,6 +102,25 @@ ts_apps_load() {
         $4=="posix" && (p=="macos" || p=="linux" || p=="wsl") { print; next }
         $4=="linux" && p=="linux" { print; next }
     ')"
+    # Distro veto, on top of the platform column.
+    #
+    # `platforms` answers "can this OS install it". This answers "should this
+    # DISTRO offer it", which is a different question and has exactly one case:
+    # Omarchy standardises on mise for language runtimes (mise-bin is in its base
+    # package set, `omarchy install dev-env <lang>` is entirely `mise use
+    # --global`, and env-bootstrap puts ~/.local/share/mise/shims on PATH). A
+    # second version manager competes for the same binaries and the winner is
+    # decided by PATH order.
+    #
+    # It has to be HERE rather than only in the installer: an id that is offered,
+    # ticked and then skipped is an id `ts_apps_pending` reports as missing on
+    # every `tstack update`, forever -- the exact nag ts_app_installable exists
+    # to end. uv/pipx/ruff/ipython stay; they are tools, not version managers,
+    # and Omarchy's own `dev-env python` installs uv too.
+    if [ "$(ts_distro_id 2>/dev/null || true)" = omarchy ]; then
+        TS_APPS_ROWS="$(printf '%s\n' "$TS_APPS_ROWS" \
+            | awk '$1!="fnm" && $1!="node" && $1!="python"')"
+    fi
     TS_APPS_ALL="$(printf '%s\n' "$TS_APPS_ROWS" | awk '{print $1}' | tr '\n' ' ')"
     TS_APPS_ALL="${TS_APPS_ALL% }"
     TS_APPS_RECOMMENDED="$(printf '%s\n' "$TS_APPS_ROWS" \

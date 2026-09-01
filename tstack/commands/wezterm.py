@@ -120,6 +120,16 @@ def channel() -> str:
             got = _run(["dpkg", "-s", package], timeout=30)
             if got and got.returncode == 0:
                 return name
+    elif shutil.which("pacman"):
+        # Arch: `extra/wezterm` is the stable channel; the nightly is
+        # `wezterm-git` from the AUR. Without this branch an Arch box fell
+        # through to "unknown" -- WezTerm on PATH, no package manager owning it
+        # -- and install() then refused to touch a perfectly ordinary pacman
+        # package, reporting it as hand-placed.
+        for package, name in (("wezterm-git", "nightly"), ("wezterm", "stable")):
+            got = _run(["pacman", "-Q", package], timeout=30)
+            if got and got.returncode == 0:
+                return name
     return "unknown" if shutil.which("wezterm") else "none"
 
 
@@ -534,6 +544,34 @@ def _apt_install(want: str, other: str) -> None:
         print(f"{WARN} WezTerm: apt install failed; see https://wezterm.org/install/linux.html")
 
 
+def _pacman_install(want: str) -> None:
+    """Arch: stable is a repo package, nightly is not.
+
+    Deliberately does NOT run an AUR helper. `wezterm-git` builds WezTerm from
+    source -- tens of minutes on a laptop, unattended, inside what the user
+    thinks is a dotfiles install -- and the AUR is user-submitted, so pulling a
+    PKGBUILD without being asked is not this installer's call to make. It prints
+    the exact command instead, which is the same stance the Debian side takes
+    for Ghostty.
+    """
+    if want == "nightly":
+        print(f"{INFO} WezTerm: Arch packages only the stable channel (extra/wezterm).")
+        if shutil.which("yay"):
+            print("      Nightly is AUR `wezterm-git`, built from source:  yay -S wezterm-git")
+        else:
+            print("      Nightly is AUR `wezterm-git`; see https://wezterm.org/install/linux.html")
+        return
+    add = (
+        ["omarchy-pkg-add"]
+        if shutil.which("omarchy-pkg-add")
+        else ["sudo", "pacman", "-S", "--noconfirm", "--needed"]
+    )
+    print(f"{INFO} WezTerm: installing extra/wezterm ({' '.join(add)})")
+    done = _run([*add, "wezterm"], timeout=1800)
+    if not done or done.returncode != 0:
+        print(f"{WARN} WezTerm: pacman install failed; see https://wezterm.org/install/linux.html")
+
+
 def install(want: str) -> int:
     """Switching channel means REMOVING the other one first, in both directions:
     on macOS both casks own /Applications/WezTerm.app so the second install
@@ -561,6 +599,8 @@ def install(want: str) -> int:
             _apt_install("wezterm-nightly", "wezterm")
         else:
             _apt_install("wezterm", "wezterm-nightly")
+    elif shutil.which("pacman"):
+        _pacman_install(want)
     else:
         print(f"{INFO} WezTerm: no supported package manager here; see https://wezterm.org/install")
     return 0

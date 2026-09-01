@@ -67,6 +67,22 @@ install-wsl.sh
 install.ps1
 scripts/**
 
+{{- /* tmux: ONE of the two paths, never both.
+
+       tmux reads ~/.tmux.conf OR $XDG_CONFIG_HOME/tmux/tmux.conf, and on tmux
+       3.7c the XDG file wins when both exist. Omarchy ships its own config at
+       the XDG path, so on Omarchy the stack must write THERE -- writing
+       ~/.tmux.conf produced a file tmux never read, which is worse than no file
+       at all because `chezmoi diff` shows it landing.
+
+       Everywhere else keeps ~/.tmux.conf: it is what every other platform in
+       this stack already has, and moving it would be a change with no cause. */ -}}
+{{ if eq (index . "distroId" | default "") "omarchy" }}
+.tmux.conf
+{{ else }}
+.config/tmux/**
+{{ end }}
+
 # WezTerm GUI config — applied on macOS only. Native Linux hosts in this stack
 # are headless (ssh/PuTTY); Windows gets windows/.wezterm.lua via the sync hook.
 # .wezterm/** covers the Lua modules (pane_nav.lua) — without the gate they'd

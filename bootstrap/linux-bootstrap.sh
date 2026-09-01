@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # linux-bootstrap.sh — install native-Linux prerequisites for the terminal-stack.
-# Targets Debian/Ubuntu-family distros. Idempotent: re-run safely.
+# Targets Debian/Ubuntu- and Arch-family distros (Omarchy included). Idempotent.
 # See ../INSTALL.md § Linux for context.
 #
 # Difference vs wsl-bootstrap.sh: no Windows-username prompt, default SOURCE_DIR
@@ -10,13 +10,31 @@
 
 set -euo pipefail
 
+# Which package manager this host actually runs decides which half of the
+# installer contract to source (_common-debian.sh for apt, _common-arch.sh for
+# pacman); _common-posix.sh holds everything they share and is pulled in by
+# whichever one wins. _detect.sh is sourced FIRST and on its own, because the
+# choice has to be made before either candidate is loaded.
+#
+# This is the line whose absence made the whole installer fail on Arch at
+# `sudo apt-get update` — before the questionnaire, before anything was written,
+# with `sudo: apt-get: command not found` as the entire explanation.
+# shellcheck source=_detect.sh
+. "$(dirname -- "$0")/_detect.sh"
+_TS_LIB="$(ts_common_lib)"
+if [ ! -f "$(dirname -- "$0")/$_TS_LIB" ]; then
+    echo "!! no installer for this host: $(ts_distro_id) (package manager: $(ts_pkg_manager))" >&2
+    echo "   Supported: Debian/Ubuntu family (apt), Arch family incl. Omarchy (pacman)." >&2
+    exit 1
+fi
 # shellcheck source=_common-debian.sh
-. "$(dirname -- "$0")/_common-debian.sh"
+. "$(dirname -- "$0")/$_TS_LIB"
 
 common_require_non_root
 
 echo "$INFO Terminal stack Linux bootstrap"
 echo "    Detected: user $USER, home $HOME"
+echo "    Distro:   $(ts_distro_id) ($(ts_pkg_manager)) via $_TS_LIB"
 
 # Persist the wizard's answers. Called by common_install_all BEFORE anything
 # optional runs, via TS_PERSIST_HOOK — an install that fails must never be able
@@ -76,5 +94,7 @@ fi
 
 echo ""
 echo "$INFO Linux bootstrap done."
-echo "    Next: ~/.local/bin/chezmoi apply -v"
+# Where chezmoi landed depends on the package manager: the apt side curls it into
+# ~/.local/bin, Arch has `extra/chezmoi` at /usr/bin. Print the one that exists.
+echo "    Next: $(ts_chezmoi_bin 2>/dev/null || echo "$HOME/.local/bin/chezmoi") apply -v"
 echo "    See INSTALL.md § Linux for the full sequence."

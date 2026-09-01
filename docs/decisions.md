@@ -2802,3 +2802,160 @@ bare `chezmoi apply` instead. That asymmetry is the same shape as the
 `Invoke-TsWizard` duplication that killed the Windows install, and it is worth
 noticing that both were "the good version exists, and the path that needed it
 most could not reach it".
+
+## Why Omarchy is a package-manager seam, not a fifth platform kind
+
+`install-linux.sh` on any Arch host died with `sudo: apt-get: command not
+found`. Not at the end, not after a warning: `common_install_all`'s **first**
+call is `common_pkg_prereqs` (then `common_apt_prereqs`), `linux-bootstrap.sh`
+runs under `set -euo pipefail`, and that was the whole install — before the
+questionnaire, before chezmoi, before a byte was written. A `grep -rln "Arch
+Linux|pacman|Omarchy"` across every `.md`, `.sh`, `.py` and `.conf` in the repo
+returned **nothing**. The platform was not unsupported; it was unimagined.
+
+The obvious fix — make `plat.kind()` return `arch` — is the wrong one. Every
+switch on `kind()` in this repo (`engine.py`, the sync hook, `paths.py`,
+`state_dir`) is asking "is this a POSIX box with no Windows side", and an Arch
+box answers `linux` to that exactly as Debian does. A fifth value would have
+made every one of those callers learn a distinction none of them cares about,
+and the ones that were not updated would have silently taken the `else` branch.
+
+What actually differs is two things, and they are a second axis: **which package
+manager**, and **who owns which config**. So `plat.distro()` / `is_arch()` /
+`is_omarchy()` sit beside `kind()` rather than inside it, with shell twins
+(`ts_distro_id`, `ts_is_arch`, `ts_is_omarchy`) reading the same
+`/etc/os-release`. Omarchy 4.0.1 answers `ID=omarchy`, `ID_LIKE=arch`.
+
+Arch-ness and Omarchy-ness are asked **separately**, and that is load-bearing:
+`ts_is_arch` gates the package manager, `ts_is_omarchy` gates the opinions
+(bash-first, mise owns runtimes, Omarchy owns tmux and Ghostty). Widening the
+second to "arch" would run `omarchy pkg add` on a box with no omarchy, which is
+a command-not-found, not a policy. `tests/parity/run.sh arch` exists precisely
+to keep the plain-Arch path honest, because nobody developing this on an Omarchy
+laptop will ever exercise it by accident.
+
+One trap, found by the test that compares the two readers: the `TS_DISTRO_ID`
+override has to distinguish **unset** from **set-but-empty**. `[ -n "$VAR" ]`
+treats them alike, so bash fell through to the live `/etc/os-release` and
+answered `omarchy` where Python — whose `os.environ.get` returns `""` — answered
+`""`. `${VAR+set}` is the test that matches. Two readers of one rule disagreeing
+is the same failure the `platforms` column was introduced to end, arriving one
+axis over.
+
+## Why the installer contract was split into `_common-posix.sh`
+
+`_common-arch.sh` was going to be written by copying `_common-debian.sh`. That
+would have copied `common_install_all`, and `common_install_all` is not a list
+of steps — it is an **ordering**, and the ordering encodes two separate
+incidents. Persistence runs before any optional install, because an install that
+died under `set -e` once threw away ten answers the user had just typed. chezmoi
+runs before persistence, because `ts_save_config` shells out to `chezmoi init`.
+A second copy of that is a second place for either to be undone by someone
+fixing the other.
+
+So the shared half moved to `_common-posix.sh` — the orchestration plus
+`common_require_non_root`, `common_oh_my_zsh`, `common_nerd_font_jetbrains`,
+`common_tty_prompt`, `common_workspace_config`, `common_git_include`, and the
+release-binary helpers — and each distro half supplies exactly six functions:
+`common_pkg_prereqs`, `common_install_selected_apps`, `common_install_terminals`,
+`common_login_shell_zsh`, `common_chezmoi`, `common_starship`.
+`tests/test_distro.py` asserts both halves supply all six, that neither
+redefines anything posix owns, and that neither reaches for the other's package
+manager (comments stripped first — both files talk about the other at length,
+and that prose is the useful part).
+
+The pacman half came out roughly a third the size of the apt one, which is the
+measurement worth keeping: **most of `_common-debian.sh` is not apt, it is the
+absence of apt.** eza, delta, gh, ghq, lazygit, dust, gdu, bottom, bandwhich,
+gping, atuin, yazi, glow, neovim and zed each needed a GitHub-release fetch, a
+PPA or a third-party apt repo because no Debian or Ubuntu archive carries them.
+Every one is in Arch `extra`; only `llmfit` still needs the tarball. The
+`batcat`/`fdfind` symlink repairs disappear the same way — Debian renames both
+binaries to dodge package name clashes, Arch does not.
+
+`ts_arch_pkg` carries the six ids whose package name differs (`delta`→
+`git-delta`, `gh`→`github-cli`, `tldr`→`tealdeer`, `node`→`nodejs`, `pipx`→
+`python-pipx`, `poetry`→`python-poetry`). An id with no case arm is **reported
+and skipped**, never silently dropped, and a test asserts the mapping is total
+over every catalog row a Linux box could install — because a quietly missing
+tool is this repo's recurring failure, and "add a row to apps.conf" must not
+cost Arch users the tool.
+
+## Why the tmux config moved to the XDG path on Omarchy
+
+The stack wrote `~/.tmux.conf`. Omarchy ships its own config at
+`~/.config/tmux/tmux.conf`. tmux reads one **or** the other, and which one wins
+is not obvious from the man page, which says only "looks for a user
+configuration file at `~/.tmux.conf` or `$XDG_CONFIG_HOME/tmux/tmux.conf`" and
+lists all three paths together under FILES.
+
+Probed directly, on tmux 3.7c, in a scratch `$HOME`:
+
+```
+both files present            -> prefix C-Space   (the XDG file)
+only ~/.config/tmux/tmux.conf -> prefix C-Space
+only ~/.tmux.conf             -> prefix C-a
+```
+
+**The XDG path wins.** So on Omarchy the stack was applying a file tmux never
+read. The wizard asked for a tmux prefix, saved it, rendered it, showed it in
+`chezmoi diff` — and it did nothing. No error, nothing missing, nothing to
+notice. That is worse than shipping no tmux config at all.
+
+Writing the XDG path instead is necessary but not sufficient: taking it outright
+would delete Omarchy's Alt+Enter splits, Alt+1..9 window switching and the
+Super+/ keybindings popup, and would leave `omarchy-theme-set-tmux` re-tinting a
+bar we had overwritten. So the rendered file `source-file -q`s Omarchy's config
+**first**, then applies the stack's settings. Later `set` wins in tmux; the
+order is the entire mechanism. `-q` is load-bearing — the same template renders
+on plain Arch, where that file does not exist.
+
+The stack's own status bar is deliberately **not** applied on Omarchy. Its
+colours are baked light/dark at render time, so it would pin the bar to
+Catppuccin while every other surface on the desktop followed the active Omarchy
+theme. Plain Arch has nothing to follow and keeps the baked one.
+
+Two files, one body: both paths include `.chezmoitemplates/tmux-core`, and
+`.chezmoiignore` gates them against each other on `distroId` so exactly one is
+ever written. Both present is the silently-wrong state, so the bootstrap parity
+check asserts the *other* one is absent, not merely that the right one exists.
+
+## Why the bootstrap does not `chsh` on Omarchy
+
+`common_login_shell_zsh` runs `sudo chsh -s /usr/bin/zsh`. On Omarchy that is
+the wrong thing to do during a dotfiles install, and it fails silently in the
+worst way: everything appears to work and the desktop's entire shell
+environment is simply gone.
+
+Omarchy is bash-first by construction. `~/.bashrc` sources
+`$OMARCHY_PATH/default/bash/rc`, which pulls in `envs`, `shell`, `aliases`,
+`functions`, `init` and `completions` — its `EDITOR`/`BROWSER` wiring, the
+zoxide `cd` wrapper, mise/starship/zoxide/fzf init, and the aliases the
+keybindings and menus assume. None of that is in `~/.zshrc`. And Omarchy ships
+an official `omarchy-zsh` package (repo `omarchy`, deps `zsh eza mise zoxide
+starship fzf fd bat zsh-syntax-highlighting`) rather than expecting anyone to
+`chsh` by hand — which is the strongest available statement of intent.
+
+So on Omarchy the login shell is left alone, zsh is installed and `~/.zshrc` is
+still applied, and the bootstrap prints what to run (`zsh -l`) and why it did
+not switch. On **plain Arch** the `chsh` still happens: that is ordinary Arch
+behaviour and there is no bash-first contract to break. The test drives both
+branches behaviourally, with `chsh` stubbed, rather than grepping for a string.
+
+Phase 1 keeps oh-my-zsh here rather than adopting `omarchy-zsh`, deliberately:
+`omarchy-zsh` generates its own `~/.zshrc` and chezmoi owns that file whole, so
+making both work means restructuring the stack's zsh content into a sourced
+fragment. Until that lands, oh-my-zsh is self-contained in `~/.oh-my-zsh` and
+removable in one step.
+
+The related veto: **Omarchy owns language runtimes, via mise.** `mise-bin` is in
+its base package set, `omarchy install dev-env <lang>` is entirely
+`mise use --global`, and `env-bootstrap` puts `~/.local/share/mise/shims` on
+PATH. A second version manager competes for the same binaries with PATH order
+deciding the winner, so `fnm`, `node` and `python` are removed from the catalog
+on Omarchy — in `ts_apps_load` and `App.installable`, not merely skipped at
+install time. An id that is offered, ticked and then skipped is one
+`ts_apps_pending` reports as missing on every `tstack update`, forever, which is
+the exact nag `ts_app_installable` was added to end. `uv`, `pipx`, `ruff` and
+`ipython` stay: they are tools, not version managers, and Omarchy's own
+`dev-env python` installs `uv` too.

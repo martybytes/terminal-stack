@@ -883,11 +883,17 @@ def test_terminal_emulator_stays_optional_on_every_platform():
     )
     mac = (ROOT / "bootstrap/mac-bootstrap.sh").read_text(encoding="utf-8")
     assert "Terminal emulator: none selected" in mac
-    deb = (ROOT / "bootstrap/_common-debian.sh").read_text(encoding="utf-8")
-    assert "Terminal emulator: none selected" in deb
-    # WSL and headless hosts are never asked and never install one.
-    assert "if ! ts_is_headless && ! _ts_is_wsl; then TS_WIZ_ASK_TERMINALS=1; fi" in deb
-    assert "if ts_is_headless || _ts_is_wsl; then return 0; fi" in deb
+    # Both halves of the POSIX installer contract, not just the apt one: the
+    # pacman side is a separate implementation of common_install_terminals and
+    # would otherwise be free to make the emulator mandatory.
+    for lib in ("bootstrap/_common-debian.sh", "bootstrap/_common-arch.sh"):
+        body = (ROOT / lib).read_text(encoding="utf-8")
+        assert "Terminal emulator: none selected" in body, lib
+        assert "if ts_is_headless || _ts_is_wsl; then return 0; fi" in body, lib
+    # WSL and headless hosts are never asked. The question lives in the shared
+    # orchestration, so there is one place for it rather than one per distro.
+    posix = (ROOT / "bootstrap/_common-posix.sh").read_text(encoding="utf-8")
+    assert "if ! ts_is_headless && ! _ts_is_wsl; then TS_WIZ_ASK_TERMINALS=1; fi" in posix
 
 
 def test_wezterm_env_vars_map_onto_channels():
@@ -1092,8 +1098,17 @@ def test_ts_config_exposes_wezterm():
 # --- app catalog: groups, new tools, the ai group ------------------------------
 
 
-def _sh_eval(snippet):
-    """Run a snippet with bootstrap/_config.sh sourced, return stdout."""
+def _sh_eval(snippet, distro="debian"):
+    """Run a snippet with bootstrap/_config.sh sourced, return stdout.
+
+    `distro` is pinned rather than inherited because these tests are about the
+    CATALOG FILE, not about the laptop running them. ts_apps_load applies a
+    distro veto on top of the platform column -- Omarchy hands language runtimes
+    to mise, so fnm/node/python are not offered there and the `runtimes` group
+    disappears entirely. Inheriting the live value made this whole block pass or
+    fail depending on whose machine it ran on, which is the opposite of a gate.
+    Distro-specific behaviour is asserted in tests/test_distro.py, deliberately.
+    """
     r = subprocess.run(
         [BASH, "-c", f". bootstrap/_config.sh >/dev/null 2>&1; {snippet}"],
         cwd=ROOT,
@@ -1102,6 +1117,7 @@ def _sh_eval(snippet):
         check=False,
         timeout=300,
         start_new_session=True,
+        env={**os.environ, "TS_DISTRO_ID": distro, "TS_DISTRO_LIKE": ""},
     )
     assert r.returncode == 0, r.stderr
     return r.stdout.strip()
@@ -1180,6 +1196,13 @@ def test_python_and_runtimes_are_in_the_questionnaire():
     for tool in ("python", "uv", "pipx", "ruff", "ipython", "httpie", "poetry", "pre-commit"):
         assert tool in py, f"{tool} missing from the python group"
     assert set(_sh_eval("ts_app_group_members runtimes").split()) == {"fnm", "node"}
+    # ... and on Omarchy the group is gone entirely, because both of its members
+    # are mise's job there. Asserted here rather than only in test_distro.py so
+    # the two halves of this rule sit next to each other.
+    assert not _sh_eval('echo "$TS_APP_GROUPS"', distro="omarchy").split().count("runtimes")
+    assert "python" in _sh_eval('echo "$TS_APP_GROUPS"', distro="omarchy").split(), (
+        "the veto took the whole python group, not just the `python` runtime"
+    )
     # python's binary is python3, not python.
     assert _sh_eval("ts_app_bin python") == "python3"
     for tool in [*py, "fnm"]:
@@ -1246,11 +1269,20 @@ def test_agent_clis_are_not_installed_through_a_package_manager():
 
 
 def test_arch_aware_github_fallbacks():
-    """The eza/delta/lazydocker fallbacks used to hard-code x86_64 and miss on arm64."""
-    deb = (ROOT / "bootstrap/_common-debian.sh").read_text(encoding="utf-8")
-    for line in deb.splitlines():
-        if "common_install_github_binary" in line:
-            assert "x86_64" not in line, f"arch-blind fallback: {line.strip()}"
+    """The eza/delta/lazydocker fallbacks used to hard-code x86_64 and miss on arm64.
+
+    Every installer library, not just the apt one: _common-arch.sh fetches llmfit
+    the same way, and an arch-blind pattern there fails *silently on ARM only* --
+    the asset regex matches nothing and the tool is quietly absent.
+    """
+    for lib in (
+        "bootstrap/_common-debian.sh",
+        "bootstrap/_common-arch.sh",
+        "bootstrap/_common-posix.sh",
+    ):
+        for line in (ROOT / lib).read_text(encoding="utf-8").splitlines():
+            if "common_install_github_binary" in line:
+                assert "x86_64" not in line, f"arch-blind fallback in {lib}: {line.strip()}"
 
 
 def test_ts_config_wizard_replays_the_whole_questionnaire():
@@ -1525,7 +1557,7 @@ def test_common_arch_tag_rust_uses_aarch64_not_arm64():
     `gnu` yields `arm64`. Getting this wrong fails *silently on ARM only*: the
     asset regex matches nothing, x86_64 boxes keep working, and the tool is
     quietly missing on every Pi/ARM server."""
-    lib = ROOT / "bootstrap/_common-debian.sh"
+    lib = ROOT / "bootstrap/_common-posix.sh"
     fn = re.search(r"^common_arch_tag\(\) \{.*?^\}", lib.read_text(encoding="utf-8"), re.S | re.M)
     assert fn, "common_arch_tag not found"
 
@@ -1894,7 +1926,9 @@ def test_tmux_title_format_uses_the_variable_name_not_the_shorthand():
     address `session_name`: inside #{...} tmux wants the variable name, and
     `#{s/^cc-//:#S}` silently evaluates to an EMPTY string — a blank tab title,
     which is worse than the noisy one it replaced."""
-    conf = (ROOT / "dot_tmux.conf.tmpl").read_text(encoding="utf-8")
+    # The body moved into .chezmoitemplates so ~/.tmux.conf and the Omarchy
+    # ~/.config/tmux/tmux.conf cannot drift; this is where it lives now.
+    conf = (ROOT / ".chezmoitemplates/tmux-core").read_text(encoding="utf-8")
     line = next(l for l in conf.splitlines() if l.startswith("set -g set-titles-string"))
     assert "session_name" in line, "must use the variable name, not #S"
     assert ":#S}" not in line, "#{...:#S} renders empty — see the comment above it"
@@ -2007,14 +2041,17 @@ def test_wizard_answers_persist_before_any_optional_install():
     # The agent WIRING needs the CLIs installed, so it alone stays late.
     assert mac.index("ts_agents_apply_wizard") > mac.index("ts_save_config")
 
-    deb = (ROOT / "bootstrap/_common-debian.sh").read_text(encoding="utf-8")
+    # common_install_all is in _common-posix.sh: the ordering it encodes is the
+    # product of two separate incidents, and a per-distro copy would have been
+    # two places for it to be got wrong.
+    deb = (ROOT / "bootstrap/_common-posix.sh").read_text(encoding="utf-8")
     body = deb[deb.index("common_install_all() {") :]
     body = body[: body.index("\n}\n")]
     body = _uncommented(body)  # index the calls, not the prose about them
     hook = body.index("TS_PERSIST_HOOK")
     for installer in ("common_install_selected_apps", "common_install_terminals"):
         assert hook < body.index(installer), (
-            f"_common-debian.sh: {installer} runs before the persistence hook"
+            f"_common-posix.sh: {installer} runs before the persistence hook"
         )
     # chezmoi must precede the hook: ts_save_config runs `chezmoi init`.
     assert body.index("common_chezmoi") < hook

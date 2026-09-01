@@ -1,0 +1,28 @@
+{{- /* ~/.config/tmux/tmux.conf — the ARCH/OMARCHY path.
+
+       tmux looks for a user config at ~/.tmux.conf OR $XDG_CONFIG_HOME/tmux/
+       tmux.conf, and on tmux 3.7c the XDG one wins when both exist (probed in a
+       scratch $HOME: prefix C-Space from the XDG file beat prefix C-a from
+       ~/.tmux.conf). Omarchy ships its own config at exactly that path, so
+       writing ~/.tmux.conf here applied a file tmux never read -- the wizard's
+       tmux-prefix answer had no effect, with no error and nothing in the diff.
+
+       So on Omarchy the stack writes THIS path instead, and SOURCES Omarchy's
+       config first rather than replacing it. That keeps its Alt+Enter splits,
+       Alt+1..9 window switching, the Super+/ keybindings popup and its
+       status-bar styling -- which `omarchy-theme-set-tmux` re-tints on every
+       `omarchy theme set` -- and then applies the stack's prefix and behaviour
+       on top. Later `set` wins in tmux, so order is the whole mechanism.
+
+       The stack's own status-bar theme is deliberately NOT applied on Omarchy:
+       its hexes are baked light/dark and would pin the bar to Catppuccin while
+       every other surface followed the active Omarchy theme. Plain Arch has no
+       Omarchy theme to follow, so it keeps the baked one. */ -}}
+{{- $omarchy := eq (index . "distroId" | default "") "omarchy" -}}
+{{ if $omarchy -}}
+# Omarchy's own tmux config, first. `-q` so a missing file is not an error: this
+# survives Omarchy being uninstalled from under us, and works on plain Arch.
+source-file -q /usr/share/omarchy/config/tmux/tmux.conf
+{{ end -}}
+{{ template "tmux-core" . }}
+{{ if not $omarchy }}{{ template "tmux-theme" . }}{{ end -}}

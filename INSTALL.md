@@ -17,7 +17,7 @@ irm https://raw.githubusercontent.com/martybytes/terminal-stack/main/install.ps1
 # WSL Ubuntu — run after the Windows one-liner
 curl -fsSL https://raw.githubusercontent.com/martybytes/terminal-stack/main/install-wsl.sh | bash
 
-# Native Debian/Ubuntu
+# Native Linux (Debian/Ubuntu or Arch/Omarchy)
 curl -fsSL https://raw.githubusercontent.com/martybytes/terminal-stack/main/install-linux.sh | bash
 
 # macOS
@@ -190,9 +190,16 @@ This installs:
 
 Re-run as needed; the script is idempotent.
 
-### 2L. Linux side (native Debian/Ubuntu, instead of WSL)
+### 2L. Linux side (native Debian/Ubuntu or Arch/Omarchy, instead of WSL)
 
-For any native Debian/Ubuntu host:
+For any native Debian/Ubuntu or Arch-family host. The bootstrap reads
+`/etc/os-release` and routes to `bootstrap/_common-debian.sh` (apt) or
+`bootstrap/_common-arch.sh` (pacman) on its own; nothing extra to pass.
+
+**On Omarchy the login shell stays bash.** That is deliberate - Omarchy's
+aliases, functions and shell init all hang off `~/.bashrc`, and `chsh` would
+silently take them away. Run `zsh -l` for the stack's zsh, or point your
+terminal at it. See `docs/omarchy.md` for the full division of labour:
 
 ```sh
 git clone <repo-url> ~/.local/share/terminal-stack    # or your chosen path
