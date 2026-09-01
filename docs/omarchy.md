@@ -81,13 +81,18 @@ still installed and `~/.zshrc` is still applied, so:
 zsh -l              # the stack's zsh, on demand
 ```
 
-**Phase 1 uses oh-my-zsh, as on every other platform.** Omarchy ships an
-official `omarchy-zsh` package (repo `omarchy`, deps `zsh eza mise zoxide
-starship fzf fd bat zsh-syntax-highlighting`) which is the intended route — but
-it generates its own `~/.zshrc`, and chezmoi owns that file whole. Making both
-work means restructuring the stack's zsh content into a sourced fragment, which
-is phase 2. Until then oh-my-zsh stays: it is self-contained in `~/.oh-my-zsh`
-and trivially removed later.
+**The stack still uses oh-my-zsh here, as on every other platform.** Omarchy
+ships an official `omarchy-zsh` package (repo `omarchy`, deps `zsh eza mise
+zoxide starship fzf fd bat zsh-syntax-highlighting`) which is the intended route
+— but it generates its own `~/.zshrc`, and chezmoi owns that file whole, so both
+cannot hold it. Adopting it means restructuring the stack's zsh content into a
+sourced fragment; that is not done. Until then oh-my-zsh stays: it is
+self-contained in `~/.oh-my-zsh` and removable in one step.
+
+`EDITOR` is the one env collision that mattered, and it is fixed: `dot_zshrc`
+leaves `omarchy-launch-editor` alone rather than overwriting it with `micro`.
+That value is not a preference — the same launcher backs
+`omarchy-launch-config-editor`, the Super-key editor binding and `SUDO_EDITOR`.
 
 Do **not** `chsh -s /usr/bin/zsh` on Omarchy. It takes away the entire
 `default/bash/rc` chain with no warning.
@@ -154,12 +159,59 @@ installs the former and **prints** the command for the latter without running an
 AUR helper — `wezterm-git` builds from source, unattended, inside what the user
 thinks is a dotfiles install.
 
-Note that Omarchy's own terminal machinery only knows `alacritty|foot|ghostty|
-kitty`: `omarchy install terminal`, `omarchy default terminal`, `omarchy font
-set` and the theme templates all enumerate those four. WezTerm gets no Omarchy
-theming or font syncing today. Phase 2 adds a user template
-(`~/.config/omarchy/themed/wezterm.lua.tpl`) and a `theme-set.d` hook to fix
-that.
+**The GUI config lands here.** `.chezmoiignore` used to gate `.wezterm.lua` and
+`.wezterm/**` to macOS, on the stated grounds that "native Linux hosts in this
+stack are headless (ssh/PuTTY)" — a premise Omarchy ends. It is gated on the
+distro rather than on "is this graphical", because there is no reliable
+graphical signal at apply time: `WAYLAND_DISPLAY` is absent when chezmoi runs
+from a hook or over ssh, and probing for a compositor socket would make the file
+appear and disappear depending on whether anyone was logged in. Generic
+graphical Linux needs the bootstrap's headless answer persisted first; that is
+not done.
+
+## The integration with Omarchy's own extension points
+
+Omarchy's terminal machinery only knows `alacritty|foot|ghostty|kitty` —
+`omarchy install terminal`, `omarchy default terminal`, `omarchy font set` and
+the theme templates all enumerate those four — so WezTerm gets no theming from
+it at all. `tstack omarchy` closes that, using Omarchy's own published seams
+rather than editing anything it owns.
+
+```sh
+tstack omarchy            # what is installed, and whether it is current
+tstack omarchy sync       # install or refresh (also run by every apply)
+tstack omarchy off        # remove the files, on THIS machine, and remember
+```
+
+Three files:
+
+| File | What it does |
+|---|---|
+| `~/.config/omarchy/themed/wezterm.lua.tpl` | Omarchy renders it to `~/.local/state/omarchy/current/theme/wezterm.lua` on every `omarchy theme set`. The WezTerm config `pcall`s that file and overlays the colours onto its baked palette |
+| `~/.config/omarchy/hooks/theme-set.d/terminal-stack` | Re-bakes the light/dark palette **only when the mode actually flips**, then touches the WezTerm config so running instances reload |
+| `~/.config/omarchy/hooks/post-update.d/terminal-stack` | During `omarchy update`, after packages and migrations: fetches and reports what the stack has waiting |
+
+`run_after_50-omarchy-integration.sh` keeps them current on every apply and
+self-no-ops everywhere else, the same bargain `run_after_90-sync-windows.sh`
+strikes. These files live outside chezmoi's target tree, so nothing else could
+notice they had drifted.
+
+Three rules worth knowing:
+
+- **Additive only.** Each file has a name of its own; nothing Omarchy or your
+  stow tree owns is edited. Stow links per file, so a new sibling is undisturbed.
+- **A file at one of those paths that is not ours is left alone**, and said so.
+  The marker has to be on one line — it was wrapped once, and every sync then
+  politely refused to refresh its own template while reporting "up to date".
+- **`off` is a machine-local sentinel**, not a chezmoi `[data]` key: the artefacts
+  only exist where Omarchy does, and an apply must not reinstate what someone
+  deliberately removed.
+
+The `post-update` hook **reports and does not pull.** `tstack update` is a zsh
+function (`commands.conf`: `update  @_tstack_update`) carrying the dirty-clone
+refusal, the rollback point and the duplicate-clone warning — behaviour a bash
+hook cannot call and must not reimplement. Making it pull needs `tstack update`
+ported to Python first.
 
 ## Testing
 
@@ -184,18 +236,34 @@ the `docker` group (`install/config/docker.sh`: group membership is equivalent
 to passwordless root), so without that the parity run is unavailable on the very
 platform it gates.
 
-## Known gaps (phase 2)
+## Docker
 
-- **`tstack services` / Docker.** `engine.py` sees permission-denied and advises
-  `sudo usermod -aG docker "$USER"`, which is exactly the escalation Omarchy
-  declined. It should point at `omarchy-setup-security-sudoless-docker`. `ufw`
-  is active and `ufw-docker` is installed, so published ports need a
-  localhost-binding story before the stacks are used here.
-- **WezTerm config is still macOS-gated** in `.chezmoiignore`.
+`tstack services` can now say the right thing here: on Omarchy a permission
+denial points at `sudo docker` and at
+`omarchy-setup-security-sudoless-docker` (Setup > Security, behind its warning)
+rather than at `sudo usermod -aG docker "$USER"` — which is exactly the
+escalation `install/config/docker.sh` declined, and for a stated reason.
+
+`ufw` is active and `ufw-docker` is installed. Published container ports still
+need a localhost-binding story before the service stacks are used here; that is
+not done.
+
+## Known gaps
+
+- **The service stacks' ufw/localhost story.** Docker's iptables rules bypass
+  ufw by default, which is why Omarchy ships `ufw-docker`; a stack publishing
+  `0.0.0.0:8788` would be LAN-reachable while ufw appeared to block it.
 - **`~/.claude/settings.json`** — `omarchy-theme-set-claude --activate` writes
   `.theme` and its `mv` replaces a symlink; the stack's splice writes the same
   key. The stack should drop `theme` here and write through symlinks.
-- **Alias collisions** — Omarchy's `c` (opencode), `cx` (claude, auto
-  permissions) and `cy` (codex) versus the stack's, plus `EDITOR`.
-- **`omarchy-zsh`** as the zsh base, with the stack's content as a fragment.
-- **`post-update.d` hook** so `omarchy update` also refreshes the stack.
+- **`omarchy-zsh` as the zsh base**, with the stack's content as a sourced
+  fragment, replacing oh-my-zsh. `~/.zshrc` is owned whole-file by chezmoi and
+  generated by `omarchy-zsh`, so both cannot hold it as things stand.
+- **`c` still means Cursor here and opencode in Omarchy's bash.** Harmless
+  today (bash aliases do not reach a zsh session) and resolved by the
+  `omarchy-zsh` work above. `EDITOR` is fixed: the shell no longer overwrites
+  `omarchy-launch-editor`.
+- **Generic graphical Linux** for the WezTerm config, which needs the
+  bootstrap's headless answer persisted.
+- **Ghostty's `shell-integration-features`** is `no-cursor,ssh-env` upstream,
+  missing `ssh-terminfo`. One line, worth a PR to basecamp/omarchy.

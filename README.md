@@ -193,6 +193,7 @@ tstack config theme follow
 tstack ui              # every setting in one screen (needs Textual)
 tstack config wizard   # replay the install questionnaire and save the answers
 tstack ghostty         # the managed Ghostty config: status, diff, on, off
+tstack omarchy         # Omarchy only: the theme template + event hooks it installs
 tstack update          # pull the latest stack and re-apply
 tstack rollback        # undo that update
 tstack apply           # re-apply the dotfiles; explains any conflict, backs yours up

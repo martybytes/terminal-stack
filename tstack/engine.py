@@ -172,6 +172,21 @@ def engine_advice(os_kind: str, kind: str) -> list[str]:
             "    or install a Linux docker CLI in this distro",
         ]
     if kind == DENIED:
+        # Omarchy declines the docker group ON PURPOSE. Its
+        # install/config/docker.sh records the reasoning -- membership is
+        # equivalent to passwordless root, since anything in the group can
+        # `docker run -v /:/host` -- and ships its own opt-in behind a warning.
+        # Telling a user to `usermod -aG docker` there is telling them to undo a
+        # decision their distro made deliberately, without saying so. Point at
+        # the distro's own door instead.
+        if plat.is_omarchy():
+            return [
+                "the engine is there but this user may not talk to it.",
+                "  Omarchy does not grant the `docker` group on purpose: it is",
+                "  equivalent to passwordless root. Two honest ways forward:",
+                "  fix:  sudo docker ...                        (per command, no escalation)",
+                "        omarchy-setup-security-sudoless-docker  (Setup > Security, behind its warning)",
+            ]
         return [
             "the engine is there but this user may not talk to it.",
             '  fix:  sudo usermod -aG docker "$USER"   then LOG OUT and back in',

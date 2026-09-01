@@ -6,6 +6,65 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Added
 
+- **The Omarchy desktop integration (09/01/2026).** Omarchy themes the terminals
+  it knows about -- alacritty, foot, ghostty, kitty -- and knows about exactly
+  those four, so WezTerm sat in Catppuccin while the rest of the desktop turned
+  Tokyo Night. `tstack omarchy` closes that using Omarchy's own published seams
+  rather than anything it owns.
+  - **Three additive files**: `~/.config/omarchy/themed/wezterm.lua.tpl`
+    (Omarchy renders it to `~/.local/state/omarchy/current/theme/wezterm.lua` on
+    every `omarchy theme set`, and the WezTerm config `pcall`s that and overlays
+    it onto the baked palette), plus `theme-set.d` and `post-update.d` hooks.
+    Each has a name of its own, so nothing Omarchy or a stow tree owns is
+    edited -- the same bargain `~/.config/git/terminal-stack.gitconfig` strikes.
+  - **`run_after_50-omarchy-integration.sh`** keeps them current on every apply
+    and self-no-ops everywhere else, the same shape as the Windows sync hook:
+    these files live outside chezmoi's target tree, so nothing else could notice
+    they had drifted.
+  - **The WezTerm GUI config now lands on Omarchy.** `.chezmoiignore` gated it
+    to macOS on the stated grounds that "native Linux hosts in this stack are
+    headless (ssh/PuTTY)" -- a premise Omarchy ends. Gated on the DISTRO rather
+    than on "is this graphical", because there is no reliable graphical signal
+    at apply time and a socket probe would make the file appear and disappear
+    with whether anyone was logged in.
+  - **The theme hook does not re-render on every theme change.** Flicking the
+    theme picker fires it per keystroke, and only a light<->dark FLIP changes
+    what the stack bakes, so it compares first -- using the `mode` key Omarchy's
+    colors.toml states outright, which is better than the gsettings value the
+    fallback reads back from Omarchy. It does always touch the WezTerm config,
+    because WezTerm watches its own config and not the generated theme beside it.
+  - **The post-update hook REPORTS; it does not pull.** `tstack update` is a zsh
+    function carrying the dirty-clone refusal, the rollback point and the
+    duplicate-clone warning -- a bash hook can neither call it nor honestly
+    reimplement it. Making it pull needs that command ported to Python.
+  - Ownership is a marker, and **the marker has to be on one line**: it shipped
+    wrapped, `_is_ours` greps line-wise, and every sync then skipped its own
+    template while reporting "up to date". Caught by `tstack omarchy status` on
+    the first live run.
+  - `off` is a machine-local sentinel rather than a chezmoi `[data]` key -- the
+    artefacts only exist where Omarchy does, and an apply must not reinstate
+    what someone removed. 17 tests in `tests/test_omarchy.py`.
+
+### Fixed
+
+- **The docker advice no longer tells Omarchy users to undo their distro's
+  security decision (09/01/2026).** `engine_advice`'s DENIED branch said
+  `sudo usermod -aG docker "$USER"`. Omarchy declines that group on purpose --
+  `install/config/docker.sh` records that membership is equivalent to
+  passwordless root -- and ships `omarchy-setup-security-sudoless-docker` as the
+  opt-in. On Omarchy the advice now names `sudo docker` and that command, and
+  never `usermod`; every other Linux is unchanged. `tests/parity/run.sh`
+  escalates to `sudo docker` the same way, so the gate for the platform can run
+  on the platform without joining the group being gated.
+- **The shell no longer overwrites Omarchy's `EDITOR` (09/01/2026).**
+  `dot_zshrc` set `EDITOR=micro` unconditionally. On Omarchy that value is
+  `omarchy-launch-editor`, which is not a preference: the same launcher backs
+  `omarchy-launch-config-editor`, the Super-key editor binding and
+  `SUDO_EDITOR`. Matched on the VALUE rather than the distro, because
+  `dot_zshrc` is not a template and has to stay correct on five platforms.
+
+### Added
+
 - **Arch and Omarchy are a supported target (08/31/2026).** `install-linux.sh`
   died on every Arch host at `sudo apt-get update` -- the FIRST call in
   `common_install_all`, under `set -euo pipefail` -- before the questionnaire,

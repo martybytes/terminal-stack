@@ -18,6 +18,31 @@ cat /etc/os-release | head -4   # ID=omarchy, ID_LIKE=arch
 tstack doctor --repair          # relocate a legacy clone, fix hooks
 ```
 
+## Theme integration
+
+```bash
+tstack omarchy                  # what is installed, and whether it is current
+tstack omarchy sync             # install or refresh (every apply does this too)
+tstack omarchy off              # remove it, on this machine, and remember
+omarchy theme set tokyo-night   # renders the WezTerm colours as a side effect
+```
+
+Three files in Omarchy's own extension points, all additive:
+
+| File | Does |
+|---|---|
+| `~/.config/omarchy/themed/wezterm.lua.tpl` | Omarchy renders it per theme; WezTerm reads the result |
+| `~/.config/omarchy/hooks/theme-set.d/terminal-stack` | re-bakes light/dark on a mode flip, nudges WezTerm to reload |
+| `~/.config/omarchy/hooks/post-update.d/terminal-stack` | reports pending stack commits during `omarchy update` |
+
+```bash
+cat ~/.local/state/omarchy/current/theme/wezterm.lua   # what WezTerm reads
+bash ~/.config/omarchy/hooks/theme-set.d/terminal-stack tokyo-night   # run it by hand
+```
+
+If WezTerm's colours look stale: touch `~/.wezterm.lua` (it watches its own
+config, not the generated theme beside it).
+
 ## Who owns what
 
 ```bash
@@ -119,4 +144,7 @@ tstack apply                                # re-render everything
 | Omarchy's tmux bindings gone | `grep source-file ~/.config/tmux/tmux.conf` |
 | prompt looks wrong after `omarchy theme set` | `tstack config theme follow`, then `tstack apply` |
 | a tool "NOT FOUND on PATH" | `pacman -Q <pkg>`; then `tstack config apps` |
+| WezTerm ignores `omarchy theme set` | `tstack omarchy status` — is the template `current`? |
+| `tstack omarchy sync` says "not ours" | a file of that name exists that the stack did not write; move it aside |
+| `docker` permission denied | expected: `sudo docker`, or `omarchy-setup-security-sudoless-docker` |
 | `starship` from the wrong place | `command -v starship` must be `/usr/bin/starship`, not `/usr/local/bin` |

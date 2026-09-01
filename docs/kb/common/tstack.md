@@ -15,6 +15,7 @@ commands any more, and no aliases for them.
 | `tstack mux` | the WezTerm multiplexer domain |
 | `tstack wezterm` | WezTerm channel and updates |
 | `tstack ghostty` | the managed Ghostty config; `status`, `diff`, `on`, `off` |
+| `tstack omarchy` | the Omarchy desktop integration (theme template + event hooks); `status`, `sync`, `on`, `off`. Omarchy only |
 | `tstack wizard` | ask the install questions and print the answers — it saves nothing |
 | `tstack smb` | SMB shares over rclone (POSIX only) - see `doc smb-shares` |
 | `tstack agents` | agent CLI wiring - see `doc agentmemory`, `doc headroom` |

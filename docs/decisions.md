@@ -2959,3 +2959,87 @@ install time. An id that is offered, ticked and then skipped is one
 the exact nag `ts_app_installable` was added to end. `uv`, `pipx`, `ruff` and
 `ipython` stay: they are tools, not version managers, and Omarchy's own
 `dev-env python` installs `uv` too.
+
+## Why the Omarchy integration installs into Omarchy's extension points
+
+Omarchy themes the terminal it knows about -- alacritty, foot, ghostty, kitty --
+from the active theme's `colors.toml`, and it knows about exactly those four.
+`omarchy install terminal`, `omarchy default terminal`, `omarchy font set` and
+`default/themed/*.tpl` all enumerate the same list. WezTerm is not on it, so on
+an Omarchy desktop the stack's flagship terminal sat in Catppuccin while every
+other surface turned Tokyo Night.
+
+The tempting fix is to read `colors.toml` from the WezTerm config and be done.
+The better one is to use the seams Omarchy publishes, because they are what make
+the result survive: `~/.config/omarchy/themed/<name>.tpl` is globbed by
+`omarchy-theme-set-templates` and rendered into
+`~/.local/state/omarchy/current/theme/<name>` on every theme change, and
+`~/.config/omarchy/hooks/<event>.d/` is documented in Omarchy's own agent skill.
+Using them means the stack never parses a format it does not own, never edits a
+file Omarchy will overwrite, and gets re-rendered by Omarchy's machinery rather
+than by ours.
+
+Three files, and three rules that fell out of building them.
+
+**Additive only.** Each has a name of its own -- `wezterm.lua.tpl`,
+`hooks/*/terminal-stack` -- so nothing Omarchy or a stow tree owns is edited.
+That is the same bargain `~/.config/git/terminal-stack.gitconfig` strikes on a
+fleet where `~/.config/git/config` is somebody else's symlink, and stow links
+per file, so a new sibling is undisturbed.
+
+**Ownership is a marker, and the marker has to be on one line.** A file at one
+of those paths without it is somebody's own and is left alone, said out loud.
+The WezTerm template shipped with the marker WRAPPED across two lines, and
+`_is_ours` greps line-wise: every sync then politely skipped its own template
+while reporting "up to date", so an upgrade could never reach it. Caught by
+`tstack omarchy status` on the first live run, which is the argument for having
+a status verb at all.
+
+**`off` is a machine-local sentinel, not a chezmoi `[data]` key.** Adding a key
+to that store has a documented seven-step blast radius, and this decision is per
+machine by nature: the artefacts only exist where Omarchy does. The sentinel is
+also what stops `run_after_50-omarchy-integration.sh` reinstating on the next
+apply what someone deliberately removed -- the same shape as the TTS mute
+sentinel, and the same reason `tstack ghostty off` acts on one machine.
+
+Two deliberate limits.
+
+The theme hook does **not** re-render on every theme change. Flicking through
+the theme picker fires it per keystroke, and only a light<->dark FLIP changes
+anything the stack bakes -- so it compares first, using the `mode` key Omarchy's
+`colors.toml` states outright. That is also strictly better than the gsettings
+probe `resolve_os_theme` falls back to, which reads a value Omarchy wrote.
+It does always touch the WezTerm config, because WezTerm watches its OWN config
+file and not the generated theme beside it, so nothing reaches a running
+instance otherwise.
+
+The post-update hook **reports and does not pull**, which is not what was
+originally wanted. `tstack update` is a zsh function (`commands.conf`:
+`update  @_tstack_update`) carrying the dirty-clone refusal, the rollback point
+and the duplicate-clone warning; a bash hook can neither call it nor honestly
+reimplement it, and a second copy of that logic is exactly what
+`_common-posix.sh` exists to prevent one file over. Making the hook pull needs
+`tstack update` ported to Python first. Until then the hook does the half it can
+do correctly -- fetch, and say what is waiting, after Omarchy's own migrations
+have run.
+
+## Why the docker advice asks Omarchy's permission first
+
+`engine_advice` told a user whose engine refused them to run
+`sudo usermod -aG docker "$USER"`. On Omarchy that is advice to undo a decision
+the distro made on purpose: `install/config/docker.sh` declines the group and
+writes down why -- membership is equivalent to passwordless root, because
+anything in it can `docker run -v /:/host` -- and ships
+`omarchy-setup-security-sudoless-docker` as the opt-in, behind a warning.
+
+The stack has no business quietly talking someone out of that. On Omarchy the
+DENIED branch now names `sudo docker` (per command, no escalation) and Omarchy's
+own opt-in, and nowhere mentions `usermod`. Every other Linux keeps the advice
+it had: the group is the ordinary answer there, and the point is not that the
+group is wrong, it is that this distro already considered it.
+
+Same shape one level up, in the parity runner: `tests/parity/run.sh` escalates
+to `sudo docker` on its own when a plain `docker info` fails and a passwordless
+`sudo docker info` works. Without that, the gate for the Arch platform could not
+run on the Arch platform -- and the fix must not be "join the docker group",
+because that is the thing being respected.
