@@ -77,7 +77,11 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
   `install/config/docker.sh` records that membership is equivalent to
   passwordless root -- and ships `omarchy-setup-security-sudoless-docker` as the
   opt-in. On Omarchy the advice now names `sudo docker` and that command, and
-  never `usermod`; every other Linux is unchanged. `tests/parity/run.sh`
+  never `usermod`; every other Linux is unchanged. (Port EXPOSURE needed nothing:
+  every published port in every stack already binds 127.0.0.1, and
+  `test_every_published_port_binds_loopback_only` has globbed every compose file
+  for it all along -- which matters more on a box where ufw is active, because
+  Docker's own iptables rules bypass ufw for a published port.) `tests/parity/run.sh`
   escalates to `sudo docker` the same way, so the gate for the platform can run
   on the platform without joining the group being gated.
 - **The shell no longer overwrites Omarchy's `EDITOR` (09/01/2026).**
