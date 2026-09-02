@@ -3043,3 +3043,62 @@ to `sudo docker` on its own when a plain `docker info` fails and a passwordless
 `sudo docker info` works. Without that, the gate for the Arch platform could not
 run on the Arch platform -- and the fix must not be "join the docker group",
 because that is the thing being respected.
+
+## Why Omarchy's zsh base is sourced, and why two names are escaped
+
+Omarchy ships `omarchy-zsh`, an official package that is the zsh half of the
+aliases, functions and environment its bash rc provides. Adopting it is obviously
+right on an Omarchy box -- `zsh -l` should not be a different machine from the
+one Super+Return opens -- and obviously impossible as packaged: `omarchy-setup-zsh`
+generates its own `~/.zshrc`, and chezmoi owns that file whole-file. Two owners,
+one file.
+
+The way out was to read what the generator actually writes. It is two lines:
+
+    source /usr/share/omarchy-zsh/shell/zoptions
+    source /usr/share/omarchy-zsh/shell/all
+
+So `dot_zshrc` sources those files directly and the generator is never run.
+Nothing is lost and ownership is never contested -- the same move the tmux config
+makes on Omarchy, and for the same reason. `inits` is skipped out of that
+aggregate because it initialises starship, zoxide, mise and fzf, all of which
+this rc already does, and the prompt is a saved setting: two inits means two
+precmd hooks for one prompt.
+
+THE PART THAT WAS NOT OBVIOUS
+
+zsh expands aliases at PARSE time. Omarchy defines `c` and `cy` as aliases; this
+stack defines both as functions; and defining a function whose name is a live
+alias is a parse error. A parse error in an rc does not stop at its line -- it
+abandons the rest of the file. With omarchy-zsh installed:
+
+    /root/.zshrc:470: defining function based on alias `cy'
+    /root/.zshrc:470: parse error near `()'
+    ws=none  doc=none  tstack=none        <- everything after line 470
+
+`ws`, `doc`, `tstack`, the `cc*` wrappers: all silently absent, on one distro
+only, from a line 470 lines earlier. This was found by RUNNING the rc in the
+omarchy parity container, not by reading it, and it would not have been found any
+other way.
+
+The first fix attempted was the obvious one -- wrap the definitions in
+`if [[ -z "$_TS_OMARCHY_ZSH" ]]; then ... fi`. It does not work, and the reason
+is worth keeping: zsh parses the whole `if` block before it evaluates the
+condition, so the alias is expanded regardless of which branch would run. What
+works is escaping the name, `\cy()`, which suppresses expansion at parse time;
+the guard then decides only whether the function is DEFINED.
+
+Exactly two names collide, and that was computed rather than assumed: every
+alias omarchy-zsh defines, intersected with every function `dot_zshrc` defines.
+`tests/test_omarchy_zsh.py` carries the alias set and fails on any unescaped
+collision, so a future stack function called `d`, `t` or `g` is caught by a test
+rather than by somebody's shell going quiet.
+
+Both collisions are deferred to Omarchy, which is what the machine's owner
+chose: `c` is opencode there and Cursor here, genuinely different programs, and
+`cy` is codex on both sides. The deferral is not merely a preference for `cy` --
+it is also the shape that avoids the parse error without an escape hatch nobody
+would remember.
+
+The repo has met this exact failure before. It is why `dot_zshrc` does not load
+oh-my-zsh's `z` plugin: "(eval):...: defining function based on alias `z'".

@@ -729,12 +729,32 @@ def test_agent_binaries_resolve_lazily_not_at_shell_load():
     assert "was not found on PATH when this profile loaded" not in ps
 
 
-def test_cursor_launcher_is_defined_unconditionally():
+def test_cursor_launcher_is_not_gated_on_the_binary():
+    """`c` must not be defined conditionally on whether `cursor` is INSTALLED.
+
+    That gate left `c` undefined for the life of any shell started before
+    Cursor's shell command was added; the body resolves the binary per call
+    instead, so a mid-session install just works.
+
+    It IS gated on which zsh base is loaded, and that is a different condition
+    with a different failure: where Omarchy's base is present, `c` is its alias
+    for opencode -- a different program -- and defining a FUNCTION over a live
+    alias is a zsh parse error that abandons the rest of the rc. That gate is
+    decided once at load and cannot go stale mid-session, which is exactly what
+    the binary check could not say. See tests/test_omarchy_zsh.py.
+    """
     zsh = (ROOT / "dot_zshrc").read_text(encoding="utf-8")
-    # Gating the *definition* on `command -v cursor` left `c` undefined for the
-    # life of any shell that started before Cursor's shell command was installed.
     assert "command -v cursor >/dev/null 2>&1 && c()" not in zsh
-    assert "\nc() {" in zsh
+    # The definition is still there, escaped so the block parses where `c` is an
+    # alias. Anchored to a line start: the prose above it names `\c()` too.
+    assert any(ln.startswith("\\c() {") for ln in zsh.splitlines()), (
+        "the cursor launcher is gone entirely"
+    )
+    # ...and the only guard around it is the base check, never a binary probe.
+    idx = next(i for i, ln in enumerate(zsh.splitlines()) if ln.startswith("\\c() {"))
+    window = "\n".join(zsh.splitlines()[max(0, idx - 3) : idx])
+    assert '[[ -z "$_TS_OMARCHY_ZSH" ]]' in window
+    assert "command -v cursor" not in window
 
 
 @pytest.mark.skipif(not shutil.which("zsh"), reason="zsh is unavailable")

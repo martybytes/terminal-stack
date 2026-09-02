@@ -9,6 +9,7 @@
 #   common_pkg_prereqs            base packages the rest of the bootstrap needs
 #   common_install_selected_apps  the catalog ids the user ticked
 #   common_install_terminals      the GUI terminal emulator, if any
+#   common_zsh_base               the zsh framework ~/.zshrc expects to find
 #   common_login_shell_zsh        whether/how the login shell changes
 #   common_chezmoi                install chezmoi
 #   common_starship               install the starship binary
@@ -42,6 +43,10 @@ common_require_non_root() {
 
 _ts_is_wsl() { [ -r /proc/version ] && grep -qi microsoft /proc/version 2>/dev/null; }
 
+# The oh-my-zsh install itself, shared because both distro halves reach for it --
+# Omarchy is the only host that uses something else. Called through
+# common_zsh_base rather than directly, so which base a platform gets is a
+# contract decision and not a shared default anybody can quietly diverge from.
 common_oh_my_zsh() {
     if [ ! -d "$HOME/.oh-my-zsh" ]; then
         echo "$INFO Installing oh-my-zsh"
@@ -194,7 +199,7 @@ common_install_all() {
     fi
     common_install_selected_apps "$TS_WIZ_APPS" || ts_note_failure "optional apps" "retry: tstack config apps"
     common_install_terminals "${TS_WIZ_TERMINALS:-}" || ts_note_failure "terminal emulator" "retry: tstack config wezterm install <channel>"
-    common_oh_my_zsh
+    common_zsh_base
     common_login_shell_zsh
     common_starship
     common_nerd_font_jetbrains

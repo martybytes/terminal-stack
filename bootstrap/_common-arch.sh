@@ -193,6 +193,35 @@ common_install_terminals() {
     esac
 }
 
+# The zsh base.
+#
+# On Omarchy that is `omarchy-zsh`, the distro's own official package, and not
+# oh-my-zsh: it is the zsh half of the same aliases, functions and environment
+# the desktop's bash rc provides, so `zsh -l` stops being a different machine
+# from the one Super+Return opens. dot_zshrc sources it when the files are there.
+#
+# `omarchy-setup-zsh` -- which the package prints as the next step -- is
+# deliberately NOT run. It generates its own ~/.zshrc, and chezmoi owns that file
+# whole-file. The generated file is only two source lines, and dot_zshrc takes
+# those two directly, so nothing is lost by leaving the generator alone.
+#
+# Plain Arch gets oh-my-zsh like everywhere else: omarchy-zsh is in Omarchy's
+# own pacman repo and is not there to install.
+common_zsh_base() {
+    if ts_is_omarchy; then
+        echo "$INFO zsh base: omarchy-zsh (the distro's own; not oh-my-zsh)"
+        if ts_pacman_add omarchy-zsh >/dev/null 2>&1; then
+            echo "$INFO      installed. Do NOT run omarchy-setup-zsh: it would overwrite the"
+            echo "      ~/.zshrc chezmoi owns. The stack sources its files directly."
+        else
+            echo "$WARN omarchy-zsh install failed; falling back to oh-my-zsh"
+            common_oh_my_zsh
+        fi
+        return 0
+    fi
+    common_oh_my_zsh
+}
+
 # The login shell.
 #
 # On plain Arch this is the ordinary chsh the apt side does. On OMARCHY it is

@@ -53,6 +53,7 @@ CONTRACT = (
     "common_pkg_prereqs",
     "common_install_selected_apps",
     "common_install_terminals",
+    "common_zsh_base",
     "common_login_shell_zsh",
     "common_chezmoi",
     "common_starship",

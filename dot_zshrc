@@ -79,7 +79,42 @@ HIST_STAMPS="mm/dd/yyyy"
 #   (eval):...: defining function based on alias `z'
 plugins=(git sudo)
 
-source $ZSH/oh-my-zsh.sh
+# ---- shell base: oh-my-zsh, or Omarchy's own where it exists ----------------
+# Omarchy ships an official zsh configuration as a pacman package (omarchy-zsh),
+# and on an Omarchy box that is the right base: it is the zsh half of the same
+# aliases, functions and env the desktop's bash rc provides, so `zsh -l` stops
+# being a different machine from the one Super+Return opens. The bootstrap
+# installs it there and installs oh-my-zsh everywhere else.
+#
+# It is SOURCED here rather than adopted wholesale. `omarchy-setup-zsh` generates
+# its own ~/.zshrc, and chezmoi owns that file whole-file (this one) -- both
+# cannot hold it. But the generated file is only two source lines, so taking
+# those two directly costs nothing and leaves ownership undisturbed. Same shape
+# as the tmux config on Omarchy: source theirs, then apply ours on top.
+#
+# `inits` is deliberately NOT sourced. It runs starship, zoxide, mise and fzf
+# init -- all of which this file does itself, its own way, and the prompt in
+# particular is a saved setting (`tstack config prompt`). Sourcing both would
+# register two sets of precmd hooks for one prompt.
+#
+# Guarded on the FILE, not the distro: this file is not a chezmoi template (see
+# CLAUDE.md, the re-add rule), it has to stay correct on five platforms, and
+# "the package is installed" is the actual condition.
+_TS_OMARCHY_ZSH=""
+[[ -r /usr/share/omarchy-zsh/shell/all ]] && _TS_OMARCHY_ZSH=/usr/share/omarchy-zsh/shell
+
+if [[ -n "$_TS_OMARCHY_ZSH" ]]; then
+  [[ -r "$_TS_OMARCHY_ZSH/zoptions" ]] && source "$_TS_OMARCHY_ZSH/zoptions"
+  for _ts_f in envs aliases functions; do
+    [[ -r "$_TS_OMARCHY_ZSH/$_ts_f" ]] && source "$_TS_OMARCHY_ZSH/$_ts_f"
+  done
+  unset _ts_f
+elif [[ -r "$ZSH/oh-my-zsh.sh" ]]; then
+  # Guarded: the bootstrap does not install oh-my-zsh on Omarchy, and an
+  # unguarded source of a missing file aborts the whole rc under `set -e`-ish
+  # conditions and prints a confusing error under all of them.
+  source "$ZSH/oh-my-zsh.sh"
+fi
 
 # ---- terminal-stack-zsh-start ----
 # History — 100k lines, per-shell append + on-demand import, expire dups, drop secrets.
@@ -432,7 +467,19 @@ _ts_codex() {
   return "$rc"
 }
 codex() { if _ts_codex_is_interactive "$@"; then _ts_codex safe "$@"; else codex-stock "$@"; fi }
-cy()    { _ts_codex yolo "$@" }
+# `cy` is skipped where Omarchy's zsh base is loaded, and this one is not a
+# preference: Omarchy defines cy as an ALIAS, and in zsh defining a function
+# whose name is an existing alias is a PARSE ERROR that aborts the rest of the
+# rc. Found by loading it -- `ws`, `doc` and everything after this line were
+# silently undefined. Same failure shape the repo already documents for
+# oh-my-zsh's `z` plugin ("defining function based on alias `z'").
+#
+# Two names collide this way and only two, computed rather than assumed: see
+# tests/test_omarchy_zsh.py, which pins the set so a future stack function
+# called `d`, `t` or `g` is caught here rather than in someone's shell.
+if [[ -z "$_TS_OMARCHY_ZSH" ]]; then
+\cy()   { _ts_codex yolo "$@" }
+fi
 cyr()   { _ts_codex yolo resume "$@" }
 
 # Escape hatch: vanilla zsh, no rc files (no oh-my-zsh/starship/aliases).
@@ -1343,13 +1390,25 @@ alias v='nvim'
 # on `command -v cursor` meant installing Cursor's shell command mid-session left
 # `c` silently undefined until a new shell. Matches the pwsh `c` function, which
 # has always resolved per call.
-c() {
+# NOT defined where Omarchy's zsh base is loaded: `c` is opencode there, and
+# opencode and Cursor are different programs. Everything else in this file keeps
+# its name -- the stack's own are unambiguous (cc*, ws*, doc, tstack).
+#
+# NOTE THE BACKSLASH. zsh expands aliases at PARSE time, and it parses a whole
+# `if ... fi` block before evaluating the condition -- so an unescaped `c()` here
+# is a parse error the guard cannot prevent, and a parse error at this point
+# aborts the REST OF THE RC. Measured: ws, doc and tstack were all silently
+# undefined. `\c()` suppresses the expansion, so the block parses everywhere and
+# the guard decides whether the function is defined.
+if [[ -z "$_TS_OMARCHY_ZSH" ]]; then
+\c() {
   command -v cursor >/dev/null 2>&1 || {
     print -u2 "c: cursor CLI not found on PATH — install Cursor and enable its shell command"
     return 127
   }
   cursor "${1:-.}" --classic "${@:2}"
 }
+fi
 
 # ref — alias into the `doc` knowledge base (replaced the old command-reference file).
 ref() { doc "$@"; }
@@ -1847,3 +1906,10 @@ cctts() {
 
 # Per-machine overrides (not tracked by chezmoi). See dot_zshrc.local.example.
 [[ -r "$HOME/.zshrc.local" ]] && source "$HOME/.zshrc.local"
+
+# zsh-syntax-highlighting, if the machine has it (omarchy-zsh depends on it).
+# LAST, after ~/.zshrc.local: it wraps every ZLE widget defined before it, and
+# anything sourced afterwards silently loses highlighting -- which is why
+# omarchy-zsh's own `all` ends with this exact line and says so.
+[[ -r /usr/share/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ]] && \
+  source /usr/share/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh

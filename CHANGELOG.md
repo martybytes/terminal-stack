@@ -6,6 +6,37 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Added
 
+- **Omarchy's own zsh is the base there now, not oh-my-zsh (09/01/2026).**
+  `omarchy-zsh` is Omarchy's official package and the zsh half of the aliases,
+  functions and environment its bash rc provides, so `zsh -l` stops being a
+  different machine from the one Super+Return opens. The bootstrap installs it
+  on Omarchy through a new `common_zsh_base` contract point and installs
+  oh-my-zsh everywhere else, plain Arch included.
+
+  It is SOURCED, not adopted: `omarchy-setup-zsh` generates its own `~/.zshrc`
+  and chezmoi owns that file whole-file, but the generated file is only two
+  `source` lines, so `dot_zshrc` takes those directly and the generator is never
+  run. `inits` is skipped out of the aggregate -- it initialises starship,
+  zoxide, mise and fzf, all of which this rc already does, and the prompt is a
+  saved setting, so two inits means two precmd hooks for one prompt. The
+  oh-my-zsh source is now guarded, since it is no longer installed everywhere.
+  `zsh-syntax-highlighting` is sourced last of all, after `~/.zshrc.local`.
+
+  **The part that was not obvious, and could only be found by running it:** zsh
+  expands aliases at PARSE time. Omarchy defines `c` and `cy` as aliases, this
+  stack defines both as functions, and defining a function over a live alias is
+  a parse error that abandons THE REST OF THE FILE -- `ws`, `doc`, `tstack` and
+  the `cc*` wrappers all silently absent, on one distro only, from a line 470
+  lines earlier. Wrapping the definitions in `if ... fi` does NOT help: zsh
+  parses the whole block before evaluating the condition. Escaping the name
+  (`\cy()`) does. Exactly two names collide, computed rather than assumed, and
+  both defer to Omarchy; `tests/test_omarchy_zsh.py` carries the alias set so a
+  future stack function called `d`, `t` or `g` is caught by a test rather than
+  by somebody's shell going quiet. Same shape as the oh-my-zsh `z` plugin this
+  repo already refuses to load.
+
+### Added
+
 - **The Omarchy desktop integration (09/01/2026).** Omarchy themes the terminals
   it knows about -- alacritty, foot, ghostty, kitty -- and knows about exactly
   those four, so WezTerm sat in Catppuccin while the rest of the desktop turned

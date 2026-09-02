@@ -69,6 +69,22 @@ getent passwd "$USER" | cut -d: -f7   # confirm it is still bash
 
 Do **not** run `sudo chsh -s /usr/bin/zsh`.
 
+The zsh base here is **omarchy-zsh**, not oh-my-zsh -- Omarchy's own package, so
+`zsh -l` has the same aliases and functions as the bash the desktop opens. The
+stack sources its files directly; do **not** run `omarchy-setup-zsh`, which would
+generate a `~/.zshrc` over the one chezmoi owns.
+
+```bash
+pacman -Q omarchy-zsh                 # the base
+zsh -ic 'print $_TS_OMARCHY_ZSH'      # non-empty when it is loaded
+zsh -ic 'whence -w c cy ws doc'       # c/cy are Omarchy's aliases; the rest ours
+```
+
+`c` and `cy` are Omarchy's here and not the stack's, deliberately: zsh expands
+aliases at parse time, and a function of the same name is a parse error that
+abandons the rest of the rc. If `ws`, `doc` or `tstack` ever go missing in zsh,
+that is the shape to look for -- run `zsh -ic true` and read the first error.
+
 ## tmux
 
 The config is at the XDG path here, not `~/.tmux.conf` — tmux 3.7c prefers

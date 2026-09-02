@@ -311,6 +311,9 @@ common_fd_symlink() {
 }
 
 
+# oh-my-zsh, as it has always been here. dot_zshrc sources it when present.
+common_zsh_base() { common_oh_my_zsh; }
+
 common_login_shell_zsh() {
     local current_shell
     current_shell="$(getent passwd "$USER" | cut -d: -f7)"
