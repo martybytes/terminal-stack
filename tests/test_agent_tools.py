@@ -3075,3 +3075,133 @@ def test_the_prompt_template_preserves_the_trailing_newline():
 #     -> a Python module either imports or does not; mypy and the suite cover it
 #   test_nightly_is_preticked_even_when_stable_is_installed
 #     -> covered by test_both_preticked_collapses_before_the_first_render
+
+
+# --- ~/.claude/settings.json behind a symlink ---------------------------------
+#
+# chezmoi's modify_ script produces bytes; CHEZMOI does the write, and it writes
+# a regular file. Probed on archlinux with chezmoi 2.72, a symlinked target and a
+# one-line modify_ script: the splice succeeded, the link was gone, and the file
+# the other tool tracked was left behind at its old content -- still referenced
+# by its repo, now permanently stale, with nothing anywhere saying so. On this
+# fleet that other tool is omarchy-dots, which stows ~/.claude/settings.json.
+#
+# run_before_25/run_after_25 put the write back through the link. These tests RUN
+# them, because the whole failure is a filesystem effect that no amount of
+# grepping the scripts would have caught.
+
+LINK_RECORD = ROOT / "run_before_25-claude-settings-link-record.sh"
+LINK_RESTORE = ROOT / "run_after_25-claude-settings-link-restore.sh"
+
+
+def _run_link_script(script, home, state):
+    return subprocess.run(
+        [BASH, str(script)],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+        start_new_session=True,
+        env={"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(home),
+             "XDG_STATE_HOME": str(state)},
+    )
+
+
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+def test_the_settings_splice_is_written_through_its_symlink(tmp_path):
+    """The whole point: the tracked file receives the splice, and the link lives."""
+    home = tmp_path / "home"
+    state = tmp_path / "state"
+    (home / ".claude").mkdir(parents=True)
+    tracked = tmp_path / "dots" / "settings.json"
+    tracked.parent.mkdir()
+    tracked.write_text('{"model": "opus"}\n', encoding="utf-8")
+    link = home / ".claude" / "settings.json"
+    link.symlink_to(tracked)
+
+    assert _run_link_script(LINK_RECORD, home, state).returncode == 0
+    # Stand in for chezmoi: replace the link with the spliced regular file.
+    link.unlink()
+    link.write_text('{"model": "opus", "statusLine": {"type": "command"}}\n', encoding="utf-8")
+
+    assert _run_link_script(LINK_RESTORE, home, state).returncode == 0
+    assert link.is_symlink(), "the symlink was not restored"
+    assert link.resolve() == tracked.resolve()
+    assert "statusLine" in tracked.read_text(encoding="utf-8"), (
+        "the tracked file did not receive the splice"
+    )
+
+
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+def test_the_link_pair_is_a_no_op_on_an_ordinary_file(tmp_path):
+    """The common case, on every machine that does not symlink this file. A pair
+    of apply hooks that only works on one fleet is a pair that breaks four."""
+    home = tmp_path / "home"
+    state = tmp_path / "state"
+    (home / ".claude").mkdir(parents=True)
+    plain = home / ".claude" / "settings.json"
+    plain.write_text('{"model": "opus"}\n', encoding="utf-8")
+
+    assert _run_link_script(LINK_RECORD, home, state).returncode == 0
+    assert not (state / "terminal-stack" / "claude-settings-symlink").exists()
+    assert _run_link_script(LINK_RESTORE, home, state).returncode == 0
+    assert not plain.is_symlink()
+    assert plain.read_text(encoding="utf-8") == '{"model": "opus"}\n'
+
+
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+def test_a_stale_record_cannot_recreate_a_link_the_user_removed(tmp_path):
+    """The record is cleared at the START of every apply, not only on success.
+
+    Without that, a machine where the file WAS a link and deliberately is not any
+    more would have the link silently restored on the next apply -- the stack
+    undoing a change the user made, from a file they cannot see."""
+    home = tmp_path / "home"
+    state = tmp_path / "state"
+    (home / ".claude").mkdir(parents=True)
+    (home / ".claude" / "settings.json").write_text("{}\n", encoding="utf-8")
+    record = state / "terminal-stack" / "claude-settings-symlink"
+    record.parent.mkdir(parents=True)
+    record.write_text(f"{tmp_path}/gone.json\n", encoding="utf-8")
+
+    assert _run_link_script(LINK_RECORD, home, state).returncode == 0
+    assert not record.exists(), "run_before did not clear a stale record"
+
+
+def test_the_two_link_scripts_do_not_share_a_source_name():
+    """chezmoi strips the run_before_/run_after_ prefix to name the source entry,
+    so a matching pair collapses into one and the apply dies with "inconsistent
+    state" before a single target is written. Found by running it."""
+    assert LINK_RECORD.name.replace("run_before_", "") != LINK_RESTORE.name.replace(
+        "run_after_", ""
+    )
+
+
+def test_the_restore_needs_no_diffutils():
+    """`cmp` lives in diffutils, which a minimal Arch container does not have --
+    it failed with "command not found" on the first end-to-end run. There is
+    nothing to buy: git compares content, so an identical write leaves the other
+    tool's repo clean."""
+    body = LINK_RESTORE.read_text(encoding="utf-8")
+    for line in body.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            continue
+        assert not stripped.startswith(("cmp ", "if cmp", "diff ")), stripped
+
+
+def test_the_theme_key_is_omarchys_on_omarchy():
+    """`omarchy-theme-set-claude --activate` writes "custom:omarchy" and keeps
+    ~/.claude/themes/omarchy.json in step with the desktop, which Claude Code
+    hot-reloads. A flat light/dark token over the top of that flaps on every
+    apply and every theme change, with nothing to explain it."""
+    src = (ROOT / "dot_claude/modify_settings.json.tmpl").read_text(encoding="utf-8")
+    theme_line = next(ln for ln in src.splitlines() if '"theme":' in ln)
+    assert '{{ end }}' in theme_line, "the theme key is not gated at all"
+    gate = next(ln for ln in src.splitlines() if 'ne (index . "distroId"' in ln)
+    assert '"omarchy"' in gate
+    # statusLine and hooks stay ours everywhere -- only `theme` is ceded.
+    assert '"statusLine"' in src and '"hooks"' in src
+    for key in ('"statusLine"', '"hooks"'):
+        line = next(ln for ln in src.splitlines() if key in ln)
+        assert "distroId" not in line, f"{key} must not be distro-gated"

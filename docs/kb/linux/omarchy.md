@@ -129,6 +129,22 @@ systemctl is-active docker.socket
 sudo ufw status                             # ufw-docker is installed
 ```
 
+## Claude Code settings
+
+`~/.claude/settings.json` is a symlink into omarchy-dots here, and three things
+write it. The stack splices `statusLine` and `hooks`, cedes `theme` to
+`omarchy-theme-set-claude`, and writes through the link rather than replacing it.
+
+```bash
+ls -la ~/.claude/settings.json            # should still be a symlink after an apply
+jq -r .theme ~/.claude/settings.json      # custom:omarchy, Omarchy's
+jq -r .statusLine.command ~/.claude/settings.json   # ours
+git -C ~/Workspace/src/github.com/martybytes/omarchy-dots status --short
+```
+
+That last one should show the tracked file changing when the stack's hooks
+change -- that is the write going through, not around, the link.
+
 ## Troubleshooting
 
 ```bash
@@ -147,4 +163,6 @@ tstack apply                                # re-render everything
 | WezTerm ignores `omarchy theme set` | `tstack omarchy status` — is the template `current`? |
 | `tstack omarchy sync` says "not ours" | a file of that name exists that the stack did not write; move it aside |
 | `docker` permission denied | expected: `sudo docker`, or `omarchy-setup-security-sudoless-docker` |
+| `~/.claude/settings.json` is no longer a symlink | the restore hook failed; `tstack apply` again and read its stderr |
+| Claude Code theme flapping | the stack should not write `theme` on Omarchy; check `chezmoi data \| grep distroId` |
 | `starship` from the wrong place | `command -v starship` must be `/usr/bin/starship`, not `/usr/local/bin` |

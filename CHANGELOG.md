@@ -47,6 +47,30 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **`~/.claude/settings.json` survives an apply as a symlink (09/01/2026).**
+  chezmoi's `modify_` script produces bytes; CHEZMOI does the write, and it
+  writes a regular file. Measured on archlinux with chezmoi 2.72: the splice
+  succeeded, the symlink was replaced, and the file the other tool tracked --
+  omarchy-dots stows this one -- was left behind at its old content, still
+  referenced by its repo and now permanently stale, with nothing saying so.
+  `run_before_25-claude-settings-link-record.sh` and
+  `run_after_25-claude-settings-link-restore.sh` record the destination and put
+  the spliced content through it, restoring the link. Not Omarchy-specific: any
+  dotfile manager that symlinks this file hits it. Two traps found by running
+  it -- the two scripts' basenames must differ, because chezmoi strips the
+  `run_before_`/`run_after_` prefix to name the source entry and a matching pair
+  dies with `inconsistent state` before any target is written; and the restore
+  may not use `cmp`, which lives in diffutils and is absent from a minimal Arch
+  install.
+- **The stack no longer fights Omarchy over the Claude Code theme (09/01/2026).**
+  `omarchy-theme-set-claude --activate` writes `theme: "custom:omarchy"` and
+  keeps `~/.claude/themes/omarchy.json` in step with the desktop, which Claude
+  Code hot-reloads; the stack's fragment wrote a flat light/dark token over the
+  top, so the two alternated on every apply and every `omarchy theme set`.
+  The key is now dropped from the fragment on Omarchy and only there -- ownership
+  in that splice is per key and derived from what the fragment renders, so
+  dropping it is the whole mechanism. `statusLine` and `hooks` stay ours
+  everywhere.
 - **The docker advice no longer tells Omarchy users to undo their distro's
   security decision (09/01/2026).** `engine_advice`'s DENIED branch said
   `sudo usermod -aG docker "$USER"`. Omarchy declines that group on purpose --
