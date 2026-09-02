@@ -165,6 +165,26 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **The wizard suite no longer inherits the developer's ssh session
+  (09/01/2026).** Four tests in `tests/test_wizard.py` passed at a console and
+  failed over ssh -- same commit, same machine, different way in -- and passed
+  in CI and in the parity containers, which is the worst shape for this kind of
+  bug: green everywhere it is watched. `flow.headless()` answers True for ANY
+  ssh session, `bare` follows it, and `_agents` then short-circuits to its
+  unattended defaults without asking anything, so the memory answers came back
+  `("off", "off")` instead of `("on", "on")` with nothing in the failure to say
+  why. Measured on an Omarchy box reached over Tailscale.
+
+  The autouse `_clean_env` fixture already stripped `TS_*`; it now strips
+  `DISPLAY`, `WAYLAND_DISPLAY`, `SSH_CONNECTION`, `SSH_TTY` and `SSH_CLIENT`
+  too. Cleared rather than pinned, so `headless()` computes False by its own
+  rules -- exactly what CI has always exercised. The two tests that exercise the
+  detection set those variables themselves, and anything wanting the headless
+  path still sets `TS_HEADLESS_RESOLVED`. A new test asserts the variables are
+  absent, so the next one to leak in is caught rather than diagnosed.
+
+### Fixed
+
 - **Docs caught up with `tstack apply` (08/29/2026).** README and INSTALL.md
   still told people the macOS, WSL and Linux one-liners "end with `chezmoi
   apply`". They end with `tstack apply`, and the difference — the conflict
