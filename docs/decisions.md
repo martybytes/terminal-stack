@@ -2673,3 +2673,33 @@ pwsh) and `test_named_leader_keys_map_identically_in_both_chord_mappers` fails i
 a name is added to one and not the other. And `phys:` names a physical position
 on the US ANSI layout, so on another layout `ctrl-backslash` is whichever key sits
 where `\` does on a US board; `space` has always had the same property.
+
+## Why the WSL sync walk reads its file list from fd 3
+
+`run_after_90-sync-windows.sh` walks `windows/` with `while read -d '' ... done < <(find ...)`.
+Two entries in that tree are part-owned and go through `pwsh.exe` (the
+`.claude/settings.json` and `.cursor/hooks.json` merges). pwsh drains whatever
+stdin it inherits, and with the file list on stdin the first merge consumed the
+rest of it. In `find` order that was everything after `.claude/settings.json.tmpl`:
+`.config/**`, `.cursor/**`, `.wezterm/pane_nav.lua`, `.wezterm.lua.tmpl`,
+`AppData/**` and `Documents/PowerShell/**`. None of it was visited, nothing was
+printed, and the summary line counted the visited files as unchanged.
+
+It was found on 2026-09-02 when `tstack config leader ctrl-backslash` saved,
+`chezmoi init` derived `phys:Backslash`, the hook's own `cfg leaderKey` returned
+`phys:Backslash`, and the rendered `~/.wezterm.lua` on the Windows side still said
+`phys:Space`. `bash -x` showed the walk ending eleven files in. How long it had
+been that way is not knowable from the logs, because the failure mode is an
+absence: every pwsh-side `sync-windows.ps1` run kept the Windows files current
+enough that nobody noticed the WSL apply had stopped touching them.
+
+The fix is `read -u 3` with `3< <(find ...)`, so the body can run anything it
+likes on stdin. `< /dev/null` on the pwsh call alone was rejected: it fixes the
+one consumer we know about and leaves the trap armed for the next one.
+
+The same investigation exposed a second gap. The Python `tstack config` saved to
+chezmoi `[data]` and stopped; the shell save it replaced had always ended in
+`ts_mirror_windows_config`. Since `scripts/sync-windows.ps1` renders from that
+mirror, a setting changed from WSL was rendered back to its old value by the next
+pwsh-side sync. `_apply` now calls the bash writer after `chezmoi init` on WSL,
+keeping one implementation of the mirror.
