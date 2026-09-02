@@ -27,13 +27,36 @@ from tstack.wizard import emit, flow  # noqa: E402
 from tstack.wizard.console import Console  # noqa: E402
 from tstack.wizard.prompts import Option, choice, collapse_exclusive, multi  # noqa: E402
 
+# What `flow.headless()` reads out of the ambient environment. Stripping TS_* was
+# never enough: these decide `bare`, and `bare` short-circuits the whole agents
+# question to its unattended defaults.
+AMBIENT = ("DISPLAY", "WAYLAND_DISPLAY", "SSH_CONNECTION", "SSH_TTY", "SSH_CLIENT")
+
 
 @pytest.fixture(autouse=True)
 def _clean_env(monkeypatch, tmp_path):
-    """No TS_* leaking in from the developer's shell, and a throwaway store."""
+    """No ambient environment leaking in from the developer's shell, and a
+    throwaway store.
+
+    TS_* was the obvious half. The other half is the SSH and display variables:
+    `flow.headless()` answers True for ANY ssh session, `bare` follows, and
+    `_agents` then returns its unattended defaults without asking anything. So
+    four tests in this module passed at a console and failed over ssh -- same
+    commit, same machine, different way in -- and passed in CI and in the parity
+    containers, where nothing sets SSH_CONNECTION. Measured on an Omarchy box
+    reached over Tailscale: SSH_CONNECTION set, headless() True, the memory
+    answers ("off", "off") instead of ("on", "on").
+
+    Cleared rather than pinned: with none of them set, `headless()` computes
+    False on Linux by its own rules, which is what CI has always exercised. A
+    test that wants the headless path sets TS_HEADLESS_RESOLVED itself, and the
+    two that test the detection set these variables themselves.
+    """
     for name in list(__import__("os").environ):
         if name.startswith("TS_"):
             monkeypatch.delenv(name, raising=False)
+    for name in AMBIENT:
+        monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("TERMINAL_STACK_DIR", str(ROOT))
     monkeypatch.setattr(store, "chezmoi_data", lambda: {})
     monkeypatch.setattr(store, "mirror", lambda: {})
@@ -591,6 +614,22 @@ def test_headless_detection(monkeypatch):
 
     monkeypatch.setenv("DISPLAY", ":0")
     assert not flow.headless(), "an explicit display wins"
+
+
+def test_the_suite_does_not_inherit_the_developers_ssh_session(monkeypatch):
+    """The regression this fixture exists for.
+
+    `flow.headless()` returns True for any ssh session, `bare` follows it, and
+    `_agents` short-circuits to unattended defaults -- so running the suite over
+    ssh changed four answers with nothing in the failure to say why. CI and the
+    parity containers never see it, which is the worst shape for this kind of
+    bug: green everywhere it is watched.
+    """
+    import os
+
+    for name in AMBIENT:
+        assert name not in os.environ, f"{name} leaked into the suite"
+    assert not flow.headless(), "the suite must start from a non-headless machine"
 
 
 def test_an_explicitly_resolved_headless_answer_wins(monkeypatch):
