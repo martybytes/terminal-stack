@@ -263,7 +263,13 @@ function ConvertTo-TsLeader([string]$chord) {
             }
         }
     }
-    $wkey = if ($key.ToLower() -eq 'space') { 'phys:Space' } else { $key }
+    # Keys with no printable spelling are named, and named keys map to WezTerm
+    # phys: codes. Keep this switch identical to .chezmoi.toml.tmpl.
+    $wkey = switch ($key.ToLower()) {
+        'space'     { 'phys:Space' }
+        'backslash' { 'phys:Backslash' }
+        default     { $key }
+    }
     return @{ key = $wkey; mods = ($mods -join '|') }
 }
 

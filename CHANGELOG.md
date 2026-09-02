@@ -6,6 +6,17 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **`Ctrl+\` can be the WezTerm leader (09/02/2026).** The leader chord is
+  stored as `mod-key` text, and the only key with a spelled-out name was
+  `space`. A literal `ctrl-\` had two failure modes, both silent until the
+  next chezmoi command: the store writes `key = "<value>"` with no escaping,
+  so the backslash left `chezmoi.toml` unparseable, and had it got through,
+  every renderer would have produced `key = '\'` in Lua. `backslash` now joins
+  `space` as a named key (`ctrl-backslash`, mapped to `phys:Backslash`) in
+  both chord mappers, and the `leaderChord`/`tmuxPrefix` validator refuses a
+  backslash or double quote with the spelling that works. Pinned by a
+  two-mapper parity test and a pwsh run of `ConvertTo-TsLeader`.
+
 - **Ghostty: backspace and Delete work over ssh again (08/28/2026).** ssh into
   any Linux host from Ghostty and backspace inserted junk instead of erasing,
   while Delete did nothing. Ghostty announces `TERM=xterm-ghostty` and `ssh`

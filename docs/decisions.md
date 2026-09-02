@@ -2647,3 +2647,29 @@ the winget pass and before the agent CLIs, in **both** `Install-TsApps` and
 and a new winget id is verified with `winget show --id <id> --exact` before it is
 written down. An id that always fails is worse than an honest "not available on
 this platform".
+
+## Why leader keys with no printable spelling are stored by name
+
+`tstack config leader ctrl-\` looked like it should work and could not, for two
+independent reasons that both stayed silent until the next chezmoi command. The
+store (`store.set` and `ts_data_set`) writes `key = "<value>"` with no escaping,
+so a backslash or a double quote leaves `~/.config/chezmoi/chezmoi.toml`
+unparseable and every later `chezmoi` invocation dead. And had the value got
+through, all three renderers (the WSL hook's Python substitution, `sync-windows.ps1`
+and `dot_wezterm.lua.tmpl`) would have written `key = '\'` into Lua, where the
+backslash escapes the closing quote.
+
+The fix chosen is the pattern the stack already had for the one other such key:
+`space` is spelled by name and `.chezmoi.toml.tmpl` / `ConvertTo-TsLeader` map it
+to WezTerm's `phys:Space`. `backslash` joins it as `phys:Backslash`. That keeps
+every renderer a plain token substitution (no Lua escaping in three places to keep
+aligned), and the schema validator turns the two forbidden characters into a
+refusal that names the spelling. The alternative, escaping at render time, was
+rejected because it fixes the Lua and not the TOML, and the TOML failure is the
+one that bricks the machine.
+
+Two consequences. The mapping table now lives in two places (Go template and
+pwsh) and `test_named_leader_keys_map_identically_in_both_chord_mappers` fails if
+a name is added to one and not the other. And `phys:` names a physical position
+on the US ANSI layout, so on another layout `ctrl-backslash` is whichever key sits
+where `\` does on a US board; `space` has always had the same property.
