@@ -492,6 +492,41 @@ def test_windows_config_preserves_agent_settings_when_other_values_change(tmp_pa
     assert cfg["agentmemoryEnabled"] == "off"
 
 
+def test_named_leader_keys_map_identically_in_both_chord_mappers():
+    """A leader key with no printable spelling (space, backslash) is stored by
+    name and mapped to a WezTerm phys: code. The Go template and the pwsh twin
+    each hold that table; a name only one of them knows renders a different
+    leader on Windows than on macOS/WSL."""
+    toml = read_repo(".chezmoi.toml.tmpl")
+    ps = read_repo("bootstrap/_config.ps1")
+    for name, phys in (("space", "phys:Space"), ("backslash", "phys:Backslash")):
+        assert f'(lower $ckey) "{name}" -}}}}{{{{- $leaderKey = "{phys}"' in toml, name
+        assert f"'{name}'" in ps and f"'{phys}'" in ps, name
+
+
+@pytest.mark.skipif(not shutil.which("pwsh"), reason="PowerShell 7 is unavailable")
+def test_pwsh_maps_ctrl_backslash_to_a_phys_key():
+    helper = ROOT / "bootstrap/_config.ps1"
+    command = (
+        f". '{helper}'; "
+        "$l = ConvertTo-TsLeader 'ctrl-backslash'; "
+        "$s = ConvertTo-TsLeader 'ctrl-space'; "
+        "$a = ConvertTo-TsLeader 'alt-x'; "
+        'Write-Output "$($l.mods)+$($l.key)|$($s.mods)+$($s.key)|$($a.mods)+$($a.key)"'
+    )
+    result = subprocess.run(
+        [shutil.which("pwsh"), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command],
+        text=True,
+        encoding="utf-8",
+        capture_output=True,
+        check=False,
+        timeout=300,
+        start_new_session=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "CTRL+phys:Backslash|CTRL+phys:Space|ALT+x"
+
+
 @pytest.mark.skipif(not shutil.which("pwsh"), reason="PowerShell 7 is unavailable")
 def test_existing_agentmemory_install_migrates_missing_toggle_to_on(tmp_path):
     home = tmp_path / "home"
