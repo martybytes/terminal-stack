@@ -411,6 +411,30 @@ def test_claude_instructions_fit_claude_code_limit():
     assert (ROOT / "CLAUDE.md").stat().st_size <= 40_000
 
 
+def test_the_wsl_sync_walk_reads_from_its_own_fd():
+    """The walk's file list must not share stdin with the loop body. pwsh.exe
+    (the part-owned merges) drains inherited stdin, and with the list there the
+    first merge silently dropped every later file: .wezterm.lua and $PROFILE
+    were never re-rendered by a WSL apply, while the summary said unchanged."""
+    sh = (ROOT / "run_after_90-sync-windows.sh").read_text(encoding="utf-8")
+    assert "while IFS= read -r -d '' -u 3 src; do" in sh
+    assert "done 3< <(find" in sh
+    assert "done < <(find" not in sh, "a walk reading from stdin came back"
+
+
+def test_a_posix_save_refreshes_the_windows_mirror():
+    """tstack config on WSL writes chezmoi [data]; sync-windows.ps1 reads
+    config.json. Without the refresh the next pwsh-side sync renders the
+    previous leader/theme back over the new one."""
+    py = (ROOT / "tstack/commands/config.py").read_text(encoding="utf-8")
+    assert "ts_mirror_windows_config" in py
+    apply_body = py.split("def _apply(")[1].split("\ndef ")[0]
+    assert "_refresh_windows_mirror(out)" in apply_body
+    assert apply_body.index("chezmoi_init()") < apply_body.index("_refresh_windows_mirror"), (
+        "the mirror is derived from the keys chezmoi init regenerates"
+    )
+
+
 def test_updates_reconcile_only_enabled_tools():
     ps = (ROOT / "scripts/sync-windows.ps1").read_text(encoding="utf-8")
     sh = (ROOT / "run_after_90-sync-windows.sh").read_text(encoding="utf-8")
