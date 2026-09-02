@@ -22,11 +22,11 @@ import contextlib
 import functools
 import json
 import os
-import subprocess
 from pathlib import Path
 from typing import Any
 
 from . import platform as plat
+from . import proc
 
 MISSING = "__missing__"
 
@@ -132,18 +132,8 @@ def chezmoi_data() -> dict[str, str]:
         )
         parts.append('{{ if hasKey . "' + k + '" }}' + k + "=<<" + body + ">>\n{{ end }}")
     template = "".join(parts)
-    try:
-        out = subprocess.run(
-            [chezmoi, "execute-template", template],
-            capture_output=True,
-            text=True,
-            timeout=120,
-            check=False,
-            start_new_session=True,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return {}
-    if out.returncode != 0:
+    out = proc.capture([chezmoi, "execute-template", template], timeout=120)
+    if out is None or out.returncode != 0:
         return {}
     found: dict[str, str] = {}
     for line in out.stdout.splitlines():
@@ -460,15 +450,5 @@ def chezmoi_init() -> bool:
     chezmoi = plat.find_chezmoi()
     if not chezmoi or not Path(chezmoi).exists():
         return False
-    try:
-        out = subprocess.run(
-            [chezmoi, "init"],
-            capture_output=True,
-            text=True,
-            timeout=300,
-            check=False,
-            start_new_session=True,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return out.returncode == 0
+    out = proc.capture([chezmoi, "init"], timeout=300)
+    return out is not None and out.returncode == 0

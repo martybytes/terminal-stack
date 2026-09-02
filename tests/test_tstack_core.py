@@ -9,6 +9,7 @@ because two of the four targets cannot be run on this machine at all.
 
 from __future__ import annotations
 
+import ast
 import os
 import subprocess
 import sys
@@ -19,7 +20,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from tstack import cli, paths, registry  # noqa: E402
+from tstack import cli, paths, proc, registry  # noqa: E402
 from tstack import platform as plat  # noqa: E402
 
 
@@ -349,3 +350,57 @@ def test_version_survives_having_no_clone(monkeypatch):
     monkeypatch.setattr(paths, "clone_candidates", lambda: [])
     text = cli.render_version()
     assert "no terminal-stack clone found" in text
+
+
+# ------------------------------------------------------- child process capture
+
+
+def _capture_calls():
+    """Every `subprocess.run` in the package that reads the child's output."""
+    for source in sorted((ROOT / "tstack").rglob("*.py")):
+        tree = ast.parse(source.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            name = ast.unparse(node.func)
+            if name not in ("subprocess.run", "subprocess.check_output", "subprocess.Popen"):
+                continue
+            keywords = {k.arg for k in node.keywords}
+            if keywords & {"text", "capture_output", "universal_newlines", "input"}:
+                yield source.relative_to(ROOT), node.lineno, keywords
+
+
+def test_every_captured_child_process_decodes_as_utf_8():
+    """A bare `text=True` decodes with the LOCALE codec, which on a Windows host
+    is cp1252 -- and starship, wezterm, docker, git and chezmoi all emit UTF-8.
+    The decode blows up inside subprocess's reader THREAD, so run() returns
+    returncode=0, stderr='' and stdout=None, and the caller dies on
+    `got.stdout.strip()` nowhere near anything about encoding. `tstack ui`
+    crashed exactly that way on `starship preset tokyo-night`.
+
+    tstack/proc.py is the one place that decides this; a call site that wants its
+    own subprocess.run must still say so explicitly."""
+    offenders = [
+        f"{where}:{line}"
+        for where, line, keywords in _capture_calls()
+        if "encoding" not in keywords and where.as_posix() != "tstack/proc.py"
+    ]
+    assert not offenders, "captured output decoded with the locale codec: " + ", ".join(offenders)
+
+
+def test_capture_reads_utf_8_and_never_hands_back_a_none_stdout():
+    """errors="replace" is the load-bearing half: a child that is genuinely not
+    UTF-8 must cost a replacement character, not a None every caller then
+    dereferences."""
+    glyph = proc.capture(
+        [sys.executable, "-c", "import sys; sys.stdout.buffer.write(chr(0x2588).encode())"]
+    )
+    assert glyph is not None and glyph.stdout == chr(0x2588)
+    junk = proc.capture(
+        [sys.executable, "-c", "import sys; sys.stdout.buffer.write(bytes([0x81, 0xFF]))"]
+    )
+    assert junk is not None and junk.stdout == "��"
+
+
+def test_capture_answers_none_when_the_child_cannot_run():
+    assert proc.capture(["terminal-stack-no-such-binary"]) is None

@@ -2647,3 +2647,73 @@ the winget pass and before the agent CLIs, in **both** `Install-TsApps` and
 and a new winget id is verified with `winget show --id <id> --exact` before it is
 written down. An id that always fails is worse than an honest "not available on
 this platform".
+
+## Why the ssh symlink block is a notice, not a fix
+
+Every shim winget writes to `%LOCALAPPDATA%\Microsoft\WinGet\Links` is a symlink
+into the package directory. An ssh logon carries a remote token, Windows disables
+remote-to-local symlink evaluation by default, and `CreateProcess` therefore
+refuses the shim: 30 tools on ORIGIN could not start over ssh while the same
+machine at the console was fine. `starship` and `zoxide` were unaffected only
+because they resolve to real exes outside winget.
+
+The repair is one command, `fsutil behavior set SymlinkEvaluation R2L:1`. The
+stack does not run it, and will not:
+
+- It is **machine-wide policy**, not stack configuration. Enabling R2L means a
+  symlink on a remote share may be followed to a local path. That is the machine
+  owner's risk call, and a dotfiles apply is the wrong place to make it.
+- It needs **elevation**, which a login shell does not have and must not ask for.
+- On a corp-managed box the answer may legitimately be no, in which case the
+  right behaviour is to keep working and stop mentioning it, which is what the
+  `no-ssh-symlink-notice` sentinel is for.
+
+So the profile detects the exact state and prints the reason plus the command.
+Three conditions, cheapest first: `$env:SSH_CONNECTION` set (a local session must
+see nothing, because nothing is wrong there), `SymlinkRemoteToLocalEvaluation`
+under `HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem` not `1`, and the Links
+directory on `PATH`.
+
+Two details that are easy to get wrong. The check reads the **registry**, not
+`fsutil behavior query`: same answer, and a login should not spawn a process to
+learn it. And a **missing** value counts as blocked, because absent is the
+Windows default; treating unknown as fine would silence the notice on precisely
+the machines that need it. `tstack doctor` repeats it as the `winget-symlinks`
+NOTE, so the guidance survives the session where it was printed.
+
+Rejected: rewriting `$env:Path` to the real `WinGet\Packages\...` directories.
+Those names carry a package id and a source id and move on upgrade, so it would
+work until the next `winget upgrade` and then fail quietly.
+
+## Why one helper decides how child output is decoded
+
+`subprocess.run(argv, capture_output=True, text=True)` decodes with the **locale**
+codec. On a Windows host that is cp1252, and starship, wezterm, docker, git and
+chezmoi all emit UTF-8. The failure mode is what makes this worth a section: the
+`UnicodeDecodeError` is raised inside subprocess's stdout **reader thread**, so
+`run()` returns a `CompletedProcess` with `returncode=0`, `stderr=''` and
+`stdout=None`, and the caller dies on `got.stdout.strip()` several frames from
+anything that mentions encoding. `tstack ui` crashed exactly that way previewing
+`starship preset tokyo-night`, whose Nerd Font glyphs are outside cp1252, and CI
+never saw it because it needs a real starship on a cp1252 host.
+
+Six modules had grown their own copy of the same `_run` helper and every copy had
+the bug, plus ten more capture sites in `paths`, `platform`, `stacks`, `store`
+and `ghostty`. That is the argument for `tstack/proc.py`: not deduplication for
+its own sake, but one place where the decision is written down, so fixing it is
+one edit rather than seventeen.
+
+`errors="replace"` is the load-bearing half. A child that genuinely is not UTF-8
+(`tasklist.exe` on some locales) must cost a replacement character, never a
+`None` stdout that every call site dereferences; the whole incident was a `None`
+nobody expected.
+
+Rejected: UTF-8 mode process-wide (`PYTHONUTF8`, or `sys.flags.utf8_mode`). It
+changes file I/O defaults too, and it does nothing when `tstack` is imported
+rather than run as a script, which is how every test exercises it.
+
+`test_every_captured_child_process_decodes_as_utf_8` walks the package's AST and
+fails any capturing `subprocess.run` without an explicit `encoding`. A call site
+that needs its own `subprocess.run` (the compose runner in `stacks.py`, whose
+caller decides whether output is captured at all) still has to say `encoding`
+out loud.

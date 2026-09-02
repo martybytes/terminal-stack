@@ -673,10 +673,22 @@ function y {
 # The fallback matters: fnm before 1.36 has no --resolve-engines and exits
 # non-zero, and Invoke-Expression of an empty string would leave fnm unwired
 # with nothing printed.
+# Get-Command only stats the file, so it says yes to a binary that cannot be
+# launched. winget's shims under WinGet\Links are symlinks, and an ssh session
+# evaluates them as remote-to-local, which Windows disables by default
+# (fsutil behavior query SymlinkEvaluation): CreateProcess fails with "the path
+# cannot be traversed because it contains an untrusted mount point", and the two
+# lines below then threw on a null string. Three errors on every remote login.
+# The machine-side fix is `fsutil behavior set SymlinkEvaluation R2L:1`, but a
+# login must degrade quietly whatever the reason fnm will not start.
 if (Get-Command fnm -ErrorAction SilentlyContinue) {
-    $tsFnmEnv = fnm env --use-on-cd --resolve-engines=false --shell powershell 2>$null | Out-String
-    if (-not $tsFnmEnv.Trim()) { $tsFnmEnv = fnm env --use-on-cd --shell powershell | Out-String }
-    Invoke-Expression $tsFnmEnv
+    $tsFnmEap = $ErrorActionPreference
+    $ErrorActionPreference = 'SilentlyContinue'
+    try {
+        $tsFnmEnv = fnm env --use-on-cd --resolve-engines=false --shell powershell 2>$null | Out-String
+        if (-not "$tsFnmEnv".Trim()) { $tsFnmEnv = fnm env --use-on-cd --shell powershell 2>$null | Out-String }
+        if ("$tsFnmEnv".Trim()) { Invoke-Expression $tsFnmEnv }
+    } finally { $ErrorActionPreference = $tsFnmEap }
 }
 
 $tsZoxide = (Get-Command zoxide -ErrorAction SilentlyContinue).Source
@@ -741,6 +753,54 @@ function rmf {
     Remove-Item -Path $Paths -Recurse -Force -Confirm:$false
 }
 # ---- cli-tools-end ----
+
+# ---- ssh-symlink-notice-start ----
+# Over ssh, winget-installed tools cannot start at all, and nothing about the
+# error says why. Every shim under %LOCALAPPDATA%\Microsoft\WinGet\Links is a
+# SYMLINK; an ssh logon is a remote token, so Windows classifies the traversal
+# as remote-to-local and refuses it, which surfaces as
+#   Program 'eza.exe' failed to run: ... The path cannot be traversed because it
+#   contains an untrusted mount point
+# on the first `ls`, and as three errors from the fnm block above during load.
+# Local sessions are unaffected, so this is invisible until someone ssh's in.
+# The fix is one elevated command; the stack cannot run it (machine-wide policy,
+# needs elevation), so it says exactly what to run and why.
+function Test-TsRemoteSymlinkBlocked {
+    # Cheapest gate first: nothing to say in a local session.
+    if (-not $env:SSH_CONNECTION) { return $false }
+    if (Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'terminal-stack\no-ssh-symlink-notice')) { return $false }
+    # The registry, not `fsutil behavior query`: same answer, no process spawn
+    # during login. A MISSING value is the Windows default, which is disabled --
+    # so absent must count as blocked, not as unknown.
+    $key = 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem'
+    $r2l = (Get-ItemProperty -LiteralPath $key -Name SymlinkRemoteToLocalEvaluation -ErrorAction SilentlyContinue).SymlinkRemoteToLocalEvaluation
+    if ($r2l -eq 1) { return $false }
+    $links = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Links'
+    if (-not (Test-Path -LiteralPath $links)) { return $false }
+    # -contains is case-insensitive; a PATH entry may be spelled either way.
+    return (($env:Path -split ';') -contains $links)
+}
+
+if (Test-TsRemoteSymlinkBlocked) {
+    $tsLinks = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Links'
+    $tsShims = @(Get-ChildItem -LiteralPath $tsLinks -Filter *.exe -Attributes ReparsePoint -ErrorAction SilentlyContinue).Count
+    Write-Host ''
+    Write-Host 'note: winget-installed tools cannot start in this ssh session.'
+    Write-Host "      $tsLinks holds $tsShims symlink(s), and Windows blocks"
+    Write-Host '      remote-to-local symlink traversal for a remote logon, so eza, fnm, fd, rg and'
+    Write-Host '      friends fail with "the path cannot be traversed because it contains an'
+    Write-Host '      untrusted mount point". Local sessions on this machine are unaffected.'
+    Write-Host ''
+    Write-Host '      Open an ELEVATED Command Prompt or pwsh ON THE CONSOLE (not over ssh) and run:'
+    Write-Host ''
+    Write-Host '          fsutil behavior set SymlinkEvaluation R2L:1'
+    Write-Host ''
+    Write-Host '      then reconnect. Check it with: fsutil behavior query SymlinkEvaluation'
+    Write-Host '      Leave the policy alone and silence this notice with:'
+    Write-Host "          New-Item -ItemType File -Force '$(Join-Path $env:LOCALAPPDATA 'terminal-stack\no-ssh-symlink-notice')' | Out-Null"
+    Write-Host ''
+}
+# ---- ssh-symlink-notice-end ----
 
 # ---- git-shortcuts-start ----
 # Git muscle-memory, matching the zsh side (oh-my-zsh git plugin + stack

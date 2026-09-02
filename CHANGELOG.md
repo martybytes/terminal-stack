@@ -6,6 +6,48 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **Windows over ssh: winget-installed tools are explained, not silently broken (09/02/2026).**
+  Logging into Windows over ssh printed three errors before the prompt and then
+  failed on `ls`: `Program 'fnm.exe' failed to run: ... The path cannot be
+  traversed because it contains an untrusted mount point`. Cause is neither tool.
+  Every shim under `%LOCALAPPDATA%\Microsoft\WinGet\Links` is a symlink (30 on
+  the machine that found this), an ssh logon carries a remote token, and Windows
+  disables remote-to-local symlink traversal by default. `starship` and `zoxide`
+  survived only because they resolve to real exes outside winget.
+
+  Three parts. The `$PROFILE` fnm block degrades quietly: `Get-Command` only
+  stats the file, so it said yes to a shim that cannot launch, and the block now
+  suppresses `$ErrorActionPreference` across both probes, quotes its
+  interpolation so a null cannot be `.Trim()`ed, and evaluates only a non-empty
+  env. A new `ssh-symlink-notice` block prints the reason and the exact elevated
+  command (`fsutil behavior set SymlinkEvaluation R2L:1`) when, and only when,
+  `$env:SSH_CONNECTION` is set, `SymlinkRemoteToLocalEvaluation` is not `1` and
+  the Links directory is on `PATH` -- read from the registry rather than
+  `fsutil`, so login costs no process, and a missing value counts as blocked
+  because absent is the Windows default. `tstack doctor` reports the same state
+  as the `winget-symlinks` NOTE. The policy is machine-wide and needs elevation,
+  so the stack reports it and never sets it;
+  `%LOCALAPPDATA%\terminal-stack\no-ssh-symlink-notice` silences the login notice.
+
+- **Every captured child process decodes as UTF-8 (09/02/2026).** `tstack ui`
+  crashed with `AttributeError: 'NoneType' object has no attribute 'strip'` when
+  previewing the `tokyo-night` prompt on a Windows host. `subprocess.run(...,
+  text=True)` decodes with the *locale* codec (cp1252), starship's preset is
+  UTF-8, and the `UnicodeDecodeError` is raised in subprocess's reader THREAD --
+  so `run()` returned `returncode=0`, `stderr=''` and `stdout=None`, and the
+  caller died on `got.stdout.strip()` nowhere near anything about encoding.
+  Six modules had grown their own copy of the same `_run` helper and all six had
+  the bug, along with ten more capture sites in `paths`, `platform`, `stacks`,
+  `store` and `ghostty`.
+
+  New `tstack/proc.py` is the one place that decides it: `encoding="utf-8"` with
+  `errors="replace"`, so a child that genuinely is not UTF-8 costs a replacement
+  character rather than a None every call site dereferences. Every `_run` now
+  delegates to it, and `test_every_captured_child_process_decodes_as_utf_8`
+  walks the package's AST so the next call site cannot reintroduce it. Also
+  fixed while in there: a doctor NOTE's `hint` was dropped by `Result.render()`
+  and reached `--json` only, which hid `other-clones`' repair line too.
+
 - **Ghostty: backspace and Delete work over ssh again (08/28/2026).** ssh into
   any Linux host from Ghostty and backspace inserted junk instead of erasing,
   while Delete did nothing. Ghostty announces `TERM=xterm-ghostty` and `ssh`

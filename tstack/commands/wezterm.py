@@ -34,6 +34,7 @@ import urllib.request
 from pathlib import Path
 
 from .. import platform as plat
+from .. import proc
 
 HELP = """tstack wezterm - WezTerm build info, upstream comparison, channel switching.
 
@@ -134,17 +135,7 @@ def terminals_channel(selection: str) -> str:
 
 
 def _run(argv: list[str], timeout: int = 30) -> subprocess.CompletedProcess | None:
-    try:
-        return subprocess.run(
-            argv,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-            start_new_session=True,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
+    return proc.capture(argv, timeout=timeout)
 
 
 # --------------------------------------------------------- upstream (network)
@@ -449,16 +440,10 @@ def show_changes() -> int:
     body = f"# WezTerm changes since {got[0]}\n\n{text}\n"
     # The same reader the `doc` knowledge base uses, so long output behaves the
     # same way everywhere in the stack.
-    if shutil.which("glow"):
-        got_glow = subprocess.run(
-            ["glow", "-p", "-"], input=body, text=True, check=False, start_new_session=True
-        )
-        if got_glow.returncode == 0:
-            return 0
+    if shutil.which("glow") and proc.feed(["glow", "-p", "-"], body) == 0:
+        return 0
     pager = os.environ.get("PAGER") or "less -RF"
-    try:
-        subprocess.run(pager.split(), input=body, text=True, check=False, start_new_session=True)
-    except OSError:
+    if proc.feed(pager.split(), body) != 0:
         print(body)
     return 0
 
@@ -511,14 +496,7 @@ def _apt_install(want: str, other: str) -> None:
     except OSError:
         current = ""
     if line not in current:
-        subprocess.run(
-            ["sudo", "tee", str(listing)],
-            input=line + "\n",
-            text=True,
-            capture_output=True,
-            check=False,
-            start_new_session=True,
-        )
+        proc.capture(["sudo", "tee", str(listing)], stdin=line + "\n", timeout=60)
     _run(["sudo", "apt-get", "update", "-qq"], timeout=600)
     got = _run(["dpkg", "-s", other], timeout=30)
     if got and got.returncode == 0:

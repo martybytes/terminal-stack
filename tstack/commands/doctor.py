@@ -34,7 +34,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .. import checks, paths, store
+from .. import checks, paths, proc, store
 from .. import platform as plat
 from ..checks import Report
 from . import agents
@@ -44,17 +44,7 @@ PASSED = "==> all checks passed."
 
 
 def _run(argv: list[str], timeout: int = 15) -> subprocess.CompletedProcess | None:
-    try:
-        return subprocess.run(
-            argv,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-            start_new_session=True,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
+    return proc.capture(argv, timeout=timeout)
 
 
 # --------------------------------------------------------------------- checks
@@ -196,6 +186,69 @@ def check_tools_on_path(report: Report) -> None:
             report.fail(
                 f"path-{tool}", f"{tool} not on PATH", f"install it: tstack config apps {tool}"
             )
+
+
+def winget_links() -> Path | None:
+    """The winget shim directory, if this machine has one on PATH."""
+    local = os.environ.get("LOCALAPPDATA")
+    if plat.kind() != plat.WINDOWS or not local:
+        return None
+    links = Path(local) / "Microsoft" / "WinGet" / "Links"
+    if not links.is_dir():
+        return None
+    entries = [e for e in os.environ.get("PATH", "").split(os.pathsep) if e]
+    if not any(e.rstrip(r"\/").lower() == str(links).rstrip(r"\/").lower() for e in entries):
+        return None
+    return links
+
+
+def remote_symlinks_blocked() -> bool:
+    """Whether Windows would refuse to follow a local symlink for a remote logon.
+
+    A MISSING value is the default, and the default is disabled -- so absent
+    counts as blocked. Read from the registry rather than `fsutil behavior
+    query`, which is the same answer for the cost of a process.
+    """
+    if plat.kind() != plat.WINDOWS:
+        return False
+    try:
+        import winreg
+    except ImportError:  # pragma: no cover - Windows-only import
+        return False
+    try:
+        with winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\FileSystem"
+        ) as key:
+            value, _ = winreg.QueryValueEx(key, "SymlinkRemoteToLocalEvaluation")
+    except OSError:
+        return True
+    return value != 1
+
+
+def check_winget_symlinks(report: Report) -> None:
+    """Every winget shim is a symlink, which an ssh session cannot traverse.
+
+    Only over ssh, because that is the only session where it is true: the same
+    machine at the console follows those symlinks happily. Reported as a NOTE --
+    it is machine policy rather than a broken install, and the repair needs an
+    elevation this process does not have. `$PROFILE` prints the same guidance at
+    login; this is the copy you can ask for.
+    """
+    if not os.environ.get("SSH_CONNECTION"):
+        return
+    links = winget_links()
+    if links is None or not remote_symlinks_blocked():
+        return
+    try:
+        shims = sum(1 for e in os.scandir(links) if e.is_symlink())
+    except OSError:
+        shims = 0
+    report.note(
+        "winget-symlinks",
+        f"{shims} winget shim(s) in {links} cannot start in an ssh session "
+        "(remote-to-local symlink evaluation is disabled)",
+        "on the console, in an ELEVATED prompt: fsutil behavior set SymlinkEvaluation R2L:1",
+    )
 
 
 def check_config_stores(report: Report) -> None:
@@ -744,6 +797,7 @@ def collect() -> Report:
     src = check_clone(report, chezmoi)
     check_shell_integration(report)
     check_tools_on_path(report)
+    check_winget_symlinks(report)
     check_config_stores(report)
     check_memory_backend(report)
     check_prompt(report)

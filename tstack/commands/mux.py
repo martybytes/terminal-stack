@@ -27,7 +27,7 @@ import sys
 import time
 from pathlib import Path
 
-from .. import paths, store
+from .. import paths, proc, store
 from .. import platform as plat
 
 HELP = """tstack mux - WezTerm multiplexer domain: keep panes alive when the GUI dies.
@@ -87,17 +87,7 @@ def mux_bin() -> str | None:
 
 
 def _run(argv: list[str], timeout: int = 30) -> subprocess.CompletedProcess | None:
-    try:
-        return subprocess.run(
-            argv,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-            start_new_session=True,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
+    return proc.capture(argv, timeout=timeout)
 
 
 def mux_pids() -> list[str]:
