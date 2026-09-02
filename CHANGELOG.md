@@ -78,6 +78,16 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **The settings.json link walk no longer uses `readlink -f` (09/01/2026).**
+  It is GNU-only, and this pair runs on macOS on every apply -- BSD readlink had
+  no `-f` for years and `realpath` is absent on older releases, a rule
+  `bootstrap/_smb.sh` and `services/_stack.sh` already write down. The failure
+  would have been silent and macOS-only: nothing recorded, the restore never
+  runs, and a symlinked settings.json clobbered exactly as before. Replaced with
+  a manual walk that handles relative links and chains and is bounded at 40 hops,
+  because a symlink cycle would otherwise hang the apply forever. It does not
+  preserve the link's FORM -- a relative chain is restored as one absolute link
+  to the file at the end of it, same inode and same writes.
 - **`~/.claude/settings.json` survives an apply as a symlink (09/01/2026).**
   chezmoi's `modify_` script produces bytes; CHEZMOI does the write, and it
   writes a regular file. Measured on archlinux with chezmoi 2.72: the splice

@@ -3170,6 +3170,77 @@ def test_the_link_pair_is_a_no_op_on_an_ordinary_file(tmp_path):
 
 
 @pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+def test_a_relative_symlink_and_a_chain_both_resolve(tmp_path):
+    """`readlink -f` would have done this in one call -- and it is GNU-only.
+
+    This pair runs on macOS on every apply, where BSD readlink had no -f for
+    years and `realpath` is absent on older releases; the repo already writes
+    that rule down twice (bootstrap/_smb.sh, services/_stack.sh). The failure
+    would have been silent and macOS-only: nothing recorded, restore never runs,
+    and a symlinked settings.json gets clobbered exactly as before.
+
+    So the walk is by hand, and it has to handle what `-f` handled: a RELATIVE
+    link, and a CHAIN.
+    """
+    home = tmp_path / "home"
+    state = tmp_path / "state"
+    (home / ".claude").mkdir(parents=True)
+    tracked = tmp_path / "dots" / "settings.json"
+    tracked.parent.mkdir()
+    tracked.write_text('{"model": "opus"}\n', encoding="utf-8")
+
+    # ~/.claude/settings.json -> ../hop.json -> ../dots/settings.json,
+    # every hop RELATIVE, which is what `readlink -f` used to flatten for us.
+    # Each link resolves against its OWN directory: hop.json lives in home/, so
+    # `../dots/...` is tmp_path/dots/... .
+    hop = home / "hop.json"
+    hop.symlink_to(Path("..") / "dots" / "settings.json")
+    (home / ".claude" / "settings.json").symlink_to(Path("..") / "hop.json")
+
+    assert _run_link_script(LINK_RECORD, home, state).returncode == 0
+    record = state / "terminal-stack" / "claude-settings-symlink"
+    assert record.exists(), "a relative two-hop chain was not resolved"
+    assert Path(record.read_text(encoding="utf-8").strip()).resolve() == tracked.resolve()
+
+
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+def test_a_symlink_cycle_does_not_hang_the_apply(tmp_path):
+    """An apply that hangs forever is worse than one that skips a nicety."""
+    home = tmp_path / "home"
+    state = tmp_path / "state"
+    (home / ".claude").mkdir(parents=True)
+    a = home / ".claude" / "settings.json"
+    b = home / ".claude" / "other.json"
+    a.symlink_to(b)
+    b.symlink_to(a)
+
+    done = subprocess.run(
+        [BASH, str(LINK_RECORD)],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+        start_new_session=True,
+        env={"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(home),
+             "XDG_STATE_HOME": str(state)},
+    )
+    assert done.returncode == 0
+    assert not (state / "terminal-stack" / "claude-settings-symlink").exists()
+
+
+def test_the_link_scripts_avoid_the_gnu_only_flags():
+    """readlink -f and realpath are both absent on macOS releases this stack
+    supports. Named here so the next edit does not quietly reintroduce one."""
+    for script in (LINK_RECORD, LINK_RESTORE):
+        for line in script.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                continue
+            assert "readlink -f" not in stripped, f"{script.name}: {stripped}"
+            assert not stripped.startswith("realpath"), f"{script.name}: {stripped}"
+
+
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_a_stale_record_cannot_recreate_a_link_the_user_removed(tmp_path):
     """The record is cleared at the START of every apply, not only on success.
 

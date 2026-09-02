@@ -41,13 +41,40 @@ rm -f "$RECORD"
 
 [ -L "$TARGET" ] || exit 0
 
-# The link's destination, absolute. `readlink -f` resolves a relative link
-# against its own directory and follows any further hops, which is what we want:
-# the file that must actually receive the bytes is at the end of the chain, not
-# the first hop. A dangling link resolves to nothing and is left alone -- there
-# is no file to write through to, and inventing one is not this script's call.
-DEST="$(readlink -f -- "$TARGET" 2>/dev/null || true)"
-[ -n "$DEST" ] && [ -f "$DEST" ] || exit 0
+# The link's destination, absolute, walked by hand.
+#
+# NOT `readlink -f`: that is GNU-only, and this script runs on macOS on every
+# apply. BSD readlink had no -f for years and `realpath` is not on older macOS
+# either -- the same rule bootstrap/_smb.sh and services/_stack.sh already write
+# down. The failure would have been silent and macOS-only: DEST empty, exit 0,
+# no record, and the restore below simply never runs, so a macOS user whose
+# ~/.claude/settings.json is a symlink (yadm and stow are common there too) gets
+# exactly the clobber this pair exists to prevent, with nothing to see.
+#
+# Bounded at 40 hops. A symlink CYCLE would otherwise spin here forever, and an
+# apply that hangs is worse than an apply that skips a nicety.
+p="$TARGET"
+hops=0
+while [ -L "$p" ]; do
+    hops=$((hops + 1))
+    if [ "$hops" -gt 40 ]; then
+        echo "!! ~/.claude/settings.json: symlink chain too deep (a cycle?); not recorded." >&2
+        exit 0
+    fi
+    t="$(readlink -- "$p" 2>/dev/null || true)"
+    [ -n "$t" ] || exit 0
+    case "$t" in
+        /*) p="$t" ;;
+        *)  p="$(dirname -- "$p")/$t" ;;
+    esac
+done
+
+# Absolute and free of `..`, so the restore writes where we think it does. The
+# directory is resolved with `cd -P`; the basename is kept as-is because the
+# file itself is what we are after, not whatever it might further resolve to.
+[ -f "$p" ] || exit 0
+DEST="$(cd -- "$(dirname -- "$p")" 2>/dev/null && pwd -P)/$(basename -- "$p")"
+[ -f "$DEST" ] || exit 0
 
 mkdir -p "$STATE_DIR"
 printf '%s\n' "$DEST" > "$RECORD"

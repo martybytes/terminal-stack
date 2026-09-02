@@ -305,11 +305,20 @@ write), so a pair of apply hooks does:
 and restores the link. Not Omarchy-specific — any dotfile manager that symlinks
 this file hits the same thing.
 
-Two traps found by running it: the two scripts' **basenames must differ**
+Three traps found by running it: the two scripts' **basenames must differ**
 (chezmoi strips the `run_before_`/`run_after_` prefix to name the source entry,
 and a matching pair collapses into one with `inconsistent state`, killing the
-whole apply), and the restore may not use `cmp` (diffutils is not present on a
-minimal Arch install).
+whole apply); the restore may not use `cmp` (diffutils is not present on a
+minimal Arch install); and the walk may not use **`readlink -f`**, which is
+GNU-only — the same rule `bootstrap/_smb.sh` and `services/_stack.sh` already
+write down. That last one would have failed silently and on macOS only: nothing
+recorded, restore never runs, and a symlinked `settings.json` clobbered exactly
+as before. The walk is by hand, handles relative links and chains, and is
+bounded at 40 hops so a symlink cycle cannot hang an apply.
+
+It does not preserve the link's *form*: a relative chain is restored as one
+absolute link to the file at the end of it. Same inode, same writes; a dotfile
+manager that authored a relative link will simply rewrite it on its next run.
 
 ## Docker
 
