@@ -209,12 +209,15 @@ def remote_symlinks_blocked() -> bool:
     counts as blocked. Read from the registry rather than `fsutil behavior
     query`, which is the same answer for the cost of a process.
     """
-    if plat.kind() != plat.WINDOWS:
+    # sys.platform, not just plat.kind(): typeshed gates every winreg attribute
+    # behind win32, so on a Linux CI host `winreg.OpenKey` does not exist as far
+    # as mypy is concerned. This form narrows statically on every platform, where
+    # a `type: ignore` would be flagged as unused on Windows by
+    # warn_unused_ignores and fail the gate on the other side.
+    if sys.platform != "win32" or plat.kind() != plat.WINDOWS:
         return False
-    try:
-        import winreg
-    except ImportError:  # pragma: no cover - Windows-only import
-        return False
+    import winreg
+
     try:
         with winreg.OpenKey(
             winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\FileSystem"

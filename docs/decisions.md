@@ -2676,7 +2676,12 @@ directory on `PATH`.
 
 Two details that are easy to get wrong. The check reads the **registry**, not
 `fsutil behavior query`: same answer, and a login should not spawn a process to
-learn it. And a **missing** value counts as blocked, because absent is the
+learn it. The Python twin's `winreg` import has to sit behind
+`if sys.platform != "win32"` rather than a `type: ignore`: typeshed gates every
+winreg attribute behind win32, so a Linux CI host reports `Module has no
+attribute "OpenKey"`, while an ignore comment would then be *unused* on Windows
+and `warn_unused_ignores` would fail the gate on the other side. Reproduce that
+one with `mypy --platform linux`; the platform mypy assumes is the host's. And a **missing** value counts as blocked, because absent is the
 Windows default; treating unknown as fine would silence the notice on precisely
 the machines that need it. `tstack doctor` repeats it as the `winget-symlinks`
 NOTE, so the guidance survives the session where it was printed.
