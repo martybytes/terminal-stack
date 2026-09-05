@@ -6,6 +6,31 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **Every `ssh` and `git push` in every WezTerm pane failed while the agent was
+  healthy (09/04/2026).** `ssh-add -l` returned
+
+  ```
+  Error connecting to agent: No such file or directory
+  ```
+
+  in brand-new tabs, after `Restart-Service ssh-agent`, from an elevated shell —
+  while the identical command in cmd.exe or Windows Terminal listed both keys.
+  Nothing in the repo, `$PROFILE` or `~/.ssh/config` set `SSH_AUTH_SOCK`; WezTerm
+  did. `mux_enable_ssh_agent` defaults to **true** and sets the variable for panes
+  in the **local** domain — `tstack mux off` does not opt out — pointing it at a
+  symlink WezTerm creates at `<data dir>/wezterm/agent.<gui pid>`. Creating a
+  symlink on Windows needs a privilege an ordinary user does not hold, so the call
+  failed with `os error 1314`, WezTerm logged it where nobody looks (Ctrl+Shift+L)
+  and exported the variable anyway. Windows OpenSSH honours `SSH_AUTH_SOCK` ahead
+  of its pipe, so every pane got a path to a file that never existed.
+
+  `windows/.wezterm.lua.tmpl` now pins both halves — `mux_enable_ssh_agent = false`
+  *and* `set_environment_variables` naming `\\.\pipe\openssh-ssh-agent`. Each alone
+  fails, differently: the first is overridden by the mux agent, the second leaves
+  the variable set-but-empty, which Windows OpenSSH also rejects. macOS keeps the
+  stock behaviour, where the value is a real socket proxying the launchd agent.
+  `doc troubleshooting` gains the symptom, `doc ssh-config` and `doc github-keys`
+  the Windows pipe-vs-socket rule, and `docs/powershell-quirks.md` the diagnosis.
 - **Docs caught up with `tstack apply` (08/29/2026).** README and INSTALL.md
   still told people the macOS, WSL and Linux one-liners "end with `chezmoi
   apply`". They end with `tstack apply`, and the difference — the conflict

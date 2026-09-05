@@ -23,6 +23,13 @@ for _, dom in ipairs(config.ssh_domains) do
   dom.assume_shell = 'Posix'
 end
 
+-- No SSH_AUTH_SOCK handling here, unlike windows/.wezterm.lua.tmpl. That twin
+-- pins mux_enable_ssh_agent = false plus set_environment_variables, because on
+-- Windows WezTerm points SSH_AUTH_SOCK at a symlink it lacks the privilege to
+-- create, and Windows OpenSSH needs the named pipe instead. On macOS the
+-- default behaviour is correct: the value is a real unix socket proxying the
+-- launchd agent. The divergence is deliberate -- see the Windows twin.
+
 -- Optional: host panes in a multiplexer process outside the GUI, so a GUI crash
 -- leaves every pane (and everything running in it) alive and relaunching WezTerm
 -- reattaches. OFF by default — the mux server loads its OWN copy of this file, so

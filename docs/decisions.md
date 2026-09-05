@@ -2802,3 +2802,87 @@ bare `chezmoi apply` instead. That asymmetry is the same shape as the
 `Invoke-TsWizard` duplication that killed the Windows install, and it is worth
 noticing that both were "the good version exists, and the path that needed it
 most could not reach it".
+
+## Why the Windows WezTerm config pins `SSH_AUTH_SOCK` to the named pipe
+
+On ORION every WezTerm pane failed the same way:
+
+```
+Error connecting to agent: No such file or directory
+```
+
+`ssh-add -l`, `ssh git@github.com`, `git push` — all of it, in brand-new tabs,
+after `Restart-Service ssh-agent`, from an elevated shell, from a fresh WezTerm.
+Everything a check would look at said the stack was healthy: `Get-Service
+ssh-agent` reported Running as LocalSystem, `ssh-add.exe` resolved to
+`C:\Windows\System32\OpenSSH\ssh-add.exe`, `\\.\pipe\openssh-ssh-agent` was present in
+`\\.\pipe\`, and the identical command in cmd.exe or Windows Terminal listed
+both keys. The terminal was the variable.
+
+WezTerm's [`mux_enable_ssh_agent`](https://wezterm.org/config/lua/config/mux_enable_ssh_agent.html)
+defaults to **true**, and it sets `SSH_AUTH_SOCK` for panes spawned in the
+**local** domain — not only for mux or SSH domains, so `weztermMux = off` does
+not opt out of it. The value points at a symlink WezTerm maintains at
+`<data dir>/wezterm/agent.<gui pid>`, retargeted at whichever mux client was
+active last. Creating a symlink on Windows needs `SeCreateSymbolicLinkPrivilege`,
+which an ordinary user does not hold unless Developer Mode is on, so the call
+fails:
+
+```
+ERROR mux::ssh_agent > failed to set "...gent.6524" to initial inherited
+SSH_AUTH_SOCK value of "...gent.27136": failed to create symlink ...:
+A required privilege is not held by the client. (os error 1314)
+```
+
+That error goes to the GUI log (Ctrl+Shift+L), which nobody reads while chasing
+an ssh problem — and WezTerm exports the variable anyway. Windows OpenSSH
+honours `SSH_AUTH_SOCK` ahead of its default pipe, so every pane got handed a
+path to a file that was never created. The agent was fine the entire time.
+
+The fix is two lines, and both are load-bearing:
+
+```lua
+config.mux_enable_ssh_agent = false
+config.set_environment_variables = { SSH_AUTH_SOCK = [[\\.\pipe\openssh-ssh-agent]] }
+```
+
+Measured, not assumed, by spawning `wezterm start --always-new-process` panes
+and reading `SSH_AUTH_SOCK` plus `ssh-add -l` out of each one:
+
+| config | `SSH_AUTH_SOCK` in the pane | `ssh-add -l` |
+|---|---|---|
+| stock | `.../wezterm/agent.<pid>` (never created) | `Error connecting to agent: No such file or directory` |
+| `set_environment_variables` alone | `.../wezterm/agent.<pid>` — the mux agent **overrides** it | same failure |
+| `mux_enable_ssh_agent = false` alone | **empty string** | `Could not open a connection to your authentication agent` |
+| both | `\\.\pipe\openssh-ssh-agent` | both keys listed; `ssh -T git@github.com` authenticates |
+
+Three traps in that table. `set_environment_variables` on its own loses — the
+mux agent runs after it. `mux_enable_ssh_agent = false` on its own leaves the
+variable **set but empty**, which Windows OpenSSH rejects with a *different*
+message, so a half fix looks like a new bug. And
+[`default_ssh_auth_sock`](https://wezterm.org/config/lua/config/default_ssh_auth_sock.html)
+reads like the intended knob for exactly this — an alternative identity agent —
+but never reached a local pane in testing. Do not swap it in for either line.
+
+Two things this is **not**. It is not a Unix agent: nothing starts `ssh-agent -s`
+or hands out a socket path, and `AddKeysToAgent yes` / `IdentitiesOnly yes` in
+`~/.ssh/config` are untouched. And naming the pipe explicitly is not the same
+mistake as setting a socket path — Win32 OpenSSH accepts a pipe path in
+`SSH_AUTH_SOCK` and connects to it, verified directly. Leaving the variable
+unset would be equally correct, but WezTerm gives us no way to do that; naming
+the pipe is how we say "the default" in a form WezTerm cannot overwrite with an
+empty string.
+
+macOS keeps the stock behaviour: there the value is a real unix socket proxying
+the launchd agent, and it works. `dot_wezterm.lua.tmpl` carries a comment
+recording the divergence so the two GUI configs stay explainable.
+
+Unrelated leftovers found in the same sweep, and cleared: `SSH_AUTH_SOCK`
+existed as an **empty** `REG_SZ` under both `HKCU\Environment` and the machine
+`Session Manager\Environment`. Windows drops empty values when it builds a
+process environment block, so neither reached a shell and neither was the
+cause — but an empty `SSH_AUTH_SOCK` breaks Windows OpenSSH the moment anything
+propagates it, so they are worth clearing rather than leaving as a trap. The
+user-scope one was deleted; the machine-scope one needs an elevated
+`reg delete "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment" /v
+SSH_AUTH_SOCK /f`.

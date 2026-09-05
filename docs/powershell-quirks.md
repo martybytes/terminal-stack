@@ -109,6 +109,68 @@ PowerShell's `-File` accepts forward slashes on Windows. Forward slashes have no
 
 Commit: [`a63044a`](../CHANGELOG.md).
 
+## `ssh-add`: "Error connecting to agent" in WezTerm panes only
+
+**Symptom.** Every `ssh`, `ssh-add` and `git push` in every WezTerm pane fails with
+
+```
+Error connecting to agent: No such file or directory
+```
+
+in brand-new tabs, after `Restart-Service ssh-agent`, from an elevated shell, and
+after a full WezTerm restart. Everything you would check says the stack is fine:
+`Get-Service ssh-agent` is Running, `ssh-add.exe` resolves to
+`C:\Windows\System32\OpenSSH\ssh-add.exe`, `\\.\pipe\openssh-ssh-agent` is present, and the
+identical command in **cmd.exe or Windows Terminal lists your keys**. The terminal
+is the variable, not the agent.
+
+**Cause.** WezTerm's `mux_enable_ssh_agent` defaults to **true** and sets
+`SSH_AUTH_SOCK` for panes in the **local** domain — so `tstack mux off` does not opt
+out of it. The value points at a symlink WezTerm maintains at
+`<data dir>/wezterm/agent.<gui pid>`. Creating a symlink on Windows needs
+`SeCreateSymbolicLinkPrivilege`, which an ordinary user does not hold unless
+Developer Mode is on, so the call fails and WezTerm logs (Ctrl+Shift+L, which
+nobody reads while chasing an ssh problem):
+
+```
+ERROR mux::ssh_agent > failed to set "...gent.6524" to initial inherited
+SSH_AUTH_SOCK value of "...gent.27136": failed to create symlink ...:
+A required privilege is not held by the client. (os error 1314)
+```
+
+It then exports the variable anyway. Windows OpenSSH honours `SSH_AUTH_SOCK` ahead
+of its default pipe, so every pane is handed a path to a file that was never
+created. The agent was healthy the whole time.
+
+**Fix.** Two lines in `windows/.wezterm.lua.tmpl`, both load-bearing:
+
+```lua
+config.mux_enable_ssh_agent = false
+config.set_environment_variables = { SSH_AUTH_SOCK = [[\\.\pipe\openssh-ssh-agent]] }
+```
+
+`set_environment_variables` alone loses — the mux agent runs after it and puts the
+dangling path back. `mux_enable_ssh_agent = false` alone leaves the variable **set
+but empty**, which Windows OpenSSH rejects with a *different* message
+("Could not open a connection to your authentication agent"), so a half fix reads
+as a new bug. `default_ssh_auth_sock` looks like the intended knob and never
+reached a local pane in testing — do not swap it in.
+
+Naming the pipe is not the same mistake as setting a Unix socket path: Win32
+OpenSSH accepts a pipe path in `SSH_AUTH_SOCK` and connects to it. Leaving the
+variable unset would be equally correct, but WezTerm gives no way to do that.
+
+**Check it from the failing shell, not a fresh one:**
+
+```powershell
+[bool](Test-Path Env:SSH_AUTH_SOCK); $env:SSH_AUTH_SOCK   # set-but-empty breaks it too
+[System.IO.Directory]::GetFiles('\\\\.\\pipe\\') -match 'openssh'
+ssh-add -l
+```
+
+Full rationale and the measured config matrix: `decisions.md` § "Why the Windows
+WezTerm config pins `SSH_AUTH_SOCK` to the named pipe".
+
 ## Claude Code overwrites the tab title
 
 **Symptom.** Our `cc` PowerShell wrapper set the per-project tab title (then `cc • <project>`; today the bare project leaf) via OSC 0 (`Write-Host -NoNewline "ESC ]0;cc • myproject BEL"`). Claude Code launches, and the tab title changes to the conversation slug (e.g., `distinguish-claude-code-tabs-pwsh`).
