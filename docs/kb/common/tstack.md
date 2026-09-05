@@ -10,6 +10,7 @@ commands any more, and no aliases for them.
 | `tstack doctor` | diagnose the install; `--quiet`, `--json`, `--repair` (see below) |
 | `tstack update` | pull the latest stack and re-apply |
 | `tstack rollback` | undo the last update |
+| `tstack apply` | re-apply the dotfiles, explaining any conflict first (POSIX) |
 | `tstack services` | the Docker service stacks - see `doc services` |
 | `tstack mux` | the WezTerm multiplexer domain |
 | `tstack wezterm` | WezTerm channel and updates |
@@ -35,6 +36,62 @@ you type never changes as each one is ported.
 On POSIX, `tstack config apps`, `tts` and `reconfigure` hand back to
 `bootstrap/ts-config.sh`: they end in a package-manager install or the
 bootstrap's own save sequence, which the port deliberately never covers.
+
+
+## "… has changed since chezmoi last wrote it?"
+
+You edited a file the stack owns -- `~/.zshrc`, `~/.tmux.conf`,
+`~/.config/starship.toml` -- or something else did, and now an update wants to
+replace it. Left to itself chezmoi asks
+
+```
+.zshrc has changed since chezmoi last wrote it?
+> diff/overwrite/all-overwrite/skip/quit
+```
+
+and says nothing about what you would lose. `tstack apply` asks the same
+question with the answer spelled out, and **backs your version up before
+overwriting it** -- chezmoi does not, on POSIX.
+
+```sh
+tstack apply              # explain, then decide file by file
+tstack apply --overwrite  # take the stack's version everywhere, backing yours up
+tstack apply --check      # list what would be asked about; change nothing
+```
+
+| answer | what happens |
+|---|---|
+| `overwrite` | your file is copied to `<file>.bak.YYYYMMDD`, then the stack's version is installed |
+| `all` | the same, for every remaining file. Usually what you want |
+| `diff` | show exactly what would change |
+| `merge` | open chezmoi's merge tool. It edits the **source clone**, which `tstack update` then refuses to run from until you commit or discard that change |
+| `quit` | stop. Nothing is applied and nothing is backed up |
+
+**Overwriting is the right answer more often than it sounds**, because these
+files are not where your settings belong. The stack owns them outright and
+rewrites them on every update, so an edit made directly to `~/.zshrc` is
+temporary by construction. Put your own configuration in:
+
+- `~/.zshrc.local` — sourced at the end of `~/.zshrc` (see `dot_zshrc.local.example`)
+- `Documents\PowerShell\profile.local.ps1` — dot-sourced by `$PROFILE`
+
+Neither is ever managed or overwritten, so anything you move there survives the
+question permanently.
+
+To recover a file you overwrote:
+
+```sh
+ls ~/.zshrc.bak.*            # newest wins; .1, .2 are same-day re-runs
+cp ~/.zshrc.bak.20260829 ~/.zshrc
+```
+
+### It stopped without asking
+
+A run with no terminal to ask on — CI, a piped script, some `curl | bash`
+setups — cannot make the choice for you, so it makes none: it lists the files,
+prints these same options and exits 4 having changed nothing. Re-run
+`tstack apply` from a terminal, or `tstack apply --overwrite` if you already
+know you want the stack's versions.
 
 ## `tstack ui`
 

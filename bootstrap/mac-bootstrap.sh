@@ -49,7 +49,15 @@ ts_confirm_headless
 # too, from linux-bootstrap.sh). A headless Mac has no window server, so it is
 # never asked and never gets one.
 ts_is_headless || TS_WIZ_ASK_TERMINALS=1
-ts_wizard_collect || exit 0
+# rc 3 is "the user quit at the review" -- the only rc that means "stop, but
+# nothing is wrong". `|| exit 0` reported a MISSING PYTHON as success too, and
+# install-mac.sh then ran chezmoi apply with no chezmoi.toml written.
+ts_wizard_collect; _wiz_rc=$?
+case "$_wiz_rc" in
+    0) ;;
+    3) echo "$INFO wizard cancelled - nothing was installed or changed."; exit 0 ;;
+    *) echo "$WARN the install questionnaire failed (exit $_wiz_rc)." >&2; exit "$_wiz_rc" ;;
+esac
 
 # 2b. Required formulae first — these are prerequisites, not optional extras,
 # and chezmoi in particular must exist before the next step: ts_save_config runs

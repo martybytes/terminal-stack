@@ -15,10 +15,41 @@
 : "${INFO:=$'\033[1;34m==>\033[0m'}"
 : "${WARN:=$'\033[1;33m!!\033[0m'}"
 
+# $USER is set by LOGIN shells, and nothing else guarantees it. All three
+# bootstraps run under `set -u` and print "Detected: user $USER" as their first
+# line, so on any non-login invocation -- `docker run ... bash -c`, `su - -c`,
+# cron, a systemd unit -- the installer aborted on line one with
+# `USER: unbound variable`. `id -un` is the actual source of truth; exported
+# because common_login_shell_zsh hands it to getent and chsh.
+: "${USER:="$(id -un 2>/dev/null || true)"}"
+export USER
+
 # shellcheck source=_cc_tts.sh
 . "$(dirname -- "${BASH_SOURCE[0]}")/_cc_tts.sh"
 # shellcheck source=_wezterm.sh
 . "$(dirname -- "${BASH_SOURCE[0]}")/_wezterm.sh"
+
+# The repo-wide backup convention, in one place: <path>.bak.YYYYMMDD, then .1,
+# .2 on a same-day re-run, never clobbering a same-day backup. ARCHITECTURE.md
+# states the rule; it had been open-coded in _cc_tts.sh and again in
+# run_before_20-backup-ghostty.sh, and `chezmoi apply` itself takes no backup at
+# all on POSIX -- which is what makes "overwrite" a destructive answer unless
+# something like this runs first.
+#
+# Prints the backup path on stdout so the caller can report it. Returns 1 when
+# there was nothing to back up.
+ts_backup_file() {
+    local f="$1" stamp base bak n=1
+    [ -f "$f" ] || return 1
+    stamp="$(date +%Y%m%d)"
+    base="$f.bak.$stamp"
+    bak="$base"
+    while [ -e "$bak" ]; do bak="$base.$n"; n=$((n + 1)); done
+    # cp, not mv: a failed apply must leave the original in place.
+    cp -p -- "$f" "$bak" 2>/dev/null || cp -- "$f" "$bak" || return 1
+    printf '%s
+' "$bak"
+}
 
 # ── App catalog ────────────────────────────────────────────────────────────────
 # The toggleable apps the wizard/picker offers, read from bootstrap/apps.conf.
@@ -53,7 +84,12 @@ ts_apps_load() {
     local _plat
     case "$(uname -s 2>/dev/null)" in
         Darwin) _plat=macos ;;
-        *)      if [ -d /mnt/c/Users ]; then _plat=wsl; else _plat=linux; fi ;;
+        *)      # /proc/version, matching tstack/platform.py and _ts_is_wsl.
+                # `-d /mnt/c/Users` also matches a native-Linux box with an NTFS
+                # mount, and then bash said wsl while Python said linux -- so the
+                # picker offered nvtop and the installer's catalog lacked it.
+                if [ -r /proc/version ] && grep -qi microsoft /proc/version 2>/dev/null
+                then _plat=wsl; else _plat=linux; fi ;;
     esac
     TS_APPS_ROWS="$(printf '%s\n' "$TS_APPS_ROWS" | awk -v p="$_plat" '
         $4=="all" { print; next }
@@ -113,7 +149,7 @@ ts_app_group_of() {
 ts_app_desc() {
     ts_apps_load || return 0
     printf '%s\n' "$TS_APPS_ROWS" \
-        | awk -v id="$1" '$1==id{$1="";$2="";$3="";$4="";sub(/^ +/,"");print;exit}'
+        | awk -v id="$1" '$1==id{ sub(/^[[:space:]]*[^[:space:]]+[[:space:]]+[^[:space:]]+[[:space:]]+[^[:space:]]+[[:space:]]+[^[:space:]]+[[:space:]]+/, ""); print; exit }'
 }
 
 # The ids pre-ticked for a machine class. Neither set is a subset of the other:

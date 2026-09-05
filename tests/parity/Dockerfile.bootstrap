@@ -1,0 +1,37 @@
+# Bootstrap target: actually RUN the installer, on a real native Linux.
+#
+# tests/parity/Dockerfile runs the suite. This one runs `linux-bootstrap.sh`
+# end to end, because the suite structurally cannot see a whole class of bug:
+# `bash -n` checks syntax, and the static resolvers in tests/ check names, but
+# neither notices that the wizard was invoked without TERMINAL_STACK_DIR and so
+# offered an EMPTY app catalog -- silently, on any clone outside the built-in
+# candidate list. The Windows twin of that bug (an unassigned $SourceDir) killed
+# every fresh install, and nothing in this repo executed an install path on any
+# platform to find out.
+#
+# Not a macOS target, and it cannot become one: containers share the host
+# kernel, so Darwin cannot be containerised. See tests/parity/run.sh.
+
+ARG BASE=debian:13-slim
+FROM ${BASE}
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONDONTWRITEBYTECODE=1
+
+# Only what a bare machine really has. The bootstrap is supposed to install the
+# rest itself, and pre-installing its dependencies here would hide the very
+# failures this target exists to catch. sudo is the exception: the bootstrap
+# shells out to it (apt, chsh) and refuses to run as root.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        sudo ca-certificates curl git python3 procps \
+    && rm -rf /var/lib/apt/lists/*
+
+# common_require_non_root refuses uid 0, so the run needs a real user -- with
+# passwordless sudo, because there is no one here to type a password.
+RUN useradd --create-home --shell /bin/bash tester \
+    && echo 'tester ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/tester \
+    && chmod 0440 /etc/sudoers.d/tester
+
+USER tester
+WORKDIR /home/tester
+CMD ["/bin/bash", "-c", "echo 'run via tests/parity/run.sh bootstrap'"]

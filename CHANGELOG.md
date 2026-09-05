@@ -85,6 +85,32 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Added
 
+- **A container target that actually runs the installer (08/28/2026).**
+  `tests/parity/run.sh bootstrap` builds `Dockerfile.bootstrap` — a non-root user
+  with passwordless sudo, because `common_require_non_root` refuses uid 0 — and
+  runs `linux-bootstrap.sh` end to end on real native Linux, from a clone at a
+  path deliberately off the candidate list, then asserts on what it left behind.
+  Nothing in this repo had ever executed an install path on any platform; `bash
+  -n` checks syntax and the static resolvers check names, and neither can see an
+  unset variable or an empty catalog. It found the `$USER` bug on its first run.
+  It asserts on the wizard's ANSWER rather than its console output, because the
+  questionnaire writes its menus to the terminal — an earlier version of the check
+  grepped stdout for a warning that never arrives there, and so could not fail.
+  Opt-in: it installs packages and wants the network, so it is not in the default
+  target set.
+
+- **The PowerShell gates that were missing entirely (08/28/2026).** CI ran `bash
+  -n` over every shell script on four platforms and checked `.ps1` *nowhere*, with
+  the Windows job's syntax step explicitly skipped. Every `.ps1` in the repo
+  parses, so a parse gate alone would not have caught `$SourceDir` either.
+  `tests/test_shell_scope.py` walks the AST for script-scope variables nothing
+  assigns — counting a dot-sourced file's script-level assignments only, because
+  counting its *function parameters* is precisely what made `$SourceDir` look
+  defined — and for `"$var?"`, where PowerShell swallows the `?` into the name.
+  `tests/test_shell_bash_helpers.py` resolves snake_case helper calls, which the
+  existing `ts_`-prefixed check could not see. CI gains a parse gate on all three
+  runners.
+
 - **The dashboard configures all of it now, not just the settings
   (08/28/2026).** Three settings were blind text boxes and one was a
   space-separated string, because their valid values are facts about the machine

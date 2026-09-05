@@ -36,10 +36,19 @@ ts_wizard_collect() {
     export TS_HEADLESS_RESOLVED
     local _root
     _root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-    if "$_python" "$_root/tstack/main.py" wizard \
+    # TERMINAL_STACK_DIR pins the clone for the Python side. Without it,
+    # apps.catalog() falls back to paths.resolve_source_dir()'s fixed candidate
+    # list -- and the wizard runs BEFORE chezmoi is configured, so on a clone at
+    # any other path the catalog came back empty and the questionnaire offered no
+    # tools at all, silently.
+    #
+    # TS_ASSUME_YES goes through the ENVIRONMENT, not as a flag: `${VAR:+...}`
+    # tests non-empty, so TS_ASSUME_YES=0 skipped the review here while
+    # `tstack wizard` (which reads the value, not its presence) still showed it.
+    if TERMINAL_STACK_DIR="${TERMINAL_STACK_DIR:-$_root}" \
+            "$_python" "$_root/tstack/main.py" wizard \
             --emit sh --out "$_wiz" \
-            ${TS_WIZ_ASK_TERMINALS:+--ask-terminals} \
-            ${TS_ASSUME_YES:+--assume-yes}; then
+            ${TS_WIZ_ASK_TERMINALS:+--ask-terminals}; then
         # shellcheck disable=SC1090
         . "$_wiz"
         rm -f "$_wiz"
