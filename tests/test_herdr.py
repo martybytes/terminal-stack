@@ -23,6 +23,7 @@ sys.path.insert(0, str(ROOT))
 
 from tstack import herdr, store  # noqa: E402
 from tstack import platform as plat  # noqa: E402
+from tstack.commands import herdr as command  # noqa: E402
 
 # What a real machine had before the stack touched it. Used verbatim so the
 # preservation tests are testing the case that actually occurred.
@@ -284,3 +285,167 @@ def test_server_state_reads_the_server_block_not_the_first_line(monkeypatch):
 def test_windows_side_is_none_off_wsl(monkeypatch):
     monkeypatch.setattr(plat, "kind", lambda: plat.LINUX)
     assert herdr.windows_side() is None
+
+
+def test_windows_side_says_so_when_interop_cannot_see_herdr(monkeypatch):
+    monkeypatch.setattr(plat, "kind", lambda: plat.WSL)
+    monkeypatch.setattr(herdr.shutil, "which", lambda name: None)
+    assert "not on PATH" in (herdr.windows_side() or "")
+
+
+def test_server_state_falls_back_to_the_exit_code(monkeypatch):
+    """A `herdr status` with no server block still has to say something."""
+
+    class Ran:
+        returncode = 1
+        stdout = "client:\n  version: 0.8.2\n"
+        stderr = ""
+
+    monkeypatch.setattr(herdr, "_run", lambda *a, **k: Ran())
+    monkeypatch.setattr(herdr, "binary", lambda: "herdr")
+    assert herdr.server_state() == "not running"
+
+
+def test_server_state_says_so_when_herdr_is_absent(monkeypatch):
+    monkeypatch.setattr(herdr, "binary", lambda: None)
+    assert herdr.server_state() == "herdr is not installed"
+
+
+def test_version_and_channel_are_none_without_the_binary(monkeypatch):
+    monkeypatch.setattr(herdr, "binary", lambda: None)
+    assert herdr.version() is None
+    assert herdr.channel() is None
+
+
+def test_channel_is_read_back_never_stored(monkeypatch):
+    """Detected, like the WezTerm channel. A stored value can disagree."""
+
+    class Ran:
+        returncode = 0
+        stdout = "stable\n"
+        stderr = ""
+
+    monkeypatch.setattr(herdr, "binary", lambda: "herdr")
+    monkeypatch.setattr(herdr, "_run", lambda *a, **k: Ran())
+    assert herdr.channel() == "stable"
+
+
+# ------------------------------------------------------------------- reporting
+
+
+def _installed(monkeypatch, version: str = "herdr 0.8.2") -> None:
+    monkeypatch.setattr(herdr, "binary", lambda: "herdr")
+    monkeypatch.setattr(herdr, "version", lambda: version)
+    monkeypatch.setattr(herdr, "channel", lambda: "stable")
+    monkeypatch.setattr(herdr, "server_state", lambda: "running")
+    monkeypatch.setattr(herdr, "windows_side", lambda: None)
+
+
+def test_status_reports_an_absent_config(config, monkeypatch, capsys):
+    _installed(monkeypatch)
+    monkeypatch.setattr(herdr, "collisions", lambda: [])
+    assert herdr.status(print) == 0
+    out = capsys.readouterr().out
+    assert "(absent)" in out
+    assert "read back, never stored" in out
+
+
+def test_status_distinguishes_our_file_from_yours(config, monkeypatch, capsys):
+    _installed(monkeypatch)
+    monkeypatch.setattr(herdr, "collisions", lambda: [])
+    config.write_text(HAND_WRITTEN, encoding="utf-8")
+    herdr.status(print)
+    assert "yours" in capsys.readouterr().out
+    config.write_text(herdr.splice(HAND_WRITTEN), encoding="utf-8")
+    herdr.status(print)
+    assert "carries our" in capsys.readouterr().out
+
+
+def test_status_names_both_places_to_fix_a_collision(config, monkeypatch, capsys):
+    _installed(monkeypatch)
+    monkeypatch.setattr(herdr, "collisions", lambda: [("tmuxPrefix", "ctrl-b")])
+    herdr.status(print)
+    out = capsys.readouterr().out
+    assert "WARNING" in out
+    assert "tstack config" in out
+    assert "[keys] prefix" in out
+
+
+def test_status_says_when_herdr_is_not_installed(config, monkeypatch, capsys):
+    monkeypatch.setattr(herdr, "binary", lambda: None)
+    monkeypatch.setattr(herdr, "version", lambda: None)
+    monkeypatch.setattr(herdr, "collisions", lambda: [])
+    assert herdr.status(print) == 0
+    assert "not installed" in capsys.readouterr().out
+
+
+def test_status_reports_the_windows_server_too(config, monkeypatch, capsys):
+    """Two independent servers, so both get said out loud."""
+    _installed(monkeypatch)
+    monkeypatch.setattr(herdr, "windows_side", lambda: "running")
+    monkeypatch.setattr(herdr, "collisions", lambda: [])
+    herdr.status(print)
+    assert "Windows side" in capsys.readouterr().out
+
+
+def test_update_reports_and_installs_nothing(config, monkeypatch, capsys):
+    _installed(monkeypatch)
+    assert herdr.report_update(print) == 0
+    out = capsys.readouterr().out
+    assert "herdr update" in out
+    assert "does not run that for you" in out
+
+
+def test_update_fails_when_herdr_is_absent(config, monkeypatch, capsys):
+    monkeypatch.setattr(herdr, "version", lambda: None)
+    assert herdr.report_update(print) == 1
+    assert "not installed" in capsys.readouterr().out
+
+
+def test_off_on_a_machine_with_no_config_says_nothing_alarming(config, monkeypatch, capsys):
+    assert herdr.turn_off(print, lambda: None) == 0
+    assert not config.exists()
+
+
+# ------------------------------------------------------- the command entry point
+
+
+def test_help_is_printed_for_every_help_flag(capsys):
+    for flag in ("-h", "--help", "help"):
+        assert command.main([flag]) == 0
+        assert "the managed herdr config" in capsys.readouterr().out
+
+
+def test_an_unknown_verb_is_usage_not_a_crash(capsys):
+    assert command.main(["frobnicate"]) == 2
+    assert "unknown action" in capsys.readouterr().err
+
+
+def test_a_stray_argument_is_refused(capsys):
+    assert command.main(["on", "extra"]) == 2
+    assert "unexpected argument" in capsys.readouterr().err
+
+
+def test_no_verb_means_status(config, monkeypatch, capsys):
+    monkeypatch.setattr(herdr, "status", lambda say: 0)
+    assert command.main([]) == 0
+
+
+def test_dry_run_saves_nothing(config, capsys):
+    assert command.main(["on", "--dry-run"]) == 0
+    assert "would set herdrConfig = on" in capsys.readouterr().out
+    assert herdr.setting() == "off"
+    assert not config.exists()
+
+
+def test_the_command_routes_on_and_off(config, monkeypatch):
+    monkeypatch.setattr(command.store, "chezmoi_init", lambda: True)
+    assert command.main(["on"]) == 0
+    assert herdr.setting() == "on"
+    assert command.main(["off"]) == 0
+    assert herdr.setting() == "off"
+
+
+def test_the_command_routes_update(config, monkeypatch, capsys):
+    monkeypatch.setattr(herdr, "version", lambda: None)
+    assert command.main(["update"]) == 1
