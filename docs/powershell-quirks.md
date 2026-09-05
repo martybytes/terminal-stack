@@ -163,8 +163,9 @@ variable unset would be equally correct, but WezTerm gives no way to do that.
 **Check it from the failing shell, not a fresh one:**
 
 ```powershell
-[bool](Test-Path Env:SSH_AUTH_SOCK); $env:SSH_AUTH_SOCK   # set-but-empty breaks it too
-[System.IO.Directory]::GetFiles('\\\\.\\pipe\\') -match 'openssh'
+Test-Path Env:SSH_AUTH_SOCK   # True with an EMPTY value still breaks ssh
+$env:SSH_AUTH_SOCK            # must be the pipe, not a wezterm agent.<pid> path
+[System.IO.Directory]::GetFiles('\\.\pipe\') -match 'openssh'
 ssh-add -l
 ```
 
