@@ -217,7 +217,9 @@ if (-not (Test-Path $bootstrap)) {
     throw "Expected bootstrap script not found at $bootstrap"
 }
 Write-Host "==> Running $bootstrap"
-& $bootstrap
+# -SourceDir explicitly: the bootstrap runs the questionnaire out of this clone,
+# and every POSIX installer exports SOURCE_DIR for the same reason.
+& $bootstrap -SourceDir $targetDir
 
 # 5. Sync windows/** to %USERPROFILE% and docs/kb/** to
 #    %LOCALAPPDATA%\terminal-stack\docs\kb\ (PowerShell-native equivalent of the WSL

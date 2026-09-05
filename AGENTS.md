@@ -90,6 +90,16 @@ Native Linux is not one of those two, and WSL is not a stand-in for it -
 tests/parity/run.sh
 ```
 
+And, when the change touches an installer or a bootstrap:
+
+```sh
+tests/parity/run.sh bootstrap
+```
+
+which actually RUNS `linux-bootstrap.sh` in a container rather than checking its
+syntax. It is opt-in and slower, and it is the only thing here that can catch an
+unset variable or an empty app catalog.
+
 Debian 13, Ubuntu 24.04, Ubuntu 22.04 and a bash 3.2 syntax gate, in containers, in
 about two seconds, each on its *own* Python. That last part is why it exists: the
 repo's floor is Python 3.10, which is what Ubuntu 22.04 ships, while CI has 3.12 and

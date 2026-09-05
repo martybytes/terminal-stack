@@ -2648,77 +2648,58 @@ and a new winget id is verified with `winget show --id <id> --exact` before it i
 written down. An id that always fails is worse than an honest "not available on
 this platform".
 
-## Why the ssh symlink block is a notice, not a fix
+## Why leader keys with no printable spelling are stored by name
 
-Every shim winget writes to `%LOCALAPPDATA%\Microsoft\WinGet\Links` is a symlink
-into the package directory. An ssh logon carries a remote token, Windows disables
-remote-to-local symlink evaluation by default, and `CreateProcess` therefore
-refuses the shim: 30 tools on ORIGIN could not start over ssh while the same
-machine at the console was fine. `starship` and `zoxide` were unaffected only
-because they resolve to real exes outside winget.
+`tstack config leader ctrl-\` looked like it should work and could not, for two
+independent reasons that both stayed silent until the next chezmoi command. The
+store (`store.set` and `ts_data_set`) writes `key = "<value>"` with no escaping,
+so a backslash or a double quote leaves `~/.config/chezmoi/chezmoi.toml`
+unparseable and every later `chezmoi` invocation dead. And had the value got
+through, all three renderers (the WSL hook's Python substitution, `sync-windows.ps1`
+and `dot_wezterm.lua.tmpl`) would have written `key = '\'` into Lua, where the
+backslash escapes the closing quote.
 
-The repair is one command, `fsutil behavior set SymlinkEvaluation R2L:1`. The
-stack does not run it, and will not:
+The fix chosen is the pattern the stack already had for the one other such key:
+`space` is spelled by name and `.chezmoi.toml.tmpl` / `ConvertTo-TsLeader` map it
+to WezTerm's `phys:Space`. `backslash` joins it as `phys:Backslash`. That keeps
+every renderer a plain token substitution (no Lua escaping in three places to keep
+aligned), and the schema validator turns the two forbidden characters into a
+refusal that names the spelling. The alternative, escaping at render time, was
+rejected because it fixes the Lua and not the TOML, and the TOML failure is the
+one that bricks the machine.
 
-- It is **machine-wide policy**, not stack configuration. Enabling R2L means a
-  symlink on a remote share may be followed to a local path. That is the machine
-  owner's risk call, and a dotfiles apply is the wrong place to make it.
-- It needs **elevation**, which a login shell does not have and must not ask for.
-- On a corp-managed box the answer may legitimately be no, in which case the
-  right behaviour is to keep working and stop mentioning it, which is what the
-  `no-ssh-symlink-notice` sentinel is for.
+Two consequences. The mapping table now lives in two places (Go template and
+pwsh) and `test_named_leader_keys_map_identically_in_both_chord_mappers` fails if
+a name is added to one and not the other. And `phys:` names a physical position
+on the US ANSI layout, so on another layout `ctrl-backslash` is whichever key sits
+where `\` does on a US board; `space` has always had the same property.
 
-So the profile detects the exact state and prints the reason plus the command.
-Three conditions, cheapest first: `$env:SSH_CONNECTION` set (a local session must
-see nothing, because nothing is wrong there), `SymlinkRemoteToLocalEvaluation`
-under `HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem` not `1`, and the Links
-directory on `PATH`.
+## Why the WSL sync walk reads its file list from fd 3
 
-Two details that are easy to get wrong. The check reads the **registry**, not
-`fsutil behavior query`: same answer, and a login should not spawn a process to
-learn it. The Python twin's `winreg` import has to sit behind
-`if sys.platform != "win32"` rather than a `type: ignore`: typeshed gates every
-winreg attribute behind win32, so a Linux CI host reports `Module has no
-attribute "OpenKey"`, while an ignore comment would then be *unused* on Windows
-and `warn_unused_ignores` would fail the gate on the other side. Reproduce that
-one with `mypy --platform linux`; the platform mypy assumes is the host's. And a **missing** value counts as blocked, because absent is the
-Windows default; treating unknown as fine would silence the notice on precisely
-the machines that need it. `tstack doctor` repeats it as the `winget-symlinks`
-NOTE, so the guidance survives the session where it was printed.
+`run_after_90-sync-windows.sh` walks `windows/` with `while read -d '' ... done < <(find ...)`.
+Two entries in that tree are part-owned and go through `pwsh.exe` (the
+`.claude/settings.json` and `.cursor/hooks.json` merges). pwsh drains whatever
+stdin it inherits, and with the file list on stdin the first merge consumed the
+rest of it. In `find` order that was everything after `.claude/settings.json.tmpl`:
+`.config/**`, `.cursor/**`, `.wezterm/pane_nav.lua`, `.wezterm.lua.tmpl`,
+`AppData/**` and `Documents/PowerShell/**`. None of it was visited, nothing was
+printed, and the summary line counted the visited files as unchanged.
 
-Rejected: rewriting `$env:Path` to the real `WinGet\Packages\...` directories.
-Those names carry a package id and a source id and move on upgrade, so it would
-work until the next `winget upgrade` and then fail quietly.
+It was found on 2026-09-02 when `tstack config leader ctrl-backslash` saved,
+`chezmoi init` derived `phys:Backslash`, the hook's own `cfg leaderKey` returned
+`phys:Backslash`, and the rendered `~/.wezterm.lua` on the Windows side still said
+`phys:Space`. `bash -x` showed the walk ending eleven files in. How long it had
+been that way is not knowable from the logs, because the failure mode is an
+absence: every pwsh-side `sync-windows.ps1` run kept the Windows files current
+enough that nobody noticed the WSL apply had stopped touching them.
 
-## Why one helper decides how child output is decoded
+The fix is `read -u 3` with `3< <(find ...)`, so the body can run anything it
+likes on stdin. `< /dev/null` on the pwsh call alone was rejected: it fixes the
+one consumer we know about and leaves the trap armed for the next one.
 
-`subprocess.run(argv, capture_output=True, text=True)` decodes with the **locale**
-codec. On a Windows host that is cp1252, and starship, wezterm, docker, git and
-chezmoi all emit UTF-8. The failure mode is what makes this worth a section: the
-`UnicodeDecodeError` is raised inside subprocess's stdout **reader thread**, so
-`run()` returns a `CompletedProcess` with `returncode=0`, `stderr=''` and
-`stdout=None`, and the caller dies on `got.stdout.strip()` several frames from
-anything that mentions encoding. `tstack ui` crashed exactly that way previewing
-`starship preset tokyo-night`, whose Nerd Font glyphs are outside cp1252, and CI
-never saw it because it needs a real starship on a cp1252 host.
-
-Six modules had grown their own copy of the same `_run` helper and every copy had
-the bug, plus ten more capture sites in `paths`, `platform`, `stacks`, `store`
-and `ghostty`. That is the argument for `tstack/proc.py`: not deduplication for
-its own sake, but one place where the decision is written down, so fixing it is
-one edit rather than seventeen.
-
-`errors="replace"` is the load-bearing half. A child that genuinely is not UTF-8
-(`tasklist.exe` on some locales) must cost a replacement character, never a
-`None` stdout that every call site dereferences; the whole incident was a `None`
-nobody expected.
-
-Rejected: UTF-8 mode process-wide (`PYTHONUTF8`, or `sys.flags.utf8_mode`). It
-changes file I/O defaults too, and it does nothing when `tstack` is imported
-rather than run as a script, which is how every test exercises it.
-
-`test_every_captured_child_process_decodes_as_utf_8` walks the package's AST and
-fails any capturing `subprocess.run` without an explicit `encoding`. A call site
-that needs its own `subprocess.run` (the compose runner in `stacks.py`, whose
-caller decides whether output is captured at all) still has to say `encoding`
-out loud.
+The same investigation exposed a second gap. The Python `tstack config` saved to
+chezmoi `[data]` and stopped; the shell save it replaced had always ended in
+`ts_mirror_windows_config`. Since `scripts/sync-windows.ps1` renders from that
+mirror, a setting changed from WSL was rendered back to its old value by the next
+pwsh-side sync. `_apply` now calls the bash writer after `chezmoi init` on WSL,
+keeping one implementation of the mirror.

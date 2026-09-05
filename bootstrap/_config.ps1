@@ -263,7 +263,13 @@ function ConvertTo-TsLeader([string]$chord) {
             }
         }
     }
-    $wkey = if ($key.ToLower() -eq 'space') { 'phys:Space' } else { $key }
+    # Keys with no printable spelling are named, and named keys map to WezTerm
+    # phys: codes. Keep this switch identical to .chezmoi.toml.tmpl.
+    $wkey = switch ($key.ToLower()) {
+        'space'     { 'phys:Space' }
+        'backslash' { 'phys:Backslash' }
+        default     { $key }
+    }
     return @{ key = $wkey; mods = ($mods -join '|') }
 }
 
@@ -940,7 +946,10 @@ function Get-TsPython {
 # -Only runs a single question ("apps"), which is what the config menu's apps
 # item needs; the POSIX twin is run_wizard_apps in bootstrap/ts-config.sh.
 function Invoke-TsWizard {
-    param([string]$SourceDir, [switch]$AskTerminals, [string]$Only)
+    # -ExitCode reports the questionnaire's raw exit status to the caller.
+    # windows-bootstrap.ps1 has to tell "the user quit at the review" (3) apart
+    # from "it failed", and a bare $null return collapses the two.
+    param([string]$SourceDir, [switch]$AskTerminals, [string]$Only, [ref]$ExitCode)
     $python = Get-TsPython
     if (-not $python) {
         Write-Warning 'python3 is required to run the install questionnaire.'
@@ -954,6 +963,7 @@ function Invoke-TsWizard {
     try {
         & $python @wizardArgs
         $rc = $LASTEXITCODE
+        if ($ExitCode) { $ExitCode.Value = $rc }
         # 3 is "quit at the review", which every caller treats as cancelled --
         # not as a failure to report.
         if ($rc -ne 0 -or -not (Test-Path -LiteralPath $out)) { return $null }
@@ -1459,10 +1469,38 @@ function Show-CcTtsConfig {
 }
 
 
+# The pwsh twin of ts_cc_tts_apply_wizard_choice (bootstrap/_cc_tts.sh).
+#
+# Seed the defaults ONLY on a host that has never been configured. This used to
+# call Get-CcTtsDefaults unconditionally, so every windows-bootstrap.ps1 re-run
+# silently discarded whatever the user had tuned with `tstack config tts voice
+# ...`, `... engine ...`, `... template ...` -- voice, engine, templates, port,
+# voice pool, music/duck and summarizer, all back to stock. The bash side fixed
+# exactly this and carries the same comment; this side kept the old behaviour.
+#
+# -Message is the wizard's "what should it say when the agent finishes?" answer,
+# which Windows previously asked for and then threw away.
 function Set-CcTtsWizardChoice {
-    param([string]$Choice)
-    $tts = Get-CcTtsDefaults
-    if ($Choice -eq 'on') { $tts.enabled = $true }
+    param([string]$Choice, [string]$Message = '', [string]$Daemon = 'off')
+
+    $configured = Get-TsProp (Get-TsConfig) ccTts
+    $tts = if ($configured) { Get-CcTtsConfig } else { Get-CcTtsDefaults }
+
+    $tts.enabled = ($Choice -eq 'on')
+    if ($Choice -ne 'on') { $Daemon = 'off' }
+
+    # self also installs a marker block into the agent instruction files; that
+    # half has no pwsh implementation (bash's ts_cc_tts_self_install already
+    # writes the Windows-side CLAUDE.md from WSL on a combined machine), so only
+    # the settings are applied here.
+    if ($Choice -eq 'on' -and $Message) {
+        switch ($Message) {
+            'self'     { $tts.messageMode = 'template'; $tts.summarize.mode = 'self' }
+            'hook'     { $tts.messageMode = 'hook';     $tts.summarize.mode = 'template' }
+            'template' { $tts.messageMode = 'template'; $tts.summarize.mode = 'template' }
+        }
+    }
+    if ($null -ne (Get-TsProp $tts 'daemon')) { $tts.daemon.enabled = ($Daemon -eq 'on') }
     return $tts
 }
 

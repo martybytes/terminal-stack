@@ -530,7 +530,15 @@ common_install_all() {
     # Desktop Linux is asked which GUI terminal emulator it wants. WSL is not —
     # the GUI lives on the Windows host — and neither is a headless server.
     if ! ts_is_headless && ! _ts_is_wsl; then TS_WIZ_ASK_TERMINALS=1; fi
-    ts_wizard_collect || return 1
+    # rc 3 is "quit at the review": stop, but it is not a failure. Returning 1
+    # for it made install-linux.sh print "a step failed silently" at someone who
+    # simply typed q.
+    ts_wizard_collect; _wiz_rc=$?
+    case "$_wiz_rc" in
+        0) ;;
+        3) echo "$INFO wizard cancelled - nothing was installed or changed."; return 3 ;;
+        *) return "$_wiz_rc" ;;
+    esac
     # chezmoi FIRST, then persist, then everything optional.
     #
     # These used to run in the other order, so an optional install that aborted

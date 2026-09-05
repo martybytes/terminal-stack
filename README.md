@@ -92,9 +92,10 @@ browser stacks under [`services/`](services/); everything else works without it.
 ### 1. Run the one-liner for your platform
 
 Each installer is idempotent — safe to re-run. The macOS, WSL and Linux
-one-liners end with `chezmoi apply`. The Windows one runs its own
-`sync-windows.ps1` instead and hands off to the WSL step, which is where
-`chezmoi apply` happens.
+one-liners end with `tstack apply`, which is `chezmoi apply` with the "this file
+changed since I last wrote it" question explained and your version backed up
+first. The Windows one runs its own `sync-windows.ps1` instead and hands off to
+the WSL step, which is where the apply happens.
 
 <details open>
 <summary><b>macOS</b> (Apple Silicon or Intel)</summary>
@@ -193,6 +194,7 @@ tstack config wizard   # replay the install questionnaire and save the answers
 tstack ghostty         # the managed Ghostty config: status, diff, on, off
 tstack update          # pull the latest stack and re-apply
 tstack rollback        # undo that update
+tstack apply           # re-apply the dotfiles; explains any conflict, backs yours up
 doc                    # fuzzy-find a runbook in the knowledge base
 ```
 

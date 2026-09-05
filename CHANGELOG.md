@@ -6,47 +6,30 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
-- **Windows over ssh: winget-installed tools are explained, not silently broken (09/02/2026).**
-  Logging into Windows over ssh printed three errors before the prompt and then
-  failed on `ls`: `Program 'fnm.exe' failed to run: ... The path cannot be
-  traversed because it contains an untrusted mount point`. Cause is neither tool.
-  Every shim under `%LOCALAPPDATA%\Microsoft\WinGet\Links` is a symlink (30 on
-  the machine that found this), an ssh logon carries a remote token, and Windows
-  disables remote-to-local symlink traversal by default. `starship` and `zoxide`
-  survived only because they resolve to real exes outside winget.
-
-  Three parts. The `$PROFILE` fnm block degrades quietly: `Get-Command` only
-  stats the file, so it said yes to a shim that cannot launch, and the block now
-  suppresses `$ErrorActionPreference` across both probes, quotes its
-  interpolation so a null cannot be `.Trim()`ed, and evaluates only a non-empty
-  env. A new `ssh-symlink-notice` block prints the reason and the exact elevated
-  command (`fsutil behavior set SymlinkEvaluation R2L:1`) when, and only when,
-  `$env:SSH_CONNECTION` is set, `SymlinkRemoteToLocalEvaluation` is not `1` and
-  the Links directory is on `PATH` -- read from the registry rather than
-  `fsutil`, so login costs no process, and a missing value counts as blocked
-  because absent is the Windows default. `tstack doctor` reports the same state
-  as the `winget-symlinks` NOTE. The policy is machine-wide and needs elevation,
-  so the stack reports it and never sets it;
-  `%LOCALAPPDATA%\terminal-stack\no-ssh-symlink-notice` silences the login notice.
-
-- **Every captured child process decodes as UTF-8 (09/02/2026).** `tstack ui`
-  crashed with `AttributeError: 'NoneType' object has no attribute 'strip'` when
-  previewing the `tokyo-night` prompt on a Windows host. `subprocess.run(...,
-  text=True)` decodes with the *locale* codec (cp1252), starship's preset is
-  UTF-8, and the `UnicodeDecodeError` is raised in subprocess's reader THREAD --
-  so `run()` returned `returncode=0`, `stderr=''` and `stdout=None`, and the
-  caller died on `got.stdout.strip()` nowhere near anything about encoding.
-  Six modules had grown their own copy of the same `_run` helper and all six had
-  the bug, along with ten more capture sites in `paths`, `platform`, `stacks`,
-  `store` and `ghostty`.
-
-  New `tstack/proc.py` is the one place that decides it: `encoding="utf-8"` with
-  `errors="replace"`, so a child that genuinely is not UTF-8 costs a replacement
-  character rather than a None every call site dereferences. Every `_run` now
-  delegates to it, and `test_every_captured_child_process_decodes_as_utf_8`
-  walks the package's AST so the next call site cannot reintroduce it. Also
-  fixed while in there: a doctor NOTE's `hint` was dropped by `Result.render()`
-  and reached `--json` only, which hid `other-clones`' repair line too.
+- **A WSL apply now reaches every Windows-side file again (09/02/2026).** The
+  `run_after` sync walked `windows/` with the file list on the loop's stdin,
+  and the part-owned merge for `.claude/settings.json` runs `pwsh.exe`, which
+  drains inherited stdin. Everything after that entry in `find` order was
+  silently skipped: `.config/**`, `.cursor/**`, `.wezterm/**`, `.wezterm.lua`
+  and `$PROFILE` were never re-rendered from WSL, and the summary counted them
+  as unchanged. The list now arrives on fd 3. Found because a saved leader
+  change never reached the rendered `.wezterm.lua`.
+- **`tstack config` on WSL refreshes the Windows `config.json` mirror (09/02/2026).**
+  The Python port saved to chezmoi `[data]` and stopped there, while the shell
+  save had always ended in `ts_mirror_windows_config`. `sync-windows.ps1` and a
+  pwsh-side `tstack update` render from the mirror, so any setting changed from
+  WSL was rendered back to its previous value by the next Windows-side sync.
+  The apply step now calls the same bash writer after `chezmoi init`.
+- **`Ctrl+\` can be the WezTerm leader (09/02/2026).** The leader chord is
+  stored as `mod-key` text, and the only key with a spelled-out name was
+  `space`. A literal `ctrl-\` had two failure modes, both silent until the
+  next chezmoi command: the store writes `key = "<value>"` with no escaping,
+  so the backslash left `chezmoi.toml` unparseable, and had it got through,
+  every renderer would have produced `key = '\'` in Lua. `backslash` now joins
+  `space` as a named key (`ctrl-backslash`, mapped to `phys:Backslash`) in
+  both chord mappers, and the `leaderChord`/`tmuxPrefix` validator refuses a
+  backslash or double quote with the spelling that works. Pinned by a
+  two-mapper parity test and a pwsh run of `ConvertTo-TsLeader`.
 
 - **Ghostty: backspace and Delete work over ssh again (08/28/2026).** ssh into
   any Linux host from Ghostty and backspace inserted junk instead of erasing,
@@ -101,6 +84,32 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
   "accepted" is meaningless.
 
 ### Added
+
+- **A container target that actually runs the installer (08/28/2026).**
+  `tests/parity/run.sh bootstrap` builds `Dockerfile.bootstrap` — a non-root user
+  with passwordless sudo, because `common_require_non_root` refuses uid 0 — and
+  runs `linux-bootstrap.sh` end to end on real native Linux, from a clone at a
+  path deliberately off the candidate list, then asserts on what it left behind.
+  Nothing in this repo had ever executed an install path on any platform; `bash
+  -n` checks syntax and the static resolvers check names, and neither can see an
+  unset variable or an empty catalog. It found the `$USER` bug on its first run.
+  It asserts on the wizard's ANSWER rather than its console output, because the
+  questionnaire writes its menus to the terminal — an earlier version of the check
+  grepped stdout for a warning that never arrives there, and so could not fail.
+  Opt-in: it installs packages and wants the network, so it is not in the default
+  target set.
+
+- **The PowerShell gates that were missing entirely (08/28/2026).** CI ran `bash
+  -n` over every shell script on four platforms and checked `.ps1` *nowhere*, with
+  the Windows job's syntax step explicitly skipped. Every `.ps1` in the repo
+  parses, so a parse gate alone would not have caught `$SourceDir` either.
+  `tests/test_shell_scope.py` walks the AST for script-scope variables nothing
+  assigns — counting a dot-sourced file's script-level assignments only, because
+  counting its *function parameters* is precisely what made `$SourceDir` look
+  defined — and for `"$var?"`, where PowerShell swallows the `?` into the name.
+  `tests/test_shell_bash_helpers.py` resolves snake_case helper calls, which the
+  existing `ts_`-prefixed check could not see. CI gains a parse gate on all three
+  runners.
 
 - **The dashboard configures all of it now, not just the settings
   (08/28/2026).** Three settings were blind text boxes and one was a

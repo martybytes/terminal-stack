@@ -5,6 +5,11 @@
 
 [CmdletBinding(SupportsShouldProcess)]
 param(
+    # The clone to run from. install.ps1 passes it; the default is what the
+    # script used to derive inline further down, so a direct `.\windows-bootstrap.ps1`
+    # still works. It was previously read but never assigned, and
+    # `Join-Path -Path $null` is terminating -- the whole install died here.
+    [string]$SourceDir = (Split-Path -Parent $PSScriptRoot),
     [switch]$IncludeOptional
 )
 
@@ -89,22 +94,18 @@ Write-Host "PowerShell $($PSVersionTable.PSVersion); user $env:USERNAME"
 # Windows always has a GUI to configure, so the terminal question is always
 # asked here -- unlike the POSIX bootstraps, which skip it on a headless host.
 $askTerminals = $true
-$wizardJson = Join-Path ([IO.Path]::GetTempPath()) ("tswiz-" + [guid]::NewGuid() + ".json")
 $pythonExe  = Get-TsPython
 if (-not $pythonExe) {
     throw 'Python 3.10+ is required to run the install questionnaire. winget install Python.Python.3.13'
 }
-$wizardArgs = @((Join-Path $SourceDir 'tstack\main.py'), 'wizard', '--emit', 'json', '--out', $wizardJson)
-if ($askTerminals) { $wizardArgs += '--ask-terminals' }
-if ($env:TS_ASSUME_YES) { $wizardArgs += '--assume-yes' }
-& $pythonExe @wizardArgs
-$wizardRc = $LASTEXITCODE
+# Invoke-TsWizard in _config.ps1 is the ONE runner; this file used to carry a
+# hand-inlined copy of it, which is how it came to reference a $SourceDir that
+# nothing assigned. -ExitCode is what lets this caller keep telling "quit"
+# (rc 3) apart from "failed", which a bare $null return cannot express.
+$wizardRc = 0
+$wizard = Invoke-TsWizard -SourceDir $SourceDir -AskTerminals:$askTerminals -ExitCode ([ref]$wizardRc)
 if ($wizardRc -eq 3) { Write-Host '==> quit - nothing was installed or changed.'; return }
-if ($wizardRc -ne 0 -or -not (Test-Path -LiteralPath $wizardJson)) {
-    throw "The install questionnaire failed (exit $wizardRc)."
-}
-$wizard = Get-Content -LiteralPath $wizardJson -Raw | ConvertFrom-Json
-Remove-Item -LiteralPath $wizardJson -Force -ErrorAction SilentlyContinue
+if (-not $wizard) { throw "The install questionnaire failed (exit $wizardRc)." }
 
 # The workspace root is NOT a wizard question -- it has no bash twin, and
 # Read-TsWorkspaceDir stayed in _config.ps1 when the prompts moved. Asked here so
@@ -116,9 +117,33 @@ $leaderChord  = $wizard.Leader
 $themeMode    = $wizard.Theme
 $selectedApps = @($wizard.Apps)
 $ccTtsChoice  = $wizard.CcTts
-$ccTts        = Set-CcTtsWizardChoice $ccTtsChoice
+$ccTts        = Set-CcTtsWizardChoice -Choice $ccTtsChoice -Message $wizard.CcTtsMessage -Daemon $wizard.CcTtsDaemon
 Write-Host ''
 Write-Host "==> Config: leader=$leaderChord theme=$themeMode terminals=$(if ($wizard.Terminals) { $wizard.Terminals -join ',' } else { 'none' }) wez-mux=$($wizard.WezMux) wez-restore=$($wizard.WezRestore) cc-tts=$ccTtsChoice headroom=$($wizard.Headroom) caveman=$($wizard.Caveman) agentmemory=$($wizard.Agentmemory)"
+
+# Every Save-TsConfig below uses this one set. It was three hand-copied 300-char
+# lines, which is how -TmuxPrefix and -AtuinEnabled came to be missing from all
+# three: the wizard asks for both and Windows threw both answers away.
+$saveArgs = @{
+    LeaderChord        = $leaderChord
+    ThemeMode          = $themeMode
+    Apps               = $selectedApps
+    WeztermMux         = $wizard.WezMux
+    WeztermRestore     = $wizard.WezRestore
+    CcTts              = $ccTts
+    HeadroomEnabled    = $wizard.Headroom
+    HeadroomCursorMode = $wizard.HeadroomCursor
+    CavemanEnabled     = $wizard.Caveman
+    AgentmemoryEnabled = $wizard.Agentmemory
+    MemoryBackend      = $wizard.MemoryBackend
+    StarshipPreset     = $wizard.StarshipPreset
+}
+# Added only when the wizard actually produced one. Save-TsConfig carries a
+# stored value forward on the strength of $PSBoundParameters.ContainsKey, so
+# passing an empty string here would RESET the prefix a WSL side had configured
+# -- and AtuinEnabled is [ValidateSet('on','off')], which an empty string fails.
+if ($wizard.Tmux)  { $saveArgs.TmuxPrefix   = $wizard.Tmux }
+if ($wizard.Atuin) { $saveArgs.AtuinEnabled = $wizard.Atuin }
 
 # Required packages (always installed; not part of the picker). Terminal
 # emulators are NOT here — they are a wizard choice, see Read-TsTerminals.
@@ -158,7 +183,7 @@ Show-TsInstalledApps $selectedApps
 # Save the chosen config to %LOCALAPPDATA%\terminal-stack\config.json — read by
 # sync-windows.ps1 (and the WSL hook's mirror) to render the Windows .tmpl files.
 if ($PSCmdlet.ShouldProcess('terminal-stack config.json', 'save config')) {
-    Save-TsConfig -LeaderChord $leaderChord -ThemeMode $themeMode -Apps $selectedApps -WeztermMux $wizard.WezMux -WeztermRestore $wizard.WezRestore -CcTts $ccTts -HeadroomEnabled $wizard.Headroom -HeadroomCursorMode $wizard.HeadroomCursor -CavemanEnabled $wizard.Caveman -AgentmemoryEnabled $wizard.Agentmemory -MemoryBackend $wizard.MemoryBackend -StarshipPreset $wizard.StarshipPreset | Out-Null
+    Save-TsConfig @saveArgs | Out-Null
     Export-CcTtsJson
     Write-Host "==> Saved config to $(Get-TsConfigPath)"
     if ($wizard.CcTts -eq 'on') {
@@ -166,33 +191,23 @@ if ($PSCmdlet.ShouldProcess('terminal-stack config.json', 'save config')) {
             else { @('-NoStart', '-NoAutostart') }
         if (Invoke-TsCcTtsDaemonInstaller $installerArgs) {
             $ccTts.daemon.enabled = ($wizard.CcTtsDaemon -eq 'on')
-            Save-TsConfig -LeaderChord $leaderChord -ThemeMode $themeMode -Apps $selectedApps -WeztermMux $wizard.WezMux -WeztermRestore $wizard.WezRestore -CcTts $ccTts -HeadroomEnabled $wizard.Headroom -HeadroomCursorMode $wizard.HeadroomCursor -CavemanEnabled $wizard.Caveman -AgentmemoryEnabled $wizard.Agentmemory -MemoryBackend $wizard.MemoryBackend -StarshipPreset $wizard.StarshipPreset | Out-Null
+            Save-TsConfig @saveArgs | Out-Null
             Export-CcTtsJson
         } else {
             Write-Warning 'TTS executable build failed; voice hooks were not enabled.'
             $ccTts.enabled = $false
             $ccTts.daemon.enabled = $false
-            Save-TsConfig -LeaderChord $leaderChord -ThemeMode $themeMode -Apps $selectedApps -WeztermMux $wizard.WezMux -WeztermRestore $wizard.WezRestore -CcTts $ccTts -HeadroomEnabled $wizard.Headroom -HeadroomCursorMode $wizard.HeadroomCursor -CavemanEnabled $wizard.Caveman -AgentmemoryEnabled $wizard.Agentmemory -MemoryBackend $wizard.MemoryBackend -StarshipPreset $wizard.StarshipPreset | Out-Null
+            Save-TsConfig @saveArgs | Out-Null
             Export-CcTtsJson
         }
     }
 }
 
-# The interpreter tstack runs on. Same probe shape as
-# bootstrap/tts-daemon/build.ps1 rather than a third spelling of it.
-function Find-Python {
-    foreach ($name in @('python', 'python3')) {
-        $found = Get-Command $name -ErrorAction SilentlyContinue
-        if ($found) { return $found.Source }
-    }
-    return $null
-}
-
 if (-not $WhatIfPreference) {
     # One implementation on every platform: tstack/commands/agents.py, run
     # through the same entry point the `tstack agents` shim uses.
-    $agentsEntry = Join-Path (Split-Path -Parent $PSScriptRoot) 'tstack\main.py'
-    $agentsPython = Find-Python
+    $agentsEntry = Join-Path $SourceDir 'tstack\main.py'
+    $agentsPython = $pythonExe
     if ($agentsPython -and (Test-Path -LiteralPath $agentsEntry)) {
         if ($wizard.Headroom -eq 'on') { & $agentsPython $agentsEntry agents headroom on $wizard.HeadroomCursor | Out-Host }
         if ($wizard.Caveman -eq 'on') { & $agentsPython $agentsEntry agents caveman on | Out-Host }

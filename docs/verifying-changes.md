@@ -36,7 +36,35 @@ machine, or a real `chezmoi apply`.
 tests/parity/run.sh                  # debian13, ubuntu2404, ubuntu2204, bash32
 tests/parity/run.sh ubuntu2204       # one target
 tests/parity/run.sh --shell debian13 # a shell inside it, to poke about
+tests/parity/run.sh bootstrap        # RUN linux-bootstrap.sh, end to end
 ```
+
+### `bootstrap` runs the installer, and is not in the default set
+
+The four targets above prove the code PARSES and that its names RESOLVE.
+`bootstrap` proves it RUNS: a non-root user with passwordless sudo (because
+`common_require_non_root` refuses uid 0), a clone at a path deliberately OFF the
+candidate list, then `linux-bootstrap.sh` end to end and assertions on what it
+left behind. Every answer arrives through `TS_*` in the environment, so nothing
+can block on a prompt; `TS_APPS=none` keeps the run about control flow rather
+than about pulling thirty packages, while the probe before it still resolves the
+*recommended* set and fails if it comes back empty.
+
+Nothing in this repo had ever executed an install path on any platform, and the
+gap is structural: `bash -n` cannot see an unset variable, and the static
+resolvers in `tests/` cannot see an empty catalog. On its first run it found
+`USER: unbound variable` -- every bootstrap printed `Detected: user $USER` under
+`set -u`, which is fine in a login shell and fatal under `docker run`, `su - -c`,
+cron or systemd.
+
+**Assert on the wizard's ANSWER, never on its console output.** The
+questionnaire writes its menus to the terminal, so its warnings never reach
+stdout. An earlier version of this check grepped the log for "the app catalog is
+empty" and therefore could not fail at all -- it passed with the bug deliberately
+reinstated. It checks `TS_WIZ_APPS` now.
+
+It is opt-in because it installs packages and wants the network. Name it to run
+it; a bare `tests/parity/run.sh` does not.
 
 **WSL is not native Linux here.** `/mnt/c` exists, interop exists, and
 `tstack/platform.py` reports `wsl` rather than `linux` deliberately - so every

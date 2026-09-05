@@ -137,20 +137,54 @@ def test_launch_wrappers_are_process_local_and_have_stock_escape_hatches():
 
 
 def test_ts_update_owns_chezmoi_conflict_handling_and_runtime_guard():
+    """The conflict question has ONE implementation, and `tstack update` uses it.
+
+    It used to live in `dot_zshrc`, in zsh, which meant the three INSTALLERS --
+    where a conflict is most likely, because a re-install runs over whatever the
+    last one left behind -- got a bare `chezmoi apply -v </dev/null` instead.
+    With no TTY chezmoi cannot ask, so that died with "could not open a new TTY"
+    under `set -e` and took the install with it.
+    """
     zsh = (ROOT / "dot_zshrc").read_text(encoding="utf-8")
     ps = (ROOT / "windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1").read_text(
         encoding="utf-8"
     )
-    update = zsh[zsh.index("_ts_chezmoi_conflicts() {") : zsh.index("_tstack_rollback() {")]
-    assert "status --path-style absolute --exclude scripts" in update
-    assert "[o]verwrite, [m]erge, [v]iew again, or [q]uit" in update
-    assert "apply --dry-run --error-on-conflict --no-tty" in update
-    assert "apply --error-on-conflict --no-tty" in update
-    assert "apply --force --no-tty" in update
+    apply = (ROOT / "bootstrap/ts-apply.sh").read_text(encoding="utf-8")
+
+    # The logic, in the one place it now lives.
+    assert "status --path-style absolute --exclude scripts" in apply
+    assert "[o]verwrite  [a]ll  [d]iff  [m]erge  [q]uit" in apply
+    assert "apply --force --no-tty" in apply
+    # Backups are what make "overwrite" a recoverable answer: chezmoi itself
+    # writes none on POSIX.
+    assert "ts_backup_file" in apply
+    # /dev/tty, not stdin -- every installer runs `</dev/null` on purpose.
+    assert "ts_is_interactive" in apply
+    assert "exit 4" in apply, "conflicts need a distinct exit code from failure"
+
+    # And nowhere else.
+    assert "_ts_chezmoi_apply_guided" not in zsh
+    assert "_ts_chezmoi_conflicts" not in zsh
+
+    # From the restart helper through the end of _tstack_update: the two belong
+    # to the same flow, and the restart offer is what makes an update take
+    # effect in the shell you ran it from.
+    update = zsh[zsh.index("_ts_offer_zsh_restart() {") : zsh.index("_tstack_rollback() {")]
+    assert "bootstrap/ts-apply.sh" in update
+    assert "_apply_rc == 4" in update, "a waiting decision is not an update failure"
     assert "runtime clone has uncommitted changes" in update
     assert "Shell configuration changed" in update
     assert "Restart this shell now to activate the update? [Y/n]" in update
     assert "jobs -p" in update and "exec zsh" in update
+
+    # Every installer routes through it, and none of them still calls chezmoi raw.
+    for name in ("install-linux.sh", "install-mac.sh", "install-wsl.sh"):
+        text = (ROOT / name).read_text(encoding="utf-8")
+        code = "\n".join(ln for ln in text.splitlines() if not ln.lstrip().startswith("#"))
+        assert "bootstrap/ts-apply.sh" in code, name
+        assert "chezmoi apply -v </dev/null" not in code, name
+        assert 'APPLY_RC" = 4' in code, f"{name} must treat 4 as 'decisions waiting'"
+
     assert "runtime clone has uncommitted changes" in ps
     assert "PowerShell profile changed" in ps
     assert "Open a new PowerShell tab" in ps
@@ -417,6 +451,30 @@ def test_claude_instructions_fit_claude_code_limit():
     assert (ROOT / "CLAUDE.md").stat().st_size <= 40_000
 
 
+def test_the_wsl_sync_walk_reads_from_its_own_fd():
+    """The walk's file list must not share stdin with the loop body. pwsh.exe
+    (the part-owned merges) drains inherited stdin, and with the list there the
+    first merge silently dropped every later file: .wezterm.lua and $PROFILE
+    were never re-rendered by a WSL apply, while the summary said unchanged."""
+    sh = (ROOT / "run_after_90-sync-windows.sh").read_text(encoding="utf-8")
+    assert "while IFS= read -r -d '' -u 3 src; do" in sh
+    assert "done 3< <(find" in sh
+    assert "done < <(find" not in sh, "a walk reading from stdin came back"
+
+
+def test_a_posix_save_refreshes_the_windows_mirror():
+    """tstack config on WSL writes chezmoi [data]; sync-windows.ps1 reads
+    config.json. Without the refresh the next pwsh-side sync renders the
+    previous leader/theme back over the new one."""
+    py = (ROOT / "tstack/commands/config.py").read_text(encoding="utf-8")
+    assert "ts_mirror_windows_config" in py
+    apply_body = py.split("def _apply(")[1].split("\ndef ")[0]
+    assert "_refresh_windows_mirror(out)" in apply_body
+    assert apply_body.index("chezmoi_init()") < apply_body.index("_refresh_windows_mirror"), (
+        "the mirror is derived from the keys chezmoi init regenerates"
+    )
+
+
 def test_updates_reconcile_only_enabled_tools():
     ps = (ROOT / "scripts/sync-windows.ps1").read_text(encoding="utf-8")
     sh = (ROOT / "run_after_90-sync-windows.sh").read_text(encoding="utf-8")
@@ -496,6 +554,41 @@ def test_windows_config_preserves_agent_settings_when_other_values_change(tmp_pa
     assert cfg["headroomCursorMode"] == "byok"
     assert cfg["cavemanEnabled"] == "on"
     assert cfg["agentmemoryEnabled"] == "off"
+
+
+def test_named_leader_keys_map_identically_in_both_chord_mappers():
+    """A leader key with no printable spelling (space, backslash) is stored by
+    name and mapped to a WezTerm phys: code. The Go template and the pwsh twin
+    each hold that table; a name only one of them knows renders a different
+    leader on Windows than on macOS/WSL."""
+    toml = read_repo(".chezmoi.toml.tmpl")
+    ps = read_repo("bootstrap/_config.ps1")
+    for name, phys in (("space", "phys:Space"), ("backslash", "phys:Backslash")):
+        assert f'(lower $ckey) "{name}" -}}}}{{{{- $leaderKey = "{phys}"' in toml, name
+        assert f"'{name}'" in ps and f"'{phys}'" in ps, name
+
+
+@pytest.mark.skipif(not shutil.which("pwsh"), reason="PowerShell 7 is unavailable")
+def test_pwsh_maps_ctrl_backslash_to_a_phys_key():
+    helper = ROOT / "bootstrap/_config.ps1"
+    command = (
+        f". '{helper}'; "
+        "$l = ConvertTo-TsLeader 'ctrl-backslash'; "
+        "$s = ConvertTo-TsLeader 'ctrl-space'; "
+        "$a = ConvertTo-TsLeader 'alt-x'; "
+        'Write-Output "$($l.mods)+$($l.key)|$($s.mods)+$($s.key)|$($a.mods)+$($a.key)"'
+    )
+    result = subprocess.run(
+        [shutil.which("pwsh"), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command],
+        text=True,
+        encoding="utf-8",
+        capture_output=True,
+        check=False,
+        timeout=300,
+        start_new_session=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "CTRL+phys:Backslash|CTRL+phys:Space|ALT+x"
 
 
 @pytest.mark.skipif(not shutil.which("pwsh"), reason="PowerShell 7 is unavailable")

@@ -17,6 +17,7 @@ sets cannot drift apart the way two hand-maintained lists did.
 from __future__ import annotations
 
 import functools
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -68,23 +69,38 @@ class App:
         return self.classes == DEV
 
 
-def parse(text: str) -> list[App]:
+def parse(text: str, *, strict: bool = True) -> list[App]:
+    """Rows in file order.
+
+    `strict` raises on a malformed row, which is what the tests and any
+    developer editing the table want. The INSTALLER path passes strict=False and
+    skips the row with a warning instead: bash's `ts_apps_load || true` and
+    pwsh's reader both shrug at a bad row, and a raise here meant one typo in
+    `apps.conf` aborted the whole questionnaire halfway through an install.
+    """
     out: list[App] = []
     for raw in text.splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
         parts = line.split(None, 4)
+        # A malformed row is a bug in the table, not user input. Naming the row
+        # matters: a silently dropped tool is exactly the failure this repo keeps
+        # being bitten by -- so it is always named, on stderr when not strict.
+        problem: str | None = None
         if len(parts) < 5:
-            # A malformed row is a bug in the table, not user input. Naming the
-            # row matters: a silently dropped tool is exactly the failure this
-            # repo keeps being bitten by.
-            raise ValueError(f"{CONF_NAME}: expected 5 fields, got {len(parts)}: {raw!r}")
-        app_id, group, classes, platforms, description = parts
-        if classes not in CLASSES:
-            raise ValueError(f"{CONF_NAME}: {app_id}: unknown class '{classes}'")
-        if platforms not in PLATFORMS:
-            raise ValueError(f"{CONF_NAME}: {app_id}: unknown platform '{platforms}'")
+            problem = f"expected 5 fields, got {len(parts)}: {raw!r}"
+        else:
+            app_id, group, classes, platforms, description = parts
+            if classes not in CLASSES:
+                problem = f"{app_id}: unknown class '{classes}'"
+            elif platforms not in PLATFORMS:
+                problem = f"{app_id}: unknown platform '{platforms}'"
+        if problem is not None:
+            if strict:
+                raise ValueError(f"{CONF_NAME}: {problem}")
+            print(f"!! {CONF_NAME}: skipping row -- {problem}", file=sys.stderr)
+            continue
         out.append(App(app_id, group, classes, platforms, description.strip()))
     return out
 
@@ -102,7 +118,7 @@ def catalog() -> tuple[App, ...]:
     path = conf_path()
     if path is None or not path.is_file():
         return ()
-    return tuple(parse(path.read_text(encoding="utf-8")))
+    return tuple(parse(path.read_text(encoding="utf-8"), strict=False))
 
 
 def clear_cache() -> None:

@@ -6,7 +6,7 @@ Two paths. Pick the one matching how much trust you have in the scripts.
 
 ### Quick install (one-liner per environment)
 
-The fastest path: a single command per environment, runnable from a fresh box. Installs prereqs, clones the repo, runs the bootstrap, and ends with `chezmoi apply`. Idempotent.
+The fastest path: a single command per environment, runnable from a fresh box. Installs prereqs, clones the repo, runs the bootstrap, and ends with `tstack apply` (`chezmoi apply`, with any conflict explained and your version backed up first). Idempotent.
 
 ```powershell
 # Windows 11 — PowerShell 7+
@@ -74,7 +74,7 @@ Every question works the same way: the default is **marked with `>` and captione
   The presets are not vendored: `starship preset <name>` runs at apply time, so
   they stay Starship's rather than freezing at whatever upstream shipped the day
   they were copied. Both sync paths render it on the Windows side too.
-- **Leader key** (WezTerm) — `Ctrl+Space` (default), `Ctrl+A`, `Ctrl+B`, `Alt+Space`, or a custom `mod-key` chord (e.g. `ctrl-x`). Skip with `TS_LEADER=ctrl-a`.
+- **Leader key** (WezTerm) — `Ctrl+Space` (default), `Ctrl+A`, `Ctrl+B`, `Alt+Space`, or a custom `mod-key` chord (e.g. `ctrl-x`; `space` and `backslash` are spelled by name, so `Ctrl+\` is `ctrl-backslash`). Skip with `TS_LEADER=ctrl-a`.
 - **Theme** — `dark` (Catppuccin Mocha, default), `light` (VS Code Light Modern), or `follow` (track the OS light/dark setting; WezTerm switches live, the Starship/tmux palette is baked at apply and refreshed by `tstack update`/`tstack config`). Skip with `TS_THEME=dark|light|follow`.
 - **Terminal emulator** (Windows, macOS and desktop Linux — WSL and headless hosts never install one) — a tick-list, so each is individually opt-in and `[n]one` is one keystroke away. **WezTerm nightly**, **WezTerm stable** and (macOS/Linux) **Ghostty** are separate ticks. Whatever is installed starts ticked on its detected channel; on a fresh machine **nightly is pre-selected**, because upstream's newest stable is `20240203` — February 2024, with no cut since — and this stack's Lua config targets current builds.
 
@@ -251,6 +251,12 @@ The WSL bootstrap already wrote `~/.config/chezmoi/chezmoi.toml` with `sourceDir
 # Inside WSL
 ~/.local/bin/chezmoi apply -v
 ```
+
+> On a machine where a managed file has been hand-edited, run `tstack apply`
+> instead. It lists what differs, says what each answer costs, and copies your
+> version to `<file>.bak.YYYYMMDD` before overwriting it; a bare `chezmoi apply`
+> asks a one-line question and keeps no backup. `tstack apply --overwrite` takes
+> the stack's version everywhere, backing yours up. See `doc tstack`.
 
 The Linux and macOS bootstraps likewise write `~/.config/chezmoi/chezmoi.toml`
 (no `windowsUsername` — there's no Windows side). If you skipped the bootstrap,

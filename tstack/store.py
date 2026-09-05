@@ -175,6 +175,14 @@ def mirror_value(dotted: str) -> str:
         node = node[part]
     if isinstance(node, bool):
         return "true" if node else "false"
+    if isinstance(node, list):
+        # Space separated, matching what chezmoi_data()'s `range` branch renders
+        # for the same key. str() on a list gives its Python repr, so `apps` came
+        # back as "['eza', 'fzf', ...]" -- one token that every caller then split
+        # into garbage, offered back as "keep this machine's selection", and
+        # saved again. The chezmoi path has carried the matching branch since the
+        # day `apps` was added; this one never got it.
+        return " ".join(str(v) for v in node)
     return str(node)
 
 

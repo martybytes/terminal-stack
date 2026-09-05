@@ -62,6 +62,15 @@ Usage:
   tstack config atuin <on|off>     atuin owns Ctrl+R
   tstack config memory <backend>   agentmemory | headroom | none | status
   tstack config agents [...]       per-machine agent wiring
+  tstack config prompt [...]       status | list | preview | <preset>
+  tstack config mux [...]          the WezTerm mux domain
+  tstack config wezterm [...]      build info and channel switching
+  tstack config ghostty [...]      the managed Ghostty config (macOS)
+
+  tstack config apps               re-pick the installed CLI tools
+  tstack config tts [...]          voice notifications
+  tstack config wizard             re-run the questionnaire, then save + install
+  tstack config reconfigure        the same, from the saved answers
 
   -h, --help                       this help
 
@@ -103,12 +112,12 @@ DELEGATED = ("apps", "tts", "reconfigure", "wizard")
 # Handed to another ported command rather than reimplemented here.
 HANDOFF = {"mux": "mux", "wezterm": "wezterm", "ghostty": "ghostty"}
 
-# The unknown-verb hint. ONE list, and it must be complete: the bash hint omits
-# `memory`, which it implements, and the pwsh one omits `atuin` instead.
-KNOWN = (
-    "show, get, set, leader, theme, tmux, apps, tts, mux, restore, atuin, "
-    "prompt, ghostty, memory, agents, wezterm, wizard"
-)
+# The unknown-verb hint. DERIVED, not restated: three hand-written copies of
+# this list had each drifted differently -- bash omitted `memory` and `prompt`,
+# pwsh omitted `atuin`, `get`, `set` and `prompt`, and this one omitted
+# `reconfigure`. dict.fromkeys keeps declaration order and drops the duplicate
+# (`ghostty` is both NATIVE and a HANDOFF target).
+KNOWN = ", ".join(dict.fromkeys(NATIVE + DELEGATED + tuple(HANDOFF)))
 
 
 def _colour() -> bool:
@@ -303,10 +312,47 @@ def _apply(out: Out, dry_run: bool) -> None:
     # exactly that reason. The gate is enforced; the shell's byte is not.
     out.say("==> applying...")
     store.chezmoi_init()
+    _refresh_windows_mirror(out)
     chezmoi = plat.find_chezmoi()
     if chezmoi:
         subprocess.run([chezmoi, "apply"], check=False, timeout=600)
     out.say("==> done.")
+
+
+def _refresh_windows_mirror(out: Out) -> None:
+    """On WSL, re-derive the Windows config.json from [data] after a save.
+
+    scripts/sync-windows.ps1 and a pwsh-side `tstack update` render the Windows
+    files from that mirror, not from chezmoi [data]. A save that touches [data]
+    alone therefore holds only until the next Windows-side sync, which renders
+    the previous answer back over it. The shell save path (ts_save_config) has
+    always ended in ts_mirror_windows_config; this is the same call, so there
+    is still one writer for the mirror.
+    """
+    if not plat.is_wsl():
+        return
+    try:
+        src = paths.resolve_source_dir()
+    except paths.CloneNotFound:
+        return
+    helper = os.path.join(str(src), "bootstrap", "_config.sh")
+    if not os.path.isfile(helper):
+        return
+    result = subprocess.run(
+        ["bash", "-c", '. "$1"; ts_mirror_windows_config', "_", helper],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=300,
+        check=False,
+    )
+    if result.returncode != 0:
+        out.say(
+            "warning: the Windows config mirror was not refreshed; "
+            "a pwsh-side sync will render the previous settings. "
+            f"({(result.stderr or '').strip()[-200:]})"
+        )
 
 
 def set_value(key: str, value: str, out: Out, dry_run: bool) -> int:
