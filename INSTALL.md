@@ -74,7 +74,7 @@ Every question works the same way: the default is **marked with `>` and captione
   The presets are not vendored: `starship preset <name>` runs at apply time, so
   they stay Starship's rather than freezing at whatever upstream shipped the day
   they were copied. Both sync paths render it on the Windows side too.
-- **Leader key** (WezTerm) — `Ctrl+Space` (default), `Ctrl+A`, `Ctrl+B`, `Alt+Space`, or a custom `mod-key` chord (e.g. `ctrl-x`). Skip with `TS_LEADER=ctrl-a`.
+- **Leader key** (WezTerm) — `Ctrl+Space` (default), `Ctrl+A`, `Ctrl+B`, `Alt+Space`, or a custom `mod-key` chord (e.g. `ctrl-x`; `space` and `backslash` are spelled by name, so `Ctrl+\` is `ctrl-backslash`). Skip with `TS_LEADER=ctrl-a`.
 - **Theme** — `dark` (Catppuccin Mocha, default), `light` (VS Code Light Modern), or `follow` (track the OS light/dark setting; WezTerm switches live, the Starship/tmux palette is baked at apply and refreshed by `tstack update`/`tstack config`). Skip with `TS_THEME=dark|light|follow`.
 - **Terminal emulator** (Windows, macOS and desktop Linux — WSL and headless hosts never install one) — a tick-list, so each is individually opt-in and `[n]one` is one keystroke away. **WezTerm nightly**, **WezTerm stable** and (macOS/Linux) **Ghostty** are separate ticks. Whatever is installed starts ticked on its detected channel; on a fresh machine **nightly is pre-selected**, because upstream's newest stable is `20240203` — February 2024, with no cut since — and this stack's Lua config targets current builds.
 
