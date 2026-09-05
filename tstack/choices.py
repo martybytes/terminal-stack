@@ -65,17 +65,34 @@ class Choice:
 
 
 def _run(argv: list[str], timeout: int = 10) -> subprocess.CompletedProcess[str] | None:
+    """Run a probe and hand back its output, or None when it produced none.
+
+    The encoding is NAMED. `text=True` alone decodes with the locale codec, which
+    on a Windows console is cp1252 -- and starship's own preset output carries
+    bytes cp1252 has no mapping for. The decode then raises inside
+    subprocess's reader THREAD, so the call returns with `returncode == 0` and
+    `stdout == None`, every caller's `got.returncode != 0` guard passes, and the
+    next `.strip()` dies with an AttributeError a long way from the cause. That
+    took out `tstack wizard` entirely on Windows, and eleven tests with it.
+
+    `stdout is None` is therefore also treated as failure: a decoder can still
+    fail on some other input, and a caller reading None is the failure mode this
+    exists to end.
+    """
     try:
-        return subprocess.run(
+        got = subprocess.run(
             argv,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
             check=False,
             start_new_session=True,
         )
     except (OSError, subprocess.SubprocessError):
         return None
+    return got if got.stdout is not None else None
 
 
 # ------------------------------------------------------------------- starship
@@ -139,6 +156,11 @@ def starship_preview(name: str) -> str | None:
             [exe, "prompt"],
             capture_output=True,
             text=True,
+            # Named for the same reason as in _run above: the locale codec on a
+            # Windows console cannot decode what starship renders, and the
+            # failure surfaces as a None stdout rather than an exception here.
+            encoding="utf-8",
+            errors="replace",
             timeout=10,
             check=False,
             start_new_session=True,

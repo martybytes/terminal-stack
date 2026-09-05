@@ -12,6 +12,7 @@ and must not block on a tty nobody is watching.
 from __future__ import annotations
 
 import os
+import shutil
 from dataclasses import dataclass, field, replace
 
 from .. import apps as catalog
@@ -43,6 +44,7 @@ class Answers:
     wez_mux: str = "off"
     wez_restore: str = "off"
     atuin: str = "off"
+    herdr: str = "off"
     apps: list[str] = field(default_factory=list)
     cc_tts: str = "off"
     cc_tts_message: str = "template"
@@ -293,6 +295,9 @@ def collect(console: Console, ask_terminals: bool = False) -> Answers:
     # ------------------------------------------------------------------ apps
     selected = _apps(ask, app_class)
 
+    # ----------------------------------------------------------------- herdr
+    herdr = _herdr(ask, selected)
+
     # ------------------------------------------------------------------- tts
     if profile != PROFILE_FULL:
         # Voice notifications announce what an AGENT is doing. Without the agent
@@ -373,6 +378,7 @@ def collect(console: Console, ask_terminals: bool = False) -> Answers:
         wez_mux=wez_mux,
         wez_restore=wez_restore,
         atuin=atuin,
+        herdr=herdr,
         apps=selected,
         cc_tts=cc_tts,
         cc_tts_message=cc_tts_message,
@@ -460,6 +466,41 @@ def _gui_toggle(
     if bare:
         return "off"
     return ask.choose(title, options, "off", intro)
+
+
+def _herdr(ask: Asker, selected: list[str]) -> str:
+    """Whether the stack manages herdr's config. PROBED, never guessed.
+
+    Asked only when there is a herdr to configure: already on PATH, or ticked in
+    the app picker moments ago. A machine with no herdr answering a question
+    about herdr's config file is the noise every skipped question here exists to
+    avoid, and the answer would be "off" either way.
+
+    Asked when headless, unlike the WezTerm toggles. herdr is a multiplexer, not
+    a GUI -- a server reached over ssh is exactly where one earns its keep.
+
+    Not the same question as "install herdr", which the app picker already asked.
+    This one is only about the config file, so a machine can run herdr with its
+    own untouched config and that is a supported answer rather than an oversight.
+    """
+    if _env("TS_HERDR"):
+        return _on_off(_env("TS_HERDR"))
+    installed = shutil.which("herdr") is not None
+    if not installed and "herdr" not in selected:
+        return "off"
+    return ask.choose(
+        "Manage herdr's config (the terminal multiplexer for coding agents):",
+        [
+            ("off", "off", "herdr's config stays entirely yours"),
+            ("on", "on", "the stack sets one key: the theme"),
+        ],
+        "on",
+        "  RECOMMENDATION: on. The stack sets exactly one key, [theme] name =\n"
+        '  "terminal", so herdr uses the palette your terminal already has in\n'
+        "  dark, light and follow alike. Every other line of that file is left\n"
+        "  untouched, and a backup is taken before the first write.\n"
+        "  Reversible with `tstack config herdr off`, which restores it.",
+    )
 
 
 def _terminals(ask: Asker) -> list[str]:
@@ -689,6 +730,7 @@ def review(console: Console, answers: Answers) -> None:
     console.say(f"    WezTerm mux      {answers.wez_mux}")
     console.say(f"    Session restore  {answers.wez_restore}")
     console.say(f"    atuin (Ctrl+R)   {answers.atuin}")
+    console.say(f"    herdr config     {answers.herdr}")
     console.say(f"    tmux prefix      {answers.tmux}")
     console.say(f"    Apps             {' '.join(answers.apps) or '<none>'}")
     console.say(f"    Agent voice      {answers.cc_tts}")

@@ -171,6 +171,16 @@ SETTINGS: tuple[Setting, ...] = (
         flags=frozenset({STANDALONE, SHELL}),
     ),
     Setting(
+        "herdrConfig",
+        "Managed herdr config",
+        "choice",
+        "shell",
+        "off",
+        options=("on", "off"),
+        note="off restores the backup taken before the first write, on this machine only",
+        flags=frozenset({STANDALONE}),
+    ),
+    Setting(
         "ghosttyConfig",
         "Managed Ghostty config",
         "choice",

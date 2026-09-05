@@ -203,6 +203,11 @@ common_install_selected_apps() {
             || echo "$WARN llmfit unavailable (GitHub fallback failed)" ;;
     esac
     ts_install_ai_clis "$apps"
+    # herdr comes from herdr.dev's own installer rather than a GitHub-release
+    # fallback: that script picks the right asset per architecture and wires up
+    # the path `herdr update` and `herdr channel set` use. Shared with the macOS
+    # pass, so there is one herdr install route on POSIX.
+    ts_install_herdrs "$apps"
 }
 
 # glow — Charm's terminal markdown renderer (`glow file.md`; `glow .` for the TUI browser).

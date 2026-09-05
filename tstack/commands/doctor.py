@@ -34,7 +34,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .. import checks, paths, store
+from .. import checks, herdr, paths, store
 from .. import platform as plat
 from ..checks import Report
 from . import agents
@@ -286,6 +286,45 @@ def check_prompt(report: Report) -> None:
         )
         return
     report.ok("prompt-preset", f"prompt: {preset}")
+
+
+def check_herdr(report: Report) -> None:
+    """Two things that can be wrong about herdr, only one of which is a failure.
+
+    A FAILURE: `herdrConfig` says on, but the deployed config carries none of our
+    line. That is drift between the setting and the machine, which is this
+    command's whole reason to exist -- and here it also means an apply on a
+    second machine would produce a different file from this one.
+
+    A WARNING: herdr's prefix equals the saved tmux prefix or WezTerm leader.
+    herdr keeps its own `ctrl+b` default and the stack stores no prefix key for
+    it (docs/decisions.md), which makes this collision reachable rather than
+    impossible -- herdr sits beside tmux rather than replacing it. It only bites
+    once one is nested inside the other, so it is reported, never enforced, and
+    never rewritten: which of the two chords to move is the user's call.
+
+    Silent when herdr is not installed. An uninstalled optional tool is not a
+    problem with the install.
+    """
+    if herdr.binary() is None:
+        return
+
+    if herdr.setting() == "on" and herdr.is_ours(herdr.target().config) is not True:
+        report.fail(
+            "herdr-config",
+            "herdrConfig is on, but herdr's config does not carry the stack's key",
+            "fix: tstack herdr on",
+        )
+    elif herdr.setting() == "on":
+        report.ok("herdr-config", "herdr config: managed")
+
+    for key, chord in herdr.collisions():
+        report.note(
+            "herdr-prefix",
+            f"herdr's prefix ({herdr.configured_prefix()}) is also {key} ({chord}); "
+            f"nested, the inner one never sees it",
+            f"change {key} with `tstack config`, or [keys] prefix in {herdr.target().config}",
+        )
 
 
 def _starship_presets(starship: str) -> list[str]:
@@ -747,6 +786,7 @@ def collect() -> Report:
     check_config_stores(report)
     check_memory_backend(report)
     check_prompt(report)
+    check_herdr(report)
     check_tts(report)
     check_agentmemory_wiring(report, src)
     check_agentmemory_secret(report, src)

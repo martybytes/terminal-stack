@@ -4,7 +4,57 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+### Added
+
+- **herdr, the terminal multiplexer that hosts coding agents (09/04/2026).**
+  Offered by the app picker on every platform and never pre-ticked, installed
+  from herdr.dev's own script rather than a package manager, and configured by a
+  new `tstack herdr` (`status`, `on`, `off`, `update`). The saved setting is
+  `herdrConfig`, default **off**.
+
+  Not winget: there is no stable `Herdr.Herdr` manifest, only
+  `Herdr.Herdr.Preview` and three third-party republishes. Not brew on macOS
+  either — `herdr channel set` works on direct installs only, and this stack
+  reads the channel back rather than storing it, matching WezTerm.
+
+  The managed config is a **key splice, not a whole-file render**. herdr rewrites
+  `config.toml` itself and so does the user; the first machine this shipped to
+  already carried a hand-written `onboarding = false` and `default_shell =
+  "pwsh"`, both of which a whole-file mirror would have deleted silently. The
+  stack owns exactly one key, `[theme] name = "terminal"`, which follows the
+  terminal's own palette and is therefore right in dark, light *and* follow. `off`
+  restores the backup taken before the first write, or removes just that line —
+  it never unlinks the file, and is never a `.chezmoiremove`.
+
+  herdr keeps its own `ctrl+b` prefix, which collides with this stack's
+  `tmuxPrefix` default. `tstack doctor` reports that as a note, gated on tmux
+  actually being installed, and never rewrites either side. On a combined
+  Windows + WSL machine the two servers are independent, and
+  `tstack herdr status` reports both. Rationale in `docs/decisions.md`; the
+  runbook is `doc herdr`.
+
 ### Fixed
+
+- **The pre-commit hook can pass again (09/04/2026).** `.githooks/pre-commit`
+  runs mypy under `set -e`, and mypy had five errors in `tstack/ui/app.py` on a
+  clean tree, so the hook rejected every commit in the clone. Newer Textual types
+  `BINDINGS` as a list of `Binding` *or* the two tuple shorthands, and `list` is
+  invariant, so the narrower `ClassVar[list[Binding]]` is an error however
+  correct its contents; and `DOMNode.action_toggle` now takes an argument, which
+  our no-argument picker override collided with. The annotations match the base
+  exactly and the picker's action is `toggle_row`, which is its own name rather
+  than a signature it never wanted.
+- **`tstack wizard` runs on Windows again (09/04/2026).** The prompt preview
+  shells out to starship, and `subprocess.run(..., text=True)` with no `encoding`
+  decodes with the locale codec — cp1252 on a Windows console, which cannot
+  decode what starship emits. The `UnicodeDecodeError` is raised inside
+  subprocess's reader *thread*, so the call returned with `returncode == 0` and
+  `stdout == None`, every `returncode != 0` guard passed, and the next `.strip()`
+  died with an `AttributeError` a long way from the cause. That killed the whole
+  questionnaire on the first question. Both calls in `tstack/choices.py` now name
+  `encoding="utf-8", errors="replace"`, and `_run` treats a `None` stdout as
+  failure. It had also been failing eleven tests in `tests/test_wizard.py`, which
+  read as a Python 3.14 quirk and were not.
 
 - **A WSL apply now reaches every Windows-side file again (09/02/2026).** The
   `run_after` sync walked `windows/` with the file list on the loop's stdin,

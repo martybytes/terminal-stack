@@ -111,6 +111,12 @@ starshipPreset = {{ index . "starshipPreset" | default "terminal-stack" | quote 
        stops re-rendering; `tstack config ghostty off` also removes/restores the
        deployed files. Default on. */}}
 ghosttyConfig = {{ index . "ghosttyConfig" | default "on" | quote }}
+{{- /* Managed ~/.config/herdr/config.toml (%APPDATA%\herdr\config.toml on
+       Windows). "off" is the default and leaves herdr's own config alone;
+       `tstack config herdr off` also restores the backup taken before the first
+       write, on that machine only. Never a .chezmoiremove: that runs everywhere
+       and would wipe a hand-written config on a box that never opted in. */}}
+herdrConfig = {{ index . "herdrConfig" | default "off" | quote }}
 {{- /* Per-computer agent integrations. These are deliberately user-global but
        machine-local: a laptop without the Docker services stays off. */}}
 headroomEnabled = {{ index . "headroomEnabled" | default "off" | quote }}

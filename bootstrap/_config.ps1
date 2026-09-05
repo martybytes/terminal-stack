@@ -145,6 +145,19 @@ function Test-TsAppIsAi([string]$id) { return ($script:TsAppGroups['ai'].Members
 $script:TsPyTools = @('pipx','ipython','httpie','poetry','pre-commit','glances')
 function Test-TsAppIsPy([string]$id) { return ($script:TsPyTools -contains $id) }
 
+# herdr, routed by an explicit id list for the same reason $TsPyTools is: its
+# GROUP says what it is (a terminal multiplexer, in `shell` next to tmux), and
+# the route says how it arrives. It does not arrive from winget.
+#
+# There is no stable `Herdr.Herdr` manifest -- only `Herdr.Herdr.Preview`, which
+# is published by Herdr, Inc. but pins the preview channel. The other three
+# search hits (hdosys.herdr-win, khanhtd36.herdr-khanhtd36, hdosys.herdr-sandbox) are
+# third-party republishes and must not be used. So the official installer it is,
+# and `winget show --id Herdr.Herdr --exact` is the check before that changes.
+# which is also what the POSIX side runs (ts_app_is_herdr in _config.sh).
+$script:TsHerdrTools = @('herdr')
+function Test-TsAppIsHerdr([string]$id) { return ($script:TsHerdrTools -contains $id) }
+
 # Can this platform actually install <id>? Twin of ts_app_installable in
 # bootstrap/_config.sh. This used to be a bare $TsWingetIds.ContainsKey, which
 # quietly meant "is it in winget" rather than "can we install it": the agent
@@ -154,6 +167,7 @@ function Test-TsAppInstallable([string]$id) {
     if ($script:TsWingetIds.ContainsKey($id)) { return $true }
     if (Test-TsAppIsAi $id) { return $true }
     if (Test-TsAppIsPy $id) { return $true }
+    if (Test-TsAppIsHerdr $id) { return $true }
     return $false
 }
 
@@ -362,6 +376,7 @@ function Get-TsConfig {
         cavemanEnabled = 'off'; agentmemoryEnabled = 'off'
         memoryBackend = 'agentmemory'
         starshipPreset = 'terminal-stack'; atuinEnabled = 'off'
+        herdrConfig = 'off'
     }
 }
 
@@ -437,7 +452,8 @@ function Save-TsConfig {
         # so a hardcoded set here would reject a preset the installed starship
         # has. bootstrap/_config.sh's ts_starship_set asks starship instead.
         [string]$StarshipPreset = 'terminal-stack',
-        [ValidateSet('on','off')][string]$AtuinEnabled = 'off'
+        [ValidateSet('on','off')][string]$AtuinEnabled = 'off',
+        [ValidateSet('on','off')][string]$HerdrConfig = 'off'
     )
     $l = ConvertTo-TsLeader $LeaderChord
     $existing = Get-TsConfig
@@ -478,7 +494,8 @@ function Save-TsConfig {
         # but is the same bug and is fixed with it rather than left as the next
         # one to find.
         @{ Param = 'StarshipPreset'; Name = 'starshipPreset'; Default = 'terminal-stack' },
-        @{ Param = 'AtuinEnabled'; Name = 'atuinEnabled'; Default = 'off' }
+        @{ Param = 'AtuinEnabled'; Name = 'atuinEnabled'; Default = 'off' },
+        @{ Param = 'HerdrConfig'; Name = 'herdrConfig'; Default = 'off' }
     )) {
         if (-not $PSBoundParameters.ContainsKey($pair.Param)) {
             Set-Variable -Name $pair.Param -Value (Get-TsProp $existing $pair.Name $pair.Default)
@@ -505,6 +522,7 @@ function Save-TsConfig {
         memoryBackend      = $MemoryBackend
         starshipPreset     = $StarshipPreset
         atuinEnabled       = $AtuinEnabled
+        herdrConfig        = $HerdrConfig
     }
     $p = Get-TsConfigPath
     # No Windows side means nowhere to mirror to. Return the object anyway --
@@ -1136,8 +1154,9 @@ function Install-TsApps([string[]]$Apps) {
     }
     if (Get-Command winget -ErrorAction SilentlyContinue) {
         foreach ($id in $Apps) {
-            if (Test-TsAppIsAi $id) { continue }   # handled by Install-TsAiCli below
-            if (Test-TsAppIsPy $id) { continue }   # handled by Install-TsPyTool below
+            if (Test-TsAppIsAi $id) { continue }      # handled by Install-TsAiCli below
+            if (Test-TsAppIsPy $id) { continue }      # handled by Install-TsPyTool below
+            if (Test-TsAppIsHerdr $id) { continue }   # handled by Install-TsHerdr below
             if ($script:TsWingetIds.ContainsKey($id)) {
                 $wid = $script:TsWingetIds[$id]
                 Write-Host "==> winget install $wid"
@@ -1158,6 +1177,7 @@ function Install-TsApps([string[]]$Apps) {
         foreach ($id in $Apps) { if (Test-TsAppIsPy $id) { Install-TsPyTool $id } }
     }
     foreach ($id in $Apps) { if (Test-TsAppIsAi $id) { Install-TsAiCli $id } }
+    foreach ($id in $Apps) { if (Test-TsAppIsHerdr $id) { Install-TsHerdr } }
     Update-TsSessionPath
 }
 
@@ -1264,6 +1284,32 @@ function Install-TsAiCli([string]$id) {
             catch { Write-Warning 'cursor-agent install failed; see https://cursor.com/cli' }
         }
         default { Write-Warning "${id}: no agent-CLI installer defined" }
+    }
+}
+
+# herdr — the terminal multiplexer that hosts coding agents. Its own installer,
+# not winget (see $TsHerdrTools above for why). Idempotent, never fatal, and only
+# ever runs for an id actually ticked: herdr is `classes none` in apps.conf, so
+# no default set pre-selects it. Twin of ts_install_herdr in bootstrap/_config.sh.
+function Install-TsHerdr {
+    $existing = Get-Command herdr -CommandType Application -ErrorAction SilentlyContinue
+    if ($existing) { Write-Host "==> herdr: already installed ($($existing.Source))"; return }
+    # Windows PowerShell rather than pwsh, matching the claude, grok and
+    # cursor-agent branches above. Execution policy is not a concern: it governs
+    # script FILES, and `iex` on a string is unaffected, so this works even where
+    # 5.1 is Restricted.
+    Write-Host '==> herdr: installing via the official installer'
+    try { & powershell -NoProfile -Command "irm https://herdr.dev/install.ps1 | iex" }
+    catch { Write-Warning 'herdr install failed.' }
+    # The installer unpacks into a versioned folder and repoints a `current`
+    # junction, so the PATH entry it adds is stable across updates -- but it is
+    # only in the USER PATH until something refreshes this session.
+    Update-TsSessionPath
+    if (-not (Get-Command herdr -CommandType Application -ErrorAction SilentlyContinue)) {
+        Write-Warning 'herdr is still not on PATH.'
+        Write-Host '   If endpoint protection blocked the PowerShell installer, use the .cmd one:'
+        Write-Host '   curl.exe -fsSLo install.cmd https://herdr.dev/install.cmd && install.cmd && del install.cmd'
+        Write-Host '   Details: https://herdr.dev/docs/install/'
     }
 }
 

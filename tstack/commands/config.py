@@ -60,6 +60,7 @@ Usage:
   tstack config tmux <chord>       the tmux prefix
   tstack config restore <on|off>   reopen the last session on launch
   tstack config atuin <on|off>     atuin owns Ctrl+R
+  tstack config herdr <on|off>     the managed herdr config
   tstack config memory <backend>   agentmemory | headroom | none | status
   tstack config agents [...]       per-machine agent wiring
 
@@ -101,13 +102,13 @@ NATIVE = (
 # every answer and threw them away.
 DELEGATED = ("apps", "tts", "reconfigure", "wizard")
 # Handed to another ported command rather than reimplemented here.
-HANDOFF = {"mux": "mux", "wezterm": "wezterm", "ghostty": "ghostty"}
+HANDOFF = {"mux": "mux", "wezterm": "wezterm", "ghostty": "ghostty", "herdr": "herdr"}
 
 # The unknown-verb hint. ONE list, and it must be complete: the bash hint omits
 # `memory`, which it implements, and the pwsh one omits `atuin` instead.
 KNOWN = (
     "show, get, set, leader, theme, tmux, apps, tts, mux, restore, atuin, "
-    "prompt, ghostty, memory, agents, wezterm, wizard"
+    "prompt, ghostty, herdr, memory, agents, wezterm, wizard"
 )
 
 
@@ -219,6 +220,9 @@ def show(out: Out) -> int:
         )
     )
     out.say(_row("atuin", store.get("atuinEnabled", "off"), "tstack config atuin on|off"))
+    # Every platform, unlike the ghostty row below: herdr runs on all four, so
+    # the setting means something wherever this is read.
+    out.say(_row("herdr", store.get("herdrConfig", "off"), "tstack config herdr on|off"))
     # macOS alone, matching the one target `tstack ghostty` still has. This was
     # briefly widened to WSL and Windows for the noctty mirror; that mirror is
     # gone, so printing the row anywhere else would advertise a setting that

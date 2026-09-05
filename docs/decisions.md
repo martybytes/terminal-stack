@@ -2703,3 +2703,127 @@ chezmoi `[data]` and stopped; the shell save it replaced had always ended in
 mirror, a setting changed from WSL was rendered back to its old value by the next
 pwsh-side sync. `_apply` now calls the bash writer after `chezmoi init` on WSL,
 keeping one implementation of the mirror.
+
+## Why herdr is opt-in, spliced rather than rendered, and keeps its own prefix
+
+herdr is a terminal multiplexer that hosts coding agents: one Rust binary running
+a background server, panes that survive detach and reboot, and every pane marked
+working, blocked or idle. It overlaps this stack in three places at once — tmux,
+the WezTerm mux domain, and the `cc*` wrappers' tab titles — so adding it was
+mostly a set of decisions about what NOT to do.
+
+**It sits beside tmux; it does not replace it.** tmux stays the `ssht` persistence
+story on servers, and nothing in the stack starts herdr for you. The cost accepted
+is that a machine can have three multiplexers available at once. The alternative,
+making `herdrConfig on` mean "tmux drops out", would have reached `ssht`, the
+wrappers and half the docs for a change nobody had asked for yet.
+
+**It keeps herdr's own `ctrl+b` prefix, and there is no `herdrPrefix` setting.**
+Matching upstream means every herdr tutorial applies unmodified and the store
+carries one fewer key. The known cost is that `ctrl+b` is also this stack's
+`tmuxPrefix` default, so tmux nested inside a herdr pane never sees the chord —
+and decision one makes that nesting reachable rather than impossible.
+
+The mitigation is a `tstack doctor` **note**, not a setting and not a rewrite:
+which of the two chords to move is the user's call, and a doctor that edited
+either would be making it for them. The note is **gated on tmux actually being
+installed**, which is the difference between a warning and a nag. herdr keeps
+`ctrl+b` by decision, so a machine reporting a collision it has decided to live
+with, on every single `tstack doctor` run, forever, is a report nobody reads.
+That is the same failure `ts_app_installable` was added to end when a macOS box
+was told about `nvtop` on every update.
+
+**The config is a key SPLICE, not a whole-file render.** This is the one place
+`tstack/herdr.py` diverges from `tstack/ghostty.py`, which it is otherwise
+modelled on, and the divergence came from looking at a real machine rather than
+reasoning about one. herdr writes `config.toml` itself — `herdr config reset-keys`
+backs it up and rewrites it, and the global menu edits it — and so does the user.
+The first box this shipped to already carried a hand-written `onboarding = false`
+and `[terminal] default_shell = "pwsh"`. A whole-file mirror would have deleted
+both, silently, with nothing in any diff: exactly the hazard that once disabled
+the agentmemory plugin by whole-file-copying `~/.claude/settings.json`, on a
+format with no cheap key splice. So the splice is written out by hand, line
+oriented, and it preserves comments, formatting and the file's own line endings.
+
+Ownership is therefore per **key**, and the set is one: `[theme] name`.
+
+**`theme.name = "terminal"`, not a theme name and not `auto_switch`.** herdr ships
+eleven built-in themes plus a light/dark `auto_switch` pair. Naming one would make
+the stack a second theme owner and would have to be re-derived every time
+`themeMode` changed. Worse, deriving it from `resolvedTheme` is precisely the trap
+the Ghostty config documents: the value looks right and silently freezes `follow`.
+`terminal` tells herdr to use the host terminal's ANSI palette, which this stack
+already themes, so one value is correct in dark, light AND follow, and stays
+correct when the OS appearance flips underneath. No re-render, no second owner.
+
+**`off` restores, and never unlinks.** Ghostty's `off` deletes what it deployed,
+because it deployed the whole file. Here the file is mostly someone else's, so
+`off` restores the `.bak.YYYYMMDD` taken before the first write, and failing that
+removes only the marked line. As with Ghostty it is deliberately not a
+`.chezmoiremove` rule and not a sync-side delete: both of those run on every
+machine and would wipe a hand-written config on a box that never opted in.
+
+**Installed by herdr.dev's own script on every platform.** Not winget: there is no
+stable `Herdr.Herdr` manifest, only `Herdr.Herdr.Preview` (which is Herdr, Inc.'s
+but pins the preview channel) and three third-party republishes. Not brew on
+macOS either, which is the less obvious half — `herdr channel set` is documented
+as working on direct installs only, and this stack **detects** the channel rather
+than storing it, matching the WezTerm channel precedent. A brew-managed herdr
+would report a channel nothing could change.
+
+**Routed by an id list, not by its group.** `herdr` belongs in `shell` next to
+tmux, because that is what it is. Putting it in `ai` to get a non-package install
+would hand it to `ts_install_ai_cli`, which has no branch for it and would print
+"no agent-CLI installer defined" — the same coupling that put `llmfit` in
+`models`. So `ts_app_is_herdr` / `Test-TsAppIsHerdr` is an explicit id list, the
+shape `$TsPyTools` already uses on the Windows side.
+
+**`tstack update` reports a newer herdr and installs nothing.** herdr already
+checks in the background on its own. Updating a live multiplexer is the same class
+of hazard as restarting the WezTerm mux server, which this stack deliberately
+never automates.
+
+**On a combined Windows plus WSL machine, both sides run their own server.** Two
+installs, two sockets, two configs, and no stack opinion about which one you
+attach to. The consequence built for: `tstack herdr status` reports both, labelled,
+rather than assuming one is authoritative, and it reaches the Windows one through
+interop (`herdr.exe`) — never `pgrep`, which finds nothing inside WSL while a
+healthy Windows-side server runs on the same machine, the trap `tstack mux`
+already documents. Neither side resolves its config to a `/mnt/c` path, and
+neither sets `HERDR_SOCKET_PATH` for the other.
+
+**The wizard question is probed, not always asked.** It only appears when there is
+a herdr to configure: already on PATH, or ticked in the app picker moments ago.
+It is asked even when headless, unlike the WezTerm toggles — a multiplexer is
+exactly what earns its keep on a server reached over ssh. And it is a different
+question from "install herdr", which the picker already asked: running herdr with
+its own untouched config is a supported answer rather than an oversight.
+
+
+## Why the starship preview subprocess names its encoding
+
+`tstack wizard` opens by rendering the prompt live, which shells out to starship.
+On Windows that call died, and took the entire questionnaire with it:
+
+```
+AttributeError: 'NoneType' object has no attribute 'strip'
+  tstack/choices.py, _preset_config
+```
+
+The cause is two failures compounding. `subprocess.run(..., text=True)` with no
+`encoding` decodes with the locale codec, which on a Windows console is cp1252 —
+and starship's own preset output carries bytes cp1252 has no mapping for. The
+`UnicodeDecodeError` is then raised inside subprocess's reader THREAD, not in the
+caller. So the call returns normally, with `returncode == 0` and `stdout` set to
+`None`. Every guard in this file tested `got is None or got.returncode != 0`, all
+of which passed, and the next `.strip()` died a long way from the cause.
+
+Two changes, because either alone leaves the trap armed. The encoding is now
+named (`encoding="utf-8", errors="replace"`) on both subprocess calls in the file,
+and `_run` treats `stdout is None` as failure — another decoder can still fail on
+some other input, and a caller reading `None` is the failure mode this exists to
+end.
+
+It had been failing on every Windows machine for as long as the preview has
+existed, and it took eleven tests in `tests/test_wizard.py` with it. They were red
+locally and read as a Python 3.14 quirk. They were not.

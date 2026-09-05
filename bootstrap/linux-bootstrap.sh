@@ -53,6 +53,7 @@ _ts_persist_wizard() {
         ts_wez_mux_set "${TS_WIZ_WEZ_MUX:-off}"
         ts_wez_restore_set "${TS_WIZ_WEZ_RESTORE:-off}"
         ts_atuin_set "${TS_WIZ_ATUIN:-off}"
+        ts_herdr_set "${TS_WIZ_HERDR:-off}"
         # Same shape as the three above: its own writer, so choosing a prompt
         # does not have to re-state every other answer.
         ts_starship_set "${TS_WIZ_STARSHIP:-terminal-stack}" || true

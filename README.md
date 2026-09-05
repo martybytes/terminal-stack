@@ -191,6 +191,7 @@ tstack config theme follow
 tstack ui              # every setting in one screen (needs Textual)
 tstack config wizard   # replay the install questionnaire and save the answers
 tstack ghostty         # the managed Ghostty config: status, diff, on, off
+tstack herdr           # the managed herdr config: status, on, off, update
 tstack update          # pull the latest stack and re-apply
 tstack rollback        # undo that update
 doc                    # fuzzy-find a runbook in the knowledge base

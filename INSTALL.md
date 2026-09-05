@@ -102,7 +102,7 @@ Every question works the same way: the default is **marked with `>` and captione
 
   | Group | Tools |
   |---|---|
-  | `shell` | tmux, eza, bat, tree, zoxide, fzf, atuin |
+  | `shell` | tmux, eza, bat, tree, zoxide, fzf, atuin, herdr |
   | `search` | ripgrep, fd |
   | `disk` | duf, ncdu, dust, gdu |
   | `system` | btop, bottom, glances, nvtop, lazydocker |
@@ -114,6 +114,14 @@ Every question works the same way: the default is **marked with `>` and captione
   | `ai` | claude, codex, cursor-agent, grok, gemini, pi |
 
   **choose whole groups** ticks groups — *all* of them start ticked, `ai` included; **choose individual tools** walks the groups one tick-list at a time, or takes a comma-separated list if you already know what you want. Anything in the recommended set starts ticked, so pressing Enter through the walk lands exactly on the recommended set.
+
+  **`herdr` is offered and never pre-ticked.** It is a terminal multiplexer that
+  hosts coding agents, and it sits beside tmux rather than replacing it, so it is
+  the one `shell` entry no default set selects for you. It does not come from a
+  package manager either: herdr.dev's own installer runs on every platform, since
+  there is no stable winget manifest and a brew-managed copy could not switch
+  release channel. Tick it and the wizard then asks one more question, whether the
+  stack should manage herdr's `config.toml` (default no). See `doc herdr`.
 
   **The `ai` group defaults to all six and is still a question** — every agent CLI starts ticked, and every one stays individually untickable. None of them come from a package manager:
 

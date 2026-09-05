@@ -47,9 +47,9 @@ class MultiPickScreen(ModalScreen[str]):
     Returns the selection as the space-separated string the store holds.
     """
 
-    BINDINGS: ClassVar[list[Binding]] = [
+    BINDINGS: ClassVar[list[Binding | tuple[str, str] | tuple[str, str, str]]] = [
         Binding("escape", "cancel", "cancel"),
-        Binding("space", "toggle", "toggle"),
+        Binding("space", "toggle_row", "toggle"),
         Binding("a", "all", "all"),
         Binding("n", "none", "none"),
         Binding("enter", "accept", "save", show=True),
@@ -95,7 +95,7 @@ class MultiPickScreen(ModalScreen[str]):
             "Installs only -- nothing is ever uninstalled."
         )
 
-    def action_toggle(self) -> None:
+    def action_toggle_row(self) -> None:
         index = self.query_one("#pick-table", DataTable).cursor_row
         if not (0 <= index < len(self.options)):
             return
@@ -144,7 +144,7 @@ class PickScreen(ModalScreen[str]):
     dashboard launched shows up on the next open.
     """
 
-    BINDINGS: ClassVar[list[Binding]] = [
+    BINDINGS: ClassVar[list[Binding | tuple[str, str] | tuple[str, str, str]]] = [
         Binding("escape", "cancel", "cancel"),
         Binding("s", "sample", "hear it"),
     ]
@@ -218,7 +218,9 @@ class PickScreen(ModalScreen[str]):
 class EditScreen(ModalScreen[str]):
     """One value, one box. Dismisses with the new value, or nothing on Escape."""
 
-    BINDINGS: ClassVar[list[Binding]] = [Binding("escape", "cancel", "cancel")]
+    BINDINGS: ClassVar[list[Binding | tuple[str, str] | tuple[str, str, str]]] = [
+        Binding("escape", "cancel", "cancel")
+    ]
 
     def __init__(self, row: model.Row) -> None:
         super().__init__()
@@ -274,7 +276,7 @@ class SettingsApp(App[None]):
     #pick-help { color: $text-muted; }
     """
 
-    BINDINGS: ClassVar[list[Binding]] = [
+    BINDINGS: ClassVar[list[Binding | tuple[str, str] | tuple[str, str, str]]] = [
         Binding("q", "quit", "quit"),
         Binding("slash", "focus_filter", "filter"),
         # `e` as well as Enter, and it is the one the footer advertises: a

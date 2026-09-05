@@ -136,8 +136,9 @@ Install-TsTerminals -Selected $wizard.Terminals
 # is also why the two non-winget routes below are repeated here rather than
 # delegated: skip either one and the tools it owns are silently never installed.
 foreach ($id in $selectedApps) {
-    if (Test-TsAppIsAi $id) { continue }   # not winget packages; handled below
-    if (Test-TsAppIsPy $id) { continue }   # PyPI, not winget; handled below
+    if (Test-TsAppIsAi $id) { continue }      # not winget packages; handled below
+    if (Test-TsAppIsPy $id) { continue }      # PyPI, not winget; handled below
+    if (Test-TsAppIsHerdr $id) { continue }   # herdr.dev's own installer; handled below
     if ($script:TsWingetIds.ContainsKey($id)) {
         Install-WingetPackage -Id $script:TsWingetIds[$id] -Because $id | Out-Null
     } else {
@@ -152,13 +153,14 @@ if (@($selectedApps | Where-Object { Test-TsAppIsPy $_ }).Count) {
     foreach ($id in $selectedApps) { if (Test-TsAppIsPy $id) { Install-TsPyTool $id } }
 }
 foreach ($id in $selectedApps) { if (Test-TsAppIsAi $id) { Install-TsAiCli $id } }
+foreach ($id in $selectedApps) { if (Test-TsAppIsHerdr $id) { Install-TsHerdr } }
 Update-TsSessionPath
 Show-TsInstalledApps $selectedApps
 
 # Save the chosen config to %LOCALAPPDATA%\terminal-stack\config.json — read by
 # sync-windows.ps1 (and the WSL hook's mirror) to render the Windows .tmpl files.
 if ($PSCmdlet.ShouldProcess('terminal-stack config.json', 'save config')) {
-    Save-TsConfig -LeaderChord $leaderChord -ThemeMode $themeMode -Apps $selectedApps -WeztermMux $wizard.WezMux -WeztermRestore $wizard.WezRestore -CcTts $ccTts -HeadroomEnabled $wizard.Headroom -HeadroomCursorMode $wizard.HeadroomCursor -CavemanEnabled $wizard.Caveman -AgentmemoryEnabled $wizard.Agentmemory -MemoryBackend $wizard.MemoryBackend -StarshipPreset $wizard.StarshipPreset | Out-Null
+    Save-TsConfig -LeaderChord $leaderChord -ThemeMode $themeMode -Apps $selectedApps -WeztermMux $wizard.WezMux -WeztermRestore $wizard.WezRestore -CcTts $ccTts -HeadroomEnabled $wizard.Headroom -HeadroomCursorMode $wizard.HeadroomCursor -CavemanEnabled $wizard.Caveman -AgentmemoryEnabled $wizard.Agentmemory -MemoryBackend $wizard.MemoryBackend -StarshipPreset $wizard.StarshipPreset -HerdrConfig $wizard.Herdr | Out-Null
     Export-CcTtsJson
     Write-Host "==> Saved config to $(Get-TsConfigPath)"
     if ($wizard.CcTts -eq 'on') {
@@ -166,13 +168,13 @@ if ($PSCmdlet.ShouldProcess('terminal-stack config.json', 'save config')) {
             else { @('-NoStart', '-NoAutostart') }
         if (Invoke-TsCcTtsDaemonInstaller $installerArgs) {
             $ccTts.daemon.enabled = ($wizard.CcTtsDaemon -eq 'on')
-            Save-TsConfig -LeaderChord $leaderChord -ThemeMode $themeMode -Apps $selectedApps -WeztermMux $wizard.WezMux -WeztermRestore $wizard.WezRestore -CcTts $ccTts -HeadroomEnabled $wizard.Headroom -HeadroomCursorMode $wizard.HeadroomCursor -CavemanEnabled $wizard.Caveman -AgentmemoryEnabled $wizard.Agentmemory -MemoryBackend $wizard.MemoryBackend -StarshipPreset $wizard.StarshipPreset | Out-Null
+            Save-TsConfig -LeaderChord $leaderChord -ThemeMode $themeMode -Apps $selectedApps -WeztermMux $wizard.WezMux -WeztermRestore $wizard.WezRestore -CcTts $ccTts -HeadroomEnabled $wizard.Headroom -HeadroomCursorMode $wizard.HeadroomCursor -CavemanEnabled $wizard.Caveman -AgentmemoryEnabled $wizard.Agentmemory -MemoryBackend $wizard.MemoryBackend -StarshipPreset $wizard.StarshipPreset -HerdrConfig $wizard.Herdr | Out-Null
             Export-CcTtsJson
         } else {
             Write-Warning 'TTS executable build failed; voice hooks were not enabled.'
             $ccTts.enabled = $false
             $ccTts.daemon.enabled = $false
-            Save-TsConfig -LeaderChord $leaderChord -ThemeMode $themeMode -Apps $selectedApps -WeztermMux $wizard.WezMux -WeztermRestore $wizard.WezRestore -CcTts $ccTts -HeadroomEnabled $wizard.Headroom -HeadroomCursorMode $wizard.HeadroomCursor -CavemanEnabled $wizard.Caveman -AgentmemoryEnabled $wizard.Agentmemory -MemoryBackend $wizard.MemoryBackend -StarshipPreset $wizard.StarshipPreset | Out-Null
+            Save-TsConfig -LeaderChord $leaderChord -ThemeMode $themeMode -Apps $selectedApps -WeztermMux $wizard.WezMux -WeztermRestore $wizard.WezRestore -CcTts $ccTts -HeadroomEnabled $wizard.Headroom -HeadroomCursorMode $wizard.HeadroomCursor -CavemanEnabled $wizard.Caveman -AgentmemoryEnabled $wizard.Agentmemory -MemoryBackend $wizard.MemoryBackend -StarshipPreset $wizard.StarshipPreset -HerdrConfig $wizard.Herdr | Out-Null
             Export-CcTtsJson
         }
     }

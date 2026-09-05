@@ -14,6 +14,7 @@ commands any more, and no aliases for them.
 | `tstack mux` | the WezTerm multiplexer domain |
 | `tstack wezterm` | WezTerm channel and updates |
 | `tstack ghostty` | the managed Ghostty config; `status`, `diff`, `on`, `off` |
+| `tstack herdr` | the managed herdr config; `status`, `on`, `off`, `update` |
 | `tstack wizard` | ask the install questions and print the answers — it saves nothing |
 | `tstack smb` | SMB shares over rclone (POSIX only) - see `doc smb-shares` |
 | `tstack agents` | agent CLI wiring - see `doc agentmemory`, `doc headroom` |
@@ -136,6 +137,7 @@ Run it bare for an interactive menu; `tstack config show` just prints the state.
 | `tstack config prompt [status\|list\|<name>]` | which Starship prompt. `list` renders every option so you can see them |
 | `tstack config atuin <on\|off>` | atuin owns `Ctrl+R` — see `doc common/tools/atuin` |
 | `tstack config ghostty [on\|off\|status\|diff]` | hand-off to `tstack ghostty` — see `doc common/tools/ghostty` |
+| `tstack config herdr [on\|off\|status\|update]` | hand-off to `tstack herdr` — see `doc common/tools/herdr` |
 | `tstack config tts …` | agent voice — see `doc common/tts` |
 | `tstack config mux [on\|off\|…]` | hand-off to `tstack mux` (WezTerm multiplexer domain) |
 | `tstack config restore <on\|off>` | reopen the last WezTerm session at startup (default off) |
