@@ -456,3 +456,99 @@ out of the prompt's reach.
 prints a bootstrap that re-runs `starship ... --print-full-init`. On a machine
 where a spawn costs 300ms-2s (antivirus scanning each exec) that is worth
 knowing: request `--print-full-init` yourself.
+
+## winget-installed tools cannot start over ssh ("untrusted mount point")
+
+ssh into a Windows box, start `pwsh`, and the profile load throws before the
+prompt while `ls` fails afterwards:
+
+```
+Program 'fnm.exe' failed to run: An error occurred trying to start process
+'C:\Users\<you>\AppData\Local\Microsoft\WinGet\Links\fnm.exe' ... The path cannot
+be traversed because it contains an untrusted mount point.
+Program 'eza.exe' failed to run: ... No application is associated with the
+specified file for this operation.
+```
+
+Nothing is wrong with fnm or eza, and the same commands work at the console.
+Every shim winget puts in `%LOCALAPPDATA%\Microsoft\WinGet\Links` is a
+**symlink** into the real package directory:
+
+```
+> cmd /c dir /al "%LOCALAPPDATA%\Microsoft\WinGet\Links"
+<SYMLINK>  eza.exe [...\WinGet\Packages\eza-community.eza_...\eza.exe]
+<SYMLINK>  fnm.exe [...\WinGet\Packages\Schniz.fnm_...\fnm.exe]
+```
+
+An ssh logon carries a **remote** token, so following one of those links is a
+remote-to-local traversal, and Windows disables that class by default:
+
+```
+> fsutil behavior query SymlinkEvaluation
+Local-to-local symbolic link evaluation is: ENABLED
+Local-to-remote symbolic link evaluation is: ENABLED
+Remote-to-local symbolic link evaluation is: DISABLED
+Remote-to-remote symbolic link evaluation is: DISABLED
+```
+
+`CreateProcess` therefore refuses the shim (`ERROR_UNTRUSTED_MOUNT_POINT`), and
+whether the message names the mount point or the vaguer "no application is
+associated" depends on how the failure surfaces. Tools installed outside winget
+are unaffected, which is why `starship` (Program Files) and `zoxide`
+(chocolatey) kept working while 30 winget shims did not.
+
+**Fix, on the console and elevated**, not over ssh, since the point is that a
+remote session's token is the problem:
+
+```
+fsutil behavior set SymlinkEvaluation R2L:1
+```
+
+Reconnect afterwards, and re-check with `fsutil behavior query
+SymlinkEvaluation`. It is a machine-wide policy: enabling R2L lets a symlink on
+a remote share be followed to a local path, so it is the machine owner's call,
+which is why the stack reports it and never sets it.
+
+Two consequences in this repo:
+
+- **`Get-Command` is not a runnability test.** It stats the file, so it says yes
+  to a shim that cannot launch. The `$PROFILE` fnm block suppresses
+  `$ErrorActionPreference` across both probes and quotes its interpolation
+  (`"$tsFnmEnv".Trim()`), because the old code turned one failed launch into
+  three errors: the launch, a `.Trim()` on the resulting `$null`, and an
+  `Invoke-Expression` with nothing to run.
+- **The stack explains it at login.** `Test-TsRemoteSymlinkBlocked` (the
+  `ssh-symlink-notice` block) fires only when `$env:SSH_CONNECTION` is set, the
+  registry value `SymlinkRemoteToLocalEvaluation` under
+  `HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem` is not `1`, and the Links
+  directory is on `PATH`. It prints the reason and the exact elevated command.
+  The registry rather than `fsutil`, so a login costs no extra process; a
+  **missing** value counts as blocked, because absent is the Windows default.
+  `tstack doctor` reports the same thing as a NOTE (`winget-symlinks`), and
+  `New-Item -ItemType File "$env:LOCALAPPDATA\terminal-stack\no-ssh-symlink-notice"`
+  silences the login notice on a machine where the policy will not be changed.
+
+## Captured child output decodes with the locale codec, not UTF-8
+
+`subprocess.run(argv, capture_output=True, text=True)` decodes with the
+**locale** encoding. On a Windows host that is cp1252, and everything this stack
+shells out to (starship, wezterm, docker, git, chezmoi) emits UTF-8. The failure
+does not look like an encoding failure, because the decode happens in
+subprocess's stdout **reader thread**:
+
+```
+UnicodeDecodeError: 'charmap' codec can't decode byte 0x81 in position 568
+```
+
+is raised there, `subprocess.run` still returns a `CompletedProcess` with
+`returncode=0`, `stderr=''` and **`stdout=None`**, and the caller dies on
+`got.stdout.strip()` several frames away. `tstack ui` crashed exactly that way
+previewing `starship preset tokyo-night`, whose Nerd Font glyphs are outside
+cp1252.
+
+`tstack/proc.py` is the single place that decides this: `encoding="utf-8"` plus
+`errors="replace"`, so a child that genuinely is not UTF-8 (`tasklist.exe` on
+some locales) costs a replacement character rather than a `None` every call site
+dereferences. `test_every_captured_child_process_decodes_as_utf_8` walks the
+package's AST and fails on any capturing `subprocess.run` without an explicit
+`encoding`.

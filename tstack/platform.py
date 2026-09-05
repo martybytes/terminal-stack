@@ -17,9 +17,11 @@ from __future__ import annotations
 import functools
 import os
 import shutil
-import subprocess
 import sys
 from pathlib import Path
+
+# proc imports nothing from the package, so this cannot cycle back through here.
+from . import proc
 
 WINDOWS = "windows"
 WSL = "wsl"
@@ -80,15 +82,8 @@ def windows_username() -> str | None:
     cmd = Path("/mnt/c/Windows/System32/cmd.exe")
     if not cmd.exists():
         return None
-    try:
-        out = subprocess.run(
-            [str(cmd), "/c", "echo %USERNAME%"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
+    out = proc.capture([str(cmd), "/c", "echo %USERNAME%"], timeout=10)
+    if out is None:
         return None
     name = out.stdout.strip().strip("\r\n")
     return name or None
@@ -160,16 +155,7 @@ def to_windows_path(path: Path | str) -> str | None:
         return str(path)
     if kind() != WSL:
         return None
-    try:
-        out = subprocess.run(
-            ["wslpath", "-w", str(path)],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if out.returncode != 0:
+    out = proc.capture(["wslpath", "-w", str(path)], timeout=10)
+    if out is None or out.returncode != 0:
         return None
     return out.stdout.strip() or None

@@ -91,6 +91,31 @@ one (`irm 'https://cursor.com/install?win32=true' | iex`) — it lands in
 The group is pre-ticked (default to all) but always asked, and every CLI in it
 stays individually untickable.
 
+## Over ssh: the shims are symlinks
+
+Every file winget puts in `%LOCALAPPDATA%\Microsoft\WinGet\Links` is a symlink
+into the package directory. An ssh session's token is a **remote** one, and
+Windows disables remote-to-local symlink traversal by default, so in an ssh
+session those tools cannot start at all:
+
+```
+Program 'eza.exe' failed to run: ... The path cannot be traversed because it
+contains an untrusted mount point.
+```
+
+The same commands work at the console, and non-winget installs (starship in
+Program Files, a chocolatey binary) are unaffected. On the console, in an
+**elevated** prompt:
+
+```
+fsutil behavior set SymlinkEvaluation R2L:1
+```
+
+then reconnect; `fsutil behavior query SymlinkEvaluation` shows the four
+classes. `$PROFILE` prints this instruction on login when it detects the state,
+and `tstack doctor` reports it as `winget-symlinks`. Full write-up in
+`docs/powershell-quirks.md`.
+
 ## Daily commands
 | Command | What it does |
 |---|---|

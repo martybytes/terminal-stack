@@ -302,9 +302,15 @@ def test_fnm_ignores_package_json_engines_in_both_shells():
     # leave fnm unwired with nothing printed, so both sides keep a fallback.
     assert '_ts_fnm_env="$(fnm env --use-on-cd --shell zsh 2>/dev/null)"' in zsh
     assert (
-        "if (-not $tsFnmEnv.Trim()) { $tsFnmEnv = fnm env --use-on-cd --shell powershell | Out-String }"
-        in ps
+        'if (-not "$tsFnmEnv".Trim()) { $tsFnmEnv = fnm env --use-on-cd --shell powershell '
+        "2>$null | Out-String }" in ps
     )
+    # A winget shim under WinGet\Links is a symlink, and an ssh session evaluates
+    # it remote-to-local -- disabled by default, so fnm.exe is present but cannot
+    # be launched and the login used to dump three errors. Quoted interpolation
+    # (no .Trim() on a null) plus a suppressed ErrorActionPreference keep it quiet.
+    assert "$ErrorActionPreference = 'SilentlyContinue'" in ps
+    assert "} finally { $ErrorActionPreference = $tsFnmEap }" in ps
 
 
 def test_headroom_auth_probe_retries_and_names_the_failure(monkeypatch):
@@ -3097,3 +3103,31 @@ def test_the_prompt_template_preserves_the_trailing_newline():
 #     -> a Python module either imports or does not; mypy and the suite cover it
 #   test_nightly_is_preticked_even_when_stable_is_installed
 #     -> covered by test_both_preticked_collapses_before_the_first_render
+
+
+def test_the_profile_explains_the_ssh_symlink_block_instead_of_failing_cryptically():
+    r"""Over ssh, every winget shim under WinGet\Links is a symlink Windows will
+    not traverse for a remote logon, so eza/fnm/fd/rg cannot start and the error
+    names a mount point rather than the policy. The fix needs elevation, so the
+    profile's job is to say what to run and why.
+
+    Gated on SSH_CONNECTION: a local session follows those symlinks happily and
+    must see nothing. Gated on the REGISTRY rather than `fsutil behavior query`
+    so login costs no process spawn, and a MISSING value counts as blocked
+    because that absent state is the Windows default.
+    """
+    ps = (ROOT / "windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1").read_text(
+        encoding="utf-8"
+    )
+    assert "# ---- ssh-symlink-notice-start ----" in ps
+    assert "# ---- ssh-symlink-notice-end ----" in ps
+    assert "if (-not $env:SSH_CONNECTION) { return $false }" in ps
+    assert "SymlinkRemoteToLocalEvaluation" in ps
+    assert "fsutil behavior set SymlinkEvaluation R2L:1" in ps
+    assert "no-ssh-symlink-notice" in ps
+    # No fsutil.exe at login: the registry answers the same question for free.
+    body = ps.split("# ---- ssh-symlink-notice-start ----")[1].split(
+        "# ---- ssh-symlink-notice-end ----"
+    )[0]
+    assert "fsutil behavior query" in body, "the notice must show how to verify the change"
+    assert "$r2l = (Get-ItemProperty" in body
