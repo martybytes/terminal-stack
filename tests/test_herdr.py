@@ -30,6 +30,28 @@ from tstack.commands import herdr as command  # noqa: E402
 HAND_WRITTEN = 'onboarding = false\n[terminal]\ndefault_shell = "pwsh"\n'
 
 
+def _toml_data() -> dict[str, str]:
+    """Read back what `store.set` wrote to chezmoi.toml, standing in for chezmoi.
+
+    `store.get` reads `[data]` through `chezmoi execute-template`, so with no
+    chezmoi binary a POSIX save is written and then unreadable: `on` saved and
+    `setting()` still answered `off`. Windows did not show it, because there the
+    save goes to the config.json mirror, which `get` reads directly.
+
+    Parsing the file the writer just produced keeps both platforms honest without
+    stubbing the writer itself -- which is the half worth testing.
+    """
+    path = store.toml_path()
+    if not path.is_file():
+        return {}
+    found: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        key, sep, value = line.partition("=")
+        if sep:
+            found[key.strip()] = value.strip().strip('"')
+    return found
+
+
 @pytest.fixture
 def config(monkeypatch, tmp_path):
     """A throwaway config path, and a store that writes into tmp_path.
@@ -48,6 +70,7 @@ def config(monkeypatch, tmp_path):
     monkeypatch.setattr(Path, "home", staticmethod(lambda: root))
     monkeypatch.setattr(plat, "find_chezmoi", lambda: None)
     monkeypatch.setattr(store, "mirror_path", lambda: tmp_path / "config.json")
+    monkeypatch.setattr(store, "chezmoi_data", _toml_data)
     store.clear_cache()
     yield spot
     store.clear_cache()
