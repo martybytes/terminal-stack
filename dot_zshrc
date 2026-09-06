@@ -5,6 +5,21 @@
 # did not yet contain it and the cc*/ccd wrappers died with "not found on PATH".
 export PATH="$HOME/.local/bin:$PATH"
 
+# ~/bin is the local-bin clone: portable tools at the top level, one directory per
+# OS under os/, and a gitignored local/ for machine-only scripts. Until now ~/bin
+# reached PATH only because RVM happens to prepend it, which breaks silently the
+# day RVM goes away.
+#
+# The os/ directory is tested rather than matched against a list of OS names, so a
+# new os/<uname> directory in that repo works here with no change on this side.
+_bin_os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+if [ -d "$HOME/bin/os/$_bin_os" ]; then
+  export PATH="$HOME/bin:$HOME/bin/os/$_bin_os:$HOME/bin/local:$PATH"
+else
+  export PATH="$HOME/bin:$HOME/bin/local:$PATH"
+fi
+unset _bin_os
+
 # Path to your Oh My Zsh installation.
 export ZSH="$HOME/.oh-my-zsh"
 
