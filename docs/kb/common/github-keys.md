@@ -10,9 +10,20 @@ ssh-keygen -t ed25519 -C "you@host-$(date +%Y%m%d)" -f ~/.ssh/id_github
 ## 2. Load into the agent (optional)
 
 ```bash
-eval "$(ssh-agent -s)"
+eval "$(ssh-agent -s)"          # macOS / Linux / WSL only
 ssh-add ~/.ssh/id_github
 ```
+
+**On Windows pwsh, skip the `eval`** — the agent is a Windows service on a named
+pipe, and starting a second one there breaks the first. Just `ssh-add`:
+
+```powershell
+Get-Service ssh-agent           # Running? then:
+ssh-add $HOME\.ssh\id_github
+```
+
+If that says `Error connecting to agent`, the agent is almost certainly fine and
+`SSH_AUTH_SOCK` is pointing somewhere wrong: `doc troubleshooting`.
 
 ## 3. Copy the PUBLIC key
 

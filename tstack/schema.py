@@ -68,6 +68,15 @@ class Setting:
             return f"{self.key} must be one of: {', '.join(self.options)}"
         if self.kind == "text" and not value.strip():
             return f"{self.key} cannot be empty"
+        if self.kind == "text" and ('"' in value or "\\" in value):
+            # store.set and ts_data_set write `key = "<value>"` with no
+            # escaping, so either character corrupts chezmoi.toml and every
+            # later chezmoi command fails to parse it. Keys are spelled by
+            # name instead (.chezmoi.toml.tmpl maps them to phys: codes).
+            return (
+                f"{self.key} cannot contain a backslash or a double quote; "
+                f"spell the key by name, e.g. ctrl-backslash"
+            )
         return None
 
 
@@ -78,7 +87,7 @@ SETTINGS: tuple[Setting, ...] = (
         "text",
         "keys",
         "ctrl-space",
-        note="e.g. ctrl-space, ctrl-a, alt-x",
+        note="e.g. ctrl-space, ctrl-a, alt-x, ctrl-backslash",
         flags=frozenset({SHELL}),
     ),
     Setting("leaderKey", "WezTerm leader key", "text", "keys", flags=frozenset({DERIVED})),

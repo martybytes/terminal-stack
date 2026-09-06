@@ -445,6 +445,30 @@ def test_claude_instructions_fit_claude_code_limit():
     assert (ROOT / "CLAUDE.md").stat().st_size <= 40_000
 
 
+def test_the_wsl_sync_walk_reads_from_its_own_fd():
+    """The walk's file list must not share stdin with the loop body. pwsh.exe
+    (the part-owned merges) drains inherited stdin, and with the list there the
+    first merge silently dropped every later file: .wezterm.lua and $PROFILE
+    were never re-rendered by a WSL apply, while the summary said unchanged."""
+    sh = (ROOT / "run_after_90-sync-windows.sh").read_text(encoding="utf-8")
+    assert "while IFS= read -r -d '' -u 3 src; do" in sh
+    assert "done 3< <(find" in sh
+    assert "done < <(find" not in sh, "a walk reading from stdin came back"
+
+
+def test_a_posix_save_refreshes_the_windows_mirror():
+    """tstack config on WSL writes chezmoi [data]; sync-windows.ps1 reads
+    config.json. Without the refresh the next pwsh-side sync renders the
+    previous leader/theme back over the new one."""
+    py = (ROOT / "tstack/commands/config.py").read_text(encoding="utf-8")
+    assert "ts_mirror_windows_config" in py
+    apply_body = py.split("def _apply(")[1].split("\ndef ")[0]
+    assert "_refresh_windows_mirror(out)" in apply_body
+    assert apply_body.index("chezmoi_init()") < apply_body.index("_refresh_windows_mirror"), (
+        "the mirror is derived from the keys chezmoi init regenerates"
+    )
+
+
 def test_updates_reconcile_only_enabled_tools():
     ps = (ROOT / "scripts/sync-windows.ps1").read_text(encoding="utf-8")
     sh = (ROOT / "run_after_90-sync-windows.sh").read_text(encoding="utf-8")
@@ -524,6 +548,41 @@ def test_windows_config_preserves_agent_settings_when_other_values_change(tmp_pa
     assert cfg["headroomCursorMode"] == "byok"
     assert cfg["cavemanEnabled"] == "on"
     assert cfg["agentmemoryEnabled"] == "off"
+
+
+def test_named_leader_keys_map_identically_in_both_chord_mappers():
+    """A leader key with no printable spelling (space, backslash) is stored by
+    name and mapped to a WezTerm phys: code. The Go template and the pwsh twin
+    each hold that table; a name only one of them knows renders a different
+    leader on Windows than on macOS/WSL."""
+    toml = read_repo(".chezmoi.toml.tmpl")
+    ps = read_repo("bootstrap/_config.ps1")
+    for name, phys in (("space", "phys:Space"), ("backslash", "phys:Backslash")):
+        assert f'(lower $ckey) "{name}" -}}}}{{{{- $leaderKey = "{phys}"' in toml, name
+        assert f"'{name}'" in ps and f"'{phys}'" in ps, name
+
+
+@pytest.mark.skipif(not shutil.which("pwsh"), reason="PowerShell 7 is unavailable")
+def test_pwsh_maps_ctrl_backslash_to_a_phys_key():
+    helper = ROOT / "bootstrap/_config.ps1"
+    command = (
+        f". '{helper}'; "
+        "$l = ConvertTo-TsLeader 'ctrl-backslash'; "
+        "$s = ConvertTo-TsLeader 'ctrl-space'; "
+        "$a = ConvertTo-TsLeader 'alt-x'; "
+        'Write-Output "$($l.mods)+$($l.key)|$($s.mods)+$($s.key)|$($a.mods)+$($a.key)"'
+    )
+    result = subprocess.run(
+        [shutil.which("pwsh"), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command],
+        text=True,
+        encoding="utf-8",
+        capture_output=True,
+        check=False,
+        timeout=300,
+        start_new_session=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "CTRL+phys:Backslash|CTRL+phys:Space|ALT+x"
 
 
 @pytest.mark.skipif(not shutil.which("pwsh"), reason="PowerShell 7 is unavailable")

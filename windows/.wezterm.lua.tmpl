@@ -31,6 +31,34 @@ for _, dom in ipairs(config.ssh_domains) do
   dom.assume_shell = 'Posix'
 end
 
+-- Windows OpenSSH talks to its agent over the named pipe \\.\pipe\openssh-ssh-agent,
+-- but it still honours SSH_AUTH_SOCK ahead of that pipe whenever the variable
+-- is set. WezTerm's mux_enable_ssh_agent (default TRUE) sets it for every pane
+-- in the LOCAL domain, pointing at a SYMLINK it maintains at
+-- <data dir>/wezterm/agent.<pid> for mux-client agent forwarding -- and creating
+-- a symlink on Windows needs SeCreateSymbolicLinkPrivilege, which a normal user
+-- does not hold unless Developer Mode is on. So the symlink is never created,
+-- WezTerm logs
+--   mux::ssh_agent > failed to ... create symlink ...: A required privilege is
+--   not held by the client. (os error 1314)
+-- and then exports SSH_AUTH_SOCK anyway, pointing at a path that does not exist.
+-- Every ssh / ssh-add / git-over-ssh in every WezTerm pane then fails with
+--   Error connecting to agent: No such file or directory
+-- while `Get-Service ssh-agent` says Running, the pipe is present, and the same
+-- command works from cmd.exe or Windows Terminal. Diagnosed on ORION 2026-09-04.
+--
+-- BOTH lines are load-bearing, in this order:
+--   * mux_enable_ssh_agent = false stops WezTerm overriding the variable. It
+--     OVERRIDES set_environment_variables, so leaving it at the default puts the
+--     dangling agent.<pid> path back however the variable is set below.
+--   * with the mux agent off WezTerm exports SSH_AUTH_SOCK as an EMPTY string,
+--     which Windows OpenSSH also rejects ("Could not open a connection to your
+--     authentication agent"), so the pipe has to be named explicitly.
+-- default_ssh_auth_sock looks like the right knob and is inert here -- it does
+-- not reach local panes. Do not swap it in.
+config.mux_enable_ssh_agent = false
+config.set_environment_variables = { SSH_AUTH_SOCK = [[\\.\pipe\openssh-ssh-agent]] }
+
 -- Optional: host panes in a multiplexer process outside the GUI, so losing the
 -- GUI does not kill the shells. Motivation: the WebGpu panic documented at
 -- config.front_end below took out three live Claude Code sessions on 2026-08-18.

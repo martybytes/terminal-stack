@@ -22,6 +22,9 @@
   chord strings (one Go-template mapping, mirrored by bootstrap/_config.ps1 for
   Windows-standalone installs that have no chezmoi.toml):
     leaderChord "ctrl-space" -> leaderKey "phys:Space", leaderMods "CTRL"
+    leaderChord "ctrl-backslash" -> leaderKey "phys:Backslash" (the key is
+      spelled by name: a literal backslash cannot be stored, see the
+      leaderChord validator in tstack/schema.py)
     tmuxPrefix  "ctrl-b"     -> tmuxPrefixResolved "C-b"
   resolvedTheme (light|dark, the baked palette for Starship/tmux) is NOT
   computed here — it needs live OS detection, so the shell helpers
@@ -50,7 +53,8 @@
 {{- end -}}
 {{- $leaderMods := (join "|" $wmods) -}}
 {{- $leaderKey := $ckey -}}
-{{- if eq (lower $ckey) "space" -}}{{- $leaderKey = "phys:Space" -}}{{- end -}}
+{{- if eq (lower $ckey) "space" -}}{{- $leaderKey = "phys:Space" -}}
+{{- else if eq (lower $ckey) "backslash" -}}{{- $leaderKey = "phys:Backslash" -}}{{- end -}}
 {{- /* ---- tmux prefix chord -> tmux key spec ---- */ -}}
 {{- $tchord := "ctrl-b" -}}
 {{- if hasKey . "tmuxPrefix" -}}{{- $tchord = .tmuxPrefix -}}{{- end -}}

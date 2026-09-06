@@ -143,6 +143,28 @@ Four ports, and which one answers tells you what is broken:
 If 3110 answers and 3111 does not, the console is down, not agentmemory.
 `tstack services status` shows all of them. Concepts: `doc agentmemory-console`.
 
+## `ssh` / `git push` says "Error connecting to agent" (Windows, WezTerm)
+
+The give-away is that **the same command works in cmd.exe or Windows Terminal**
+and fails in every WezTerm pane, however many times you restart the service.
+
+| check | what it means |
+|---|---|
+| `$env:SSH_AUTH_SOCK` **from the failing pane** | must be `\\.\pipe\openssh-ssh-agent`. A `...\wezterm\agent.<pid>` path, or an empty value, is the bug |
+| `[System.IO.Directory]::GetFiles('\\.\pipe\') -match 'openssh'` | the agent's pipe exists — if it does, the service is not your problem |
+| `Get-Service ssh-agent` | Running is necessary, and tells you almost nothing on its own |
+| `Get-Command ssh-add -All` | System32's OpenSSH should win over Git for Windows' `usr/bin` copy |
+
+Windows OpenSSH reaches its agent over a **named pipe**, but honours
+`SSH_AUTH_SOCK` ahead of it whenever that variable is set — so anything that sets
+it to a filesystem path breaks every ssh in that shell while the agent stays
+perfectly healthy. WezTerm did exactly that by default. The stack pins the
+variable to the pipe in `~/.wezterm.lua`; if a pane disagrees, it is running an
+older config — restart WezTerm (a new tab is not enough) after `tstack update`.
+
+**Never fix this by setting `SSH_AUTH_SOCK` to a socket path or starting a Unix
+`ssh-agent`** — neither can serve Windows OpenSSH. Concepts: `doc ssh-config`.
+
 ## A port is already in use
 
 ```sh

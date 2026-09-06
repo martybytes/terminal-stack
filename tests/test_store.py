@@ -200,6 +200,16 @@ def test_empty_text_is_rejected():
     assert schema.BY_KEY["leaderChord"].validate("  ") is not None
 
 
+def test_text_the_toml_writer_cannot_hold_is_rejected_with_the_spelling():
+    """store.set writes `key = "<value>"` unescaped, so `ctrl-\\` would leave
+    chezmoi.toml unparseable and every later chezmoi command dead. The refusal
+    has to name the spelling that works, or the user is stuck."""
+    for bad in ("ctrl-\\", 'ctrl-"'):
+        reason = schema.BY_KEY["leaderChord"].validate(bad)
+        assert reason and "ctrl-backslash" in reason, bad
+    assert schema.BY_KEY["leaderChord"].validate("ctrl-backslash") is None
+
+
 def test_the_source_layer_is_reported(monkeypatch):
     """Which layer won is the whole point: a value that looks right for the wrong
     reason is otherwise invisible."""

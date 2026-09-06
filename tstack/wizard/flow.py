@@ -244,7 +244,8 @@ def collect(console: Console, ask_terminals: bool = False) -> Answers:
         )
         if leader == "custom":
             leader = (
-                text(console, "Enter chord (mod-key, e.g. ctrl-x or alt-space): ") or "ctrl-space"
+                text(console, "Enter chord (mod-key, e.g. ctrl-x, alt-space, ctrl-backslash): ")
+                or "ctrl-space"
             )
 
     # ------------------------------------------------------------- terminals

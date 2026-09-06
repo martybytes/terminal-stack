@@ -6,6 +6,31 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **A WSL apply now reaches every Windows-side file again (09/02/2026).** The
+  `run_after` sync walked `windows/` with the file list on the loop's stdin,
+  and the part-owned merge for `.claude/settings.json` runs `pwsh.exe`, which
+  drains inherited stdin. Everything after that entry in `find` order was
+  silently skipped: `.config/**`, `.cursor/**`, `.wezterm/**`, `.wezterm.lua`
+  and `$PROFILE` were never re-rendered from WSL, and the summary counted them
+  as unchanged. The list now arrives on fd 3. Found because a saved leader
+  change never reached the rendered `.wezterm.lua`.
+- **`tstack config` on WSL refreshes the Windows `config.json` mirror (09/02/2026).**
+  The Python port saved to chezmoi `[data]` and stopped there, while the shell
+  save had always ended in `ts_mirror_windows_config`. `sync-windows.ps1` and a
+  pwsh-side `tstack update` render from the mirror, so any setting changed from
+  WSL was rendered back to its previous value by the next Windows-side sync.
+  The apply step now calls the same bash writer after `chezmoi init`.
+- **`Ctrl+\` can be the WezTerm leader (09/02/2026).** The leader chord is
+  stored as `mod-key` text, and the only key with a spelled-out name was
+  `space`. A literal `ctrl-\` had two failure modes, both silent until the
+  next chezmoi command: the store writes `key = "<value>"` with no escaping,
+  so the backslash left `chezmoi.toml` unparseable, and had it got through,
+  every renderer would have produced `key = '\'` in Lua. `backslash` now joins
+  `space` as a named key (`ctrl-backslash`, mapped to `phys:Backslash`) in
+  both chord mappers, and the `leaderChord`/`tmuxPrefix` validator refuses a
+  backslash or double quote with the spelling that works. Pinned by a
+  two-mapper parity test and a pwsh run of `ConvertTo-TsLeader`.
+
 - **The wizard suite no longer inherits the developer's ssh session
   (09/01/2026).** Four tests in `tests/test_wizard.py` passed at a console and
   failed over ssh -- same commit, same machine, different way in -- and passed
@@ -23,8 +48,6 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
   detection set those variables themselves, and anything wanting the headless
   path still sets `TS_HEADLESS_RESOLVED`. A new test asserts the variables are
   absent, so the next one to leak in is caught rather than diagnosed.
-
-### Fixed
 
 - **Docs caught up with `tstack apply` (08/29/2026).** README and INSTALL.md
   still told people the macOS, WSL and Linux one-liners "end with `chezmoi

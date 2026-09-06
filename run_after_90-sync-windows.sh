@@ -281,7 +281,14 @@ sync_tree() {
 
   [ -d "$src_root" ] || return 0
 
-  while IFS= read -r -d '' src; do
+  # The file list arrives on fd 3, NOT stdin. The loop body runs pwsh.exe for
+  # the part-owned merges (.claude/settings.json, .cursor/hooks.json), and
+  # pwsh drains whatever stdin it inherits. With the list on stdin, the first
+  # merge ate every entry after it: .config/**, .cursor/**, .wezterm/**,
+  # .wezterm.lua and $PROFILE were never visited, the summary still said
+  # "unchanged", and the Windows side stayed frozen at whatever a pwsh-side
+  # sync last rendered. Pinned by test_the_wsl_sync_walk_reads_from_its_own_fd.
+  while IFS= read -r -d '' -u 3 src; do
     rel="${src#"$src_root"/}"
 
     is_modifier=0
@@ -394,7 +401,7 @@ PY
       case "$dst" in "$dst_home/.wezterm"*) wezterm_cfg_changed=1 ;; esac
     fi
     [ -z "$modified" ] || rm -f -- "$modified"
-  done < <(find "$src_root" -type d -name __pycache__ -prune -o \
+  done 3< <(find "$src_root" -type d -name __pycache__ -prune -o \
     -type f ! -name '*.pyc' ! -name '*.pyo' -print0)
 }
 
