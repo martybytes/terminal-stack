@@ -48,6 +48,15 @@ See `doc wezterm/dev-config` for the sync table.
 After profile changes, start a **new** Cursor agent chat (existing agent shells keep
 the old profile until restarted).
 
+## Over ssh: errors before the prompt
+
+`pwsh` in an ssh session can print errors during profile load and then fail on
+`ls`, all naming an "untrusted mount point". The tools are fine; winget's shims
+are symlinks and Windows will not follow one for a remote logon. The profile
+prints the reason and the one elevated command that fixes it
+(`fsutil behavior set SymlinkEvaluation R2L:1`), `tstack doctor` reports it as
+`winget-symlinks`, and `doc windows/winget` has the detail.
+
 ## Recommended WezTerm model (one OS window)
 Use WezTerm **workspaces** (`Ctrl+Space w` picker, `Ctrl+Space n` to create) as the
 unit of "what I'm working on". Inside a workspace use **panes** (`F1`–`F4` /

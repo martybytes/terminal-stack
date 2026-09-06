@@ -1,29 +1,51 @@
-{{- /*
-  Which prompt gets deployed.
+#!/usr/bin/env bash
+# modify_starship.toml — render this stack's prompt WITHOUT throwing away the one
+# that was already there.
+#
+# chezmoi hands a modify_ script the current target on stdin and installs
+# whatever it writes to stdout. A plain whole-file target replaced
+# ~/.config/starship.toml outright, and on Omarchy that file is not empty: the
+# distro ships its own 32-line prompt to every account through /etc/skel. Losing
+# it silently is the same failure this repo already splices around for
+# ~/.zshenv and ~/.claude/settings.json.
+#
+# So: the stack's prompt is written first, and everything that was in the file
+# before is kept underneath it, commented out.
+#
+# CAPTURED ONCE, NOT ON EVERY APPLY. An apply runs repeatedly, so the naive
+# version comments its own output back into itself and the file grows without
+# bound. The marker below is what prevents that: if the incoming file already
+# carries it, the preserved block is reused verbatim and nothing new is
+# captured. Only the FIRST apply -- the one that sees somebody else's file --
+# takes a copy.
+#
+# To restore what was there: uncomment the block, or read it as a record of what
+# the machine looked like before the stack arrived.
+set -eu
 
-  "terminal-stack" (the default, and everything below this block) is this repo's
-  own two-line prompt. Any other value is one of Starship's twelve built-in
-  presets, emitted by `starship preset <name>` right here at apply time rather
-  than vendored -- vendoring twelve TOML files would freeze them at whatever
-  upstream shipped the day they were copied, and the whole point of a preset is
-  that it is Starship's, not ours.
+MARK_START='# ---- terminal-stack: the starship.toml that was here before ----'
+MARK_END='# ---- end of preserved original ----'
 
-  `lookPath` is the load-bearing half. During a bootstrap this template can be
-  rendered BEFORE starship is installed, and `output` on a missing binary aborts
-  the entire apply -- not just this file. Falling back to our own config keeps a
-  half-installed machine with a working prompt, and the next apply picks up the
-  preset.
+current="$(cat)"
 
-  Set it with `tstack config prompt <name>`, which lists what is available and
-  can show you each one rendered before you choose.
-*/ -}}
-{{- $preset := index . "starshipPreset" | default "terminal-stack" -}}
-{{- if and (ne $preset "terminal-stack") (lookPath "starship") -}}
+{{/* NO leading `{{-` and NO trailing `-}}` on this line. A leading dash trims
+     BACKWARDS across the newline and glues the heredoc opener below onto the
+     previous statement -- `current="$(cat)"config=$(cat <<'X'` -- so `config`
+     is never assigned and the script dies on `set -u`. Measured: chezmoi
+     rendered exactly that, and every apply failed with
+     "line 214: config: unbound variable". The `{{ if ... -}}` below is where
+     the forward trim belongs, so the assignment starts at column 0. */}}
+{{ $preset := index . "starshipPreset" | default "terminal-stack" }}
+{{ if and (ne $preset "terminal-stack") (lookPath "starship") -}}
+config=$(cat <<'TS_STARSHIP_BODY'
 # Starship's built-in "{{ $preset }}" preset, rendered by `starship preset` at
 # apply time. Managed by terminal-stack: edits here are replaced on the next
 # apply. To go back to this stack's own prompt: tstack config prompt terminal-stack
 {{ output "starship" "preset" $preset }}
-{{- else -}}
+TS_STARSHIP_BODY
+)
+{{ else -}}
+config=$(cat <<'TS_STARSHIP_BODY'
 "$schema" = "https://starship.rs/config-schema.json"
 
 # Powerlevel10k Rainbow-style two-line prompt rebuilt in Starship.
@@ -98,6 +120,18 @@ style             = "bold blue"
 truncation_length = 4
 truncate_to_repo  = false
 read_only         = " \uf023"
+# Both of these are taken from Omarchy's own starship.toml, which is worth
+# keeping rather than discarding wholesale.
+#
+# truncation_symbol: without it, `truncation_length = 4` silently drops the
+# leading path components with nothing to show it happened -- you cannot tell a
+# short path from a truncated one.
+truncation_symbol = "…/"
+# repo_root_*: inside a git repo, render the repo name distinctly from the path
+# within it. Bold for the root, plain for the rest -- the palette has no second
+# blue (cyan is the same hex), so weight carries the distinction.
+repo_root_style   = "bold blue"
+repo_root_format  = "[ \uf07b $repo_root]($repo_root_style)[$path](blue)[$read_only]($read_only_style)"
 
 # ── Git branch (octocat + branch glyph + name) ────────────────────────────────
 [git_branch]
@@ -175,4 +209,29 @@ cyan   = "#005fb8"
 yellow = "#949800"
 red    = "#CD3131"
 black  = "#616161"
+TS_STARSHIP_BODY
+)
 {{ end -}}
+
+# The preserved block. Reused if we have already taken it, captured if not.
+if printf '%s\n' "$current" | grep -qF -- "$MARK_START"; then
+    # Ours already. Take the block back out unchanged -- re-commenting it would
+    # add a `# ` to every line on every apply.
+    preserved="$(printf '%s\n' "$current" \
+        | awk -v s="$MARK_START" -v e="$MARK_END" \
+              'index($0, s) { f = 1 } f { print } index($0, e) { f = 0 }')"
+elif [ -n "${current//[[:space:]]/}" ]; then
+    # Somebody else's file, and this is the first apply. Comment it whole.
+    preserved="$MARK_START
+# Everything below was your ~/.config/starship.toml before terminal-stack
+# managed this file. It is inert; uncomment what you want back.
+$(printf '%s\n' "$current" | sed 's/^/# /')
+$MARK_END"
+else
+    # Fresh machine: no file, nothing to preserve, no empty block to explain.
+    preserved=""
+fi
+
+printf '%s\n' "$config"
+[ -n "$preserved" ] && printf '\n%s\n' "$preserved"
+exit 0

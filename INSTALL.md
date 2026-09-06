@@ -17,7 +17,7 @@ irm https://raw.githubusercontent.com/martybytes/terminal-stack/main/install.ps1
 # WSL Ubuntu — run after the Windows one-liner
 curl -fsSL https://raw.githubusercontent.com/martybytes/terminal-stack/main/install-wsl.sh | bash
 
-# Native Debian/Ubuntu
+# Native Linux (Debian/Ubuntu or Arch/Omarchy)
 curl -fsSL https://raw.githubusercontent.com/martybytes/terminal-stack/main/install-linux.sh | bash
 
 # macOS
@@ -102,7 +102,7 @@ Every question works the same way: the default is **marked with `>` and captione
 
   | Group | Tools |
   |---|---|
-  | `shell` | tmux, eza, bat, tree, zoxide, fzf, atuin |
+  | `shell` | tmux, eza, bat, tree, zoxide, fzf, atuin, herdr |
   | `search` | ripgrep, fd |
   | `disk` | duf, ncdu, dust, gdu |
   | `system` | btop, bottom, glances, nvtop, lazydocker |
@@ -114,6 +114,14 @@ Every question works the same way: the default is **marked with `>` and captione
   | `ai` | claude, codex, cursor-agent, grok, gemini, pi |
 
   **choose whole groups** ticks groups — *all* of them start ticked, `ai` included; **choose individual tools** walks the groups one tick-list at a time, or takes a comma-separated list if you already know what you want. Anything in the recommended set starts ticked, so pressing Enter through the walk lands exactly on the recommended set.
+
+  **`herdr` is offered and never pre-ticked.** It is a terminal multiplexer that
+  hosts coding agents, and it sits beside tmux rather than replacing it, so it is
+  the one `shell` entry no default set selects for you. It does not come from a
+  package manager either: herdr.dev's own installer runs on every platform, since
+  there is no stable winget manifest and a brew-managed copy could not switch
+  release channel. Tick it and the wizard then asks one more question, whether the
+  stack should manage herdr's `config.toml` (default no). See `doc herdr`.
 
   **The `ai` group defaults to all six and is still a question** — every agent CLI starts ticked, and every one stays individually untickable. None of them come from a package manager:
 
@@ -190,9 +198,16 @@ This installs:
 
 Re-run as needed; the script is idempotent.
 
-### 2L. Linux side (native Debian/Ubuntu, instead of WSL)
+### 2L. Linux side (native Debian/Ubuntu or Arch/Omarchy, instead of WSL)
 
-For any native Debian/Ubuntu host:
+For any native Debian/Ubuntu or Arch-family host. The bootstrap reads
+`/etc/os-release` and routes to `bootstrap/_common-debian.sh` (apt) or
+`bootstrap/_common-arch.sh` (pacman) on its own; nothing extra to pass.
+
+**On Omarchy the login shell stays bash.** That is deliberate - Omarchy's
+aliases, functions and shell init all hang off `~/.bashrc`, and `chsh` would
+silently take them away. Run `zsh -l` for the stack's zsh, or point your
+terminal at it. See `docs/omarchy.md` for the full division of labour:
 
 ```sh
 git clone <repo-url> ~/.local/share/terminal-stack    # or your chosen path

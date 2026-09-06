@@ -34,7 +34,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .. import checks, paths, store
+from .. import checks, herdr, paths, proc, store
 from .. import platform as plat
 from ..checks import Report
 from . import agents
@@ -44,17 +44,7 @@ PASSED = "==> all checks passed."
 
 
 def _run(argv: list[str], timeout: int = 15) -> subprocess.CompletedProcess | None:
-    try:
-        return subprocess.run(
-            argv,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-            start_new_session=True,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
+    return proc.capture(argv, timeout=timeout)
 
 
 # --------------------------------------------------------------------- checks
@@ -198,6 +188,72 @@ def check_tools_on_path(report: Report) -> None:
             )
 
 
+def winget_links() -> Path | None:
+    """The winget shim directory, if this machine has one on PATH."""
+    local = os.environ.get("LOCALAPPDATA")
+    if plat.kind() != plat.WINDOWS or not local:
+        return None
+    links = Path(local) / "Microsoft" / "WinGet" / "Links"
+    if not links.is_dir():
+        return None
+    entries = [e for e in os.environ.get("PATH", "").split(os.pathsep) if e]
+    if not any(e.rstrip(r"\/").lower() == str(links).rstrip(r"\/").lower() for e in entries):
+        return None
+    return links
+
+
+def remote_symlinks_blocked() -> bool:
+    """Whether Windows would refuse to follow a local symlink for a remote logon.
+
+    A MISSING value is the default, and the default is disabled -- so absent
+    counts as blocked. Read from the registry rather than `fsutil behavior
+    query`, which is the same answer for the cost of a process.
+    """
+    # sys.platform, not just plat.kind(): typeshed gates every winreg attribute
+    # behind win32, so on a Linux CI host `winreg.OpenKey` does not exist as far
+    # as mypy is concerned. This form narrows statically on every platform, where
+    # a `type: ignore` would be flagged as unused on Windows by
+    # warn_unused_ignores and fail the gate on the other side.
+    if sys.platform != "win32" or plat.kind() != plat.WINDOWS:
+        return False
+    import winreg
+
+    try:
+        with winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\FileSystem"
+        ) as key:
+            value, _ = winreg.QueryValueEx(key, "SymlinkRemoteToLocalEvaluation")
+    except OSError:
+        return True
+    return value != 1
+
+
+def check_winget_symlinks(report: Report) -> None:
+    """Every winget shim is a symlink, which an ssh session cannot traverse.
+
+    Only over ssh, because that is the only session where it is true: the same
+    machine at the console follows those symlinks happily. Reported as a NOTE --
+    it is machine policy rather than a broken install, and the repair needs an
+    elevation this process does not have. `$PROFILE` prints the same guidance at
+    login; this is the copy you can ask for.
+    """
+    if not os.environ.get("SSH_CONNECTION"):
+        return
+    links = winget_links()
+    if links is None or not remote_symlinks_blocked():
+        return
+    try:
+        shims = sum(1 for e in os.scandir(links) if e.is_symlink())
+    except OSError:
+        shims = 0
+    report.note(
+        "winget-symlinks",
+        f"{shims} winget shim(s) in {links} cannot start in an ssh session "
+        "(remote-to-local symlink evaluation is disabled)",
+        "on the console, in an ELEVATED prompt: fsutil behavior set SymlinkEvaluation R2L:1",
+    )
+
+
 def check_config_stores(report: Report) -> None:
     """The two stores must agree, or one silently undoes the other.
 
@@ -286,6 +342,45 @@ def check_prompt(report: Report) -> None:
         )
         return
     report.ok("prompt-preset", f"prompt: {preset}")
+
+
+def check_herdr(report: Report) -> None:
+    """Two things that can be wrong about herdr, only one of which is a failure.
+
+    A FAILURE: `herdrConfig` says on, but the deployed config carries none of our
+    line. That is drift between the setting and the machine, which is this
+    command's whole reason to exist -- and here it also means an apply on a
+    second machine would produce a different file from this one.
+
+    A WARNING: herdr's prefix equals the saved tmux prefix or WezTerm leader.
+    herdr keeps its own `ctrl+b` default and the stack stores no prefix key for
+    it (docs/decisions.md), which makes this collision reachable rather than
+    impossible -- herdr sits beside tmux rather than replacing it. It only bites
+    once one is nested inside the other, so it is reported, never enforced, and
+    never rewritten: which of the two chords to move is the user's call.
+
+    Silent when herdr is not installed. An uninstalled optional tool is not a
+    problem with the install.
+    """
+    if herdr.binary() is None:
+        return
+
+    if herdr.setting() == "on" and herdr.is_ours(herdr.target().config) is not True:
+        report.fail(
+            "herdr-config",
+            "herdrConfig is on, but herdr's config does not carry the stack's key",
+            "fix: tstack herdr on",
+        )
+    elif herdr.setting() == "on":
+        report.ok("herdr-config", "herdr config: managed")
+
+    for key, chord in herdr.collisions():
+        report.note(
+            "herdr-prefix",
+            f"herdr's prefix ({herdr.configured_prefix()}) is also {key} ({chord}); "
+            f"nested, the inner one never sees it",
+            f"change {key} with `tstack config`, or [keys] prefix in {herdr.target().config}",
+        )
 
 
 def _starship_presets(starship: str) -> list[str]:
@@ -744,9 +839,11 @@ def collect() -> Report:
     src = check_clone(report, chezmoi)
     check_shell_integration(report)
     check_tools_on_path(report)
+    check_winget_symlinks(report)
     check_config_stores(report)
     check_memory_backend(report)
     check_prompt(report)
+    check_herdr(report)
     check_tts(report)
     check_agentmemory_wiring(report, src)
     check_agentmemory_secret(report, src)

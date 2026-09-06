@@ -91,3 +91,92 @@ ts_confirm_headless() {
         case "$ans" in y|Y|yes|YES) TS_HEADLESS_RESOLVED=1; echo "$INFO Treating as a headless server." ;; esac
     fi
 }
+
+# ── Distro detection (Linux) ───────────────────────────────────────────────────
+# `ID` / `ID_LIKE` from /etc/os-release, lowercased, with TS_DISTRO_ID /
+# TS_DISTRO_LIKE / TS_PKG_MANAGER overrides so the parity containers and the unit
+# tests can drive every branch without a matching machine underneath them.
+#
+# Omarchy answers ID=omarchy, ID_LIKE=arch (verified on 4.0.1). Arch-ness and
+# Omarchy-ness are asked SEPARATELY on purpose: ts_is_arch gates the PACKAGE
+# MANAGER, ts_is_omarchy gates the OPINIONS (who owns tmux, the login shell, the
+# theme). A plain Arch box wants the first and none of the second.
+#
+# Pure bash, no awk/sed: this is sourced before anything is installed, and
+# /etc/os-release is a tiny KEY=value file. Values may be quoted, and ID_LIKE is
+# space-separated ("ubuntu debian"), which is why the membership test below pads
+# with spaces rather than comparing whole strings.
+
+ts_os_release_field() {
+    local key="$1" line val
+    [ -r /etc/os-release ] || return 1
+    while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in "$key"=*) ;; *) continue ;; esac
+        val="${line#*=}"
+        val="${val%\"}"; val="${val#\"}"
+        val="${val%\'}"; val="${val#\'}"
+        printf '%s' "$val" | tr '[:upper:]' '[:lower:]'
+        return 0
+    done < /etc/os-release
+    return 1
+}
+
+# `${VAR+set}`, not `-n "$VAR"`: an override that is SET BUT EMPTY has to mean
+# "this host has no ID", which is a real case (a minimal /etc/os-release) and the
+# one the Python twin already expressed, since os.environ.get returns "" there.
+# Testing for non-empty instead made bash fall through to the live /etc/os-release
+# and answer `omarchy` where Python answered "" -- two readers, one rule,
+# disagreeing exactly the way the platform column once did.
+ts_distro_id() {
+    if [ -n "${TS_DISTRO_ID+set}" ]; then printf '%s' "$TS_DISTRO_ID"; return 0; fi
+    ts_os_release_field ID || printf 'unknown'
+}
+
+ts_distro_like() {
+    if [ -n "${TS_DISTRO_LIKE+set}" ]; then printf '%s' "$TS_DISTRO_LIKE"; return 0; fi
+    ts_os_release_field ID_LIKE || printf ''
+}
+
+# Omarchy specifically — the distro whose own commands and owned configs the
+# stack defers to. Never widened to "arch": deferring to `omarchy pkg add` on a
+# box with no omarchy is a command-not-found, not a policy.
+ts_is_omarchy() { [ "$(ts_distro_id)" = "omarchy" ]; }
+
+ts_is_arch() {
+    case "$(ts_distro_id)" in
+        arch|archarm|omarchy|endeavouros|cachyos|manjaro|garuda|artix) return 0 ;;
+    esac
+    case " $(ts_distro_like) " in *" arch "*) return 0 ;; esac
+    return 1
+}
+
+ts_is_debianish() {
+    case "$(ts_distro_id)" in debian|ubuntu|linuxmint|pop|raspbian|elementary) return 0 ;; esac
+    case " $(ts_distro_like) " in *" debian "*|*" ubuntu "*) return 0 ;; esac
+    return 1
+}
+
+# apt | pacman | brew | none. os-release decides FIRST and the binary only
+# confirms it: a box can carry a stray package manager it does not run on (the
+# Windows-side `apt` shim inside WSL was exactly that), and picking by
+# `command -v` alone is how the wrong installer gets chosen on a box that has
+# both. Falls back to whichever binary exists when os-release says nothing
+# useful, because "unknown distro with pacman on it" is still pacman.
+ts_pkg_manager() {
+    if [ -n "${TS_PKG_MANAGER+set}" ]; then printf '%s' "$TS_PKG_MANAGER"; return 0; fi
+    if ts_is_arch      && command -v pacman  >/dev/null 2>&1; then printf 'pacman'; return 0; fi
+    if ts_is_debianish && command -v apt-get >/dev/null 2>&1; then printf 'apt';    return 0; fi
+    if command -v pacman  >/dev/null 2>&1; then printf 'pacman'; return 0; fi
+    if command -v apt-get >/dev/null 2>&1; then printf 'apt';    return 0; fi
+    if command -v brew    >/dev/null 2>&1; then printf 'brew';   return 0; fi
+    printf 'none'
+}
+
+# The distro-specific installer file for this host, as a bare filename. The
+# bootstraps source it; nothing else should need to know the mapping.
+ts_common_lib() {
+    case "$(ts_pkg_manager)" in
+        pacman) printf '_common-arch.sh' ;;
+        *)      printf '_common-debian.sh' ;;
+    esac
+}

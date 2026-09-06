@@ -23,6 +23,13 @@ for _, dom in ipairs(config.ssh_domains) do
   dom.assume_shell = 'Posix'
 end
 
+-- No SSH_AUTH_SOCK handling here, unlike windows/.wezterm.lua.tmpl. That twin
+-- pins mux_enable_ssh_agent = false plus set_environment_variables, because on
+-- Windows WezTerm points SSH_AUTH_SOCK at a symlink it lacks the privilege to
+-- create, and Windows OpenSSH needs the named pipe instead. On macOS the
+-- default behaviour is correct: the value is a real unix socket proxying the
+-- launchd agent. The divergence is deliberate -- see the Windows twin.
+
 -- Optional: host panes in a multiplexer process outside the GUI, so a GUI crash
 -- leaves every pane (and everything running in it) alive and relaunching WezTerm
 -- reattaches. OFF by default — the mux server loads its OWN copy of this file, so
@@ -123,6 +130,53 @@ local function pick_palette(mode)
   return PALETTES.dark
 end
 local P = pick_palette(THEME_MODE)
+
+-- ── Omarchy theme overlay ─────────────────────────────────────────────────────
+-- On an Omarchy desktop the SYSTEM theme is the source of truth, not the two
+-- palettes above. Omarchy renders every terminal it knows about from the active
+-- theme's colors.toml -- but it only knows alacritty, foot, ghostty and kitty,
+-- so WezTerm would otherwise sit in Catppuccin while the rest of the desktop
+-- turned Tokyo Night.
+--
+-- `tstack omarchy sync` installs a user template into
+-- ~/.config/omarchy/themed/wezterm.lua.tpl, which Omarchy renders to the file
+-- below on every `omarchy theme set`. Reading it here is the whole integration.
+--
+-- Guarded three ways, because this file must load on a machine with no Omarchy,
+-- no such file, and no guarantee the file is well-formed: pcall around dofile, a
+-- type check, and a required key. Any failure leaves the baked palette in place.
+--
+-- The cc_* Claude state tints are deliberately NOT overlaid: they are semantic
+-- washes chosen for legibility against text, not theme colours, and deriving
+-- them from an arbitrary palette is how they stop being readable.
+local function omarchy_overlay(p)
+  local home = os.getenv('HOME')
+  if not home then return p end
+  local ok, t = pcall(dofile, home .. '/.local/state/omarchy/current/theme/wezterm.lua')
+  if not ok or type(t) ~= 'table' or type(t.background) ~= 'string' then return p end
+
+  p.scheme_name = 'Omarchy'
+  p.scheme_def = {
+    foreground = t.foreground, background = t.background,
+    cursor_bg = t.cursor, cursor_fg = t.background, cursor_border = t.cursor,
+    selection_bg = t.selection_bg, selection_fg = t.selection_fg,
+    ansi = t.ansi, brights = t.brights,
+  }
+  p.text, p.term_bg, p.accent = t.foreground, t.background, t.accent
+  p.split = t.muted
+  p.pane_active, p.pane_inactive = t.background, t.tab_bar_bg or t.background
+  p.tab_bar = {
+    background = t.tab_bar_bg or t.background,
+    inactive_tab_edge = t.muted,
+    active_tab         = { bg_color = t.accent, fg_color = t.background, intensity = 'Bold' },
+    inactive_tab       = { bg_color = t.tab_bar_bg or t.background, fg_color = t.muted },
+    inactive_tab_hover = { bg_color = t.muted, fg_color = t.foreground, italic = true },
+    new_tab            = { bg_color = t.tab_bar_bg or t.background, fg_color = t.muted },
+    new_tab_hover      = { bg_color = t.muted, fg_color = t.foreground },
+  }
+  return p
+end
+P = omarchy_overlay(P)
 
 -- Final fallback is Menlo, not Cascadia Code: Menlo ships with macOS, Cascadia does not.
 config.font = wezterm.font_with_fallback {

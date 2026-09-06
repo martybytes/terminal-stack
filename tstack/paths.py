@@ -34,12 +34,12 @@ from __future__ import annotations
 
 import os
 import re
-import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 from . import platform as plat
+from . import proc
 
 # A dev clone sits at a wso workspace tier path: <tier>/<host>/<owner>/<repo>,
 # where the host segment must contain a dot. That dot is what makes the pattern
@@ -120,17 +120,8 @@ def clone_candidates() -> list[Path]:
 
 
 def _git(cwd: Path, *args: str) -> str | None:
-    try:
-        out = subprocess.run(
-            ["git", "-C", str(cwd), *args],
-            capture_output=True,
-            text=True,
-            timeout=15,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if out.returncode != 0:
+    out = proc.capture(["git", "-C", str(cwd), *args], timeout=15)
+    if out is None or out.returncode != 0:
         return None
     return out.stdout.strip()
 
@@ -233,12 +224,7 @@ def resolve_source_dir(
     # dead-ending -- see the module docstring.
     chezmoi = plat.find_chezmoi()
     if chezmoi:
-        try:
-            out = subprocess.run(
-                [chezmoi, "source-path"], capture_output=True, text=True, timeout=30, check=False
-            )
-        except (OSError, subprocess.SubprocessError):
-            out = None
+        out = proc.capture([chezmoi, "source-path"], timeout=30)
         if out is not None and out.returncode == 0:
             src = Path(out.stdout.strip())
             if str(src) and (src / ".git").exists():

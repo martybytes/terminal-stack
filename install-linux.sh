@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # install-linux.sh — one-liner native-Linux installer for the terminal-stack.
-# Targets Debian/Ubuntu-family hosts. Idempotent: re-run safely.
-# Usage (from a fresh Debian/Ubuntu box):
+# Targets Debian/Ubuntu- and Arch-family hosts (Omarchy included). Idempotent.
+# Usage (from a fresh Debian/Ubuntu/Arch box):
 #   curl -fsSL https://raw.githubusercontent.com/martybytes/terminal-stack/main/install-linux.sh | bash
 #
 # Optional: override the clone location before piping.
 #   TERMINAL_STACK_DIR=~/dotfiles/ts curl -fsSL ... | bash
 #
 # What it does:
-#   1. Ensures git + curl are installed (apt).
+#   1. Ensures git + curl are installed (apt or pacman, whichever this host runs).
 #   2. Clones github.com/martybytes/terminal-stack to ~/code/terminal-stack
 #      (or $TERMINAL_STACK_DIR, unless that names a workspace root). git pull if
 #      already cloned.
@@ -28,12 +28,28 @@ fi
 echo "$INFO terminal-stack Linux installer"
 echo "    Detected: user $USER, home $HOME"
 
-# 1. apt prereqs. `</dev/null` on each call so sudo / apt can't read from
-# our script pipe under `curl | bash`.
+# 1. Package prereqs. `</dev/null` on each call so sudo / the package manager
+# can't read from our script pipe under `curl | bash`.
+#
+# The manager is chosen by BINARY here rather than by /etc/os-release, and this
+# is the one place that is right: the full detection lives in
+# bootstrap/_detect.sh (ts_pkg_manager), but this script runs BEFORE any clone
+# exists, so it cannot source it. Same reason ts_in_workspace_root is duplicated
+# below. Keep the two in agreement: apt and pacman, in that order of preference
+# only because nothing carries both.
 if ! command -v git >/dev/null 2>&1 || ! command -v curl >/dev/null 2>&1; then
-    echo "$INFO Installing git + curl via apt"
-    sudo apt-get update -qq </dev/null
-    sudo apt-get install -y git curl </dev/null >/dev/null
+    if command -v apt-get >/dev/null 2>&1; then
+        echo "$INFO Installing git + curl via apt"
+        sudo apt-get update -qq </dev/null
+        sudo apt-get install -y git curl </dev/null >/dev/null
+    elif command -v pacman >/dev/null 2>&1; then
+        echo "$INFO Installing git + curl via pacman"
+        sudo pacman -Sy --noconfirm --needed git curl </dev/null >/dev/null
+    else
+        echo "$WARN No supported package manager (apt or pacman) found."
+        echo "    Install git and curl by hand, then re-run this script."
+        exit 1
+    fi
 fi
 
 # 2. Choose clone location ($TERMINAL_STACK_DIR skips the prompt), then clone.
@@ -238,6 +254,15 @@ echo "    Clone:  $TARGET_DIR"
 # the *current* session stays in whatever shell launched this script, so users
 # under `curl | bash` invariably ask "why am I still in bash?".
 LOGIN_SHELL="$(getent passwd "$USER" | cut -d: -f7)"
+# Omarchy is bash-first and the bootstrap deliberately does not chsh there (see
+# common_login_shell_zsh in bootstrap/_common-arch.sh). Reporting that as a
+# failure -- which this block did, because it only knew one right answer -- would
+# send the user off to "fix" the thing the installer just decided on purpose.
+if [ -r /etc/os-release ] && grep -qi '^ID=omarchy' /etc/os-release; then
+    echo "    Shell:  login shell is $LOGIN_SHELL, left alone (Omarchy is bash-first)."
+    echo "    Next:   run 'zsh -l' for the stack's zsh, or point your terminal at it."
+    exit 0
+fi
 case "$LOGIN_SHELL" in
     /usr/bin/zsh|/bin/zsh)
         echo "    Shell:  login shell is $LOGIN_SHELL (chsh applied)."

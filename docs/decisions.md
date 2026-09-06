@@ -280,6 +280,15 @@ Three decisions fell out:
 
 The status right side also gained the **Claude fleet** segment — `cc_state` counts across every pane in the mux (`N●` per state, coloured) — because "is anything done or broken somewhere?" was otherwise answered by scanning tab dots one by one. The `wezterm.mux` walk runs on the status cadence (100 ms) but is pure in-process table iteration, the same cost class as the pane-tint resync that already rode that cadence.
 
+What that Lua draws, moved here out of `CLAUDE.md`'s 40 KB budget: the active tab is a
+solid accent block and inactive tabs with Claude panes wash with their `cc_state` tint; a
+Claude pane's label is the bare project leaf, a remote pane's is a ` host ·` chip plus the
+directory leaf, never a full path. The status bar's left side renders *nothing* in the normal
+state -- a coloured badge appears only while the leader is pending or a repeat mode is live --
+and its right side carries the Claude fleet counts (`cc_state` across every mux pane), the
+workspace when it is not the default, and a clock. Leader+s
+(`wezterm.GLOBAL.show_identity`) toggles the `user@host | path` detail, nothing else.
+
 ## Why not just use a single GUI tool like Microsoft Terminal?
 
 Microsoft Terminal is fine, but:
@@ -2703,3 +2712,584 @@ chezmoi `[data]` and stopped; the shell save it replaced had always ended in
 mirror, a setting changed from WSL was rendered back to its old value by the next
 pwsh-side sync. `_apply` now calls the bash writer after `chezmoi init` on WSL,
 keeping one implementation of the mirror.
+## Why a gate has to RUN the installer, and what a parse gate cannot see
+
+A refactor that ported the wizard, the apps catalog, ghostty, mux and config to
+Python was done on macOS and merged. The first Windows install after it died on
+its third line:
+
+```
+windows-bootstrap.ps1: Cannot bind argument to parameter 'Path' because it is null.
+```
+
+`Join-Path $SourceDir 'tstack\main.py'`, with nothing assigning `$SourceDir`.
+Four separate things had to be true for that to reach `main`, and each is worth
+keeping in mind separately.
+
+**1. The bug was a duplicate, not a typo.** `_config.ps1` already had
+`Invoke-TsWizard`, and its own comment says *"ONE copy, because there are two
+callers -- the bootstrap and `tstack config wizard` in $PROFILE -- and the last
+time each had its own, $PROFILE was still calling a `Read-TsWizard` that no
+longer existed."* The bootstrap had re-inlined a third copy anyway. The comment
+was right about the failure mode and the code drifted back into it regardless.
+
+**2. The guard test named two callers and checked one.**
+`test_the_windows_wizard_runner_has_exactly_one_implementation` existed, for
+exactly this, and asserted only against `$PROFILE`. A test whose docstring
+describes an invariant it does not check is worse than no test: it is a claim
+that the thing is covered. (See also § "The claims audit".)
+
+**3. A parse gate would not have helped.** Every `.ps1` in the repo parses
+cleanly -- verified. PowerShell has no `bash -n` equivalent for undefined names,
+and CI had **no PowerShell job at all**: `bash -n` ran over every shell script on
+Linux, macOS, WSL and three distro containers, while `.ps1` was checked nowhere,
+with the Windows runner's syntax step explicitly `if: runner.os != 'Windows'`.
+
+What finds it is a scope-aware AST walk, and the one detail that decides whether
+it works: for a dot-sourced dependency it must count **script-level assignments
+only**. Counting that file's *function parameters* is precisely what made
+`$SourceDir` look defined -- `Invoke-TsWizard` has a parameter by that name. The
+first version of the scan did exactly that and reported nothing. Within the file
+under test, scriptblock `param()` blocks DO count, or `$mk = { param($ms) ... }`
+is a false positive.
+
+**4. Nothing in the repo ran an installer.** `tests/parity/run.sh` and the CI
+`parity` job both stop at `bash -n` plus pytest. That is a structural blind spot,
+not an oversight about one bug: `bash -n` cannot see an unset variable, and a
+static name resolver cannot see an empty catalog. The bash twin of the Windows
+bug was sitting in the tree at the same time -- `_wizard.sh` ran the questionnaire
+without pinning `TERMINAL_STACK_DIR`, and it runs *before* chezmoi is configured,
+so a clone at any path off the built-in candidate list produced an empty
+`apps.catalog()` and an install that finished successfully with no CLI tools.
+
+Hence `tests/parity/run.sh bootstrap`. Three things about it are load-bearing:
+
+- **A non-root user with passwordless sudo.** `common_require_non_root` refuses
+  uid 0, and the bootstrap shells out to `sudo` for apt and `chsh`.
+- **The clone goes at a path deliberately off the candidate list**
+  (`~/somewhere/odd/stack`). Every default location hides the resolution bugs.
+- **It asserts on the wizard's ANSWER, never on its console output.** The
+  questionnaire writes its menus to the terminal, so a "the app catalog is empty"
+  warning never reaches stdout. The first version grepped the log for that string
+  and therefore could not fail -- it passed with the bug deliberately reinstated.
+  It checks `TS_WIZ_APPS` instead, which is the thing the caller actually
+  consumes.
+
+It earned its place on the first run, with a bug none of the static gates could
+express: all three bootstraps printed `Detected: user $USER` under `set -u`, and
+`$USER` is set by **login** shells and nothing else. `docker run ... bash -c`,
+`su - -c`, cron and systemd units all aborted on line one. `_config.sh` derives
+it from `id -un` now.
+
+It is opt-in -- it installs packages and wants the network -- so a bare
+`tests/parity/run.sh` does not include it. Name it to run it.
+
+One more thing the containers caught, which is the older argument for them
+restated: the fix for `ts_app_desc`'s whitespace handling used an awk interval
+expression, `{4}`. Debian ships gawk and passed. **Ubuntu's default awk is mawk,
+which has no interval expressions**, so the substitution silently matched nothing
+and returned the whole row. Explicit repetition instead. Testing on "Linux"
+means testing on the distro's own tools, not on one distro that happens to have
+the permissive ones.
+
+## Why the conflict question is asked by us, not by chezmoi
+
+chezmoi already asks. That is the problem:
+
+```
+.zshrc has changed since chezmoi last wrote it?
+> diff/overwrite/all-overwrite/skip/quit
+```
+
+There is no indication of which edit is at stake, no statement that `overwrite`
+is permanent, and no hint that the recurrence has a fix. `all-overwrite` is
+nearly always correct here — these files are stack-owned and rewritten every
+update, so an edit made directly to `~/.zshrc` was never going to survive — and
+a user with only that line to go on cannot know it.
+
+**Resolve first, then apply**, rather than `chezmoi apply --interactive` with
+better wording around it. `--interactive` prompts for *every* change, not just
+the contentious ones, and its wording is not ours to change. Instead
+`bootstrap/ts-apply.sh` reads `chezmoi status`, settles each conflict with
+`chezmoi apply --force -- <file>`, and only then runs the general apply — by
+which point chezmoi has nothing to ask. A residual-conflict guard refuses to run
+that final apply if anything is somehow left, because in an installer a
+re-prompt is the dead end described below.
+
+**Back up before overwriting.** A POSIX `chezmoi apply` writes no backup at all;
+the `.bak.YYYYMMDD[.N]` convention only ever fired in the Windows sync hook, the
+merge helpers, and `run_before_20-backup-ghostty.sh` — which exists precisely
+because of this gap. Taking one turns "overwrite" from a lossy answer into a
+recoverable one, which is what makes recommending "all" honest. The convention
+is now one helper, `ts_backup_file` in `_config.sh`, instead of the two
+open-coded copies it had grown.
+
+**`/dev/tty`, not stdin.** Every installer runs the apply with `</dev/null` on
+purpose — the `curl | bash` stdin-consumption defence, where a child reading the
+script pipe truncates the script still being read. That makes stdin a useless
+test for "can I ask a question", and it is the reason chezmoi failed here at all:
+
+```
+chezmoi: .zshrc: could not open a new TTY: open /dev/tty: no such device or address
+```
+
+A re-install over any hand-edited file hit that under `set -e` and aborted. The
+repo already had the right primitive — `ts_is_interactive`, which probes
+`/dev/tty` — and using it means the question still gets asked in a real terminal
+even though stdin is closed.
+
+**Exit 4 for "a decision is waiting".** Distinct from 0 and from a real failure,
+so a caller can tell the two apart: `tstack update` reports that the pull
+succeeded and the apply is pending, and the installers say everything else is
+installed and exit 0. A conflict is not a broken install, and a half-applied home
+directory is worse than an unapplied one — so nothing is written in that case.
+
+**The conflict predicate is column 1 alone.** `chezmoi status` prints two
+columns; the earlier zsh implementation required both to be non-space. Verified
+against chezmoi 2.72, the prompt fires on **column 1** — the destination
+differing from what chezmoi last wrote — whether or not the source changed:
+
+| case | status | chezmoi |
+|---|---|---|
+| user edited, source unchanged | `MM` | asks |
+| source changed, user did not touch it | ` M` | applies silently |
+| both changed | `MM` | asks |
+
+Both filters agree on these, so the old one was not producing wrong answers —
+it was describing the wrong rule, which is the kind of thing that stops being
+harmless the moment a fourth case shows up.
+
+**One implementation, four callers.** This lived in `dot_zshrc`, in zsh, so only
+`tstack update` had it. The three installers — where a conflict is *most* likely,
+because a re-install runs over whatever the previous one left behind — got the
+bare `chezmoi apply` instead. That asymmetry is the same shape as the
+`Invoke-TsWizard` duplication that killed the Windows install, and it is worth
+noticing that both were "the good version exists, and the path that needed it
+most could not reach it".
+
+## Why Omarchy is a package-manager seam, not a fifth platform kind
+
+`install-linux.sh` on any Arch host died with `sudo: apt-get: command not
+found`. Not at the end, not after a warning: `common_install_all`'s **first**
+call is `common_pkg_prereqs` (then `common_apt_prereqs`), `linux-bootstrap.sh`
+runs under `set -euo pipefail`, and that was the whole install — before the
+questionnaire, before chezmoi, before a byte was written. A `grep -rln "Arch
+Linux|pacman|Omarchy"` across every `.md`, `.sh`, `.py` and `.conf` in the repo
+returned **nothing**. The platform was not unsupported; it was unimagined.
+
+The obvious fix — make `plat.kind()` return `arch` — is the wrong one. Every
+switch on `kind()` in this repo (`engine.py`, the sync hook, `paths.py`,
+`state_dir`) is asking "is this a POSIX box with no Windows side", and an Arch
+box answers `linux` to that exactly as Debian does. A fifth value would have
+made every one of those callers learn a distinction none of them cares about,
+and the ones that were not updated would have silently taken the `else` branch.
+
+What actually differs is two things, and they are a second axis: **which package
+manager**, and **who owns which config**. So `plat.distro()` / `is_arch()` /
+`is_omarchy()` sit beside `kind()` rather than inside it, with shell twins
+(`ts_distro_id`, `ts_is_arch`, `ts_is_omarchy`) reading the same
+`/etc/os-release`. Omarchy 4.0.1 answers `ID=omarchy`, `ID_LIKE=arch`.
+
+Arch-ness and Omarchy-ness are asked **separately**, and that is load-bearing:
+`ts_is_arch` gates the package manager, `ts_is_omarchy` gates the opinions
+(bash-first, mise owns runtimes, Omarchy owns tmux and Ghostty). Widening the
+second to "arch" would run `omarchy pkg add` on a box with no omarchy, which is
+a command-not-found, not a policy. `tests/parity/run.sh arch` exists precisely
+to keep the plain-Arch path honest, because nobody developing this on an Omarchy
+laptop will ever exercise it by accident.
+
+One trap, found by the test that compares the two readers: the `TS_DISTRO_ID`
+override has to distinguish **unset** from **set-but-empty**. `[ -n "$VAR" ]`
+treats them alike, so bash fell through to the live `/etc/os-release` and
+answered `omarchy` where Python — whose `os.environ.get` returns `""` — answered
+`""`. `${VAR+set}` is the test that matches. Two readers of one rule disagreeing
+is the same failure the `platforms` column was introduced to end, arriving one
+axis over.
+
+## Why the installer contract was split into `_common-posix.sh`
+
+`_common-arch.sh` was going to be written by copying `_common-debian.sh`. That
+would have copied `common_install_all`, and `common_install_all` is not a list
+of steps — it is an **ordering**, and the ordering encodes two separate
+incidents. Persistence runs before any optional install, because an install that
+died under `set -e` once threw away ten answers the user had just typed. chezmoi
+runs before persistence, because `ts_save_config` shells out to `chezmoi init`.
+A second copy of that is a second place for either to be undone by someone
+fixing the other.
+
+So the shared half moved to `_common-posix.sh` — the orchestration plus
+`common_require_non_root`, `common_oh_my_zsh`, `common_nerd_font_jetbrains`,
+`common_tty_prompt`, `common_workspace_config`, `common_git_include`, and the
+release-binary helpers — and each distro half supplies exactly six functions:
+`common_pkg_prereqs`, `common_install_selected_apps`, `common_install_terminals`,
+`common_login_shell_zsh`, `common_chezmoi`, `common_starship`.
+`tests/test_distro.py` asserts both halves supply all six, that neither
+redefines anything posix owns, and that neither reaches for the other's package
+manager (comments stripped first — both files talk about the other at length,
+and that prose is the useful part).
+
+The pacman half came out roughly a third the size of the apt one, which is the
+measurement worth keeping: **most of `_common-debian.sh` is not apt, it is the
+absence of apt.** eza, delta, gh, ghq, lazygit, dust, gdu, bottom, bandwhich,
+gping, atuin, yazi, glow, neovim and zed each needed a GitHub-release fetch, a
+PPA or a third-party apt repo because no Debian or Ubuntu archive carries them.
+Every one is in Arch `extra`; only `llmfit` still needs the tarball. The
+`batcat`/`fdfind` symlink repairs disappear the same way — Debian renames both
+binaries to dodge package name clashes, Arch does not.
+
+`ts_arch_pkg` carries the six ids whose package name differs (`delta`→
+`git-delta`, `gh`→`github-cli`, `tldr`→`tealdeer`, `node`→`nodejs`, `pipx`→
+`python-pipx`, `poetry`→`python-poetry`). An id with no case arm is **reported
+and skipped**, never silently dropped, and a test asserts the mapping is total
+over every catalog row a Linux box could install — because a quietly missing
+tool is this repo's recurring failure, and "add a row to apps.conf" must not
+cost Arch users the tool.
+
+## Why the tmux config moved to the XDG path on Omarchy
+
+The stack wrote `~/.tmux.conf`. Omarchy ships its own config at
+`~/.config/tmux/tmux.conf`. tmux reads one **or** the other, and which one wins
+is not obvious from the man page, which says only "looks for a user
+configuration file at `~/.tmux.conf` or `$XDG_CONFIG_HOME/tmux/tmux.conf`" and
+lists all three paths together under FILES.
+
+Probed directly, on tmux 3.7c, in a scratch `$HOME`:
+
+```
+both files present            -> prefix C-Space   (the XDG file)
+only ~/.config/tmux/tmux.conf -> prefix C-Space
+only ~/.tmux.conf             -> prefix C-a
+```
+
+**The XDG path wins.** So on Omarchy the stack was applying a file tmux never
+read. The wizard asked for a tmux prefix, saved it, rendered it, showed it in
+`chezmoi diff` — and it did nothing. No error, nothing missing, nothing to
+notice. That is worse than shipping no tmux config at all.
+
+Writing the XDG path instead is necessary but not sufficient: taking it outright
+would delete Omarchy's Alt+Enter splits, Alt+1..9 window switching and the
+Super+/ keybindings popup, and would leave `omarchy-theme-set-tmux` re-tinting a
+bar we had overwritten. So the rendered file `source-file -q`s Omarchy's config
+**first**, then applies the stack's settings. Later `set` wins in tmux; the
+order is the entire mechanism. `-q` is load-bearing — the same template renders
+on plain Arch, where that file does not exist.
+
+The stack's own status bar is deliberately **not** applied on Omarchy. Its
+colours are baked light/dark at render time, so it would pin the bar to
+Catppuccin while every other surface on the desktop followed the active Omarchy
+theme. Plain Arch has nothing to follow and keeps the baked one.
+
+Two files, one body: both paths include `.chezmoitemplates/tmux-core`, and
+`.chezmoiignore` gates them against each other on `distroId` so exactly one is
+ever written. Both present is the silently-wrong state, so the bootstrap parity
+check asserts the *other* one is absent, not merely that the right one exists.
+
+## Why the bootstrap does not `chsh` on Omarchy
+
+`common_login_shell_zsh` runs `sudo chsh -s /usr/bin/zsh`. On Omarchy that is
+the wrong thing to do during a dotfiles install, and it fails silently in the
+worst way: everything appears to work and the desktop's entire shell
+environment is simply gone.
+
+Omarchy is bash-first by construction. `~/.bashrc` sources
+`$OMARCHY_PATH/default/bash/rc`, which pulls in `envs`, `shell`, `aliases`,
+`functions`, `init` and `completions` — its `EDITOR`/`BROWSER` wiring, the
+zoxide `cd` wrapper, mise/starship/zoxide/fzf init, and the aliases the
+keybindings and menus assume. None of that is in `~/.zshrc`. And Omarchy ships
+an official `omarchy-zsh` package (repo `omarchy`, deps `zsh eza mise zoxide
+starship fzf fd bat zsh-syntax-highlighting`) rather than expecting anyone to
+`chsh` by hand — which is the strongest available statement of intent.
+
+So on Omarchy the login shell is left alone, zsh is installed and `~/.zshrc` is
+still applied, and the bootstrap prints what to run (`zsh -l`) and why it did
+not switch. On **plain Arch** the `chsh` still happens: that is ordinary Arch
+behaviour and there is no bash-first contract to break. The test drives both
+branches behaviourally, with `chsh` stubbed, rather than grepping for a string.
+
+Phase 1 keeps oh-my-zsh here rather than adopting `omarchy-zsh`, deliberately:
+`omarchy-zsh` generates its own `~/.zshrc` and chezmoi owns that file whole, so
+making both work means restructuring the stack's zsh content into a sourced
+fragment. Until that lands, oh-my-zsh is self-contained in `~/.oh-my-zsh` and
+removable in one step.
+
+The related veto: **Omarchy owns language runtimes, via mise.** `mise-bin` is in
+its base package set, `omarchy install dev-env <lang>` is entirely
+`mise use --global`, and `env-bootstrap` puts `~/.local/share/mise/shims` on
+PATH. A second version manager competes for the same binaries with PATH order
+deciding the winner, so `fnm`, `node` and `python` are removed from the catalog
+on Omarchy — in `ts_apps_load` and `App.installable`, not merely skipped at
+install time. An id that is offered, ticked and then skipped is one
+`ts_apps_pending` reports as missing on every `tstack update`, forever, which is
+the exact nag `ts_app_installable` was added to end. `uv`, `pipx`, `ruff` and
+`ipython` stay: they are tools, not version managers, and Omarchy's own
+`dev-env python` installs `uv` too.
+
+## Why the Omarchy integration installs into Omarchy's extension points
+
+Omarchy themes the terminal it knows about -- alacritty, foot, ghostty, kitty --
+from the active theme's `colors.toml`, and it knows about exactly those four.
+`omarchy install terminal`, `omarchy default terminal`, `omarchy font set` and
+`default/themed/*.tpl` all enumerate the same list. WezTerm is not on it, so on
+an Omarchy desktop the stack's flagship terminal sat in Catppuccin while every
+other surface turned Tokyo Night.
+
+The tempting fix is to read `colors.toml` from the WezTerm config and be done.
+The better one is to use the seams Omarchy publishes, because they are what make
+the result survive: `~/.config/omarchy/themed/<name>.tpl` is globbed by
+`omarchy-theme-set-templates` and rendered into
+`~/.local/state/omarchy/current/theme/<name>` on every theme change, and
+`~/.config/omarchy/hooks/<event>.d/` is documented in Omarchy's own agent skill.
+Using them means the stack never parses a format it does not own, never edits a
+file Omarchy will overwrite, and gets re-rendered by Omarchy's machinery rather
+than by ours.
+
+Three files, and three rules that fell out of building them.
+
+**Additive only.** Each has a name of its own -- `wezterm.lua.tpl`,
+`hooks/*/terminal-stack` -- so nothing Omarchy or a stow tree owns is edited.
+That is the same bargain `~/.config/git/terminal-stack.gitconfig` strikes on a
+fleet where `~/.config/git/config` is somebody else's symlink, and stow links
+per file, so a new sibling is undisturbed.
+
+**Ownership is a marker, and the marker has to be on one line.** A file at one
+of those paths without it is somebody's own and is left alone, said out loud.
+The WezTerm template shipped with the marker WRAPPED across two lines, and
+`_is_ours` greps line-wise: every sync then politely skipped its own template
+while reporting "up to date", so an upgrade could never reach it. Caught by
+`tstack omarchy status` on the first live run, which is the argument for having
+a status verb at all.
+
+**`off` is a machine-local sentinel, not a chezmoi `[data]` key.** Adding a key
+to that store has a documented seven-step blast radius, and this decision is per
+machine by nature: the artefacts only exist where Omarchy does. The sentinel is
+also what stops `run_after_50-omarchy-integration.sh` reinstating on the next
+apply what someone deliberately removed -- the same shape as the TTS mute
+sentinel, and the same reason `tstack ghostty off` acts on one machine.
+
+Two deliberate limits.
+
+The theme hook does **not** re-render on every theme change. Flicking through
+the theme picker fires it per keystroke, and only a light<->dark FLIP changes
+anything the stack bakes -- so it compares first, using the `mode` key Omarchy's
+`colors.toml` states outright. That is also strictly better than the gsettings
+probe `resolve_os_theme` falls back to, which reads a value Omarchy wrote.
+It does always touch the WezTerm config, because WezTerm watches its OWN config
+file and not the generated theme beside it, so nothing reaches a running
+instance otherwise.
+
+The post-update hook **reports and does not pull**, which is not what was
+originally wanted. `tstack update` is a zsh function (`commands.conf`:
+`update  @_tstack_update`) carrying the dirty-clone refusal, the rollback point
+and the duplicate-clone warning; a bash hook can neither call it nor honestly
+reimplement it, and a second copy of that logic is exactly what
+`_common-posix.sh` exists to prevent one file over. Making the hook pull needs
+`tstack update` ported to Python first. Until then the hook does the half it can
+do correctly -- fetch, and say what is waiting, after Omarchy's own migrations
+have run.
+
+## Why the docker advice asks Omarchy's permission first
+
+`engine_advice` told a user whose engine refused them to run
+`sudo usermod -aG docker "$USER"`. On Omarchy that is advice to undo a decision
+the distro made on purpose: `install/config/docker.sh` declines the group and
+writes down why -- membership is equivalent to passwordless root, because
+anything in it can `docker run -v /:/host` -- and ships
+`omarchy-setup-security-sudoless-docker` as the opt-in, behind a warning.
+
+The stack has no business quietly talking someone out of that. On Omarchy the
+DENIED branch now names `sudo docker` (per command, no escalation) and Omarchy's
+own opt-in, and nowhere mentions `usermod`. Every other Linux keeps the advice
+it had: the group is the ordinary answer there, and the point is not that the
+group is wrong, it is that this distro already considered it.
+
+Same shape one level up, in the parity runner: `tests/parity/run.sh` escalates
+to `sudo docker` on its own when a plain `docker info` fails and a passwordless
+`sudo docker info` works. Without that, the gate for the Arch platform could not
+run on the Arch platform -- and the fix must not be "join the docker group",
+because that is the thing being respected.
+
+## Why Omarchy's zsh base is sourced, and why two names are escaped
+
+Omarchy ships `omarchy-zsh`, an official package that is the zsh half of the
+aliases, functions and environment its bash rc provides. Adopting it is obviously
+right on an Omarchy box -- `zsh -l` should not be a different machine from the
+one Super+Return opens -- and obviously impossible as packaged: `omarchy-setup-zsh`
+generates its own `~/.zshrc`, and chezmoi owns that file whole-file. Two owners,
+one file.
+
+The way out was to read what the generator actually writes. It is two lines:
+
+    source /usr/share/omarchy-zsh/shell/zoptions
+    source /usr/share/omarchy-zsh/shell/all
+
+So `dot_zshrc` sources those files directly and the generator is never run.
+Nothing is lost and ownership is never contested -- the same move the tmux config
+makes on Omarchy, and for the same reason. `inits` is skipped out of that
+aggregate because it initialises starship, zoxide, mise and fzf, all of which
+this rc already does, and the prompt is a saved setting: two inits means two
+precmd hooks for one prompt.
+
+THE PART THAT WAS NOT OBVIOUS
+
+zsh expands aliases at PARSE time. Omarchy defines `c` and `cy` as aliases; this
+stack defines both as functions; and defining a function whose name is a live
+alias is a parse error. A parse error in an rc does not stop at its line -- it
+abandons the rest of the file. With omarchy-zsh installed:
+
+    /root/.zshrc:470: defining function based on alias `cy'
+    /root/.zshrc:470: parse error near `()'
+    ws=none  doc=none  tstack=none        <- everything after line 470
+
+`ws`, `doc`, `tstack`, the `cc*` wrappers: all silently absent, on one distro
+only, from a line 470 lines earlier. This was found by RUNNING the rc in the
+omarchy parity container, not by reading it, and it would not have been found any
+other way.
+
+The first fix attempted was the obvious one -- wrap the definitions in
+`if [[ -z "$_TS_OMARCHY_ZSH" ]]; then ... fi`. It does not work, and the reason
+is worth keeping: zsh parses the whole `if` block before it evaluates the
+condition, so the alias is expanded regardless of which branch would run. What
+works is escaping the name, `\cy()`, which suppresses expansion at parse time;
+the guard then decides only whether the function is DEFINED.
+
+Exactly two names collide, and that was computed rather than assumed: every
+alias omarchy-zsh defines, intersected with every function `dot_zshrc` defines.
+`tests/test_omarchy_zsh.py` carries the alias set and fails on any unescaped
+collision, so a future stack function called `d`, `t` or `g` is caught by a test
+rather than by somebody's shell going quiet.
+
+Both collisions are deferred to Omarchy, which is what the machine's owner
+chose: `c` is opencode there and Cursor here, genuinely different programs, and
+`cy` is codex on both sides. The deferral is not merely a preference for `cy` --
+it is also the shape that avoids the parse error without an escape hatch nobody
+would remember.
+
+The repo has met this exact failure before. It is why `dot_zshrc` does not load
+oh-my-zsh's `z` plugin: "(eval):...: defining function based on alias `z'".
+## Why herdr is opt-in, spliced rather than rendered, and keeps its own prefix
+
+herdr is a terminal multiplexer that hosts coding agents: one Rust binary running
+a background server, panes that survive detach and reboot, and every pane marked
+working, blocked or idle. It overlaps this stack in three places at once — tmux,
+the WezTerm mux domain, and the `cc*` wrappers' tab titles — so adding it was
+mostly a set of decisions about what NOT to do.
+
+**It sits beside tmux; it does not replace it.** tmux stays the `ssht` persistence
+story on servers, and nothing in the stack starts herdr for you. The cost accepted
+is that a machine can have three multiplexers available at once. The alternative,
+making `herdrConfig on` mean "tmux drops out", would have reached `ssht`, the
+wrappers and half the docs for a change nobody had asked for yet.
+
+**It keeps herdr's own `ctrl+b` prefix, and there is no `herdrPrefix` setting.**
+Matching upstream means every herdr tutorial applies unmodified and the store
+carries one fewer key. The known cost is that `ctrl+b` is also this stack's
+`tmuxPrefix` default, so tmux nested inside a herdr pane never sees the chord —
+and decision one makes that nesting reachable rather than impossible.
+
+The mitigation is a `tstack doctor` **note**, not a setting and not a rewrite:
+which of the two chords to move is the user's call, and a doctor that edited
+either would be making it for them. The note is **gated on tmux actually being
+installed**, which is the difference between a warning and a nag. herdr keeps
+`ctrl+b` by decision, so a machine reporting a collision it has decided to live
+with, on every single `tstack doctor` run, forever, is a report nobody reads.
+That is the same failure `ts_app_installable` was added to end when a macOS box
+was told about `nvtop` on every update.
+
+**The config is a key SPLICE, not a whole-file render.** This is the one place
+`tstack/herdr.py` diverges from `tstack/ghostty.py`, which it is otherwise
+modelled on, and the divergence came from looking at a real machine rather than
+reasoning about one. herdr writes `config.toml` itself — `herdr config reset-keys`
+backs it up and rewrites it, and the global menu edits it — and so does the user.
+The first box this shipped to already carried a hand-written `onboarding = false`
+and `[terminal] default_shell = "pwsh"`. A whole-file mirror would have deleted
+both, silently, with nothing in any diff: exactly the hazard that once disabled
+the agentmemory plugin by whole-file-copying `~/.claude/settings.json`, on a
+format with no cheap key splice. So the splice is written out by hand, line
+oriented, and it preserves comments, formatting and the file's own line endings.
+
+Ownership is therefore per **key**, and the set is one: `[theme] name`.
+
+**`theme.name = "terminal"`, not a theme name and not `auto_switch`.** herdr ships
+eleven built-in themes plus a light/dark `auto_switch` pair. Naming one would make
+the stack a second theme owner and would have to be re-derived every time
+`themeMode` changed. Worse, deriving it from `resolvedTheme` is precisely the trap
+the Ghostty config documents: the value looks right and silently freezes `follow`.
+`terminal` tells herdr to use the host terminal's ANSI palette, which this stack
+already themes, so one value is correct in dark, light AND follow, and stays
+correct when the OS appearance flips underneath. No re-render, no second owner.
+
+**`off` restores, and never unlinks.** Ghostty's `off` deletes what it deployed,
+because it deployed the whole file. Here the file is mostly someone else's, so
+`off` restores the `.bak.YYYYMMDD` taken before the first write, and failing that
+removes only the marked line. As with Ghostty it is deliberately not a
+`.chezmoiremove` rule and not a sync-side delete: both of those run on every
+machine and would wipe a hand-written config on a box that never opted in.
+
+**Installed by herdr.dev's own script on every platform.** Not winget: there is no
+stable `Herdr.Herdr` manifest, only `Herdr.Herdr.Preview` (which is Herdr, Inc.'s
+but pins the preview channel) and three third-party republishes. Not brew on
+macOS either, which is the less obvious half — `herdr channel set` is documented
+as working on direct installs only, and this stack **detects** the channel rather
+than storing it, matching the WezTerm channel precedent. A brew-managed herdr
+would report a channel nothing could change.
+
+**Routed by an id list, not by its group.** `herdr` belongs in `shell` next to
+tmux, because that is what it is. Putting it in `ai` to get a non-package install
+would hand it to `ts_install_ai_cli`, which has no branch for it and would print
+"no agent-CLI installer defined" — the same coupling that put `llmfit` in
+`models`. So `ts_app_is_herdr` / `Test-TsAppIsHerdr` is an explicit id list, the
+shape `$TsPyTools` already uses on the Windows side.
+
+**`tstack update` reports a newer herdr and installs nothing.** herdr already
+checks in the background on its own. Updating a live multiplexer is the same class
+of hazard as restarting the WezTerm mux server, which this stack deliberately
+never automates.
+
+**On a combined Windows plus WSL machine, both sides run their own server.** Two
+installs, two sockets, two configs, and no stack opinion about which one you
+attach to. The consequence built for: `tstack herdr status` reports both, labelled,
+rather than assuming one is authoritative, and it reaches the Windows one through
+interop (`herdr.exe`) — never `pgrep`, which finds nothing inside WSL while a
+healthy Windows-side server runs on the same machine, the trap `tstack mux`
+already documents. Neither side resolves its config to a `/mnt/c` path, and
+neither sets `HERDR_SOCKET_PATH` for the other.
+
+**The wizard question is probed, not always asked.** It only appears when there is
+a herdr to configure: already on PATH, or ticked in the app picker moments ago.
+It is asked even when headless, unlike the WezTerm toggles — a multiplexer is
+exactly what earns its keep on a server reached over ssh. And it is a different
+question from "install herdr", which the picker already asked: running herdr with
+its own untouched config is a supported answer rather than an oversight.
+
+
+## Why the starship preview subprocess names its encoding
+
+`tstack wizard` opens by rendering the prompt live, which shells out to starship.
+On Windows that call died, and took the entire questionnaire with it:
+
+```
+AttributeError: 'NoneType' object has no attribute 'strip'
+  tstack/choices.py, _preset_config
+```
+
+The cause is two failures compounding. `subprocess.run(..., text=True)` with no
+`encoding` decodes with the locale codec, which on a Windows console is cp1252 —
+and starship's own preset output carries bytes cp1252 has no mapping for. The
+`UnicodeDecodeError` is then raised inside subprocess's reader THREAD, not in the
+caller. So the call returns normally, with `returncode == 0` and `stdout` set to
+`None`. Every guard in this file tested `got is None or got.returncode != 0`, all
+of which passed, and the next `.strip()` died a long way from the cause.
+
+(Since generalised: `tstack/proc.py` is now the one capture helper, and
+`choices.py` delegates to it rather than naming the encoding itself. The reasoning
+below is why that module exists.)
+
+Two changes, because either alone leaves the trap armed. The encoding is now
+named (`encoding="utf-8", errors="replace"`) on both subprocess calls in the file,
+and `_run` treats `stdout is None` as failure — another decoder can still fail on
+some other input, and a caller reading `None` is the failure mode this exists to
+end.
+
+It had been failing on every Windows machine for as long as the preview has
+existed, and it took eleven tests in `tests/test_wizard.py` with it. They were red
+locally and read as a Python 3.14 quirk. They were not.

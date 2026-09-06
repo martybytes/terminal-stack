@@ -82,6 +82,7 @@ Pick your row. Everything in the third column is installed for you.
 | **Windows 11** | winget (App Installer); PowerShell 7+ recommended | winget packages, `$PROFILE`, Nerd Font, Starship, and WezTerm if you keep it ticked |
 | **WSL2 Ubuntu** | WSL2 with Ubuntu (run the Windows step first — see below) | apt packages, oh-my-zsh, chezmoi, Starship |
 | **Debian / Ubuntu** | `sudo` and `curl` | the same shell stack (apt packages, oh-my-zsh, chezmoi, Starship); a desktop also gets WezTerm, but the WezTerm GUI config is macOS/Windows-only and the Ghostty one is macOS-only |
+| **Arch / Omarchy** | `sudo` and `curl` | the same, from pacman rather than apt. On Omarchy the login shell stays **bash** (the distro is bash-first), tmux renders to `~/.config/tmux/tmux.conf` sourcing Omarchy's own, and mise keeps the language runtimes. See [docs/omarchy.md](docs/omarchy.md) |
 | **macOS** | an admin account (Homebrew needs `sudo`; it is installed for you if absent) | brew formulae and casks, oh-my-zsh, chezmoi, Starship |
 
 Docker is **optional**. It is only needed for the memory, compression, voice and
@@ -192,6 +193,8 @@ tstack config theme follow
 tstack ui              # every setting in one screen (needs Textual)
 tstack config wizard   # replay the install questionnaire and save the answers
 tstack ghostty         # the managed Ghostty config: status, diff, on, off
+tstack herdr           # the managed herdr config: status, on, off, update
+tstack omarchy         # Omarchy only: the theme template + event hooks it installs
 tstack update          # pull the latest stack and re-apply
 tstack rollback        # undo that update
 tstack apply           # re-apply the dotfiles; explains any conflict, backs yours up

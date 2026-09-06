@@ -17,9 +17,11 @@ from __future__ import annotations
 import functools
 import os
 import shutil
-import subprocess
 import sys
 from pathlib import Path
+
+# proc imports nothing from the package, so this cannot cycle back through here.
+from . import proc
 
 WINDOWS = "windows"
 WSL = "wsl"
@@ -60,6 +62,81 @@ def is_wsl() -> bool:
     return bool(os.environ.get("WSL_DISTRO_NAME"))
 
 
+# ---- Distro (Linux only) ---------------------------------------------------
+# kind() stays four-valued on purpose. Every switch in this repo -- engine.py,
+# the sync hook, paths.py -- means "is this a POSIX box with no Windows side",
+# and an Arch box answers `linux` to that exactly as Debian does. What differs
+# is the PACKAGE MANAGER and who owns which config, which is a second axis, so
+# it gets its own function rather than a fifth kind() value that every existing
+# caller would have to learn.
+#
+# Port of ts_distro_id / ts_is_arch / ts_is_omarchy in bootstrap/_detect.sh, with
+# the same TS_DISTRO_ID override so tests can drive every branch.
+
+_ARCH_IDS = frozenset(
+    {"arch", "archarm", "omarchy", "endeavouros", "cachyos", "manjaro", "garuda", "artix"}
+)
+
+
+def _os_release() -> dict[str, str]:
+    """/etc/os-release as a lowercased dict. Empty off Linux, or when unreadable."""
+    out: dict[str, str] = {}
+    try:
+        text = Path("/etc/os-release").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return out
+    for line in text.splitlines():
+        key, sep, value = line.partition("=")
+        if not sep:
+            continue
+        out[key.strip().lower()] = value.strip().strip('"').strip("'").lower()
+    return out
+
+
+@functools.lru_cache(maxsize=1)
+def distro() -> str:
+    """The os-release ID, lowercased: `omarchy`, `debian`, `ubuntu`, ... or ``.
+
+    Empty rather than None so callers can compare without a guard, and empty on
+    every non-Linux platform because /etc/os-release is a Linux file.
+    """
+    pinned = os.environ.get("TS_DISTRO_ID")
+    if pinned is not None:
+        return pinned.lower()
+    if kind() in (WINDOWS, MACOS):
+        return ""
+    return _os_release().get("id", "")
+
+
+@functools.lru_cache(maxsize=1)
+def distro_like() -> str:
+    """os-release ID_LIKE, lowercased and space-separated ("ubuntu debian")."""
+    pinned = os.environ.get("TS_DISTRO_LIKE")
+    if pinned is not None:
+        return pinned.lower()
+    if kind() in (WINDOWS, MACOS):
+        return ""
+    return _os_release().get("id_like", "")
+
+
+def is_omarchy() -> bool:
+    """Omarchy specifically -- the distro whose own commands and owned configs
+    the stack defers to. Never widened to "arch": `omarchy pkg add` on a box with
+    no omarchy is a command-not-found, not a policy."""
+    return distro() == "omarchy"
+
+
+def is_arch() -> bool:
+    """The Arch FAMILY: what decides that pacman is the package manager."""
+    return distro() in _ARCH_IDS or "arch" in distro_like().split()
+
+
+def clear_distro_cache() -> None:
+    """Tests flip TS_DISTRO_ID between cases; the lru_caches have to follow."""
+    distro.cache_clear()
+    distro_like.cache_clear()
+
+
 def is_windows_side() -> bool:
     """True when Windows-side paths (/mnt/c, %LOCALAPPDATA%) are reachable."""
     return kind() in (WINDOWS, WSL)
@@ -80,15 +157,8 @@ def windows_username() -> str | None:
     cmd = Path("/mnt/c/Windows/System32/cmd.exe")
     if not cmd.exists():
         return None
-    try:
-        out = subprocess.run(
-            [str(cmd), "/c", "echo %USERNAME%"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
+    out = proc.capture([str(cmd), "/c", "echo %USERNAME%"], timeout=10)
+    if out is None:
         return None
     name = out.stdout.strip().strip("\r\n")
     return name or None
@@ -160,16 +230,7 @@ def to_windows_path(path: Path | str) -> str | None:
         return str(path)
     if kind() != WSL:
         return None
-    try:
-        out = subprocess.run(
-            ["wslpath", "-w", str(path)],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if out.returncode != 0:
+    out = proc.capture(["wslpath", "-w", str(path)], timeout=10)
+    if out is None or out.returncode != 0:
         return None
     return out.stdout.strip() or None

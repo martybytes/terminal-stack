@@ -316,6 +316,12 @@ def _stub_everything(monkeypatch, tmp_path, *, healthy: bool) -> None:
         (home / ".claude/plugins/cache/agentmemory/agentmemory").mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("CODEX_HOME", str(home / ".codex"))
     monkeypatch.setattr(doctor.shutil, "which", lambda t: "/usr/bin/" + t)
+    # herdr is optional, and its checks read the real machine. The `which` stub
+    # above answers yes to every program, so without this the sandbox grows a
+    # herdr AND a tmux and reports the prefix collision between them -- on a box
+    # that has neither. Say which machine this is pretending to be rather than
+    # inheriting whatever the developer running the suite happens to have.
+    monkeypatch.setattr(doctor.herdr, "binary", lambda: None)
 
 
 def test_collect_runs_every_check_without_touching_the_machine(monkeypatch, tmp_path):
@@ -442,3 +448,67 @@ def test_the_prompt_check_runs_in_collect():
     from tstack.commands import doctor as doc
 
     assert "check_prompt(report)" in inspect.getsource(doc.collect)
+
+
+# ------------------------------------------------------------ winget symlinks
+
+
+def _symlink_report(monkeypatch, *, ssh, links, blocked):
+    monkeypatch.setattr(doctor, "winget_links", lambda: Path(links) if links else None)
+    monkeypatch.setattr(doctor, "remote_symlinks_blocked", lambda: blocked)
+    if ssh:
+        monkeypatch.setenv("SSH_CONNECTION", "10.0.0.9 5000 10.0.0.2 2222")
+    else:
+        monkeypatch.delenv("SSH_CONNECTION", raising=False)
+    report = Report()
+    doctor.check_winget_symlinks(report)
+    return report
+
+
+def test_the_winget_symlink_check_says_nothing_in_a_local_session(monkeypatch, tmp_path):
+    """The same machine at the console follows those symlinks happily, so a local
+    `tstack doctor` reporting them would be reporting a non-problem."""
+    report = _symlink_report(monkeypatch, ssh=False, links=str(tmp_path), blocked=True)
+    assert report.results == []
+
+
+def test_the_winget_symlink_check_says_nothing_once_the_policy_allows_it(monkeypatch, tmp_path):
+    report = _symlink_report(monkeypatch, ssh=True, links=str(tmp_path), blocked=False)
+    assert report.results == []
+
+
+def test_the_winget_symlink_check_is_a_note_carrying_the_fsutil_command(monkeypatch, tmp_path):
+    """NOTE, not FAIL: machine policy rather than a broken install, and the
+    repair needs an elevation this process does not have. The hint has to be the
+    command itself -- naming the symptom without it is what left this
+    undiagnosed over ssh."""
+    report = _symlink_report(monkeypatch, ssh=True, links=str(tmp_path), blocked=True)
+    assert [r.status for r in report.results] == [checks.NOTE]
+    assert report.issues == 0
+    line = report.results[0].render()
+    assert "fsutil behavior set SymlinkEvaluation R2L:1" in line
+    assert "ELEVATED" in line
+
+
+def test_a_missing_registry_value_counts_as_blocked(monkeypatch):
+    """Windows ships remote-to-local evaluation DISABLED and writes no value for
+    it, so "absent" must not read as "fine"."""
+    as_platform(monkeypatch, plat.WINDOWS)
+    monkeypatch.setattr(
+        doctor, "remote_symlinks_blocked", doctor.remote_symlinks_blocked
+    )  # real one
+    if sys.platform != "win32":
+        pytest.skip("registry read is Windows-only")
+    import winreg
+
+    def boom(*_args, **_kwargs):
+        raise OSError("no such value")
+
+    monkeypatch.setattr(winreg, "QueryValueEx", boom)
+    assert doctor.remote_symlinks_blocked() is True
+
+
+def test_the_winget_symlink_check_runs_in_collect():
+    import inspect
+
+    assert "check_winget_symlinks(report)" in inspect.getsource(doctor.collect)

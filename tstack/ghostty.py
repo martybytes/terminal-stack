@@ -30,7 +30,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import platform as plat
-from . import store
+from . import proc, store
 
 # `say` is the caller's output function and `apply` its post-save step, injected
 # so this module never decides how a message is printed or how a machine
@@ -123,17 +123,7 @@ def binary() -> str | None:
 
 
 def _run(argv: list[str], timeout: int = 20) -> subprocess.CompletedProcess[str] | None:
-    try:
-        return subprocess.run(
-            argv,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-            start_new_session=True,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
+    return proc.capture(argv, timeout=timeout)
 
 
 # ----------------------------------------------------------------------- verbs
@@ -193,13 +183,10 @@ def diff(source: Path, say: Say) -> int:
     if not chezmoi:
         say("chezmoi is not installed, so there is nothing to diff against.")
         return 1
-    got = subprocess.run(
-        [chezmoi, "diff", "--", str(spot.config), str(spot.theme)],
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=120,
-    )
+    got = proc.capture([chezmoi, "diff", "--", str(spot.config), str(spot.theme)], timeout=120)
+    if got is None:
+        say("could not run chezmoi diff.")
+        return 1
     if got.stdout.strip():
         print(got.stdout, end="" if got.stdout.endswith("\n") else "\n")
     else:

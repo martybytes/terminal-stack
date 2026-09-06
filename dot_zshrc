@@ -79,7 +79,47 @@ HIST_STAMPS="mm/dd/yyyy"
 #   (eval):...: defining function based on alias `z'
 plugins=(git sudo)
 
-source $ZSH/oh-my-zsh.sh
+# ---- shell base: oh-my-zsh, or Omarchy's own where it exists ----------------
+# Omarchy ships an official zsh configuration as a pacman package (omarchy-zsh),
+# and on an Omarchy box that is the right base: it is the zsh half of the same
+# aliases, functions and env the desktop's bash rc provides, so `zsh -l` stops
+# being a different machine from the one Super+Return opens. The bootstrap
+# installs it there and installs oh-my-zsh everywhere else.
+#
+# It is SOURCED here rather than adopted wholesale. `omarchy-setup-zsh` generates
+# its own ~/.zshrc, and chezmoi owns that file whole-file (this one) -- both
+# cannot hold it. But the generated file is only two source lines, so taking
+# those two directly costs nothing and leaves ownership undisturbed. Same shape
+# as the tmux config on Omarchy: source theirs, then apply ours on top.
+#
+# `inits` is deliberately NOT sourced. It runs starship, zoxide, mise and fzf
+# init -- all of which this file does itself, its own way, and the prompt in
+# particular is a saved setting (`tstack config prompt`). Sourcing both would
+# register two sets of precmd hooks for one prompt.
+#
+# Guarded on the FILE, not the distro: this file is not a chezmoi template (see
+# CLAUDE.md, the re-add rule), it has to stay correct on five platforms, and
+# "the package is installed" is the actual condition.
+_TS_OMARCHY_ZSH=""
+[[ -r /usr/share/omarchy-zsh/shell/all ]] && _TS_OMARCHY_ZSH=/usr/share/omarchy-zsh/shell
+
+if [[ -n "$_TS_OMARCHY_ZSH" ]]; then
+  [[ -r "$_TS_OMARCHY_ZSH/zoptions" ]] && source "$_TS_OMARCHY_ZSH/zoptions"
+  for _ts_f in envs aliases functions; do
+    [[ -r "$_TS_OMARCHY_ZSH/$_ts_f" ]] && source "$_TS_OMARCHY_ZSH/$_ts_f"
+  done
+  unset _ts_f
+  # `try` -- Omarchy's throwaway-scratch tool, pointed at ~/Work/tries. Its ONLY
+  # initialiser is the `inits` file we deliberately skip above, so without this
+  # line `try` is silently a no-op in zsh while working fine in the bash the
+  # desktop opens. Same form omarchy-zsh's own inits uses for zsh.
+  command -v try >/dev/null 2>&1 && eval "$(try init ~/Work/tries)"
+elif [[ -r "$ZSH/oh-my-zsh.sh" ]]; then
+  # Guarded: the bootstrap does not install oh-my-zsh on Omarchy, and an
+  # unguarded source of a missing file aborts the whole rc under `set -e`-ish
+  # conditions and prints a confusing error under all of them.
+  source "$ZSH/oh-my-zsh.sh"
+fi
 
 # ---- terminal-stack-zsh-start ----
 # History — 100k lines, per-shell append + on-demand import, expire dups, drop secrets.
@@ -140,7 +180,30 @@ hgrep() {
 
 # micro (a nano alternative) is installed by the bootstrap; fall back to nano on
 # machines — e.g. bare ssh servers — where it isn't present.
-if command -v micro >/dev/null 2>&1; then
+#
+# Unless the desktop already picked one. Omarchy exports
+# EDITOR=omarchy-launch-editor, and that value is not a preference — it is the
+# same launcher `omarchy-launch-config-editor` and the Super-key editor binding
+# use, and SUDO_EDITOR is derived from it. Overwriting it here made those open
+# the wrong thing from any shell started under this rc, which is a desktop-level
+# break caused by a shell-level default.
+#
+# Matched on the VALUE rather than on the distro deliberately: this file is not a
+# template (see CLAUDE.md § the re-add rule), it has to stay correct on five
+# platforms, and "someone else's launcher is already in EDITOR" is the actual
+# condition — not "which Linux is this".
+if [[ "${EDITOR:-}" == omarchy-launch-editor* ]]; then
+  : # Omarchy's launcher; leave it, and leave SUDO_EDITOR pointing at it too.
+elif command -v nvim >/dev/null 2>&1; then
+  # nvim is the default wherever it exists. On Omarchy that IS omarchy-nvim, a
+  # prebuilt LazyVim config in the base package set, and omarchy-zsh's own
+  # envs sets EDITOR=nvim for the same reason -- so this agrees with the desktop
+  # instead of overriding it, which the `omarchy-launch-editor*` test above
+  # could never do: that is the BASH value, and a zsh session never sees it.
+  export EDITOR='nvim'
+elif command -v micro >/dev/null 2>&1; then
+  # micro stays installed and stays the fallback: it is the friendlier editor on
+  # a machine with no nvim, which is what it was chosen for.
   export EDITOR='micro'
 else
   export EDITOR='nano'
@@ -418,7 +481,19 @@ _ts_codex() {
   return "$rc"
 }
 codex() { if _ts_codex_is_interactive "$@"; then _ts_codex safe "$@"; else codex-stock "$@"; fi }
-cy()    { _ts_codex yolo "$@" }
+# `cy` is skipped where Omarchy's zsh base is loaded, and this one is not a
+# preference: Omarchy defines cy as an ALIAS, and in zsh defining a function
+# whose name is an existing alias is a PARSE ERROR that aborts the rest of the
+# rc. Found by loading it -- `ws`, `doc` and everything after this line were
+# silently undefined. Same failure shape the repo already documents for
+# oh-my-zsh's `z` plugin ("defining function based on alias `z'").
+#
+# Two names collide this way and only two, computed rather than assumed: see
+# tests/test_omarchy_zsh.py, which pins the set so a future stack function
+# called `d`, `t` or `g` is caught here rather than in someone's shell.
+if [[ -z "$_TS_OMARCHY_ZSH" ]]; then
+\cy()   { _ts_codex yolo "$@" }
+fi
 cyr()   { _ts_codex yolo resume "$@" }
 
 # Escape hatch: vanilla zsh, no rc files (no oh-my-zsh/starship/aliases).
@@ -1329,13 +1404,25 @@ alias v='nvim'
 # on `command -v cursor` meant installing Cursor's shell command mid-session left
 # `c` silently undefined until a new shell. Matches the pwsh `c` function, which
 # has always resolved per call.
-c() {
+# NOT defined where Omarchy's zsh base is loaded: `c` is opencode there, and
+# opencode and Cursor are different programs. Everything else in this file keeps
+# its name -- the stack's own are unambiguous (cc*, ws*, doc, tstack).
+#
+# NOTE THE BACKSLASH. zsh expands aliases at PARSE time, and it parses a whole
+# `if ... fi` block before evaluating the condition -- so an unescaped `c()` here
+# is a parse error the guard cannot prevent, and a parse error at this point
+# aborts the REST OF THE RC. Measured: ws, doc and tstack were all silently
+# undefined. `\c()` suppresses the expansion, so the block parses everywhere and
+# the guard decides whether the function is defined.
+if [[ -z "$_TS_OMARCHY_ZSH" ]]; then
+\c() {
   command -v cursor >/dev/null 2>&1 || {
     print -u2 "c: cursor CLI not found on PATH — install Cursor and enable its shell command"
     return 127
   }
   cursor "${1:-.}" --classic "${@:2}"
 }
+fi
 
 # ref — alias into the `doc` knowledge base (replaced the old command-reference file).
 ref() { doc "$@"; }
@@ -1492,7 +1579,7 @@ _doc_os() { [[ "$(uname -s)" == Darwin ]] && echo macos || echo linux; }
 # "unknown action: become(...)" as soon as alt-e is bound. Degrade to
 # `execute(...)+abort`, same fallback the pwsh side already uses.
 _doc_edit_bind() {
-  local ed="${EDITOR:-micro}" ver
+  local ed="${EDITOR:-nvim}" ver
   ver="$(fzf --version 2>/dev/null)"; ver="${ver%% *}"
   autoload -Uz is-at-least
   if is-at-least 0.42.0 "$ver" 2>/dev/null; then
@@ -1833,3 +1920,18 @@ cctts() {
 
 # Per-machine overrides (not tracked by chezmoi). See dot_zshrc.local.example.
 [[ -r "$HOME/.zshrc.local" ]] && source "$HOME/.zshrc.local"
+
+# zsh-syntax-highlighting, if the machine has it (omarchy-zsh depends on it).
+# LAST, after ~/.zshrc.local: it wraps every ZLE widget defined before it, and
+# anything sourced afterwards silently loses highlighting.
+#
+# Guarded on ZSH_HIGHLIGHT_VERSION because omarchy-zsh's `zoptions` -- which this
+# rc sources near the top -- already ends with this exact line. Sourcing it twice
+# re-wraps every widget a second time, which is waste at best. The cost of NOT
+# re-sourcing is that widgets defined between the two points are not wrapped;
+# that is the trade this guard takes deliberately, and it is why the line stays
+# here rather than moving up.
+if [[ -z "${ZSH_HIGHLIGHT_VERSION:-}" ]]; then
+  [[ -r /usr/share/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ]] && \
+    source /usr/share/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+fi

@@ -1,0 +1,84 @@
+# Parity target: run the suite on Arch, and on an Omarchy-shaped Arch.
+#
+# The Debian/Ubuntu targets next door cannot see the whole class of bug this
+# exists for: `install-linux.sh` died at `sudo apt-get update` on any Arch host,
+# before the questionnaire and before anything was written, and NOTHING in the
+# repo executed an install path on a non-apt machine to find out.
+#
+# ARG DISTRO=arch|omarchy.
+#
+#   arch      plain archlinux:latest. Proves the pacman half works with none of
+#             the `omarchy-*` commands present -- which is the case
+#             _common-arch.sh has to keep working for, and the one a developer
+#             on an Omarchy laptop never exercises by accident.
+#
+#   omarchy   the same image with Omarchy's /etc/os-release and Omarchy's own
+#             pacman repo, plus the real `omarchy-pkg-*` scripts extracted from
+#             the real package.
+#
+# Why omarchy is FAKED RATHER THAN INSTALLED: the `omarchy` package depends on
+# hyprland, quickshell, sddm, uwsm and pipewire -- 115 MB of desktop that cannot
+# run in a container and has nothing to do with the code under test. What the
+# stack actually calls is `omarchy-pkg-add` and `omarchy-pkg-missing`, so those
+# are taken from the genuine package rather than stubbed: a stub would agree with
+# whatever we assumed, which is the opposite of a test.
+
+FROM archlinux:latest
+ARG DISTRO=arch
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# zsh is not optional: dot_zshrc is zsh-only syntax that `bash -n` cannot check,
+# and without zsh present that gate skips silently -- the exact failure mode the
+# parity suite exists for.
+RUN pacman -Sy --noconfirm --needed \
+        python python-pip bash zsh git curl ca-certificates tmux \
+    && pacman -Scc --noconfirm >/dev/null
+
+# Arch marks its system Python externally-managed (PEP 668), same as Debian 13.
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:${PATH}"
+RUN pip install --no-cache-dir pytest pytest-cov hypothesis
+
+# Omarchy shape: os-release, the repo, and the real pkg helpers. `TrustAll` and
+# the exact Server line are copied from a live Omarchy 4.0.1 /etc/pacman.conf.
+RUN if [ "$DISTRO" = omarchy ]; then set -eux; \
+      printf '%s\n' \
+        'NAME="Omarchy"' 'PRETTY_NAME="Omarchy"' 'ID=omarchy' 'ID_LIKE=arch' \
+        'BUILD_ID="4.0.1"' 'VERSION_ID="4.0.1"' 'HOME_URL="https://omarchy.org/"' \
+        > /etc/os-release; \
+      printf '\n[omarchy]\nSigLevel = Optional TrustAll\nServer = https://pkgs.omarchy.org/stable/$arch\n' \
+        >> /etc/pacman.conf; \
+      pacman -Sy --noconfirm >/dev/null; \
+      # Download the real package and take ONLY the pkg helpers out of it. The
+      # rest is themes, PNG previews and Quickshell QML -- none of it reachable
+      # from a container and none of it under test.
+      # -dd skips dependency resolution: we want the package FILE, not the
+      # 115 MB desktop it depends on. `--wildcards` is not optional -- GNU tar
+      # treats a member name as literal without it and reports "Not found in
+      # archive", which an `|| true` then swallowed: the image built green with
+      # no omarchy-pkg-add in it, so the very branch this target exists to
+      # exercise was skipped and the run still passed. Nothing here is allowed
+      # to fail quietly any more.
+      pacman -Swdd --noconfirm omarchy >/dev/null; \
+      pkg="$(ls -1 /var/cache/pacman/pkg/omarchy-*.pkg.tar.zst | head -n1)"; \
+      # The REAL scripts live in /usr/bin; /usr/share/omarchy/bin/* are symlinks
+      # to them. Extracting only the share/ pattern therefore lands a directory
+      # of dangling links -- which is what the first attempt did, and what the
+      # `command -v` assertions below now catch. Take both patterns.
+      tar -xf "$pkg" -C / --wildcards \
+        'usr/bin/omarchy-pkg-*' 'usr/share/omarchy/bin/omarchy-pkg-*'; \
+      # Prove the helper the stack actually calls is present and runnable.
+      command -v omarchy-pkg-add >/dev/null; \
+      command -v omarchy-pkg-missing >/dev/null; \
+      # OMARCHY_PATH is set by /etc/profile.d on a real box; the helpers read it.
+      printf 'export OMARCHY_PATH=/usr/share/omarchy\n' > /etc/profile.d/omarchy.sh; \
+      pacman -Scc --noconfirm >/dev/null; \
+    fi
+
+# The repo is mounted read-only at /repo and copied to /work, so a container can
+# never write to the developer's tree. A test that corrupts the machine it is
+# meant to protect is not a test.
+WORKDIR /work
+CMD ["/bin/bash", "-c", "echo 'run via tests/parity/run.sh'"]

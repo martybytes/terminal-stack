@@ -33,10 +33,28 @@ tests/**
 services/**
 # The pre-commit hook is repo infrastructure, run from a DEV clone, never $HOME.
 .githooks/**
-# Project-scoped Claude Code commands: dev-clone infrastructure. Without this
-# line chezmoi deploys them to ~/.claude/commands and they collide with the
-# user's own global commands.
-.claude/**
+# NOTE: there is deliberately NO `.claude/**` rule here.
+#
+# There used to be, to stop the repo's own project-scoped `.claude/commands`
+# reaching ~/.claude. It did that -- and, because .chezmoiignore matches the
+# TARGET path and `dot_claude/` maps to the same target, it also blocked the
+# entire `dot_claude/**` tree. statusLine, the hooks, keybindings, skills, tts
+# and modify_settings.json have therefore never deployed on any POSIX machine.
+# Found by installing on a throwaway account: `chezmoi managed | grep claude`
+# returned nothing but the two run_ scripts, and ~/.claude did not exist.
+#
+# The rule was never needed. chezmoi ignores source entries whose name begins
+# with a dot on its own; proved in a container with no .chezmoiignore at all,
+# where `chezmoi managed` listed `.claude/statusline.sh` (from dot_claude/) and
+# did NOT list the repo's own `.claude/commands/`. Pinned by
+# test_the_claude_tree_is_not_ignored in tests/test_agent_tools.py.
+
+# A stray committed fixture, not a config file. `C/ts-agentmemory-data.tgz` came
+# in with a services test and had no rule, so every POSIX apply created ~/C/ and
+# put a tarball in it. Same allow-by-default trap as tests/**, services/** and
+# tstack/** above, arriving by the same door.
+C
+C/**
 # The tstack program: repo infrastructure, run from the clone by the shell shims in
 # dot_zshrc and $PROFILE. Same allow-by-default trap as tests/** and services/**:
 # without this line every module is written into $HOME on apply
@@ -67,13 +85,44 @@ install-wsl.sh
 install.ps1
 scripts/**
 
-# WezTerm GUI config — applied on macOS only. Native Linux hosts in this stack
-# are headless (ssh/PuTTY); Windows gets windows/.wezterm.lua via the sync hook.
-# .wezterm/** covers the Lua modules (pane_nav.lua) — without the gate they'd
-# litter WSL/native-Linux home dirs with a module nothing requires.
-{{ if ne .chezmoi.os "darwin" }}
+{{- /* tmux: ONE of the two paths, never both.
+
+       tmux reads ~/.tmux.conf OR $XDG_CONFIG_HOME/tmux/tmux.conf, and on tmux
+       3.7c the XDG file wins when both exist. Omarchy ships its own config at
+       the XDG path, so on Omarchy the stack must write THERE -- writing
+       ~/.tmux.conf produced a file tmux never read, which is worse than no file
+       at all because `chezmoi diff` shows it landing.
+
+       Everywhere else keeps ~/.tmux.conf: it is what every other platform in
+       this stack already has, and moving it would be a change with no cause. */ -}}
+{{ if eq (index . "distroId" | default "") "omarchy" }}
+.tmux.conf
+{{ else }}
+.config/tmux/**
+{{ end }}
+
+{{- /* WezTerm GUI config. macOS, and now Omarchy.
+
+       The old comment here said "native Linux hosts in this stack are headless
+       (ssh/PuTTY)", and that premise died with Omarchy: it is a Hyprland desktop
+       with wezterm in `extra`, and the flagship config -- pane_nav, the
+       hand-rolled tab bar, the Claude fleet counts -- was the one thing the
+       stack did not deploy there.
+
+       Gated on the DISTRO rather than on "is this graphical", deliberately.
+       There is no reliable graphical signal at apply time: WAYLAND_DISPLAY is
+       absent when chezmoi runs from a hook or over ssh, and probing for a
+       compositor socket would make the file appear and disappear depending on
+       whether anyone happened to be logged in. Omarchy is a desktop by
+       definition, which makes this deterministic. Generic graphical Linux needs
+       the bootstrap's headless answer persisted first; see docs/omarchy.md.
+
+       Windows gets windows/.wezterm.lua through the sync hook, not this. */ -}}
+{{ if and (ne .chezmoi.os "darwin") (ne (index . "distroId" | default "") "omarchy") }}
 .wezterm.lua
 .wezterm/**
+{{ end }}
+{{ if ne .chezmoi.os "darwin" }}
 .config/ghostty/**
 {{- /* ~/Library/LaunchAgents is a macOS path. On WSL the GUI agents are WINDOWS
        processes and inherit HKCU\Environment, which the plugin's own setup

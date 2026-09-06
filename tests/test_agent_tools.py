@@ -302,9 +302,15 @@ def test_fnm_ignores_package_json_engines_in_both_shells():
     # leave fnm unwired with nothing printed, so both sides keep a fallback.
     assert '_ts_fnm_env="$(fnm env --use-on-cd --shell zsh 2>/dev/null)"' in zsh
     assert (
-        "if (-not $tsFnmEnv.Trim()) { $tsFnmEnv = fnm env --use-on-cd --shell powershell | Out-String }"
-        in ps
+        'if (-not "$tsFnmEnv".Trim()) { $tsFnmEnv = fnm env --use-on-cd --shell powershell '
+        "2>$null | Out-String }" in ps
     )
+    # A winget shim under WinGet\Links is a symlink, and an ssh session evaluates
+    # it remote-to-local -- disabled by default, so fnm.exe is present but cannot
+    # be launched and the login used to dump three errors. Quoted interpolation
+    # (no .Trim() on a null) plus a suppressed ErrorActionPreference keep it quiet.
+    assert "$ErrorActionPreference = 'SilentlyContinue'" in ps
+    assert "} finally { $ErrorActionPreference = $tsFnmEap }" in ps
 
 
 def test_headroom_auth_probe_retries_and_names_the_failure(monkeypatch):
@@ -788,12 +794,32 @@ def test_agent_binaries_resolve_lazily_not_at_shell_load():
     assert "was not found on PATH when this profile loaded" not in ps
 
 
-def test_cursor_launcher_is_defined_unconditionally():
+def test_cursor_launcher_is_not_gated_on_the_binary():
+    """`c` must not be defined conditionally on whether `cursor` is INSTALLED.
+
+    That gate left `c` undefined for the life of any shell started before
+    Cursor's shell command was added; the body resolves the binary per call
+    instead, so a mid-session install just works.
+
+    It IS gated on which zsh base is loaded, and that is a different condition
+    with a different failure: where Omarchy's base is present, `c` is its alias
+    for opencode -- a different program -- and defining a FUNCTION over a live
+    alias is a zsh parse error that abandons the rest of the rc. That gate is
+    decided once at load and cannot go stale mid-session, which is exactly what
+    the binary check could not say. See tests/test_omarchy_zsh.py.
+    """
     zsh = (ROOT / "dot_zshrc").read_text(encoding="utf-8")
-    # Gating the *definition* on `command -v cursor` left `c` undefined for the
-    # life of any shell that started before Cursor's shell command was installed.
     assert "command -v cursor >/dev/null 2>&1 && c()" not in zsh
-    assert "\nc() {" in zsh
+    # The definition is still there, escaped so the block parses where `c` is an
+    # alias. Anchored to a line start: the prose above it names `\c()` too.
+    assert any(ln.startswith("\\c() {") for ln in zsh.splitlines()), (
+        "the cursor launcher is gone entirely"
+    )
+    # ...and the only guard around it is the base check, never a binary probe.
+    idx = next(i for i, ln in enumerate(zsh.splitlines()) if ln.startswith("\\c() {"))
+    window = "\n".join(zsh.splitlines()[max(0, idx - 3) : idx])
+    assert '[[ -z "$_TS_OMARCHY_ZSH" ]]' in window
+    assert "command -v cursor" not in window
 
 
 @pytest.mark.skipif(not shutil.which("zsh"), reason="zsh is unavailable")
@@ -942,11 +968,17 @@ def test_terminal_emulator_stays_optional_on_every_platform():
     )
     mac = (ROOT / "bootstrap/mac-bootstrap.sh").read_text(encoding="utf-8")
     assert "Terminal emulator: none selected" in mac
-    deb = (ROOT / "bootstrap/_common-debian.sh").read_text(encoding="utf-8")
-    assert "Terminal emulator: none selected" in deb
-    # WSL and headless hosts are never asked and never install one.
-    assert "if ! ts_is_headless && ! _ts_is_wsl; then TS_WIZ_ASK_TERMINALS=1; fi" in deb
-    assert "if ts_is_headless || _ts_is_wsl; then return 0; fi" in deb
+    # Both halves of the POSIX installer contract, not just the apt one: the
+    # pacman side is a separate implementation of common_install_terminals and
+    # would otherwise be free to make the emulator mandatory.
+    for lib in ("bootstrap/_common-debian.sh", "bootstrap/_common-arch.sh"):
+        body = (ROOT / lib).read_text(encoding="utf-8")
+        assert "Terminal emulator: none selected" in body, lib
+        assert "if ts_is_headless || _ts_is_wsl; then return 0; fi" in body, lib
+    # WSL and headless hosts are never asked. The question lives in the shared
+    # orchestration, so there is one place for it rather than one per distro.
+    posix = (ROOT / "bootstrap/_common-posix.sh").read_text(encoding="utf-8")
+    assert "if ! ts_is_headless && ! _ts_is_wsl; then TS_WIZ_ASK_TERMINALS=1; fi" in posix
 
 
 def test_wezterm_env_vars_map_onto_channels():
@@ -1151,8 +1183,17 @@ def test_ts_config_exposes_wezterm():
 # --- app catalog: groups, new tools, the ai group ------------------------------
 
 
-def _sh_eval(snippet):
-    """Run a snippet with bootstrap/_config.sh sourced, return stdout."""
+def _sh_eval(snippet, distro="debian"):
+    """Run a snippet with bootstrap/_config.sh sourced, return stdout.
+
+    `distro` is pinned rather than inherited because these tests are about the
+    CATALOG FILE, not about the laptop running them. ts_apps_load applies a
+    distro veto on top of the platform column -- Omarchy hands language runtimes
+    to mise, so fnm/node/python are not offered there and the `runtimes` group
+    disappears entirely. Inheriting the live value made this whole block pass or
+    fail depending on whose machine it ran on, which is the opposite of a gate.
+    Distro-specific behaviour is asserted in tests/test_distro.py, deliberately.
+    """
     r = subprocess.run(
         [BASH, "-c", f". bootstrap/_config.sh >/dev/null 2>&1; {snippet}"],
         cwd=ROOT,
@@ -1161,6 +1202,7 @@ def _sh_eval(snippet):
         check=False,
         timeout=300,
         start_new_session=True,
+        env={**os.environ, "TS_DISTRO_ID": distro, "TS_DISTRO_LIKE": ""},
     )
     assert r.returncode == 0, r.stderr
     return r.stdout.strip()
@@ -1239,6 +1281,13 @@ def test_python_and_runtimes_are_in_the_questionnaire():
     for tool in ("python", "uv", "pipx", "ruff", "ipython", "httpie", "poetry", "pre-commit"):
         assert tool in py, f"{tool} missing from the python group"
     assert set(_sh_eval("ts_app_group_members runtimes").split()) == {"fnm", "node"}
+    # ... and on Omarchy the group is gone entirely, because both of its members
+    # are mise's job there. Asserted here rather than only in test_distro.py so
+    # the two halves of this rule sit next to each other.
+    assert not _sh_eval('echo "$TS_APP_GROUPS"', distro="omarchy").split().count("runtimes")
+    assert "python" in _sh_eval('echo "$TS_APP_GROUPS"', distro="omarchy").split(), (
+        "the veto took the whole python group, not just the `python` runtime"
+    )
     # python's binary is python3, not python.
     assert _sh_eval("ts_app_bin python") == "python3"
     for tool in [*py, "fnm"]:
@@ -1305,11 +1354,20 @@ def test_agent_clis_are_not_installed_through_a_package_manager():
 
 
 def test_arch_aware_github_fallbacks():
-    """The eza/delta/lazydocker fallbacks used to hard-code x86_64 and miss on arm64."""
-    deb = (ROOT / "bootstrap/_common-debian.sh").read_text(encoding="utf-8")
-    for line in deb.splitlines():
-        if "common_install_github_binary" in line:
-            assert "x86_64" not in line, f"arch-blind fallback: {line.strip()}"
+    """The eza/delta/lazydocker fallbacks used to hard-code x86_64 and miss on arm64.
+
+    Every installer library, not just the apt one: _common-arch.sh fetches llmfit
+    the same way, and an arch-blind pattern there fails *silently on ARM only* --
+    the asset regex matches nothing and the tool is quietly absent.
+    """
+    for lib in (
+        "bootstrap/_common-debian.sh",
+        "bootstrap/_common-arch.sh",
+        "bootstrap/_common-posix.sh",
+    ):
+        for line in (ROOT / lib).read_text(encoding="utf-8").splitlines():
+            if "common_install_github_binary" in line:
+                assert "x86_64" not in line, f"arch-blind fallback in {lib}: {line.strip()}"
 
 
 def test_ts_config_wizard_replays_the_whole_questionnaire():
@@ -1584,7 +1642,7 @@ def test_common_arch_tag_rust_uses_aarch64_not_arm64():
     `gnu` yields `arm64`. Getting this wrong fails *silently on ARM only*: the
     asset regex matches nothing, x86_64 boxes keep working, and the tool is
     quietly missing on every Pi/ARM server."""
-    lib = ROOT / "bootstrap/_common-debian.sh"
+    lib = ROOT / "bootstrap/_common-posix.sh"
     fn = re.search(r"^common_arch_tag\(\) \{.*?^\}", lib.read_text(encoding="utf-8"), re.S | re.M)
     assert fn, "common_arch_tag not found"
 
@@ -1953,7 +2011,9 @@ def test_tmux_title_format_uses_the_variable_name_not_the_shorthand():
     address `session_name`: inside #{...} tmux wants the variable name, and
     `#{s/^cc-//:#S}` silently evaluates to an EMPTY string — a blank tab title,
     which is worse than the noisy one it replaced."""
-    conf = (ROOT / "dot_tmux.conf.tmpl").read_text(encoding="utf-8")
+    # The body moved into .chezmoitemplates so ~/.tmux.conf and the Omarchy
+    # ~/.config/tmux/tmux.conf cannot drift; this is where it lives now.
+    conf = (ROOT / ".chezmoitemplates/tmux-core").read_text(encoding="utf-8")
     line = next(l for l in conf.splitlines() if l.startswith("set -g set-titles-string"))
     assert "session_name" in line, "must use the variable name, not #S"
     assert ":#S}" not in line, "#{...:#S} renders empty — see the comment above it"
@@ -2066,14 +2126,17 @@ def test_wizard_answers_persist_before_any_optional_install():
     # The agent WIRING needs the CLIs installed, so it alone stays late.
     assert mac.index("ts_agents_apply_wizard") > mac.index("ts_save_config")
 
-    deb = (ROOT / "bootstrap/_common-debian.sh").read_text(encoding="utf-8")
+    # common_install_all is in _common-posix.sh: the ordering it encodes is the
+    # product of two separate incidents, and a per-distro copy would have been
+    # two places for it to be got wrong.
+    deb = (ROOT / "bootstrap/_common-posix.sh").read_text(encoding="utf-8")
     body = deb[deb.index("common_install_all() {") :]
     body = body[: body.index("\n}\n")]
     body = _uncommented(body)  # index the calls, not the prose about them
     hook = body.index("TS_PERSIST_HOOK")
     for installer in ("common_install_selected_apps", "common_install_terminals"):
         assert hook < body.index(installer), (
-            f"_common-debian.sh: {installer} runs before the persistence hook"
+            f"_common-posix.sh: {installer} runs before the persistence hook"
         )
     # chezmoi must precede the hook: ts_save_config runs `chezmoi init`.
     assert body.index("common_chezmoi") < hook
@@ -2838,13 +2901,17 @@ def test_the_prompt_is_a_setting_and_presets_are_not_vendored():
     that it is Starship's rather than ours.
     """
     assert _sh_eval("ts_starship_get") == "terminal-stack"
-    tmpl = (ROOT / "dot_config/starship.toml.tmpl").read_text(encoding="utf-8")
+    # The template became a modify_ script so it can preserve the file it
+    # replaces (Omarchy ships its own starship.toml). The rules below are
+    # unchanged; only the filename moved.
+    tmpl = (ROOT / "dot_config/modify_starship.toml.tmpl").read_text(encoding="utf-8")
     assert 'output "starship" "preset" $preset' in tmpl
     # lookPath is the load-bearing half: during a bootstrap this template can be
     # rendered BEFORE starship is installed, and `output` on a missing binary
     # aborts the whole apply -- not just this file.
     assert 'lookPath "starship"' in tmpl
-    assert "{{- else -}}" in tmpl, "and it must fall back to this stack's own prompt"
+    assert "{{ else -}}" in tmpl, "and it must fall back to this stack's own prompt"
+    assert "Powerlevel10k Rainbow-style" in tmpl, "the fallback body went missing"
     for name in ("bracketed-segments", "tokyo-night", "gruvbox-rainbow"):
         assert name not in tmpl, f"{name} must not be vendored into the template"
 
@@ -3059,17 +3126,21 @@ def test_a_server_is_never_nagged_about_tools_it_declined():
 
 
 def test_the_prompt_template_preserves_the_trailing_newline():
-    """`{{- end -}}` at the end of a wrapped file trims the newline the wrapped
-    content ended with, so the rendered config loses its final byte and chezmoi
-    reports a diff on a file nobody edited. Caught by rendering it and comparing
-    against the deployed copy; pinned here so the whitespace control cannot be
-    "tidied" back.
+    """The rendered config must end with exactly one newline, or chezmoi reports
+    a diff on a file nobody edited.
+
+    The old shape was a wrapped template where `{{- end -}}` could trim the
+    content's own trailing newline. The modify_ script cannot have that bug by
+    construction and the guarantee is now explicit: `$( )` strips every trailing
+    newline from the heredoc, and the emit adds exactly one back. Pinned so the
+    emit cannot be "tidied" into something that does not.
     """
-    body = (ROOT / "dot_config/starship.toml.tmpl").read_text(encoding="utf-8")
-    assert body.endswith("{{ end -}}\n"), (
-        "the closing action must not trim the content's own trailing newline"
+    body = (ROOT / "dot_config/modify_starship.toml.tmpl").read_text(encoding="utf-8")
+    emit = "printf '%s\\n' \"$config\""
+    assert emit in body, (
+        "the config must be emitted with exactly one trailing newline"
     )
-    assert 'black  = "#616161"\n{{ end -}}\n' in body
+    assert 'black  = "#616161"' in body, "the config body lost its tail"
 
 
 # ---------------------------------------------------------------------------
@@ -3097,3 +3168,523 @@ def test_the_prompt_template_preserves_the_trailing_newline():
 #     -> a Python module either imports or does not; mypy and the suite cover it
 #   test_nightly_is_preticked_even_when_stable_is_installed
 #     -> covered by test_both_preticked_collapses_before_the_first_render
+
+
+# --- ~/.claude/settings.json behind a symlink ---------------------------------
+#
+# chezmoi's modify_ script produces bytes; CHEZMOI does the write, and it writes
+# a regular file. Probed on archlinux with chezmoi 2.72, a symlinked target and a
+# one-line modify_ script: the splice succeeded, the link was gone, and the file
+# the other tool tracked was left behind at its old content -- still referenced
+# by its repo, now permanently stale, with nothing anywhere saying so. On this
+# fleet that other tool is omarchy-dots, which stows ~/.claude/settings.json.
+#
+# run_before_25/run_after_25 put the write back through the link. These tests RUN
+# them, because the whole failure is a filesystem effect that no amount of
+# grepping the scripts would have caught.
+
+LINK_RECORD = ROOT / "run_before_25-claude-settings-link-record.sh"
+LINK_RESTORE = ROOT / "run_after_25-claude-settings-link-restore.sh"
+
+# Two of the five tests below assert on SYMLINK semantics, and only those two.
+#
+# BASH is truthy on a Windows runner -- shell_support falls back to git-bash --
+# so every skipif(not BASH) test really runs there, under MSYS. MSYS `ln -s`
+# COPIES unless MSYS=winsymlinks:nativestrict and the process holds the privilege
+# to make one, and it hands paths back in its own /c/... form, which Python then
+# resolves against the current drive (CI produced D:/c/Users/... for a file on
+# C:). Both of those are MSYS facts, not facts about these hooks.
+#
+# And the hooks cannot run there anyway: they are chezmoi run_before_/run_after_
+# scripts, and this stack applies chezmoi from inside WSL, never from Windows
+# pwsh (CLAUDE.md, "The apply workflow"). The Windows side of
+# ~/.claude/settings.json is bootstrap/_merge_claude_settings.ps1, which has its
+# own tests. Linux, WSL and macOS -- every platform that runs these scripts --
+# still run these tests.
+POSIX_LINKS_ONLY = pytest.mark.skipif(
+    os.name == "nt",
+    reason="chezmoi applies from WSL, not Windows; MSYS ln -s copies rather than links",
+)
+
+
+def _run_link_script(script, home, state):
+    return subprocess.run(
+        [BASH, str(script)],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+        start_new_session=True,
+        env={"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(home),
+             "XDG_STATE_HOME": str(state)},
+    )
+
+
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+@POSIX_LINKS_ONLY
+def test_the_settings_splice_is_written_through_its_symlink(tmp_path):
+    """The whole point: the tracked file receives the splice, and the link lives."""
+    home = tmp_path / "home"
+    state = tmp_path / "state"
+    (home / ".claude").mkdir(parents=True)
+    tracked = tmp_path / "dots" / "settings.json"
+    tracked.parent.mkdir()
+    tracked.write_text('{"model": "opus"}\n', encoding="utf-8")
+    link = home / ".claude" / "settings.json"
+    link.symlink_to(tracked)
+
+    assert _run_link_script(LINK_RECORD, home, state).returncode == 0
+    # Stand in for chezmoi: replace the link with the spliced regular file.
+    link.unlink()
+    link.write_text('{"model": "opus", "statusLine": {"type": "command"}}\n', encoding="utf-8")
+
+    assert _run_link_script(LINK_RESTORE, home, state).returncode == 0
+    assert link.is_symlink(), "the symlink was not restored"
+    assert link.resolve() == tracked.resolve()
+    assert "statusLine" in tracked.read_text(encoding="utf-8"), (
+        "the tracked file did not receive the splice"
+    )
+
+
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+def test_the_link_pair_is_a_no_op_on_an_ordinary_file(tmp_path):
+    """The common case, on every machine that does not symlink this file. A pair
+    of apply hooks that only works on one fleet is a pair that breaks four."""
+    home = tmp_path / "home"
+    state = tmp_path / "state"
+    (home / ".claude").mkdir(parents=True)
+    plain = home / ".claude" / "settings.json"
+    plain.write_text('{"model": "opus"}\n', encoding="utf-8")
+
+    assert _run_link_script(LINK_RECORD, home, state).returncode == 0
+    assert not (state / "terminal-stack" / "claude-settings-symlink").exists()
+    assert _run_link_script(LINK_RESTORE, home, state).returncode == 0
+    assert not plain.is_symlink()
+    assert plain.read_text(encoding="utf-8") == '{"model": "opus"}\n'
+
+
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+@POSIX_LINKS_ONLY
+def test_a_relative_symlink_and_a_chain_both_resolve(tmp_path):
+    """`readlink -f` would have done this in one call -- and it is GNU-only.
+
+    This pair runs on macOS on every apply, where BSD readlink had no -f for
+    years and `realpath` is absent on older releases; the repo already writes
+    that rule down twice (bootstrap/_smb.sh, services/_stack.sh). The failure
+    would have been silent and macOS-only: nothing recorded, restore never runs,
+    and a symlinked settings.json gets clobbered exactly as before.
+
+    So the walk is by hand, and it has to handle what `-f` handled: a RELATIVE
+    link, and a CHAIN.
+    """
+    home = tmp_path / "home"
+    state = tmp_path / "state"
+    (home / ".claude").mkdir(parents=True)
+    tracked = tmp_path / "dots" / "settings.json"
+    tracked.parent.mkdir()
+    tracked.write_text('{"model": "opus"}\n', encoding="utf-8")
+
+    # ~/.claude/settings.json -> ../hop.json -> ../dots/settings.json,
+    # every hop RELATIVE, which is what `readlink -f` used to flatten for us.
+    # Each link resolves against its OWN directory: hop.json lives in home/, so
+    # `../dots/...` is tmp_path/dots/... .
+    hop = home / "hop.json"
+    hop.symlink_to(Path("..") / "dots" / "settings.json")
+    (home / ".claude" / "settings.json").symlink_to(Path("..") / "hop.json")
+
+    assert _run_link_script(LINK_RECORD, home, state).returncode == 0
+    record = state / "terminal-stack" / "claude-settings-symlink"
+    assert record.exists(), "a relative two-hop chain was not resolved"
+    assert Path(record.read_text(encoding="utf-8").strip()).resolve() == tracked.resolve()
+
+
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+def test_a_symlink_cycle_does_not_hang_the_apply(tmp_path):
+    """An apply that hangs forever is worse than one that skips a nicety."""
+    home = tmp_path / "home"
+    state = tmp_path / "state"
+    (home / ".claude").mkdir(parents=True)
+    a = home / ".claude" / "settings.json"
+    b = home / ".claude" / "other.json"
+    a.symlink_to(b)
+    b.symlink_to(a)
+
+    done = subprocess.run(
+        [BASH, str(LINK_RECORD)],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+        start_new_session=True,
+        env={"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(home),
+             "XDG_STATE_HOME": str(state)},
+    )
+    assert done.returncode == 0
+    assert not (state / "terminal-stack" / "claude-settings-symlink").exists()
+
+
+def test_the_link_scripts_avoid_the_gnu_only_flags():
+    """readlink -f and realpath are both absent on macOS releases this stack
+    supports. Named here so the next edit does not quietly reintroduce one."""
+    for script in (LINK_RECORD, LINK_RESTORE):
+        for line in script.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                continue
+            assert "readlink -f" not in stripped, f"{script.name}: {stripped}"
+            assert not stripped.startswith("realpath"), f"{script.name}: {stripped}"
+
+
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+def test_a_stale_record_cannot_recreate_a_link_the_user_removed(tmp_path):
+    """The record is cleared at the START of every apply, not only on success.
+
+    Without that, a machine where the file WAS a link and deliberately is not any
+    more would have the link silently restored on the next apply -- the stack
+    undoing a change the user made, from a file they cannot see."""
+    home = tmp_path / "home"
+    state = tmp_path / "state"
+    (home / ".claude").mkdir(parents=True)
+    (home / ".claude" / "settings.json").write_text("{}\n", encoding="utf-8")
+    record = state / "terminal-stack" / "claude-settings-symlink"
+    record.parent.mkdir(parents=True)
+    record.write_text(f"{tmp_path}/gone.json\n", encoding="utf-8")
+
+    assert _run_link_script(LINK_RECORD, home, state).returncode == 0
+    assert not record.exists(), "run_before did not clear a stale record"
+
+
+def test_the_two_link_scripts_do_not_share_a_source_name():
+    """chezmoi strips the run_before_/run_after_ prefix to name the source entry,
+    so a matching pair collapses into one and the apply dies with "inconsistent
+    state" before a single target is written. Found by running it."""
+    assert LINK_RECORD.name.replace("run_before_", "") != LINK_RESTORE.name.replace(
+        "run_after_", ""
+    )
+
+
+def test_the_restore_needs_no_diffutils():
+    """`cmp` lives in diffutils, which a minimal Arch container does not have --
+    it failed with "command not found" on the first end-to-end run. There is
+    nothing to buy: git compares content, so an identical write leaves the other
+    tool's repo clean."""
+    body = LINK_RESTORE.read_text(encoding="utf-8")
+    for line in body.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            continue
+        assert not stripped.startswith(("cmp ", "if cmp", "diff ")), stripped
+
+
+def test_the_theme_key_is_omarchys_on_omarchy():
+    """`omarchy-theme-set-claude --activate` writes "custom:omarchy" and keeps
+    ~/.claude/themes/omarchy.json in step with the desktop, which Claude Code
+    hot-reloads. A flat light/dark token over the top of that flaps on every
+    apply and every theme change, with nothing to explain it."""
+    src = (ROOT / "dot_claude/modify_settings.json.tmpl").read_text(encoding="utf-8")
+    theme_line = next(ln for ln in src.splitlines() if '"theme":' in ln)
+    assert '{{ end }}' in theme_line, "the theme key is not gated at all"
+    gate = next(ln for ln in src.splitlines() if 'ne (index . "distroId"' in ln)
+    assert '"omarchy"' in gate
+    # statusLine and hooks stay ours everywhere -- only `theme` is ceded.
+    assert '"statusLine"' in src and '"hooks"' in src
+    for key in ('"statusLine"', '"hooks"'):
+        line = next(ln for ln in src.splitlines() if key in ln)
+        assert "distroId" not in line, f"{key} must not be distro-gated"
+
+
+# --- the Nerd Font guard, under pipefail --------------------------------------
+
+
+def _font_guard_script(fc_list_body: str) -> str:
+    """common_nerd_font_jetbrains, with its world stubbed and pipefail ON.
+
+    pipefail is the whole point: the bootstraps set it, and it is what turned
+    this guard inside out.
+    """
+    lib = (ROOT / "bootstrap/_common-posix.sh").read_text(encoding="utf-8")
+    fn = re.search(r"(?m)^common_nerd_font_jetbrains\(\) \{.*?^\}", lib, re.S).group(0)
+    return (
+        "set -euo pipefail\n"
+        'INFO=""\n'
+        "ts_is_headless() { return 1; }\n"
+        # The `;` matters: bash rejects `{ cmd }` without a terminator.
+        f"fc-list() {{ {fc_list_body}; }}\n"
+        'curl() { echo "DOWNLOAD-ATTEMPTED"; }\n'
+        "unzip() { :; }\n"
+        "fc-cache() { :; }\n"
+        "mktemp() { echo /dev/null; }\n"
+        f"{fn}\n"
+        "common_nerd_font_jetbrains\n"
+    )
+
+
+def _run_font_guard(fc_list_body: str) -> str:
+    got = subprocess.run(
+        [BASH, "-c", _font_guard_script(fc_list_body)],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+        start_new_session=True,
+    )
+    return got.stdout + got.stderr
+
+
+# A match on the FIRST line, then thousands more. That is the exact race: with
+# `fc-list | grep -q`, grep exits on line one while fc-list is still writing, and
+# under pipefail the SIGPIPE (141) makes the pipeline "fail" -- so the guard
+# concludes the font is MISSING precisely because it found it.
+_MATCH_THEN_BULK = (
+    'echo "/f.ttf: JetBrainsMono Nerd Font:style=Regular"; '
+    "i=0; while [ $i -lt 4000 ]; do "
+    'echo "/other$i.ttf: Some Other Font:style=Regular"; i=$((i+1)); done'
+)
+
+
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+def test_the_font_guard_is_not_inverted_by_pipefail():
+    """THE regression.
+
+    Measured on a fresh Omarchy account: fc-list matched 4 JetBrainsMono Nerd
+    Font families and the guard downloaded ~30 MB anyway, on every single
+    install. It is a race -- on a machine with few fonts fc-list finishes first
+    and the guard is right -- which is why it survived this long.
+    """
+    out = _run_font_guard(_MATCH_THEN_BULK)
+    assert "DOWNLOAD-ATTEMPTED" not in out, (
+        "the font is present and the guard downloaded anyway (pipefail + grep -q)"
+    )
+    assert "already in fontconfig" in out
+
+
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+def test_the_font_guard_still_downloads_when_the_font_really_is_absent():
+    """The other half. A guard that never downloads is not a fix."""
+    out = _run_font_guard('echo "/other.ttf: Some Other Font:style=Regular"')
+    assert "DOWNLOAD-ATTEMPTED" in out
+    assert "already in fontconfig" not in out
+
+
+def test_no_bootstrap_library_pipes_a_long_producer_into_grep_q():
+    """`<something that writes a lot> | grep -q` is unsafe under pipefail.
+
+    Scoped to the producers that actually write enough to lose the race --
+    `fc-list` and `ps` -- rather than to every `grep -q` in the tree: a producer
+    emitting one line finishes before grep exits and is fine, and a blanket ban
+    would be noise nobody could act on.
+    """
+    offenders = []
+    for path in sorted((ROOT / "bootstrap").glob("*.sh")):
+        for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if line.strip().startswith("#"):
+                continue
+            if re.search(r"\b(fc-list|ps)\b[^|]*\|\s*grep\s+-q", line):
+                offenders.append(f"{path.name}:{n}: {line.strip()}")
+    assert not offenders, (
+        "capture the output first and match with `case`, or grep -c: under "
+        "pipefail these lose to SIGPIPE.\n" + "\n".join(offenders)
+    )
+
+
+# --- Omarchy citizenship: defaults we must not quietly change -----------------
+
+
+def test_the_claude_tree_is_not_ignored():
+    """`.claude/**` blocked the whole ~/.claude TARGET, not just the repo's own
+    project-scoped commands, so dot_claude/** never deployed on POSIX.
+
+    chezmoi skips source entries beginning with a dot by itself -- verified in a
+    container with no .chezmoiignore, where `chezmoi managed` listed
+    `.claude/statusline.sh` (from dot_claude/) and not the repo's
+    `.claude/commands/`. So the rule bought nothing and cost the whole tree.
+    """
+    ignore = (ROOT / ".chezmoiignore").read_text(encoding="utf-8")
+    for line in ignore.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#") or stripped.startswith("{{"):
+            continue
+        assert stripped not in (".claude", ".claude/**"), (
+            "this rule matches the TARGET ~/.claude and blocks dot_claude/** with it"
+        )
+    # And the tree it protects is really there to deploy.
+    assert (ROOT / "dot_claude/statusline-command.sh").is_file()
+    assert (ROOT / "dot_claude/modify_settings.json.tmpl").is_file()
+
+
+def test_the_stray_fixture_does_not_land_in_home():
+    """`C/ts-agentmemory-data.tgz` is a committed test fixture. Without a rule,
+    chezmoi deploys it to ~/C/ on every POSIX machine -- which it did."""
+    ignore = {ln.strip() for ln in (ROOT / ".chezmoiignore").read_text(encoding="utf-8").splitlines()}
+    if (ROOT / "C").is_dir():
+        assert "C" in ignore and "C/**" in ignore, "the C/ fixture would deploy to ~/C"
+
+
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+def test_starship_preserves_the_file_it_replaced_exactly_once():
+    """Omarchy ships its own starship.toml to every account through /etc/skel, so
+    the stack's prompt lands on top of a real file. It is kept, commented, and
+    captured ONCE -- an apply runs repeatedly, and the naive version comments its
+    own output back into itself until the file grows without bound."""
+    src = (ROOT / "dot_config/modify_starship.toml.tmpl").read_text(encoding="utf-8")
+    assert src.startswith("#!"), "a modify_ script needs a shebang"
+    assert "MARK_START=" in src and "grep -qF" in src, "nothing detects our own output"
+    # The reuse arm must not re-comment; only the capture arm may add `# `.
+    reuse = src[src.index('if printf') : src.index("elif [ -n")]
+    assert "sed 's/^/# /'" not in reuse, "the reuse path re-comments on every apply"
+
+    # A leading `{{-` on the $preset line trims BACKWARDS across the newline and
+    # glues the heredoc opener onto the statement above it:
+    #     current="$(cat)"config=$(cat <<'TS_STARSHIP_BODY'
+    # `config` is then never assigned and every apply dies on `set -u` with
+    # "config: unbound variable". chezmoi rendered exactly that; caught by the
+    # Ubuntu bootstrap target, not by reading.
+    preset = next(ln for ln in src.splitlines() if "$preset :=" in ln)
+    assert not preset.lstrip().startswith("{{-"), (
+        "a backward trim here glues the heredoc opener to the line above it"
+    )
+    assert "config=$(cat" in src and "\ncurrent=" in src
+
+
+def test_editor_defaults_to_nvim_and_defers_to_a_desktop_launcher():
+    """omarchy-zsh's envs sets EDITOR=nvim and derives SUDO_EDITOR from it; on
+    Omarchy `nvim` IS omarchy-nvim, a prebuilt LazyVim in the base package set.
+    The stack used to override that with micro, and the guard meant to prevent it
+    tested the BASH value (`omarchy-launch-editor`), which a zsh session never
+    sees."""
+    rc = (ROOT / "dot_zshrc").read_text(encoding="utf-8")
+    block = rc[rc.index("# micro (a nano alternative)") : rc.index("# Git muscle-memory overrides")]
+    assert '"${EDITOR:-}" == omarchy-launch-editor*' in block
+    assert block.index("command -v nvim") < block.index("command -v micro"), (
+        "micro must be the fallback, not the default"
+    )
+    assert "export EDITOR='micro'" in block, "micro is still the fallback, not removed"
+    assert "${EDITOR:-micro}" not in rc, "a stale micro default is still hiding in a fallback"
+
+
+def test_try_is_initialised_where_omarchy_would_have():
+    """Skipping omarchy-zsh's `inits` (to avoid double prompt init) also skipped
+    the only initialiser for `try`, so it was a silent no-op in zsh while working
+    in the bash the desktop opens."""
+    rc = (ROOT / "dot_zshrc").read_text(encoding="utf-8")
+    block = rc[rc.index("_TS_OMARCHY_ZSH=") : rc.index("# ---- terminal-stack-zsh-start ----")]
+    assert "try init" in block
+    assert '/inits"' not in block and "$_TS_OMARCHY_ZSH/inits" not in block, (
+        "the rest of inits must still be skipped -- it double-initialises the prompt"
+    )
+
+
+def test_syntax_highlighting_is_not_loaded_twice():
+    """omarchy-zsh's zoptions already ends with the same source line."""
+    rc = (ROOT / "dot_zshrc").read_text(encoding="utf-8")
+    tail = rc[rc.index("zsh-syntax-highlighting") - 800 :]
+    assert "ZSH_HIGHLIGHT_VERSION" in tail, "nothing guards against a second load"
+
+
+def test_tmux_keeps_omarchys_prefix_and_both_chords():
+    """Omarchy uses prefix C-Space + prefix2 C-b, and herdr -- the tmux
+    replacement in its base package set -- mirrors that config deliberately.
+    Changing the prefix desynchronises the two."""
+    def code(path):
+        # Comment lines only, stripped -- the prose in these files NAMES the
+        # directives it is explaining, and an unanchored search finds the note
+        # rather than the setting. Third time this shape has bitten a test here.
+        return "\n".join(
+            ln for ln in (ROOT / path).read_text(encoding="utf-8").splitlines()
+            if not ln.strip().startswith("#")
+        )
+
+    assert "unbind C-b" not in code(".chezmoitemplates/tmux-core"), (
+        "the shared core must not unbind C-b; Omarchy keeps it as prefix2"
+    )
+    assert "unbind C-b" in code("dot_tmux.conf.tmpl"), (
+        "off Omarchy the stale C-b binding should still go"
+    )
+    assert "set -g prefix2 C-b" in code("dot_config/tmux/tmux.conf.tmpl"), (
+        "C-b must keep working on Omarchy"
+    )
+    flow = (ROOT / "tstack/wizard/flow.py").read_text(encoding="utf-8")
+    body = flow[flow.index("def _saved_tmux") :]
+    body = body[: body.index("\n\n\n")]
+    assert 'plat.is_omarchy()' in body and '"ctrl-space"' in body
+
+
+# --- the macOS axis a Linux container cannot reach ----------------------------
+
+# Spellings that exist in GNU coreutils and not in the BSD userland macOS ships.
+# `readlink -f` is here because this repo shipped it once: it fails silently on
+# macOS only, and the Linux parity containers cannot see it because GNU readlink
+# is right there. bootstrap/_smb.sh and services/_stack.sh already write the rule
+# down in prose; this makes it a gate.
+# DELIBERATELY NARROW. The first draft of this list also carried `stat -c`,
+# `date -d` and `realpath`, and it failed on code that is already correct:
+# `stat -f '%Lp' … || stat -c '%a' …` tries BSD first, `ts_ws_stat_flavor`
+# PROBES with `stat -c` on purpose, and `date -d` sits behind that probe. Those
+# have a working BSD spelling on the same line or one guard away, so a flat ban
+# would force churn on correct code -- and a gate that fires on correct code is
+# worse than no gate.
+#
+# What is left is the spellings with no BSD form at all, where the only fix is
+# not to use them. `readlink -f` leads because this repo shipped it: it fails
+# silently on macOS only, and no Linux container can see that.
+GNU_ONLY = (
+    (r"\breadlink\s+-f\b", "readlink -f: BSD has no -f; walk the link by hand"),
+    (r"\bgrep\s+-[A-Za-z]*P\b", "grep -P: GNU only; use -E"),
+    (r"\bmktemp\s+-p\b", "mktemp -p: GNU only; use TMPDIR"),
+    (r"\bcp\s+--parents\b", "cp --parents: GNU only"),
+    (r"\bsed\s+-i\s+-e\b", "sed -i -e: BSD sed reads -e as the backup suffix"),
+)
+
+
+def test_no_shell_file_uses_a_gnu_only_spelling():
+    """macOS cannot be containerised -- containers share the host kernel -- so
+    the BSD-utility axis is checked by reading rather than by running. This is a
+    stronger gate than a container would be: it catches the class, not one path.
+    """
+    offenders = []
+    files = [
+        *sorted((ROOT / "bootstrap").glob("*.sh")),
+        *sorted(ROOT.glob("run_*.sh")),
+        *sorted(ROOT.glob("install-*.sh")),
+        *sorted((ROOT / "services").glob("*.sh")),
+        ROOT / "dot_zshrc",
+    ]
+    for path in files:
+        if not path.is_file():
+            continue
+        for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if line.strip().startswith("#"):
+                continue
+            code = line.split(" #", 1)[0]
+            for pattern, why in GNU_ONLY:
+                if re.search(pattern, code):
+                    offenders.append(f"{path.relative_to(ROOT)}:{n}: {why}\n      {line.strip()}")
+    assert not offenders, "GNU-only spellings on a tree that runs on macOS:\n" + "\n".join(offenders)
+
+
+def test_the_profile_explains_the_ssh_symlink_block_instead_of_failing_cryptically():
+    r"""Over ssh, every winget shim under WinGet\Links is a symlink Windows will
+    not traverse for a remote logon, so eza/fnm/fd/rg cannot start and the error
+    names a mount point rather than the policy. The fix needs elevation, so the
+    profile's job is to say what to run and why.
+
+    Gated on SSH_CONNECTION: a local session follows those symlinks happily and
+    must see nothing. Gated on the REGISTRY rather than `fsutil behavior query`
+    so login costs no process spawn, and a MISSING value counts as blocked
+    because that absent state is the Windows default.
+    """
+    ps = (ROOT / "windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1").read_text(
+        encoding="utf-8"
+    )
+    assert "# ---- ssh-symlink-notice-start ----" in ps
+    assert "# ---- ssh-symlink-notice-end ----" in ps
+    assert "if (-not $env:SSH_CONNECTION) { return $false }" in ps
+    assert "SymlinkRemoteToLocalEvaluation" in ps
+    assert "fsutil behavior set SymlinkEvaluation R2L:1" in ps
+    assert "no-ssh-symlink-notice" in ps
+    # No fsutil.exe at login: the registry answers the same question for free.
+    body = ps.split("# ---- ssh-symlink-notice-start ----")[1].split(
+        "# ---- ssh-symlink-notice-end ----"
+    )[0]
+    assert "fsutil behavior query" in body, "the notice must show how to verify the change"
+    assert "$r2l = (Get-ItemProperty" in body

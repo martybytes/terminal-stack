@@ -28,6 +28,12 @@ export USER
 . "$(dirname -- "${BASH_SOURCE[0]}")/_cc_tts.sh"
 # shellcheck source=_wezterm.sh
 . "$(dirname -- "${BASH_SOURCE[0]}")/_wezterm.sh"
+# Distro detection, for the catalog's distro veto below. _detect.sh is also
+# sourced by _common-posix.sh; sourcing it here too is harmless (it only defines
+# functions) and it is what lets `tstack config apps` and the picker answer the
+# same question the installer does, from any entry point.
+# shellcheck source=_detect.sh
+. "$(dirname -- "${BASH_SOURCE[0]}")/_detect.sh"
 
 # The repo-wide backup convention, in one place: <path>.bak.YYYYMMDD, then .1,
 # .2 on a same-day re-run, never clobbering a same-day backup. ARCHITECTURE.md
@@ -96,6 +102,25 @@ ts_apps_load() {
         $4=="posix" && (p=="macos" || p=="linux" || p=="wsl") { print; next }
         $4=="linux" && p=="linux" { print; next }
     ')"
+    # Distro veto, on top of the platform column.
+    #
+    # `platforms` answers "can this OS install it". This answers "should this
+    # DISTRO offer it", which is a different question and has exactly one case:
+    # Omarchy standardises on mise for language runtimes (mise-bin is in its base
+    # package set, `omarchy install dev-env <lang>` is entirely `mise use
+    # --global`, and env-bootstrap puts ~/.local/share/mise/shims on PATH). A
+    # second version manager competes for the same binaries and the winner is
+    # decided by PATH order.
+    #
+    # It has to be HERE rather than only in the installer: an id that is offered,
+    # ticked and then skipped is an id `ts_apps_pending` reports as missing on
+    # every `tstack update`, forever -- the exact nag ts_app_installable exists
+    # to end. uv/pipx/ruff/ipython stay; they are tools, not version managers,
+    # and Omarchy's own `dev-env python` installs uv too.
+    if [ "$(ts_distro_id 2>/dev/null || true)" = omarchy ]; then
+        TS_APPS_ROWS="$(printf '%s\n' "$TS_APPS_ROWS" \
+            | awk '$1!="fnm" && $1!="node" && $1!="python"')"
+    fi
     TS_APPS_ALL="$(printf '%s\n' "$TS_APPS_ROWS" | awk '{print $1}' | tr '\n' ' ')"
     TS_APPS_ALL="${TS_APPS_ALL% }"
     TS_APPS_RECOMMENDED="$(printf '%s\n' "$TS_APPS_ROWS" \
@@ -193,6 +218,22 @@ ts_app_bin() {
 # installer defined" -- which is why llmfit sits in `models` instead.
 ts_app_is_ai() {
     case " $(ts_app_group_members ai) " in *" $1 "*) return 0 ;; *) return 1 ;; esac
+}
+
+# herdr is routed by an explicit id list rather than by its group, which is the
+# deliberate difference from ts_app_is_ai above. It belongs in `shell` -- it is a
+# terminal multiplexer, next to tmux -- but it arrives from herdr.dev's own
+# installer, not from apt, brew or winget. Putting it in `ai` to get a
+# non-package install would hand it to ts_install_ai_cli, which has no branch for
+# it and would print "no agent-CLI installer defined": exactly the coupling that
+# put llmfit in `models`.
+#
+# The official installer, not brew, on every POSIX platform. `herdr channel set`
+# works on direct installs ONLY, and the stack reads the channel back rather than
+# storing it (docs/decisions.md), so a brew-installed herdr would report a
+# channel it cannot change. One route everywhere also means one thing to debug.
+ts_app_is_herdr() {
+    case "$1" in herdr) return 0 ;; *) return 1 ;; esac
 }
 
 # Apps this machine is expected to have but doesn't. Two sources, deliberately:
@@ -504,6 +545,9 @@ ts_brew_install_apps() {
             # installed it twelve lines later, so the transcript blamed the
             # wrong thing when the cask was what actually failed.
             zed)        ;;
+            # herdr IS mapped — by its own installer, below. Same reason zed has
+            # an empty arm: without one the catch-all blames the wrong thing.
+            herdr)      ;;
             *)          ts_app_is_ai "$id" || echo "==> $id: no macOS package mapping; skipped" ;;
         esac
     done
@@ -536,6 +580,7 @@ ts_brew_install_apps() {
     esac
     ts_install_node_lts "$apps" || ts_note_failure "Node LTS" "retry: tstack config apps node"
     ts_install_ai_clis "$apps"  || ts_note_failure "agent CLIs" "retry: tstack config apps claude,codex,…"
+    ts_install_herdrs "$apps"   || ts_note_failure "herdr" "retry: tstack config apps herdr"
     return 0
 }
 
@@ -629,6 +674,39 @@ ts_install_ai_clis() {
     local id
     for id in $1; do
         ts_app_is_ai "$id" && ts_install_ai_cli "$id"
+    done
+    return 0
+}
+
+# ── herdr ───────────────────────────────────────────────────────────────────────
+# One Rust binary from herdr.dev's own installer. Idempotent (skips when already
+# on PATH), never fatal, and only ever runs for an id actually ticked: herdr is
+# `classes none` in apps.conf, so no default set pre-selects it.
+#
+# Not brew on macOS, deliberately -- see the comment on ts_app_is_herdr. Not apt
+# or the GitHub-release fallback on Debian either: the installer resolves the
+# right asset per architecture and sets up the update path that `herdr update`
+# uses, and duplicating that here is how the fallback ladders in
+# _common-debian.sh grew.
+ts_install_herdr() {
+    if command -v herdr >/dev/null 2>&1; then
+        echo "==> herdr: already installed ($(command -v herdr))"
+        return 0
+    fi
+    echo "==> herdr: installing via the official installer"
+    if ! curl -fsSL https://herdr.dev/install.sh | sh; then
+        echo "!! herdr install failed; see https://herdr.dev/docs/install/"
+        return 0
+    fi
+    command -v herdr >/dev/null 2>&1 \
+        || echo "!! herdr installed but not on PATH yet; open a new shell to pick it up"
+    return 0
+}
+
+ts_install_herdrs() {
+    local id
+    for id in $1; do
+        ts_app_is_herdr "$id" && ts_install_herdr
     done
     return 0
 }
@@ -947,7 +1025,7 @@ TS_MIRROR_DATA_KEYS="
     ccTtsSummarizer ccTtsTemplateError ccTtsTemplatePermission ccTtsTemplateQuestion 
     ccTtsTemplateWaiting ccTtsVoicePool leaderChord tmuxPrefix windowsUsername
     weztermMux weztermRestore atuinEnabled starshipPreset headroomEnabled headroomCursorMode
-    cavemanEnabled agentmemoryEnabled playwrightEnabled memoryBackend
+    cavemanEnabled agentmemoryEnabled playwrightEnabled memoryBackend herdrConfig
 "
 
 ts_data_prefetch() {
@@ -1190,6 +1268,38 @@ ts_atuin_set() {
     ts_mirror_windows_config
 }
 
+# ── herdr's managed config ──────────────────────────────────────────────────────
+# "on"  -> `tstack herdr` writes ~/.config/herdr/config.toml (%APPDATA%\herdr\
+#          config.toml on Windows) from the saved theme.
+# "off" -> the default. herdr's own config is left alone, and flipping to off
+#          restores the backup taken before the first write.
+#
+# Unlike atuin's fragment this is NOT rendered by chezmoi. herdr rewrites its own
+# config (`herdr --default-config`, the global menu), the user hand-edits it, and
+# TOML has no include mechanism -- the same "the app also writes this file"
+# hazard as ~/.claude/settings.json, on a format with no cheap key splice. So one
+# Python writer owns it, takes a backup first, and `off` is a restore.
+#
+# And, as with Ghostty: this is deliberately not a .chezmoiremove rule and not a
+# sync-side delete. Both run on every machine, so either would wipe a
+# hand-written herdr config on a box that never opted in. `tstack config herdr
+# off` does the removal explicitly, for the machine you run it on.
+#
+# Default off rather than on, unlike ghosttyConfig: a machine that has never
+# heard of herdr must not grow a herdr config directory on its next apply.
+ts_herdr_get() {
+    local v; v="$(ts_data_get herdrConfig 2>/dev/null || true)"
+    case "$v" in on|off) echo "$v" ;; *) echo off ;; esac
+}
+
+# ts_herdr_set <on|off> — persist, regenerate derived keys, mirror to Windows.
+ts_herdr_set() {
+    case "$1" in on|off) ;; *) echo "ts_herdr_set: expected on|off" >&2; return 2 ;; esac
+    ts_data_set herdrConfig "$1"
+    local cz; if cz="$(ts_chezmoi_bin)"; then "$cz" init >/dev/null 2>&1 || true; fi
+    ts_mirror_windows_config
+}
+
 # ── Which prompt ────────────────────────────────────────────────────────────────
 # "terminal-stack" (default) is this repo's own two-line Starship config; any
 # other value is one of Starship's built-in presets, rendered by
@@ -1404,6 +1514,7 @@ EOF
   "weztermMux": "$(ts_wez_mux_get)",
   "weztermRestore": "$(ts_wez_restore_get)",
   "atuinEnabled": "$(ts_atuin_get)",
+  "herdrConfig": "$(ts_herdr_get)",
   "starshipPreset": "$(ts_starship_get)",
   "headroomEnabled": "$(ts_agent_get headroomEnabled)",
   "headroomCursorMode": "$(ts_agent_get headroomCursorMode)",

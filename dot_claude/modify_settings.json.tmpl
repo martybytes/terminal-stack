@@ -19,6 +19,25 @@ Ownership is derived from the rendered fragment below, NOT a hard-coded list —
 so dropping a key from the template drops it from the live file, and adding one
 takes it over. Everything else in the live file survives byte for byte.
 
+`theme` is dropped on Omarchy, and only there. `omarchy-theme-set-claude
+--activate` writes "custom:omarchy" and keeps ~/.claude/themes/omarchy.json in
+step with the active desktop theme, which Claude Code hot-reloads. A flat
+light/dark token written over the top of that flaps between the two on every
+apply and every `omarchy theme set`, with nothing to explain it. statusLine and
+hooks stay ours on every platform; only this one key is ceded.
+
+Keep the rationale HERE rather than as a `{{/* … */}}` comment inside the JSON
+fragment: tests/test_agent_tools.py renders this template crudely (strip the
+`if`/`end` directives, substitute the rest) and a template comment came back as
+a literal in the middle of the object.
+
+And note what the splice does NOT do: chezmoi writes the result, and chezmoi
+writes a REGULAR FILE. Where the target is a symlink — omarchy-dots stows this
+file — the link is replaced and the tracked file is orphaned. That is repaired
+either side of the apply by run_before_25-claude-settings-link-record.sh and
+run_after_25-claude-settings-link-restore.sh, not here: this script only
+produces bytes.
+
 chezmoi hands us the current target contents on stdin and takes stdout as the
 new contents. We refuse rather than guess: if the live file is present but
 unparseable, we echo it back untouched instead of destroying hand-edits.
@@ -108,8 +127,8 @@ FRAGMENT = r"""
         ]
       }
     ]{{ end }}
-  },
-  "theme": "{{ if hasKey . "resolvedTheme" }}{{ .resolvedTheme }}{{ else }}dark{{ end }}"
+  }{{ if ne (index . "distroId" | default "") "omarchy" }},
+  "theme": "{{ if hasKey . "resolvedTheme" }}{{ .resolvedTheme }}{{ else }}dark{{ end }}"{{ end }}
 }
 """
 

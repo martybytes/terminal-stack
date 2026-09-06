@@ -109,6 +109,69 @@ PowerShell's `-File` accepts forward slashes on Windows. Forward slashes have no
 
 Commit: [`a63044a`](../CHANGELOG.md).
 
+## `ssh-add`: "Error connecting to agent" in WezTerm panes only
+
+**Symptom.** Every `ssh`, `ssh-add` and `git push` in every WezTerm pane fails with
+
+```
+Error connecting to agent: No such file or directory
+```
+
+in brand-new tabs, after `Restart-Service ssh-agent`, from an elevated shell, and
+after a full WezTerm restart. Everything you would check says the stack is fine:
+`Get-Service ssh-agent` is Running, `ssh-add.exe` resolves to
+`C:\Windows\System32\OpenSSH\ssh-add.exe`, `\\.\pipe\openssh-ssh-agent` is present, and the
+identical command in **cmd.exe or Windows Terminal lists your keys**. The terminal
+is the variable, not the agent.
+
+**Cause.** WezTerm's `mux_enable_ssh_agent` defaults to **true** and sets
+`SSH_AUTH_SOCK` for panes in the **local** domain — so `tstack mux off` does not opt
+out of it. The value points at a symlink WezTerm maintains at
+`<data dir>/wezterm/agent.<gui pid>`. Creating a symlink on Windows needs
+`SeCreateSymbolicLinkPrivilege`, which an ordinary user does not hold unless
+Developer Mode is on, so the call fails and WezTerm logs (Ctrl+Shift+L, which
+nobody reads while chasing an ssh problem):
+
+```
+ERROR mux::ssh_agent > failed to set "...gent.6524" to initial inherited
+SSH_AUTH_SOCK value of "...gent.27136": failed to create symlink ...:
+A required privilege is not held by the client. (os error 1314)
+```
+
+It then exports the variable anyway. Windows OpenSSH honours `SSH_AUTH_SOCK` ahead
+of its default pipe, so every pane is handed a path to a file that was never
+created. The agent was healthy the whole time.
+
+**Fix.** Two lines in `windows/.wezterm.lua.tmpl`, both load-bearing:
+
+```lua
+config.mux_enable_ssh_agent = false
+config.set_environment_variables = { SSH_AUTH_SOCK = [[\\.\pipe\openssh-ssh-agent]] }
+```
+
+`set_environment_variables` alone loses — the mux agent runs after it and puts the
+dangling path back. `mux_enable_ssh_agent = false` alone leaves the variable **set
+but empty**, which Windows OpenSSH rejects with a *different* message
+("Could not open a connection to your authentication agent"), so a half fix reads
+as a new bug. `default_ssh_auth_sock` looks like the intended knob and never
+reached a local pane in testing — do not swap it in.
+
+Naming the pipe is not the same mistake as setting a Unix socket path: Win32
+OpenSSH accepts a pipe path in `SSH_AUTH_SOCK` and connects to it. Leaving the
+variable unset would be equally correct, but WezTerm gives no way to do that.
+
+**Check it from the failing shell, not a fresh one:**
+
+```powershell
+Test-Path Env:SSH_AUTH_SOCK   # True with an EMPTY value still breaks ssh
+$env:SSH_AUTH_SOCK            # must be the pipe, not a wezterm agent.<pid> path
+[System.IO.Directory]::GetFiles('\\.\pipe\') -match 'openssh'
+ssh-add -l
+```
+
+Full rationale and the measured config matrix: `decisions.md` § "Why the Windows
+WezTerm config pins `SSH_AUTH_SOCK` to the named pipe".
+
 ## Claude Code overwrites the tab title
 
 **Symptom.** Our `cc` PowerShell wrapper set the per-project tab title (then `cc • <project>`; today the bare project leaf) via OSC 0 (`Write-Host -NoNewline "ESC ]0;cc • myproject BEL"`). Claude Code launches, and the tab title changes to the conversation slug (e.g., `distinguish-claude-code-tabs-pwsh`).
@@ -456,3 +519,99 @@ out of the prompt's reach.
 prints a bootstrap that re-runs `starship ... --print-full-init`. On a machine
 where a spawn costs 300ms-2s (antivirus scanning each exec) that is worth
 knowing: request `--print-full-init` yourself.
+
+## winget-installed tools cannot start over ssh ("untrusted mount point")
+
+ssh into a Windows box, start `pwsh`, and the profile load throws before the
+prompt while `ls` fails afterwards:
+
+```
+Program 'fnm.exe' failed to run: An error occurred trying to start process
+'C:\Users\<you>\AppData\Local\Microsoft\WinGet\Links\fnm.exe' ... The path cannot
+be traversed because it contains an untrusted mount point.
+Program 'eza.exe' failed to run: ... No application is associated with the
+specified file for this operation.
+```
+
+Nothing is wrong with fnm or eza, and the same commands work at the console.
+Every shim winget puts in `%LOCALAPPDATA%\Microsoft\WinGet\Links` is a
+**symlink** into the real package directory:
+
+```
+> cmd /c dir /al "%LOCALAPPDATA%\Microsoft\WinGet\Links"
+<SYMLINK>  eza.exe [...\WinGet\Packages\eza-community.eza_...\eza.exe]
+<SYMLINK>  fnm.exe [...\WinGet\Packages\Schniz.fnm_...\fnm.exe]
+```
+
+An ssh logon carries a **remote** token, so following one of those links is a
+remote-to-local traversal, and Windows disables that class by default:
+
+```
+> fsutil behavior query SymlinkEvaluation
+Local-to-local symbolic link evaluation is: ENABLED
+Local-to-remote symbolic link evaluation is: ENABLED
+Remote-to-local symbolic link evaluation is: DISABLED
+Remote-to-remote symbolic link evaluation is: DISABLED
+```
+
+`CreateProcess` therefore refuses the shim (`ERROR_UNTRUSTED_MOUNT_POINT`), and
+whether the message names the mount point or the vaguer "no application is
+associated" depends on how the failure surfaces. Tools installed outside winget
+are unaffected, which is why `starship` (Program Files) and `zoxide`
+(chocolatey) kept working while 30 winget shims did not.
+
+**Fix, on the console and elevated**, not over ssh, since the point is that a
+remote session's token is the problem:
+
+```
+fsutil behavior set SymlinkEvaluation R2L:1
+```
+
+Reconnect afterwards, and re-check with `fsutil behavior query
+SymlinkEvaluation`. It is a machine-wide policy: enabling R2L lets a symlink on
+a remote share be followed to a local path, so it is the machine owner's call,
+which is why the stack reports it and never sets it.
+
+Two consequences in this repo:
+
+- **`Get-Command` is not a runnability test.** It stats the file, so it says yes
+  to a shim that cannot launch. The `$PROFILE` fnm block suppresses
+  `$ErrorActionPreference` across both probes and quotes its interpolation
+  (`"$tsFnmEnv".Trim()`), because the old code turned one failed launch into
+  three errors: the launch, a `.Trim()` on the resulting `$null`, and an
+  `Invoke-Expression` with nothing to run.
+- **The stack explains it at login.** `Test-TsRemoteSymlinkBlocked` (the
+  `ssh-symlink-notice` block) fires only when `$env:SSH_CONNECTION` is set, the
+  registry value `SymlinkRemoteToLocalEvaluation` under
+  `HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem` is not `1`, and the Links
+  directory is on `PATH`. It prints the reason and the exact elevated command.
+  The registry rather than `fsutil`, so a login costs no extra process; a
+  **missing** value counts as blocked, because absent is the Windows default.
+  `tstack doctor` reports the same thing as a NOTE (`winget-symlinks`), and
+  `New-Item -ItemType File "$env:LOCALAPPDATA\terminal-stack\no-ssh-symlink-notice"`
+  silences the login notice on a machine where the policy will not be changed.
+
+## Captured child output decodes with the locale codec, not UTF-8
+
+`subprocess.run(argv, capture_output=True, text=True)` decodes with the
+**locale** encoding. On a Windows host that is cp1252, and everything this stack
+shells out to (starship, wezterm, docker, git, chezmoi) emits UTF-8. The failure
+does not look like an encoding failure, because the decode happens in
+subprocess's stdout **reader thread**:
+
+```
+UnicodeDecodeError: 'charmap' codec can't decode byte 0x81 in position 568
+```
+
+is raised there, `subprocess.run` still returns a `CompletedProcess` with
+`returncode=0`, `stderr=''` and **`stdout=None`**, and the caller dies on
+`got.stdout.strip()` several frames away. `tstack ui` crashed exactly that way
+previewing `starship preset tokyo-night`, whose Nerd Font glyphs are outside
+cp1252.
+
+`tstack/proc.py` is the single place that decides this: `encoding="utf-8"` plus
+`errors="replace"`, so a child that genuinely is not UTF-8 (`tasklist.exe` on
+some locales) costs a replacement character rather than a `None` every call site
+dereferences. `test_every_captured_child_process_decodes_as_utf_8` walks the
+package's AST and fails on any capturing `subprocess.run` without an explicit
+`encoding`.

@@ -34,6 +34,7 @@ import urllib.request
 from pathlib import Path
 
 from .. import platform as plat
+from .. import proc
 
 HELP = """tstack wezterm - WezTerm build info, upstream comparison, channel switching.
 
@@ -120,6 +121,16 @@ def channel() -> str:
             got = _run(["dpkg", "-s", package], timeout=30)
             if got and got.returncode == 0:
                 return name
+    elif shutil.which("pacman"):
+        # Arch: `extra/wezterm` is the stable channel; the nightly is
+        # `wezterm-git` from the AUR. Without this branch an Arch box fell
+        # through to "unknown" -- WezTerm on PATH, no package manager owning it
+        # -- and install() then refused to touch a perfectly ordinary pacman
+        # package, reporting it as hand-placed.
+        for package, name in (("wezterm-git", "nightly"), ("wezterm", "stable")):
+            got = _run(["pacman", "-Q", package], timeout=30)
+            if got and got.returncode == 0:
+                return name
     return "unknown" if shutil.which("wezterm") else "none"
 
 
@@ -134,17 +145,7 @@ def terminals_channel(selection: str) -> str:
 
 
 def _run(argv: list[str], timeout: int = 30) -> subprocess.CompletedProcess | None:
-    try:
-        return subprocess.run(
-            argv,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-            start_new_session=True,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
+    return proc.capture(argv, timeout=timeout)
 
 
 # --------------------------------------------------------- upstream (network)
@@ -449,16 +450,10 @@ def show_changes() -> int:
     body = f"# WezTerm changes since {got[0]}\n\n{text}\n"
     # The same reader the `doc` knowledge base uses, so long output behaves the
     # same way everywhere in the stack.
-    if shutil.which("glow"):
-        got_glow = subprocess.run(
-            ["glow", "-p", "-"], input=body, text=True, check=False, start_new_session=True
-        )
-        if got_glow.returncode == 0:
-            return 0
+    if shutil.which("glow") and proc.feed(["glow", "-p", "-"], body) == 0:
+        return 0
     pager = os.environ.get("PAGER") or "less -RF"
-    try:
-        subprocess.run(pager.split(), input=body, text=True, check=False, start_new_session=True)
-    except OSError:
+    if proc.feed(pager.split(), body) != 0:
         print(body)
     return 0
 
@@ -511,14 +506,7 @@ def _apt_install(want: str, other: str) -> None:
     except OSError:
         current = ""
     if line not in current:
-        subprocess.run(
-            ["sudo", "tee", str(listing)],
-            input=line + "\n",
-            text=True,
-            capture_output=True,
-            check=False,
-            start_new_session=True,
-        )
+        proc.capture(["sudo", "tee", str(listing)], stdin=line + "\n", timeout=60)
     _run(["sudo", "apt-get", "update", "-qq"], timeout=600)
     got = _run(["dpkg", "-s", other], timeout=30)
     if got and got.returncode == 0:
@@ -532,6 +520,34 @@ def _apt_install(want: str, other: str) -> None:
         print(f"{INFO} WezTerm: {version[0] if version else 'installed'}")
     else:
         print(f"{WARN} WezTerm: apt install failed; see https://wezterm.org/install/linux.html")
+
+
+def _pacman_install(want: str) -> None:
+    """Arch: stable is a repo package, nightly is not.
+
+    Deliberately does NOT run an AUR helper. `wezterm-git` builds WezTerm from
+    source -- tens of minutes on a laptop, unattended, inside what the user
+    thinks is a dotfiles install -- and the AUR is user-submitted, so pulling a
+    PKGBUILD without being asked is not this installer's call to make. It prints
+    the exact command instead, which is the same stance the Debian side takes
+    for Ghostty.
+    """
+    if want == "nightly":
+        print(f"{INFO} WezTerm: Arch packages only the stable channel (extra/wezterm).")
+        if shutil.which("yay"):
+            print("      Nightly is AUR `wezterm-git`, built from source:  yay -S wezterm-git")
+        else:
+            print("      Nightly is AUR `wezterm-git`; see https://wezterm.org/install/linux.html")
+        return
+    add = (
+        ["omarchy-pkg-add"]
+        if shutil.which("omarchy-pkg-add")
+        else ["sudo", "pacman", "-S", "--noconfirm", "--needed"]
+    )
+    print(f"{INFO} WezTerm: installing extra/wezterm ({' '.join(add)})")
+    done = _run([*add, "wezterm"], timeout=1800)
+    if not done or done.returncode != 0:
+        print(f"{WARN} WezTerm: pacman install failed; see https://wezterm.org/install/linux.html")
 
 
 def install(want: str) -> int:
@@ -561,6 +577,8 @@ def install(want: str) -> int:
             _apt_install("wezterm-nightly", "wezterm")
         else:
             _apt_install("wezterm", "wezterm-nightly")
+    elif shutil.which("pacman"):
+        _pacman_install(want)
     else:
         print(f"{INFO} WezTerm: no supported package manager here; see https://wezterm.org/install")
     return 0

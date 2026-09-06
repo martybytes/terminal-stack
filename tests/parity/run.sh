@@ -3,8 +3,10 @@
 #
 #   tests/parity/run.sh              every suite target
 #   tests/parity/run.sh debian13     one target
-#   tests/parity/run.sh --shell debian13   a shell inside the target, to poke about
-#   tests/parity/run.sh bootstrap    RUN linux-bootstrap.sh, end to end
+#   tests/parity/run.sh --shell omarchy    a shell inside the target, to poke about
+#   tests/parity/run.sh bootstrap          RUN linux-bootstrap.sh (Debian), end to end
+#   tests/parity/run.sh ubuntu-bootstrap   ... and on Ubuntu
+#   tests/parity/run.sh omarchy-bootstrap  RUN linux-bootstrap.sh (pacman), end to end
 #
 # Why this exists: WSL is not native Linux here. /mnt/c exists, interop exists,
 # and tstack/platform.py reports `wsl` rather than `linux` on purpose -- so every
@@ -20,6 +22,23 @@ set -euo pipefail
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$root"
 
+# The docker CLI, which on some hosts needs sudo to reach the daemon. Omarchy
+# deliberately does NOT put the install user in the `docker` group -- its
+# install/config/docker.sh records the reasoning, that group membership is
+# equivalent to passwordless root -- so on the very platform the arch/omarchy
+# targets below exist to gate, a bare `docker` is permission-denied and the
+# whole parity run is unavailable.
+#
+# Escalates only when a plain `docker info` fails AND a passwordless
+# `sudo docker info` works: nothing here prompts, and nothing here changes the
+# machine's security posture. If neither works the first docker call fails with
+# its own message, which is the right one to read.
+DOCKER=(docker)
+if ! docker info >/dev/null 2>&1 && sudo -n docker info >/dev/null 2>&1; then
+    DOCKER=(sudo docker)
+    echo "==> using 'sudo docker' (the daemon is not reachable as this user)"
+fi
+
 declare -A TARGETS=(
     [debian13]="debian:13-slim"
     [ubuntu2404]="ubuntu:24.04"
@@ -32,10 +51,39 @@ declare -A TARGETS=(
     # default set -- it installs packages and wants the network, so it is opted
     # into rather than paid for on every run.
     [bootstrap]="debian:13-slim"
+    # The same installer on Ubuntu. Debian and Ubuntu diverge on package
+    # availability and Python version, and the ~/.claude tree that had never
+    # deployed needs proving on both rather than on whichever one was handy.
+    [ubuntu-bootstrap]="ubuntu:24.04"
+    # Arch family. `arch` is plain archlinux with none of the `omarchy-*`
+    # commands present, which is the case _common-arch.sh has to keep working
+    # for and the one a developer on an Omarchy laptop never hits by accident.
+    # `omarchy` adds Omarchy's os-release, its pacman repo and the real
+    # omarchy-pkg-* helpers. Both build from Dockerfile.arch.
+    [arch]="archlinux:latest"
+    [omarchy]="archlinux:latest"
+    # The installer, for real, on pacman. Opted into like the apt one.
+    [arch-bootstrap]="archlinux:latest"
+    [omarchy-bootstrap]="archlinux:latest"
+)
+
+# Which Dockerfile builds a target, and the DISTRO build-arg it wants. Absent
+# means the Debian defaults.
+declare -A DOCKERFILE=(
+    [arch]=tests/parity/Dockerfile.arch
+    [omarchy]=tests/parity/Dockerfile.arch
+    [arch-bootstrap]=tests/parity/Dockerfile.arch-bootstrap
+    [omarchy-bootstrap]=tests/parity/Dockerfile.arch-bootstrap
+)
+declare -A DISTRO_ARG=(
+    [arch]=arch
+    [omarchy]=omarchy
+    [arch-bootstrap]=arch
+    [omarchy-bootstrap]=omarchy
 )
 
 # The default set. `bootstrap` is deliberately absent; name it to run it.
-DEFAULT_TARGETS=(debian13 ubuntu2404 ubuntu2204 bash32)
+DEFAULT_TARGETS=(debian13 ubuntu2404 ubuntu2204 arch omarchy bash32)
 
 shell_mode=0
 if [ "${1:-}" = "--shell" ]; then shell_mode=1; shift; fi
@@ -74,15 +122,18 @@ for name in "${wanted[@]}"; do
     # `USER` came to be read unguarded under `set -u` (fine in a login shell,
     # fatal under `docker run`, `su -c`, cron or systemd) and how the wizard came
     # to be invoked with no clone pinned.
-    if [ "$name" = bootstrap ]; then
+    if [ "${name}" = bootstrap ] || [ "${name%-bootstrap}" != "$name" ]; then
         echo "==> $name (linux-bootstrap.sh, for real, on $base)"
-        docker build -q -f tests/parity/Dockerfile.bootstrap             --build-arg "BASE=$base" -t "$image" . >/dev/null
+        dockerfile="${DOCKERFILE[$name]:-tests/parity/Dockerfile.bootstrap}"
+        build_args=(--build-arg "BASE=$base")
+        [ -n "${DISTRO_ARG[$name]:-}" ] && build_args+=(--build-arg "DISTRO=${DISTRO_ARG[$name]}")
+        "${DOCKER[@]}" build -q -f "$dockerfile" "${build_args[@]}" -t "$image" . >/dev/null
         # Every answer through the environment, so the questionnaire never
         # blocks. TS_APPS=none keeps the RUN about control flow -- wizard, config
         # save, chezmoi apply -- rather than about spending ten minutes pulling
         # thirty packages; the recommended set is still resolved and asserted on
         # inside bootstrap-check.sh, which is where the interesting bug lives.
-        if docker run --rm -v "$root:/repo:ro"                 -e TS_ASSUME_YES=1 -e TS_HEADLESS_RESOLVED=1                 -e TS_PROFILE=shell -e TS_DEVELOPMENT=no -e TS_APPS=none                 -e TS_THEME=dark -e TS_LEADER=ctrl-space -e TS_TMUX=ctrl-b                 -e TS_ATUIN=off -e TS_CC_TTS=off -e TS_MEMORY_BACKEND=none                 -e TS_HEADROOM=off -e TS_CAVEMAN=off -e TS_AGENTMEMORY=off                 "$image" bash /repo/tests/parity/bootstrap-check.sh; then
+        if "${DOCKER[@]}" run --rm -v "$root:/repo:ro"                 -e TS_ASSUME_YES=1 -e TS_HEADLESS_RESOLVED=1                 -e TS_PROFILE=shell -e TS_DEVELOPMENT=no -e TS_APPS=none                 -e TS_THEME=dark -e TS_LEADER=ctrl-space -e TS_TMUX=ctrl-b                 -e TS_ATUIN=off -e TS_CC_TTS=off -e TS_MEMORY_BACKEND=none                 -e TS_HEADROOM=off -e TS_CAVEMAN=off -e TS_AGENTMEMORY=off                 "$image" bash /repo/tests/parity/bootstrap-check.sh; then
             echo "    $name OK"
         else
             echo "    $name FAILED"
@@ -93,10 +144,17 @@ for name in "${wanted[@]}"; do
 
     if [ "$name" = bash32 ]; then
         echo "==> $name (bash 3.2 syntax gate for services/**)"
-        if docker run --rm -v "$root:/repo:ro" bash:3.2 bash -c '
+        # SCOPE WIDENED. This used to check services/** only, which left the
+        # installer itself -- the part that actually changed -- unchecked on the
+        # one bash version macOS ships. macOS cannot be containerised (containers
+        # share the host kernel), so this target plus the GNU-only lint in
+        # tests/test_agent_tools.py are the whole macOS story outside CI.
+        if "${DOCKER[@]}" run --rm -v "$root:/repo:ro" bash:3.2 bash -c '
                 rc=0
-                for f in /repo/services/*.sh /repo/services/stacks/*/*.sh; do
+                for f in /repo/services/*.sh /repo/services/stacks/*/*.sh \
+                         /repo/bootstrap/*.sh /repo/run_*.sh /repo/install-*.sh; do
                     [ -e "$f" ] || continue
+                    case "$f" in *.tmpl) continue ;; esac
                     bash -n "$f" || rc=1
                 done
                 exit $rc
@@ -110,10 +168,13 @@ for name in "${wanted[@]}"; do
     fi
 
     echo "==> building $name ($base)"
-    docker build -q -f tests/parity/Dockerfile --build-arg "BASE=$base" -t "$image" . >/dev/null
+    dockerfile="${DOCKERFILE[$name]:-tests/parity/Dockerfile}"
+    build_args=(--build-arg "BASE=$base")
+    [ -n "${DISTRO_ARG[$name]:-}" ] && build_args+=(--build-arg "DISTRO=${DISTRO_ARG[$name]}")
+    "${DOCKER[@]}" build -q -f "$dockerfile" "${build_args[@]}" -t "$image" . >/dev/null
 
     if [ "$shell_mode" = 1 ]; then
-        exec docker run --rm -it -v "$root:/repo:ro" "$image" \
+        exec "${DOCKER[@]}" run --rm -it -v "$root:/repo:ro" "$image" \
             bash -c 'cp -a /repo/. /work/ && exec bash'
     fi
 
@@ -121,7 +182,7 @@ for name in "${wanted[@]}"; do
     # Read-only mount, copied to /work: a container must never write to the
     # developer's tree. git needs safe.directory because the copy is owned by a
     # different uid than the one that made it.
-    if docker run --rm -v "$root:/repo:ro" "$image" bash -c '
+    if "${DOCKER[@]}" run --rm -v "$root:/repo:ro" "$image" bash -c '
             set -e
             cp -a /repo/. /work/
             git config --global --add safe.directory /work

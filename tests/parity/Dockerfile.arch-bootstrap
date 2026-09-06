@@ -1,0 +1,71 @@
+# Bootstrap target: actually RUN linux-bootstrap.sh on an Arch / Omarchy host.
+#
+# Dockerfile.arch runs the suite. This one runs the INSTALLER, because the suite
+# structurally cannot see what broke here: `bash -n` checks syntax and the static
+# resolvers in tests/ check names, and neither notices that `common_apt_prereqs`
+# is the first thing `common_install_all` calls. On Arch that is
+# `sudo: apt-get: command not found`, `set -e`, exit 1 -- before the
+# questionnaire, before chezmoi, before anything was written.
+#
+# It is the same argument the Debian bootstrap target makes, on the platform
+# that proved it.
+#
+# ARG DISTRO=arch|omarchy -- see Dockerfile.arch for why omarchy is shaped
+# rather than installed.
+
+FROM archlinux:latest
+ARG DISTRO=arch
+
+ENV PYTHONDONTWRITEBYTECODE=1
+
+# Only what a bare machine really has. The bootstrap is supposed to install the
+# rest itself, and pre-installing its dependencies here would hide the very
+# failures this target exists to catch. sudo is the exception: the bootstrap
+# shells out to it (pacman, chsh) and refuses to run as root.
+#
+# `which` is not in the base image and `command -v` covers the shell side, but
+# `chsh` lives in util-linux and shadow provides `getent`; both are already in
+# base. fontconfig is deliberately ABSENT: common_nerd_font_jetbrains has to
+# cope with no fc-list, which is the headless path.
+RUN pacman -Sy --noconfirm --needed sudo ca-certificates curl git python procps-ng \
+    && pacman -Scc --noconfirm >/dev/null
+
+RUN if [ "$DISTRO" = omarchy ]; then set -eux; \
+      printf '%s\n' \
+        'NAME="Omarchy"' 'PRETTY_NAME="Omarchy"' 'ID=omarchy' 'ID_LIKE=arch' \
+        'BUILD_ID="4.0.1"' 'VERSION_ID="4.0.1"' > /etc/os-release; \
+      printf '\n[omarchy]\nSigLevel = Optional TrustAll\nServer = https://pkgs.omarchy.org/stable/$arch\n' \
+        >> /etc/pacman.conf; \
+      pacman -Sy --noconfirm >/dev/null; \
+      # -dd skips dependency resolution: we want the package FILE, not the
+      # 115 MB desktop it depends on. `--wildcards` is not optional -- GNU tar
+      # treats a member name as literal without it and reports "Not found in
+      # archive", which an `|| true` then swallowed: the image built green with
+      # no omarchy-pkg-add in it, so the very branch this target exists to
+      # exercise was skipped and the run still passed. Nothing here is allowed
+      # to fail quietly any more.
+      pacman -Swdd --noconfirm omarchy >/dev/null; \
+      pkg="$(ls -1 /var/cache/pacman/pkg/omarchy-*.pkg.tar.zst | head -n1)"; \
+      # The REAL scripts live in /usr/bin; /usr/share/omarchy/bin/* are symlinks
+      # to them. Extracting only the share/ pattern therefore lands a directory
+      # of dangling links -- which is what the first attempt did, and what the
+      # `command -v` assertions below now catch. Take both patterns.
+      tar -xf "$pkg" -C / --wildcards \
+        'usr/bin/omarchy-pkg-*' 'usr/share/omarchy/bin/omarchy-pkg-*'; \
+      # Prove the helper the stack actually calls is present and runnable.
+      command -v omarchy-pkg-add >/dev/null; \
+      command -v omarchy-pkg-missing >/dev/null; \
+      printf 'export OMARCHY_PATH=/usr/share/omarchy\n' > /etc/profile.d/omarchy.sh; \
+      pacman -Scc --noconfirm >/dev/null; \
+    fi
+
+# common_require_non_root refuses uid 0, so the run needs a real user -- with
+# passwordless sudo, because there is no one here to type a password.
+RUN useradd --create-home --shell /bin/bash tester \
+    && echo 'tester ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/tester \
+    && chmod 0440 /etc/sudoers.d/tester
+
+USER tester
+ENV OMARCHY_PATH=/usr/share/omarchy
+WORKDIR /home/tester
+CMD ["/bin/bash", "-c", "echo 'run via tests/parity/run.sh arch-bootstrap'"]

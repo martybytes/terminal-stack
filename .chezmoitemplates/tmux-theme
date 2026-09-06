@@ -1,0 +1,9 @@
+{{- /* Theme-aware status colours, baked from the saved config (resolvedTheme). */ -}}
+{{- $rt := "dark" -}}{{- if hasKey . "resolvedTheme" -}}{{- $rt = .resolvedTheme -}}{{- end -}}
+{{- $bg := "#181825" -}}{{- $fg := "#cdd6f4" -}}{{- $accent := "#89dceb" -}}{{- $dim := "#6c7086" -}}
+{{- if eq $rt "light" -}}{{- $bg = "#e6e9ef" -}}{{- $fg = "#4c4f69" -}}{{- $accent = "#04a5e5" -}}{{- $dim = "#9ca0b0" -}}{{- end -}}
+set -g status-interval 5
+set -g status-left-length 80
+set -g status-style 'bg={{ $bg }},fg={{ $fg }}'
+set -g status-left  '#[bold]#S #[fg={{ $accent }}]#H #[default]'
+set -g status-right '#[fg={{ $dim }}]#{pane_current_path} | %m/%d/%Y %H:%M'
