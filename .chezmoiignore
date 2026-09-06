@@ -33,10 +33,28 @@ tests/**
 services/**
 # The pre-commit hook is repo infrastructure, run from a DEV clone, never $HOME.
 .githooks/**
-# Project-scoped Claude Code commands: dev-clone infrastructure. Without this
-# line chezmoi deploys them to ~/.claude/commands and they collide with the
-# user's own global commands.
-.claude/**
+# NOTE: there is deliberately NO `.claude/**` rule here.
+#
+# There used to be, to stop the repo's own project-scoped `.claude/commands`
+# reaching ~/.claude. It did that -- and, because .chezmoiignore matches the
+# TARGET path and `dot_claude/` maps to the same target, it also blocked the
+# entire `dot_claude/**` tree. statusLine, the hooks, keybindings, skills, tts
+# and modify_settings.json have therefore never deployed on any POSIX machine.
+# Found by installing on a throwaway account: `chezmoi managed | grep claude`
+# returned nothing but the two run_ scripts, and ~/.claude did not exist.
+#
+# The rule was never needed. chezmoi ignores source entries whose name begins
+# with a dot on its own; proved in a container with no .chezmoiignore at all,
+# where `chezmoi managed` listed `.claude/statusline.sh` (from dot_claude/) and
+# did NOT list the repo's own `.claude/commands/`. Pinned by
+# test_the_claude_tree_is_not_ignored in tests/test_agent_tools.py.
+
+# A stray committed fixture, not a config file. `C/ts-agentmemory-data.tgz` came
+# in with a services test and had no rule, so every POSIX apply created ~/C/ and
+# put a tarball in it. Same allow-by-default trap as tests/**, services/** and
+# tstack/** above, arriving by the same door.
+C
+C/**
 # The tstack program: repo infrastructure, run from the clone by the shell shims in
 # dot_zshrc and $PROFILE. Same allow-by-default trap as tests/** and services/**:
 # without this line every module is written into $HOME on apply

@@ -94,12 +94,22 @@ applied and then silently ignored.
 ```bash
 head -3 ~/.config/tmux/tmux.conf     # sources Omarchy's config first
 ls ~/.tmux.conf                      # should NOT exist on Omarchy
-tmux show-options -g prefix          # what actually took effect
+tmux show-options -g prefix          # C-Space here, Omarchy's default
+tmux show-options -g prefix2         # C-b still works too
 tstack config tmux ctrl-a            # change it, then restart the server
 ```
 
 Omarchy's own bindings survive: `Alt+Enter` / `Alt+Shift+Enter` split,
-`Alt+1..9` switch windows, `Super+/` shows the keybinding popup.
+`Alt+1..9` switch windows, `Super+/` shows the keybinding popup. The prefix stays
+Omarchy's `C-Space` (with `C-b` as a second prefix) because herdr mirrors that
+config deliberately -- change one and the two drift apart.
+
+```bash
+head -20 ~/.config/starship.toml     # ours
+grep -A3 'was here before' ~/.config/starship.toml   # yours, kept commented
+zsh -ic 'print $EDITOR'              # nvim (omarchy-nvim), not micro
+zsh -ic 'whence -w try'              # cherry-picked out of omarchy-zsh's inits
+```
 
 ## Packages
 

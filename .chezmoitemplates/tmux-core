@@ -3,8 +3,10 @@
 # Change it with `tstack config tmux <chord>` (e.g. ctrl-a). Kept separate from the
 # WezTerm leader so the two layers don't collide.
 set -g prefix {{ $tp }}
-unbind C-b
 bind {{ $tp }} send-prefix
+# NOTE: `unbind C-b` is deliberately NOT here. It belongs to the ~/.tmux.conf
+# wrapper only: on Omarchy C-b is kept as `prefix2` so both chords work, and
+# unbinding it there would undo half of that.
 
 # Truecolor: without these the Catppuccin hexes below get quantized to 256
 # colors; RGB advertises 24-bit support for terminals matching the patterns.

@@ -25,4 +25,12 @@
 source-file -q /usr/share/omarchy/config/tmux/tmux.conf
 {{ end -}}
 {{ template "tmux-core" . }}
+{{ if $omarchy -}}
+# Both chords, on purpose. Omarchy ships `prefix C-Space` with `prefix2 C-b`, so
+# either works; the stack's prefix question defaults to ctrl-space here (see
+# _saved_tmux) and this keeps C-b alive alongside whatever was chosen. herdr
+# mirrors Omarchy's tmux config deliberately -- its own header says so -- so
+# muscle memory should carry between the two.
+set -g prefix2 C-b
+{{ end -}}
 {{ if not $omarchy }}{{ template "tmux-theme" . }}{{ end -}}

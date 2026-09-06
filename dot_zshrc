@@ -109,6 +109,11 @@ if [[ -n "$_TS_OMARCHY_ZSH" ]]; then
     [[ -r "$_TS_OMARCHY_ZSH/$_ts_f" ]] && source "$_TS_OMARCHY_ZSH/$_ts_f"
   done
   unset _ts_f
+  # `try` -- Omarchy's throwaway-scratch tool, pointed at ~/Work/tries. Its ONLY
+  # initialiser is the `inits` file we deliberately skip above, so without this
+  # line `try` is silently a no-op in zsh while working fine in the bash the
+  # desktop opens. Same form omarchy-zsh's own inits uses for zsh.
+  command -v try >/dev/null 2>&1 && eval "$(try init ~/Work/tries)"
 elif [[ -r "$ZSH/oh-my-zsh.sh" ]]; then
   # Guarded: the bootstrap does not install oh-my-zsh on Omarchy, and an
   # unguarded source of a missing file aborts the whole rc under `set -e`-ish
@@ -189,7 +194,16 @@ hgrep() {
 # condition — not "which Linux is this".
 if [[ "${EDITOR:-}" == omarchy-launch-editor* ]]; then
   : # Omarchy's launcher; leave it, and leave SUDO_EDITOR pointing at it too.
+elif command -v nvim >/dev/null 2>&1; then
+  # nvim is the default wherever it exists. On Omarchy that IS omarchy-nvim, a
+  # prebuilt LazyVim config in the base package set, and omarchy-zsh's own
+  # envs sets EDITOR=nvim for the same reason -- so this agrees with the desktop
+  # instead of overriding it, which the `omarchy-launch-editor*` test above
+  # could never do: that is the BASH value, and a zsh session never sees it.
+  export EDITOR='nvim'
 elif command -v micro >/dev/null 2>&1; then
+  # micro stays installed and stays the fallback: it is the friendlier editor on
+  # a machine with no nvim, which is what it was chosen for.
   export EDITOR='micro'
 else
   export EDITOR='nano'
@@ -1565,7 +1579,7 @@ _doc_os() { [[ "$(uname -s)" == Darwin ]] && echo macos || echo linux; }
 # "unknown action: become(...)" as soon as alt-e is bound. Degrade to
 # `execute(...)+abort`, same fallback the pwsh side already uses.
 _doc_edit_bind() {
-  local ed="${EDITOR:-micro}" ver
+  local ed="${EDITOR:-nvim}" ver
   ver="$(fzf --version 2>/dev/null)"; ver="${ver%% *}"
   autoload -Uz is-at-least
   if is-at-least 0.42.0 "$ver" 2>/dev/null; then
@@ -1909,7 +1923,15 @@ cctts() {
 
 # zsh-syntax-highlighting, if the machine has it (omarchy-zsh depends on it).
 # LAST, after ~/.zshrc.local: it wraps every ZLE widget defined before it, and
-# anything sourced afterwards silently loses highlighting -- which is why
-# omarchy-zsh's own `all` ends with this exact line and says so.
-[[ -r /usr/share/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ]] && \
-  source /usr/share/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+# anything sourced afterwards silently loses highlighting.
+#
+# Guarded on ZSH_HIGHLIGHT_VERSION because omarchy-zsh's `zoptions` -- which this
+# rc sources near the top -- already ends with this exact line. Sourcing it twice
+# re-wraps every widget a second time, which is waste at best. The cost of NOT
+# re-sourcing is that widgets defined between the two points are not wrapped;
+# that is the trade this guard takes deliberately, and it is why the line stays
+# here rather than moving up.
+if [[ -z "${ZSH_HIGHLIGHT_VERSION:-}" ]]; then
+  [[ -r /usr/share/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ]] && \
+    source /usr/share/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+fi
