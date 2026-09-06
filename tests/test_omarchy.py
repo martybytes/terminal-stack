@@ -119,7 +119,11 @@ def test_sync_installs_then_does_nothing(box):
     assert omarchy.sync(say) == 0
     for art in omarchy.artefacts():
         assert art.path.exists(), art.path
-        if art.executable:
+        # NTFS carries no POSIX execute bit and os.chmod cannot set one, so this
+        # asserts the filesystem rather than the installer on a Windows runner
+        # (CI: st_mode 0o100666). The rest of this test -- the files land, and a
+        # second sync rewrites nothing -- is platform-independent and still runs.
+        if art.executable and os.name != "nt":
             assert art.path.stat().st_mode & stat.S_IXUSR
 
     out2, say2 = _lines()

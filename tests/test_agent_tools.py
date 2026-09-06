@@ -3186,6 +3186,26 @@ def test_the_prompt_template_preserves_the_trailing_newline():
 LINK_RECORD = ROOT / "run_before_25-claude-settings-link-record.sh"
 LINK_RESTORE = ROOT / "run_after_25-claude-settings-link-restore.sh"
 
+# Two of the five tests below assert on SYMLINK semantics, and only those two.
+#
+# BASH is truthy on a Windows runner -- shell_support falls back to git-bash --
+# so every skipif(not BASH) test really runs there, under MSYS. MSYS `ln -s`
+# COPIES unless MSYS=winsymlinks:nativestrict and the process holds the privilege
+# to make one, and it hands paths back in its own /c/... form, which Python then
+# resolves against the current drive (CI produced D:/c/Users/... for a file on
+# C:). Both of those are MSYS facts, not facts about these hooks.
+#
+# And the hooks cannot run there anyway: they are chezmoi run_before_/run_after_
+# scripts, and this stack applies chezmoi from inside WSL, never from Windows
+# pwsh (CLAUDE.md, "The apply workflow"). The Windows side of
+# ~/.claude/settings.json is bootstrap/_merge_claude_settings.ps1, which has its
+# own tests. Linux, WSL and macOS -- every platform that runs these scripts --
+# still run these tests.
+POSIX_LINKS_ONLY = pytest.mark.skipif(
+    os.name == "nt",
+    reason="chezmoi applies from WSL, not Windows; MSYS ln -s copies rather than links",
+)
+
 
 def _run_link_script(script, home, state):
     return subprocess.run(
@@ -3201,6 +3221,7 @@ def _run_link_script(script, home, state):
 
 
 @pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+@POSIX_LINKS_ONLY
 def test_the_settings_splice_is_written_through_its_symlink(tmp_path):
     """The whole point: the tracked file receives the splice, and the link lives."""
     home = tmp_path / "home"
@@ -3243,6 +3264,7 @@ def test_the_link_pair_is_a_no_op_on_an_ordinary_file(tmp_path):
 
 
 @pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+@POSIX_LINKS_ONLY
 def test_a_relative_symlink_and_a_chain_both_resolve(tmp_path):
     """`readlink -f` would have done this in one call -- and it is GNU-only.
 

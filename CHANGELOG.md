@@ -35,6 +35,25 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **The Omarchy tests failed on Windows CI, and only there (09/06/2026).** Three
+  of them: green on Linux, macOS and WSL, red on `windows-latest` from the moment
+  the omarchy branches were pushed. One fact explains all three, and it is worth
+  writing down: `tests/shell_support.py` falls back to **git-bash**, so `BASH` is
+  truthy on a Windows runner and every `skipif(not BASH)` test really runs there,
+  under MSYS. The omarchy work added ~15 such tests and none had ever executed on
+  that axis, which no Linux parity container can reach; the pre-existing test with
+  the same shape survived only because it is gated on `zsh`, which CI installs on
+  Linux and macOS but not Windows. MSYS `ln -s` **copies** unless
+  `MSYS=winsymlinks:nativestrict` and the process can create a link, and it hands
+  paths back in its own `/c/...` form, which Python then resolved against the
+  current drive (`D:/c/Users/...` for a file on `C:`). Both are MSYS facts rather
+  than facts about the hooks -- which cannot run on Windows at all, being chezmoi
+  `run_before_`/`run_after_` scripts on a stack that applies from WSL. The two
+  symlink-semantics tests are POSIX-gated now; the other three in that group
+  passed there and still run. Separately, the `tstack omarchy sync` test asserted
+  a POSIX execute bit NTFS does not carry (`st_mode` `0o100666`); that one
+  assertion is guarded and the rest of the test still runs everywhere.
+
 - **The Omarchy port stopped changing Omarchy defaults it had no reason to
   (09/06/2026).** An audit of the live desktop, prompted by "is there anything
   this does to Omarchy that is going to break it or be stupid".
