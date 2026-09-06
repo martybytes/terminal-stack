@@ -34,8 +34,9 @@ before anything was written.
 | `~/.config/tmux/tmux.conf` | **shared** — Omarchy's config sourced first, stack's settings on top | tmux prefers the XDG path; see below |
 | `~/.config/ghostty/config` | **Omarchy** | It themes it per theme, seds the font family on `omarchy font set`, and restores it with `omarchy refresh config`. `tstack ghostty` correctly refuses off macOS |
 | `starship` binary | **Omarchy** (pacman) | The curl installer writes `/usr/local/bin`, which precedes `/usr/bin` on PATH and shadows the packaged copy |
-| `~/.config/starship.toml` | **stack** | The prompt is the part you chose; `tstack config prompt` still owns it |
+| `~/.config/starship.toml` | **stack**, preserving Omarchy's | The prompt is the part you chose. Omarchy ships its own to every account via `/etc/skel`, so the stack keeps it commented at the foot of the rendered file rather than deleting it |
 | `chezmoi` binary | **Omarchy** (pacman, `extra/chezmoi`) | Debian has no package, which is the only reason the apt side curls it |
+| `$EDITOR` | **Omarchy** (nvim) | omarchy-zsh sets `EDITOR=nvim` and derives `SUDO_EDITOR` from it; on Omarchy `nvim` IS omarchy-nvim. The stack agrees rather than overriding — `micro` is its fallback, not its default |
 | Language runtimes | **Omarchy** (mise) | `omarchy install dev-env <lang>` is entirely `mise use --global`, and the shims are on PATH from `env-bootstrap`. `fnm`, `node` and `python` are vetoed from the catalog here |
 | Nerd Font | **Omarchy** (`ttf-jetbrains-mono-nerd-basic`) | The stack's download step guards on `fc-list`, which that package already satisfies, so it self-skips. It did not, until a real install on this box showed it downloading ~30 MB anyway — see below |
 | `~/.zshrc`, `~/.wezterm.lua`, `doc`/`ws`/`wso`/`tstack` | **stack** | The terminal is the stack's half of the machine |
@@ -61,6 +62,15 @@ and that file `source-file -q`s Omarchy's own config *first* before applying the
 stack's prefix and behaviour. Later `set` wins in tmux, so the order is the
 whole mechanism. That keeps Omarchy's Alt+Enter splits, Alt+1..9 window
 switching and the Super+/ keybindings popup.
+
+**The prefix stays Omarchy's, and both chords work.** The wizard's tmux-prefix
+question falls back to `ctrl-space` here rather than `ctrl-b`, and the rendered
+config keeps `prefix2 C-b`. That is not politeness: `herdr` — the tmux
+replacement in Omarchy's base package set — says in its own
+`config.toml` header that it mirrors `config/tmux/tmux.conf`, and uses
+`ctrl+space` too. Changing tmux's prefix silently desynchronises the two, and
+you would only find out by switching between them. `unbind C-b` therefore lives
+in the `~/.tmux.conf` wrapper, never in the shared body.
 
 The stack's own status-bar theme is deliberately **not** applied on Omarchy: its
 hexes are baked light/dark and would pin the bar to Catppuccin while every other
@@ -98,6 +108,14 @@ apply ours. **Do not run `omarchy-setup-zsh`.**
 all of which `dot_zshrc` does itself — and the prompt is a saved setting
 (`tstack config prompt`), so sourcing both would register two sets of precmd
 hooks for one prompt.
+
+**Except `try`, which is cherry-picked back out of it.** `inits` is the only
+initialiser for Omarchy's throwaway-scratch tool, so skipping the file made
+`try` a silent no-op in zsh while it kept working in the bash the desktop opens.
+
+`zsh-syntax-highlighting` is loaded **once**: omarchy-zsh's `zoptions` already
+ends with the same source line, so the stack's copy at the foot of the rc is
+guarded on `ZSH_HIGHLIGHT_VERSION`.
 
 ### The collision that abandons the rest of your rc
 

@@ -4,7 +4,8 @@
 #   tests/parity/run.sh              every suite target
 #   tests/parity/run.sh debian13     one target
 #   tests/parity/run.sh --shell omarchy    a shell inside the target, to poke about
-#   tests/parity/run.sh bootstrap          RUN linux-bootstrap.sh (apt), end to end
+#   tests/parity/run.sh bootstrap          RUN linux-bootstrap.sh (Debian), end to end
+#   tests/parity/run.sh ubuntu-bootstrap   ... and on Ubuntu
 #   tests/parity/run.sh omarchy-bootstrap  RUN linux-bootstrap.sh (pacman), end to end
 #
 # Why this exists: WSL is not native Linux here. /mnt/c exists, interop exists,
@@ -50,6 +51,10 @@ declare -A TARGETS=(
     # default set -- it installs packages and wants the network, so it is opted
     # into rather than paid for on every run.
     [bootstrap]="debian:13-slim"
+    # The same installer on Ubuntu. Debian and Ubuntu diverge on package
+    # availability and Python version, and the ~/.claude tree that had never
+    # deployed needs proving on both rather than on whichever one was handy.
+    [ubuntu-bootstrap]="ubuntu:24.04"
     # Arch family. `arch` is plain archlinux with none of the `omarchy-*`
     # commands present, which is the case _common-arch.sh has to keep working
     # for and the one a developer on an Omarchy laptop never hits by accident.
@@ -139,10 +144,17 @@ for name in "${wanted[@]}"; do
 
     if [ "$name" = bash32 ]; then
         echo "==> $name (bash 3.2 syntax gate for services/**)"
+        # SCOPE WIDENED. This used to check services/** only, which left the
+        # installer itself -- the part that actually changed -- unchecked on the
+        # one bash version macOS ships. macOS cannot be containerised (containers
+        # share the host kernel), so this target plus the GNU-only lint in
+        # tests/test_agent_tools.py are the whole macOS story outside CI.
         if "${DOCKER[@]}" run --rm -v "$root:/repo:ro" bash:3.2 bash -c '
                 rc=0
-                for f in /repo/services/*.sh /repo/services/stacks/*/*.sh; do
+                for f in /repo/services/*.sh /repo/services/stacks/*/*.sh \
+                         /repo/bootstrap/*.sh /repo/run_*.sh /repo/install-*.sh; do
                     [ -e "$f" ] || continue
+                    case "$f" in *.tmpl) continue ;; esac
                     bash -n "$f" || rc=1
                 done
                 exit $rc

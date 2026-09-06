@@ -102,6 +102,20 @@ if [ -n "$CZ" ]; then
             && { echo "!! ~/.config/tmux/tmux.conf exists off Omarchy; it would shadow ~/.tmux.conf"; fail=1; }
     fi
 
+    # ~/.claude, which `.chezmoiignore` blocked outright until 2026-09-06. The
+    # rule was meant to stop the repo's own project-scoped .claude/commands
+    # deploying; because .chezmoiignore matches the TARGET, it took dot_claude/**
+    # with it and nothing under ~/.claude had ever landed on POSIX.
+    [ -f "$HOME/.claude/statusline-command.sh" ] \
+        || { echo "!! ~/.claude/statusline-command.sh did not deploy"; fail=1; }
+    [ -f "$HOME/.claude/settings.json" ] \
+        || { echo "!! the ~/.claude/settings.json splice did not run"; fail=1; }
+    grep -q statusLine "$HOME/.claude/settings.json" 2>/dev/null \
+        || { echo "!! ~/.claude/settings.json has no statusLine; the splice wrote nothing"; fail=1; }
+
+    # And the stray fixture that used to ride along with it.
+    [ -e "$HOME/C" ] && { echo "!! ~/C was created; the C/ fixture is deploying again"; fail=1; }
+
     # The login shell. On Omarchy the bootstrap must NOT have chsh'd: the distro
     # is bash-first and its whole shell environment hangs off ~/.bashrc.
     if [ -r /etc/os-release ] && grep -qi '^ID=omarchy' /etc/os-release; then

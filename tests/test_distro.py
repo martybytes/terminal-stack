@@ -419,14 +419,23 @@ def test_both_tmux_paths_share_one_body():
     for body in (home, xdg):
         assert '{{ template "tmux-core" . }}' in body
     assert '{{ template "tmux-theme" . }}' in home
-    # Neither wrapper may carry settings of its own: that is how a copy starts.
+    # Each wrapper may carry only the ONE setting that is genuinely per-path --
+    # anything more is a copy of the shared body starting to grow. Off Omarchy
+    # the old C-b binding is released; on Omarchy it is kept as the second
+    # prefix, because Omarchy ships prefix C-Space + prefix2 C-b and herdr
+    # mirrors that config deliberately.
+    allowed = {
+        "dot_tmux.conf.tmpl": {"unbind C-b"},
+        "dot_config/tmux/tmux.conf.tmpl": {"set -g prefix2 C-b"},
+    }
     for body, name in ((home, "dot_tmux.conf.tmpl"), (xdg, "dot_config/tmux/tmux.conf.tmpl")):
         stray = [
             line
             for line in body.splitlines()
             if line.startswith(("set -g", "setw -g", "set -s", "set -as", "bind", "unbind"))
+            and line.strip() not in allowed[name]
         ]
-        assert not stray, f"{name} carries its own settings: {stray}"
+        assert not stray, f"{name} carries settings of its own: {stray}"
 
 
 def test_the_omarchy_tmux_config_sources_omarchys_own():

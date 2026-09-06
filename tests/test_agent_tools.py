@@ -2836,13 +2836,17 @@ def test_the_prompt_is_a_setting_and_presets_are_not_vendored():
     that it is Starship's rather than ours.
     """
     assert _sh_eval("ts_starship_get") == "terminal-stack"
-    tmpl = (ROOT / "dot_config/starship.toml.tmpl").read_text(encoding="utf-8")
+    # The template became a modify_ script so it can preserve the file it
+    # replaces (Omarchy ships its own starship.toml). The rules below are
+    # unchanged; only the filename moved.
+    tmpl = (ROOT / "dot_config/modify_starship.toml.tmpl").read_text(encoding="utf-8")
     assert 'output "starship" "preset" $preset' in tmpl
     # lookPath is the load-bearing half: during a bootstrap this template can be
     # rendered BEFORE starship is installed, and `output` on a missing binary
     # aborts the whole apply -- not just this file.
     assert 'lookPath "starship"' in tmpl
-    assert "{{- else -}}" in tmpl, "and it must fall back to this stack's own prompt"
+    assert "{{ else -}}" in tmpl, "and it must fall back to this stack's own prompt"
+    assert "Powerlevel10k Rainbow-style" in tmpl, "the fallback body went missing"
     for name in ("bracketed-segments", "tokyo-night", "gruvbox-rainbow"):
         assert name not in tmpl, f"{name} must not be vendored into the template"
 
@@ -3057,17 +3061,21 @@ def test_a_server_is_never_nagged_about_tools_it_declined():
 
 
 def test_the_prompt_template_preserves_the_trailing_newline():
-    """`{{- end -}}` at the end of a wrapped file trims the newline the wrapped
-    content ended with, so the rendered config loses its final byte and chezmoi
-    reports a diff on a file nobody edited. Caught by rendering it and comparing
-    against the deployed copy; pinned here so the whitespace control cannot be
-    "tidied" back.
+    """The rendered config must end with exactly one newline, or chezmoi reports
+    a diff on a file nobody edited.
+
+    The old shape was a wrapped template where `{{- end -}}` could trim the
+    content's own trailing newline. The modify_ script cannot have that bug by
+    construction and the guarantee is now explicit: `$( )` strips every trailing
+    newline from the heredoc, and the emit adds exactly one back. Pinned so the
+    emit cannot be "tidied" into something that does not.
     """
-    body = (ROOT / "dot_config/starship.toml.tmpl").read_text(encoding="utf-8")
-    assert body.endswith("{{ end -}}\n"), (
-        "the closing action must not trim the content's own trailing newline"
+    body = (ROOT / "dot_config/modify_starship.toml.tmpl").read_text(encoding="utf-8")
+    emit = "printf '%s\\n' \"$config\""
+    assert emit in body, (
+        "the config must be emitted with exactly one trailing newline"
     )
-    assert 'black  = "#616161"\n{{ end -}}\n' in body
+    assert 'black  = "#616161"' in body, "the config body lost its tail"
 
 
 # ---------------------------------------------------------------------------
@@ -3390,3 +3398,178 @@ def test_no_bootstrap_library_pipes_a_long_producer_into_grep_q():
         "capture the output first and match with `case`, or grep -c: under "
         "pipefail these lose to SIGPIPE.\n" + "\n".join(offenders)
     )
+
+
+# --- Omarchy citizenship: defaults we must not quietly change -----------------
+
+
+def test_the_claude_tree_is_not_ignored():
+    """`.claude/**` blocked the whole ~/.claude TARGET, not just the repo's own
+    project-scoped commands, so dot_claude/** never deployed on POSIX.
+
+    chezmoi skips source entries beginning with a dot by itself -- verified in a
+    container with no .chezmoiignore, where `chezmoi managed` listed
+    `.claude/statusline.sh` (from dot_claude/) and not the repo's
+    `.claude/commands/`. So the rule bought nothing and cost the whole tree.
+    """
+    ignore = (ROOT / ".chezmoiignore").read_text(encoding="utf-8")
+    for line in ignore.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#") or stripped.startswith("{{"):
+            continue
+        assert stripped not in (".claude", ".claude/**"), (
+            "this rule matches the TARGET ~/.claude and blocks dot_claude/** with it"
+        )
+    # And the tree it protects is really there to deploy.
+    assert (ROOT / "dot_claude/statusline-command.sh").is_file()
+    assert (ROOT / "dot_claude/modify_settings.json.tmpl").is_file()
+
+
+def test_the_stray_fixture_does_not_land_in_home():
+    """`C/ts-agentmemory-data.tgz` is a committed test fixture. Without a rule,
+    chezmoi deploys it to ~/C/ on every POSIX machine -- which it did."""
+    ignore = {ln.strip() for ln in (ROOT / ".chezmoiignore").read_text(encoding="utf-8").splitlines()}
+    if (ROOT / "C").is_dir():
+        assert "C" in ignore and "C/**" in ignore, "the C/ fixture would deploy to ~/C"
+
+
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+def test_starship_preserves_the_file_it_replaced_exactly_once():
+    """Omarchy ships its own starship.toml to every account through /etc/skel, so
+    the stack's prompt lands on top of a real file. It is kept, commented, and
+    captured ONCE -- an apply runs repeatedly, and the naive version comments its
+    own output back into itself until the file grows without bound."""
+    src = (ROOT / "dot_config/modify_starship.toml.tmpl").read_text(encoding="utf-8")
+    assert src.startswith("#!"), "a modify_ script needs a shebang"
+    assert "MARK_START=" in src and "grep -qF" in src, "nothing detects our own output"
+    # The reuse arm must not re-comment; only the capture arm may add `# `.
+    reuse = src[src.index('if printf') : src.index("elif [ -n")]
+    assert "sed 's/^/# /'" not in reuse, "the reuse path re-comments on every apply"
+
+    # A leading `{{-` on the $preset line trims BACKWARDS across the newline and
+    # glues the heredoc opener onto the statement above it:
+    #     current="$(cat)"config=$(cat <<'TS_STARSHIP_BODY'
+    # `config` is then never assigned and every apply dies on `set -u` with
+    # "config: unbound variable". chezmoi rendered exactly that; caught by the
+    # Ubuntu bootstrap target, not by reading.
+    preset = next(ln for ln in src.splitlines() if "$preset :=" in ln)
+    assert not preset.lstrip().startswith("{{-"), (
+        "a backward trim here glues the heredoc opener to the line above it"
+    )
+    assert "config=$(cat" in src and "\ncurrent=" in src
+
+
+def test_editor_defaults_to_nvim_and_defers_to_a_desktop_launcher():
+    """omarchy-zsh's envs sets EDITOR=nvim and derives SUDO_EDITOR from it; on
+    Omarchy `nvim` IS omarchy-nvim, a prebuilt LazyVim in the base package set.
+    The stack used to override that with micro, and the guard meant to prevent it
+    tested the BASH value (`omarchy-launch-editor`), which a zsh session never
+    sees."""
+    rc = (ROOT / "dot_zshrc").read_text(encoding="utf-8")
+    block = rc[rc.index("# micro (a nano alternative)") : rc.index("# Git muscle-memory overrides")]
+    assert '"${EDITOR:-}" == omarchy-launch-editor*' in block
+    assert block.index("command -v nvim") < block.index("command -v micro"), (
+        "micro must be the fallback, not the default"
+    )
+    assert "export EDITOR='micro'" in block, "micro is still the fallback, not removed"
+    assert "${EDITOR:-micro}" not in rc, "a stale micro default is still hiding in a fallback"
+
+
+def test_try_is_initialised_where_omarchy_would_have():
+    """Skipping omarchy-zsh's `inits` (to avoid double prompt init) also skipped
+    the only initialiser for `try`, so it was a silent no-op in zsh while working
+    in the bash the desktop opens."""
+    rc = (ROOT / "dot_zshrc").read_text(encoding="utf-8")
+    block = rc[rc.index("_TS_OMARCHY_ZSH=") : rc.index("# ---- terminal-stack-zsh-start ----")]
+    assert "try init" in block
+    assert '/inits"' not in block and "$_TS_OMARCHY_ZSH/inits" not in block, (
+        "the rest of inits must still be skipped -- it double-initialises the prompt"
+    )
+
+
+def test_syntax_highlighting_is_not_loaded_twice():
+    """omarchy-zsh's zoptions already ends with the same source line."""
+    rc = (ROOT / "dot_zshrc").read_text(encoding="utf-8")
+    tail = rc[rc.index("zsh-syntax-highlighting") - 800 :]
+    assert "ZSH_HIGHLIGHT_VERSION" in tail, "nothing guards against a second load"
+
+
+def test_tmux_keeps_omarchys_prefix_and_both_chords():
+    """Omarchy uses prefix C-Space + prefix2 C-b, and herdr -- the tmux
+    replacement in its base package set -- mirrors that config deliberately.
+    Changing the prefix desynchronises the two."""
+    def code(path):
+        # Comment lines only, stripped -- the prose in these files NAMES the
+        # directives it is explaining, and an unanchored search finds the note
+        # rather than the setting. Third time this shape has bitten a test here.
+        return "\n".join(
+            ln for ln in (ROOT / path).read_text(encoding="utf-8").splitlines()
+            if not ln.strip().startswith("#")
+        )
+
+    assert "unbind C-b" not in code(".chezmoitemplates/tmux-core"), (
+        "the shared core must not unbind C-b; Omarchy keeps it as prefix2"
+    )
+    assert "unbind C-b" in code("dot_tmux.conf.tmpl"), (
+        "off Omarchy the stale C-b binding should still go"
+    )
+    assert "set -g prefix2 C-b" in code("dot_config/tmux/tmux.conf.tmpl"), (
+        "C-b must keep working on Omarchy"
+    )
+    flow = (ROOT / "tstack/wizard/flow.py").read_text(encoding="utf-8")
+    body = flow[flow.index("def _saved_tmux") :]
+    body = body[: body.index("\n\n\n")]
+    assert 'plat.is_omarchy()' in body and '"ctrl-space"' in body
+
+
+# --- the macOS axis a Linux container cannot reach ----------------------------
+
+# Spellings that exist in GNU coreutils and not in the BSD userland macOS ships.
+# `readlink -f` is here because this repo shipped it once: it fails silently on
+# macOS only, and the Linux parity containers cannot see it because GNU readlink
+# is right there. bootstrap/_smb.sh and services/_stack.sh already write the rule
+# down in prose; this makes it a gate.
+# DELIBERATELY NARROW. The first draft of this list also carried `stat -c`,
+# `date -d` and `realpath`, and it failed on code that is already correct:
+# `stat -f '%Lp' … || stat -c '%a' …` tries BSD first, `ts_ws_stat_flavor`
+# PROBES with `stat -c` on purpose, and `date -d` sits behind that probe. Those
+# have a working BSD spelling on the same line or one guard away, so a flat ban
+# would force churn on correct code -- and a gate that fires on correct code is
+# worse than no gate.
+#
+# What is left is the spellings with no BSD form at all, where the only fix is
+# not to use them. `readlink -f` leads because this repo shipped it: it fails
+# silently on macOS only, and no Linux container can see that.
+GNU_ONLY = (
+    (r"\breadlink\s+-f\b", "readlink -f: BSD has no -f; walk the link by hand"),
+    (r"\bgrep\s+-[A-Za-z]*P\b", "grep -P: GNU only; use -E"),
+    (r"\bmktemp\s+-p\b", "mktemp -p: GNU only; use TMPDIR"),
+    (r"\bcp\s+--parents\b", "cp --parents: GNU only"),
+    (r"\bsed\s+-i\s+-e\b", "sed -i -e: BSD sed reads -e as the backup suffix"),
+)
+
+
+def test_no_shell_file_uses_a_gnu_only_spelling():
+    """macOS cannot be containerised -- containers share the host kernel -- so
+    the BSD-utility axis is checked by reading rather than by running. This is a
+    stronger gate than a container would be: it catches the class, not one path.
+    """
+    offenders = []
+    files = [
+        *sorted((ROOT / "bootstrap").glob("*.sh")),
+        *sorted(ROOT.glob("run_*.sh")),
+        *sorted(ROOT.glob("install-*.sh")),
+        *sorted((ROOT / "services").glob("*.sh")),
+        ROOT / "dot_zshrc",
+    ]
+    for path in files:
+        if not path.is_file():
+            continue
+        for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if line.strip().startswith("#"):
+                continue
+            code = line.split(" #", 1)[0]
+            for pattern, why in GNU_ONLY:
+                if re.search(pattern, code):
+                    offenders.append(f"{path.relative_to(ROOT)}:{n}: {why}\n      {line.strip()}")
+    assert not offenders, "GNU-only spellings on a tree that runs on macOS:\n" + "\n".join(offenders)

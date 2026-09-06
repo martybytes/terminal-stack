@@ -6,6 +6,77 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **The Omarchy port stopped changing Omarchy defaults it had no reason to
+  (09/06/2026).** An audit of the live desktop, prompted by "is there anything
+  this does to Omarchy that is going to break it or be stupid".
+
+  Cleared first, so it is on the record: **`ssh-add` was never at risk.** The
+  stack contains no ssh-agent code, and nothing on an Omarchy box sets
+  `SSH_AUTH_SOCK` at all -- not the bash rc chain, not `environment.d`, not
+  uwsm, not PAM, not gnome-keyring (it runs `--components=pkcs11,secrets`).
+  `/usr/lib/systemd/user/ssh-agent.service:2` is a comment telling the user to
+  export it themselves. A shell switch therefore cannot regress it. **herdr** is
+  untouched too -- a standalone tmux replacement owning only
+  `~/.config/herdr/config.toml`.
+
+  What was wrong:
+  - **tmux took Omarchy's prefix.** The wizard's fallback was `ctrl-b`, so
+    `C-Space` was replaced. `herdr`'s own config header says it mirrors
+    `config/tmux/tmux.conf` and uses `ctrl+space` too, so the two silently drifted
+    apart. The fallback is now `ctrl-space` on Omarchy, and the rendered config
+    keeps `prefix2 C-b` so **both chords work**. `unbind C-b` moved out of the
+    shared body into the `~/.tmux.conf` wrapper, where it belongs.
+  - **`EDITOR` overrode Omarchy's nvim with micro,** and the guard meant to
+    prevent that tested `omarchy-launch-editor*` -- the BASH value, which a zsh
+    session never sees. `/usr/share/omarchy-zsh/shell/envs:1` sets `EDITOR=nvim`
+    and line 3 derives `SUDO_EDITOR` from it; on Omarchy `nvim` IS omarchy-nvim.
+    nvim is now the default everywhere it exists, with micro demoted from default
+    to fallback (still installed, still in the catalog).
+  - **`try` was a silent no-op in zsh.** Skipping omarchy-zsh's `inits` to avoid
+    double-initialising the prompt also skipped the only initialiser for
+    Omarchy's throwaway-scratch tool. Cherry-picked back; the rest of `inits`
+    stays skipped.
+  - **zsh-syntax-highlighting loaded twice** -- omarchy-zsh's `zoptions` already
+    ends with the same source line. Guarded on `ZSH_HIGHLIGHT_VERSION`.
+  - **`~/.config/starship.toml` was overwritten outright.** Omarchy ships its own
+    to every account through `/etc/skel`. It is now a `modify_` script that
+    writes the stack's prompt and keeps the previous file commented underneath,
+    captured ONCE behind a marker -- an apply repeats, and the naive version
+    comments its own output back in until the file grows without bound. Two bits
+    of Omarchy's prompt are merged in rather than discarded: `truncation_symbol`
+    (without it `truncation_length = 4` drops leading components with nothing to
+    show it) and `repo_root_format`/`repo_root_style`.
+
+- **Two pre-existing bugs the real-machine install test exposed (09/06/2026).**
+  - **`~/.claude/**` was ignored outright.** The `.claude/**` rule was meant to
+    stop the repo's own project-scoped commands deploying; because
+    `.chezmoiignore` matches the TARGET, it took `dot_claude/**` with it, so
+    statusLine, the hooks, keybindings, skills, tts and
+    `modify_settings.json.tmpl` had never deployed on any POSIX machine. The rule
+    was never needed: chezmoi skips source entries beginning with a dot on its
+    own, proved in a container where `chezmoi managed` listed
+    `.claude/statusline.sh` and not the repo's `.claude/commands/`.
+  - **`~/C/ts-agentmemory-data.tgz`** -- a committed test fixture with no ignore
+    rule, deployed to `$HOME` on every POSIX apply. Same allow-by-default trap as
+    `tests/**`, `services/**` and `tstack/**`.
+
+### Added
+
+- **Gates for the two axes a Linux container cannot reach (09/06/2026).**
+  `tests/parity/run.sh` gains an **`ubuntu-bootstrap`** target so the installer
+  is RUN on Ubuntu as well as Debian, both asserting the `~/.claude` tree now
+  lands and `~/C` does not. The **`bash32`** target's scope widened from
+  `services/**` to `bootstrap/*.sh`, `run_*.sh` and `install-*.sh` -- the files
+  this work actually changed, on the one bash version macOS ships. And a
+  **GNU-only spelling lint** over every shell file, because macOS cannot be
+  containerised (containers share the host kernel) and `readlink -f` already
+  shipped once and failed there silently. Deliberately narrow: `stat -c`,
+  `date -d` and `realpath` are NOT banned, because this repo already uses them
+  correctly with a BSD form on the same line or one guard away, and a gate that
+  fires on correct code is worse than no gate.
+
+### Fixed
+
 - **The Nerd Font guard was inverted by `pipefail`, and re-downloaded ~30 MB on
   every install (09/01/2026).** Found by installing on a throwaway account on a
   real Omarchy desktop, which is the only way it could have been found. The

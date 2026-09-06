@@ -104,7 +104,13 @@ def test_the_omarchy_base_is_sourced_without_its_inits():
     block = block[: block.index("# ---- terminal-stack-zsh-start ----")]
     for wanted in ("zoptions", "envs", "aliases", "functions"):
         assert wanted in block, f"the Omarchy zsh base does not source {wanted}"
-    assert "inits" not in block, "sourcing Omarchy's inits double-initialises the prompt"
+    # The FILE must not be sourced -- it would double-initialise starship, mise
+    # and zoxide. `try` is cherry-picked out of it by hand instead, because that
+    # is the one thing in there with no other initialiser.
+    assert '$_TS_OMARCHY_ZSH/inits' not in block, (
+        "sourcing Omarchy's inits double-initialises the prompt"
+    )
+    assert "try init" in block, "skipping inits also skipped the only initialiser for try"
     # Detected by the FILE, not the distro: dot_zshrc is not a chezmoi template
     # (CLAUDE.md, the re-add rule) and has to stay correct on five platforms.
     assert "/usr/share/omarchy-zsh/shell/all" in block
@@ -129,9 +135,12 @@ def test_syntax_highlighting_is_last_of_all():
     hl = text.index("zsh-syntax-highlighting.zsh")
     local = text.index('source "$HOME/.zshrc.local"')
     assert local < hl, "syntax highlighting must load after ~/.zshrc.local"
-    assert text[hl:].strip().endswith("zsh-syntax-highlighting.zsh"), (
+    assert text[hl:].strip().endswith("fi"), (
         "something was added after the syntax-highlighting source"
     )
+    # And it must not load a second time: omarchy-zsh's zoptions, sourced near
+    # the top of this rc, already ends with the same line.
+    assert "ZSH_HIGHLIGHT_VERSION" in text[hl - 900 :], "nothing guards the second load"
 
 
 def test_the_bootstrap_picks_the_right_base_and_leaves_the_generator_alone():

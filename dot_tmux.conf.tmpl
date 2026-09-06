@@ -6,4 +6,8 @@
 
        The body is shared through .chezmoitemplates so the two cannot drift. */ -}}
 {{ template "tmux-core" . }}
+# The old default, released. Off Omarchy there is no second prefix to preserve:
+# whatever was chosen above is the only one, and leaving C-b bound to
+# send-prefix in the prefix table is just a stale key.
+unbind C-b
 {{ template "tmux-theme" . }}

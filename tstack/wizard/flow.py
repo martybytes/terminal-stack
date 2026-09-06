@@ -405,8 +405,17 @@ def _saved_tmux() -> str:
 
     This used to be a bare `${TS_TMUX:-ctrl-b}`, so any machine whose prefix had
     been changed had it forced back by the next reconfigure.
+
+    The FALLBACK is distro-aware. Omarchy's own tmux config uses C-Space, and
+    herdr -- the tmux replacement in its base package set -- mirrors it
+    deliberately: /usr/share/omarchy/config/herdr/config.toml says so in its
+    header and uses ctrl+space too. Defaulting to ctrl-b there would silently
+    desynchronise the two, so a machine that never answers the question keeps
+    the desktop it already has. C-b still works: the rendered config keeps it as
+    `prefix2`.
     """
-    return _env("TS_TMUX") or store.get("tmuxPrefix", "") or "ctrl-b"
+    default = "ctrl-space" if plat.is_omarchy() else "ctrl-b"
+    return _env("TS_TMUX") or store.get("tmuxPrefix", "") or default
 
 
 def _show_prompt(console: Console, preset: str) -> None:
