@@ -43,8 +43,13 @@ class Result:
         if self.status == OK:
             return f"  ok  {self.message}"
         if self.status == NOTE:
-            return f"  note: {self.message}"
-        text = f"  !! {self.message}"
+            text = f"  note: {self.message}"
+        else:
+            text = f"  !! {self.message}"
+        # A NOTE's hint renders too. It used to be dropped, which meant the one
+        # thing a hint is for -- "the exact next action" -- reached --json only:
+        # the ssh symlink note named the symptom and swallowed the fsutil
+        # command, and `other-clones` swallowed its repair line the same way.
         return f"{text}; {self.hint}" if self.hint else text
 
 

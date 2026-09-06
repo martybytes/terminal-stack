@@ -33,6 +33,7 @@ import subprocess
 from pathlib import Path, PurePosixPath
 
 from . import platform as plat
+from . import proc
 
 # The four answers of the probe. Exactly the vocabulary of tss_docker_kind.
 NATIVE = "native"
@@ -58,17 +59,7 @@ def os_name() -> str:
 
 
 def _run(argv: list[str], timeout: int = 30) -> subprocess.CompletedProcess | None:
-    try:
-        return subprocess.run(
-            argv,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-            start_new_session=True,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
+    return proc.capture(argv, timeout=timeout)
 
 
 def docker_kind() -> str:

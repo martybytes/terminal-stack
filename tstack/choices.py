@@ -37,7 +37,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import platform as plat
-from . import store
+from . import proc, store
 
 # Provider names. A Setting carries one of these strings; nothing else may.
 APPS = "apps"
@@ -65,17 +65,7 @@ class Choice:
 
 
 def _run(argv: list[str], timeout: int = 10) -> subprocess.CompletedProcess[str] | None:
-    try:
-        return subprocess.run(
-            argv,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-            start_new_session=True,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
+    return proc.capture(argv, timeout=timeout)
 
 
 # ------------------------------------------------------------------- starship
@@ -135,21 +125,15 @@ def starship_preview(name: str) -> str | None:
             return None
         config = temporary
     try:
-        got = subprocess.run(
+        got = proc.capture(
             [exe, "prompt"],
-            capture_output=True,
-            text=True,
             timeout=10,
-            check=False,
-            start_new_session=True,
             env={**_environ(), "STARSHIP_SHELL": "", "STARSHIP_CONFIG": str(config)},
         )
-    except (OSError, subprocess.SubprocessError):
-        return None
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
-    return got.stdout or None
+    return (got.stdout or None) if got else None
 
 
 def _environ() -> dict[str, str]:

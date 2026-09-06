@@ -34,7 +34,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from .. import paths
+from .. import paths, proc
 from .. import platform as plat
 from ..stacks import env_value, stack_dir
 
@@ -217,18 +217,7 @@ def tcp_answers(host: str, port: int, timeout: float = 1.0) -> bool:
 def _run(
     argv: list[str], timeout: int = 60, stdin: str | None = None
 ) -> subprocess.CompletedProcess[str] | None:
-    try:
-        return subprocess.run(
-            argv,
-            input=stdin,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-            start_new_session=True,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
+    return proc.capture(argv, timeout=timeout, stdin=stdin)
 
 
 def find_agent(name: str) -> str | None:
@@ -871,14 +860,8 @@ class AgentMemory:
             self.out.info(f"viewer not reachable at {viewer}")
         adapter = self.adapter()
         if adapter:
-            got = subprocess.run(
-                [*adapter, "--check"],
-                capture_output=True,
-                text=True,
-                check=False,
-                start_new_session=True,
-            )
-            if got.returncode == 0:
+            got = _run([*adapter, "--check"])
+            if got and got.returncode == 0:
                 self.out.good("agent hook wiring intact")
             else:
                 self.out.bad("agent hook wiring incomplete - tstack agents agentmemory repair")

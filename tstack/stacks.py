@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import engine, store
+from . import engine, proc, store
 
 # ------------------------------------------------------------------- discovery
 
@@ -247,11 +247,16 @@ class Compose:
             print(f"({stack}) {' '.join(argv)}")
             return subprocess.CompletedProcess(argv, 0, "", "")
         directory = stack_dir(self.source, stack)
+        # Its own subprocess.run rather than proc.capture: the caller decides
+        # whether output is captured at all, and compose must run in the stack's
+        # directory. The encoding is not optional anywhere -- see tstack/proc.py.
         return subprocess.run(
             argv,
             cwd=str(directory),
             capture_output=capture,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
             start_new_session=True,
         )
@@ -266,16 +271,8 @@ class Compose:
 
 def docker(kind: str, args: list[str], timeout: int = 60) -> tuple[int, str]:
     """One docker call that is not a compose call. Returns (rc, stdout)."""
-    try:
-        out = subprocess.run(
-            [engine.binary_for(kind), *args],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-            start_new_session=True,
-        )
-    except (OSError, subprocess.SubprocessError):
+    out = proc.capture([engine.binary_for(kind), *args], timeout=timeout)
+    if out is None:
         return 1, ""
     return out.returncode, out.stdout
 
@@ -503,16 +500,8 @@ def gpu_profile() -> tuple[str, str]:
 
 
 def _probe(argv: list[str], timeout: int = 15) -> str:
-    try:
-        got = subprocess.run(
-            argv,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-            start_new_session=True,
-        )
-    except (OSError, subprocess.SubprocessError):
+    got = proc.capture(argv, timeout=timeout)
+    if got is None:
         return ""
     return got.stdout if got.returncode == 0 else ""
 
