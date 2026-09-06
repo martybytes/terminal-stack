@@ -710,6 +710,9 @@ _ts_src() {
   echo "$src"
 }
 _TS_STATE="${XDG_STATE_HOME:-$HOME/.local/state}/terminal-stack"
+# The branch a runtime clone tracks. Keep in step with tstack/paths.py
+# RELEASE_BRANCH and the installers; tests/test_release_branch.py fails on drift.
+_TS_RELEASE_BRANCH="main"
 
 
 _ts_offer_zsh_restart() {
@@ -779,7 +782,34 @@ _tstack_update() {
     done
     echo "    Only '$src' is being updated. Run 'tstack doctor --repair' if that's the wrong one." >&2
   fi
-  git -C "$src" fetch --quiet || return $?
+  # --prune, or a branch deleted on the remote still looks alive here through its
+  # stale remote-tracking ref, and every check below reads it as "nothing new".
+  git -C "$src" fetch --quiet --prune || return $?
+  # Ask for the upstream by name rather than inferring it from an empty
+  # 'HEAD..@{u}'. Three broken states — no tracking branch, a detached HEAD, and
+  # a tracking branch whose remote ref is gone — all make that command FAIL, and
+  # its stderr was discarded, so update printed "already up to date" and applied.
+  # A clone left on a merged-and-deleted feature branch stopped updating and said
+  # nothing, forever, exit 0.
+  #
+  # Two traps in the replacement. Read the STATUS, not the output: on failure
+  # rev-parse exits 128 and still prints the literal "@{u}" on stdout, which a
+  # plain capture reads as a healthy upstream by that name. And declare first,
+  # assign second: `local x="$(...)"` returns local's own status, swallowing
+  # git's.
+  local upstream branch
+  if ! upstream="$(git -C "$src" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)"; then
+    upstream=""
+  fi
+  branch="$(git -C "$src" rev-parse --abbrev-ref HEAD 2>/dev/null)"
+  if [[ -z "$upstream" ]]; then
+    echo "tstack update: '$src' is on '${branch:-a detached HEAD}', which has no upstream on the remote." >&2
+    echo "  Nothing can be pulled, so nothing was applied. Run 'tstack doctor --repair' to return it to $_TS_RELEASE_BRANCH." >&2
+    return 1
+  fi
+  if [[ -n "$branch" && "$branch" != "$_TS_RELEASE_BRANCH" ]]; then
+    echo "tstack update: note — clone is on '$branch', not $_TS_RELEASE_BRANCH; updating from $upstream." >&2
+  fi
   local incoming
   incoming="$(git -C "$src" log --oneline 'HEAD..@{u}' 2>/dev/null)"
   if [[ -n "$incoming" ]]; then

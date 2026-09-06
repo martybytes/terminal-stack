@@ -53,6 +53,11 @@ if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
 # Canonical default: inside the app-data dir the stack already owns (see
 # docs/decisions.md § "Runtime clone location"). Canonical needs no pin.
 $repoUrl = 'https://github.com/martybytes/terminal-stack.git'
+# The branch a runtime clone tracks, pinned rather than inherited. `git clone`
+# with no branch takes the repo's DEFAULT branch, so which tree an install got
+# was decided on GitHub rather than here. Keep in step with tstack/paths.py
+# RELEASE_BRANCH; tests/test_release_branch.py fails if any copy drifts.
+$releaseBranch = 'main'
 $defaultDir = Join-Path $env:LOCALAPPDATA 'terminal-stack\stack'
 
 # Workspace roots, in probe order. Keep in sync with bootstrap\_workspace.ps1
@@ -179,12 +184,52 @@ if (-not (Test-Path (Join-Path $targetDir '.git'))) {
     }
 }
 
+# An existing clone carries whatever branch it was last left on, and Move-TsClone
+# preserves that across a relocation. Left alone, a clone parked on a
+# merged-and-deleted branch fails the pull outright with git's "no such ref was
+# fetched". Prune first, or a deleted branch still looks alive through its stale
+# remote-tracking ref.
+function Set-TsCloneBranch {
+    param([string]$CloneDir, [string]$Branch)
+    & git -C $CloneDir fetch --quiet --prune origin 2>$null | Out-Null
+    if (& git -C $CloneDir status --porcelain 2>$null) {
+        Write-Warning "$CloneDir has uncommitted changes; leaving it on its current branch."
+        return
+    }
+    $current = (& git -C $CloneDir rev-parse --abbrev-ref HEAD 2>$null)
+    if (-not $current) { $current = 'HEAD' }
+    if ($current -eq $Branch) { return }
+    # '@{u}' must be quoted — pwsh would otherwise parse it as a hashtable.
+    & git -C $CloneDir rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>$null | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        # A live branch may be a deliberate test of unreleased work, so ask — and
+        # when nobody is there to answer, keep it rather than undo a pin.
+        $reply = if ([Console]::IsInputRedirected) { 'k' } else {
+            Read-Host "  Clone is on '$current', not $Branch. [S]witch / [K]eep? [S]"
+        }
+        if ($reply -match '^(k|keep)$') { Write-Host "==> Keeping '$current'."; return }
+    } else {
+        # No upstream: gone from the remote, or a detached HEAD. Nothing to ask.
+        Write-Host "==> '$current' has no upstream on the remote; returning this clone to $Branch."
+    }
+    & git -C $CloneDir checkout $Branch 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        & git -C $CloneDir checkout -b $Branch "origin/$Branch" 2>$null | Out-Null
+    }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "Could not switch $CloneDir to $Branch; continuing on '$current'."
+    } else {
+        Write-Host "==> Switched $CloneDir to $Branch."
+    }
+}
+
 if (Test-Path (Join-Path $targetDir '.git')) {
     Write-Host "==> Repo already at $targetDir; git pull"
+    Set-TsCloneBranch -CloneDir $targetDir -Branch $releaseBranch
     & git -C $targetDir pull --ff-only
 } else {
-    Write-Host "==> Cloning $repoUrl -> $targetDir"
-    & git clone $repoUrl $targetDir
+    Write-Host "==> Cloning $repoUrl ($releaseBranch) -> $targetDir"
+    & git clone --branch $releaseBranch $repoUrl $targetDir
 }
 
 # 3b. Offer to clean up old clones + retired leftover files (pre-ticked checklist;

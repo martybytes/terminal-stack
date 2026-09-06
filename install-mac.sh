@@ -53,6 +53,13 @@ fi
 
 # 3. Choose clone location ($TERMINAL_STACK_DIR skips the prompt), then clone.
 REPO_URL='https://github.com/martybytes/terminal-stack.git'
+# The branch a runtime clone tracks, pinned rather than inherited. `git clone`
+# with no --branch takes the repo's DEFAULT branch, so which tree an install got
+# was decided on GitHub rather than here -- and for a while that silently meant
+# the integration branch, while this very script was being fetched from main.
+# Keep in step with tstack/paths.py RELEASE_BRANCH; tests/test_release_branch.py
+# fails if any copy drifts.
+RELEASE_BRANCH='main'
 # Canonical default: the XDG data home (see docs/decisions.md).
 DEFAULT_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/terminal-stack"
 # Workspace roots, in probe order. Keep in sync with bootstrap/_workspace.sh
@@ -153,13 +160,50 @@ if [ ! -d "$TARGET_DIR/.git" ]; then
     fi
 fi
 
+# An existing clone carries whatever branch it was last left on, and
+# ts_relocate_clone above preserves that across a move. Left alone, a clone
+# parked on a merged-and-deleted feature branch fails the pull outright with
+# git's "no such ref was fetched", which is how this function came to exist.
+# Prune first: without it a deleted branch still looks alive through its stale
+# remote-tracking ref.
+ts_align_branch() {
+    d="$1"
+    git -C "$d" fetch --quiet --prune origin 2>/dev/null || true
+    if [ -n "$(git -C "$d" status --porcelain 2>/dev/null)" ]; then
+        echo "$WARN $d has uncommitted changes; leaving it on its current branch."
+        return 0
+    fi
+    cur="$(git -C "$d" rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)"
+    [ "$cur" = "$RELEASE_BRANCH" ] && return 0
+    if git -C "$d" rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1; then
+        # A live branch may be a deliberate test of unreleased work, so ask —
+        # and when nobody is there to answer, keep it rather than undo a pin.
+        ans=""
+        if { true > /dev/tty; } 2>/dev/null; then
+            IFS= read -r -p "  Clone is on '$cur', not $RELEASE_BRANCH. [S]witch / [K]eep? [S]: " ans < /dev/tty || ans=""
+        else
+            echo "$INFO Clone is on '$cur', not $RELEASE_BRANCH; keeping it (non-interactive)."
+            return 0
+        fi
+        case "$ans" in k|K*) echo "$INFO Keeping '$cur'."; return 0 ;; esac
+    else
+        # No upstream: gone from the remote, or a detached HEAD. Nothing to ask.
+        echo "$INFO '$cur' has no upstream on the remote; returning this clone to $RELEASE_BRANCH."
+    fi
+    git -C "$d" checkout "$RELEASE_BRANCH" 2>/dev/null \
+        || git -C "$d" checkout -b "$RELEASE_BRANCH" "origin/$RELEASE_BRANCH" 2>/dev/null \
+        || { echo "$WARN Could not switch $d to $RELEASE_BRANCH; continuing on '$cur'."; return 0; }
+    echo "$INFO Switched $d to $RELEASE_BRANCH."
+}
+
 if [ -d "$TARGET_DIR/.git" ]; then
     echo "$INFO Repo already at $TARGET_DIR; git pull"
+    ts_align_branch "$TARGET_DIR"
     git -C "$TARGET_DIR" pull --ff-only
 else
-    echo "$INFO Cloning $REPO_URL -> $TARGET_DIR"
+    echo "$INFO Cloning $REPO_URL ($RELEASE_BRANCH) -> $TARGET_DIR"
     mkdir -p "$(dirname -- "$TARGET_DIR")"
-    git clone "$REPO_URL" "$TARGET_DIR"
+    git clone --branch "$RELEASE_BRANCH" "$REPO_URL" "$TARGET_DIR"
 fi
 
 # 3b. Offer to clean up old clones + retired leftover files (pre-ticked

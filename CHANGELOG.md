@@ -6,6 +6,18 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Added
 
+- **`~/bin` on PATH, and `local-bin` cloned on apply (09/06/2026).** `~/bin` holds
+  personal tools and lives in a separate private repo. Nothing here put it on
+  PATH — it resolved only because RVM happens to prepend it, which breaks
+  silently the day RVM goes away, and on a fresh box it was never cloned at all.
+  `dot_zshrc` now exports it explicitly along with `os/<uname>` and `local/`, and
+  `run_after_60-local-bin.sh` clones the repo when `~/bin` is absent.
+  Deliberately not `.chezmoiexternal.toml`: a git-repo external runs `git pull` on
+  a refresh period, which suits vendored read-only content and fights a repo you
+  author in. `run_after_` rather than `run_once_`, so a deleted `~/bin` is
+  restored on the next apply; it never pulls. (Shipped as `478712c`, which added
+  no entry here — this is that entry, written when the omission was found.)
+
 - **herdr, the terminal multiplexer that hosts coding agents (09/04/2026).**
   Offered by the app picker on every platform and never pre-ticked, installed
   from herdr.dev's own script rather than a package manager, and configured by a
@@ -34,6 +46,43 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
   runbook is `doc herdr`.
 
 ### Fixed
+
+- **The installer and the installed tree came from different branches
+  (09/06/2026).** `curl … /main/install-mac.sh | bash` died with git's *"Your
+  configuration specifies to merge with the ref 'refs/heads/feat/…' … but no such
+  ref was fetched"* on a clone that was sitting on a merged-and-deleted feature
+  branch. Two defects underneath it.
+
+  **No installer pinned a branch.** All four ran `git clone` with no `--branch`,
+  which takes the repo's *default* branch — `develop` since 08/28/2026 — while
+  every documented one-liner is fetched from `main`. `ts_relocate_clone`
+  preserves the current branch across a move, so machines installed before that
+  date stayed on `main` and machines installed after landed on `develop`, and
+  nothing reconciled them. There is now one `RELEASE_BRANCH` constant
+  (`tstack/paths.py`, repeated in the four installers and both shells because
+  they cannot import it), `git clone --branch`, and `ts_align_branch` /
+  `Set-TsCloneBranch` to realign an existing clone *before* the pull that the
+  misalignment breaks. A clone with no upstream is returned without asking; one
+  on a live other branch is asked about, defaulting to switching and left alone
+  when nobody can answer; a dirty tree is never touched.
+
+  **`tstack update` read that state as healthy.** It inferred "nothing incoming"
+  from an empty `git log 'HEAD..@{u}'` with stderr discarded — which is also what
+  that command produces when it *fails*, as it does with no tracking branch, a
+  detached HEAD, or a tracking branch whose remote ref is gone. So the clone
+  printed `==> already up to date`, exited 0, and applied a stale tree, forever.
+  Both twins now fetch with `--prune` (without it a deleted branch still looks
+  alive through its stale remote-tracking ref) and ask for the upstream by name;
+  a missing one stops the update and names the repair instead of applying.
+
+  New `tstack doctor` check `clone-branch` — `ok` on `main`, a note on another
+  live branch, a failure with no upstream — and `--repair` performs the switch on
+  a clean tree. Dev clones at workspace tier paths are exempt throughout: a
+  feature branch is the point of one, and a check that nags where the behaviour
+  is correct teaches people to ignore it. `tests/test_release_branch.py` reads
+  all seven copies of the constant and fails on drift; nothing in the suite had
+  ever asserted a branch name before. Rationale in `docs/decisions.md` § "One
+  branch, because two of them broke the installer".
 
 - **The Omarchy tests failed on Windows CI, and only there (09/06/2026).** Three
   of them: green on Linux, macOS and WSL, red on `windows-latest` from the moment
@@ -784,6 +833,10 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Changed
 
+- **Superseded 09/06/2026: `main` is now the default, integration and release
+  branch.** Two branches bought nothing and cost an install — see the Fixed entry
+  above and `docs/decisions.md` § "One branch, because two of them broke the
+  installer". The protection on `main` described below is unchanged.
 - **`develop` is the default and integration branch; `main` is the protected
   release branch (08/28/2026).** Phase branches are cut from `develop` and merge
   back into it; `develop` reaches `main` only through a pull request with every

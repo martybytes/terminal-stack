@@ -939,6 +939,10 @@ function Invoke-TsSync([string]$SourceDir) {
     }
 }
 
+# The branch a runtime clone tracks. Keep in step with tstack/paths.py
+# RELEASE_BRANCH and the installers; tests/test_release_branch.py fails on drift.
+$script:TsReleaseBranch = 'main'
+
 function Get-TsStateFile {
     Join-Path $env:LOCALAPPDATA 'terminal-stack\rollback-sha'
 }
@@ -986,10 +990,35 @@ function Update-TerminalStack {
         }
     }
 
-    & git -C $SourceDir fetch --quiet
+    # --prune, or a branch deleted on the remote still looks alive here through
+    # its stale remote-tracking ref, and every check below reads it as "nothing
+    # new".
+    & git -C $SourceDir fetch --quiet --prune
     if ($LASTEXITCODE -ne 0) { Write-Warning 'git fetch failed; not applying.'; return }
 
+    # Ask for the upstream by name rather than inferring it from an empty
+    # 'HEAD..@{u}'. Three broken states — no tracking branch, a detached HEAD,
+    # and a tracking branch whose remote ref is gone — all make that command
+    # FAIL, and its stderr was discarded, so update printed "already up to date"
+    # and applied. A clone left on a merged-and-deleted feature branch stopped
+    # updating and said nothing, forever, exit 0.
     # '@{u}' must be quoted — pwsh would otherwise parse it as a hashtable.
+    # Read $LASTEXITCODE, not the output: on failure this command exits 128 and
+    # still prints the literal "@{u}", so a plain capture looks like a healthy
+    # upstream named "@{u}".
+    $upstream = & git -C $SourceDir rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>$null
+    if ($LASTEXITCODE -ne 0) { $upstream = $null }
+    $branch = & git -C $SourceDir rev-parse --abbrev-ref HEAD 2>$null
+    if (-not $upstream) {
+        $onWhat = if ($branch) { "'$branch'" } else { 'a detached HEAD' }
+        Write-Warning "$SourceDir is on $onWhat, which has no upstream on the remote."
+        Write-Warning "Nothing can be pulled, so nothing was applied. Run 'tstack doctor --repair' to return it to $script:TsReleaseBranch."
+        return
+    }
+    if ($branch -and $branch -ne $script:TsReleaseBranch) {
+        Write-Host "==> note: clone is on '$branch', not $script:TsReleaseBranch; updating from $upstream"
+    }
+
     $incoming = & git -C $SourceDir log --oneline 'HEAD..@{u}' 2>$null
     if ($incoming) {
         Write-Host '==> incoming changes:'

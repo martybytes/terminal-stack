@@ -790,6 +790,45 @@ def check_clone_location(report: Report, src: Path | None) -> None:
         )
 
 
+def check_clone_branch(report: Report, src: Path | None) -> None:
+    """A runtime clone must track the release branch, and must track something.
+
+    A clone left on a feature branch that is later merged and deleted upstream
+    cannot pull at all -- the installer dies on git's "no such ref was fetched",
+    and `tstack update` used to read the same state as "already up to date" and
+    apply anyway. Nothing reconciled it, because nothing looked.
+
+    Dev clones are exempt and not merely quiet: a checkout at a workspace tier
+    path is where branches are SUPPOSED to be, and nagging there would train the
+    reader to ignore this check. Same reasoning as check_clone_location's
+    dev-clone arm.
+    """
+    if src is None or paths.is_dev_clone(src):
+        return
+    version = paths.clone_version(src)
+    branch = str(version.get("branch") or "")
+    upstream = str(version.get("upstream") or "")
+    if not branch:
+        # git answered nothing at all, so this is not a working repo. check_clone
+        # owns that; a second failure for one cause reads as two problems.
+        return
+    if not upstream:
+        where = "a detached HEAD" if branch == "HEAD" else f"'{branch}'"
+        report.fail(
+            "clone-branch",
+            f"clone is on {where} with no upstream on the remote - it can never update",
+            "repair: tstack doctor --repair",
+        )
+    elif branch != paths.RELEASE_BRANCH:
+        report.note(
+            "clone-branch",
+            f"clone is on '{branch}', not {paths.RELEASE_BRANCH} (tracking {upstream})",
+            f"'tstack doctor --repair' can return it to {paths.RELEASE_BRANCH}",
+        )
+    else:
+        report.ok("clone-branch", f"clone tracks {upstream}")
+
+
 def check_other_clones(report: Report, src: Path | None) -> None:
     others = [c.path for c in paths.clones() if src is None or c.path.resolve() != src.resolve()]
     if others:
@@ -849,6 +888,7 @@ def collect() -> Report:
     check_agentmemory_secret(report, src)
     check_smb(report)
     check_clone_location(report, src)
+    check_clone_branch(report, src)
     check_other_clones(report, src)
     check_git_hooks(report, src)
     return report
@@ -887,12 +927,52 @@ def repair(src: Path | None) -> int:
         )
         return 1
     print("==> tstack doctor --repair")
+    repair_clone_branch(src)
     cleanup = src / "bootstrap" / ("_cleanup.ps1" if plat.kind() == plat.WINDOWS else "_cleanup.sh")
     if not cleanup.is_file():
         print(f"  !! {cleanup} not found; cannot run the cleanup checklist.", file=sys.stderr)
         return 1
     print(f"  cleanup checklist: {cleanup}")
     print("  (relocation and clone cleanup are interactive; follow the prompts)")
+    return 0
+
+
+def repair_clone_branch(src: Path) -> int:
+    """Return a runtime clone to the release branch.
+
+    Clean trees only. A branch switch on a dirty tree either fails or carries the
+    changes across, and neither is something to do to someone's work without
+    asking -- the installers refuse for the same reason.
+    """
+    if paths.is_dev_clone(src):
+        return 0
+    version = paths.clone_version(src)
+    branch = str(version.get("branch") or "")
+    if branch == paths.RELEASE_BRANCH and version.get("upstream"):
+        return 0
+    if version.get("dirty"):
+        print(f"  !! {src} has uncommitted changes; leaving its branch alone.", file=sys.stderr)
+        return 1
+    print(f"  clone branch: '{branch or 'detached'}' -> {paths.RELEASE_BRANCH}")
+    _run(["git", "-C", str(src), "fetch", "--quiet", "--prune", "origin"])
+    got = _run(["git", "-C", str(src), "checkout", paths.RELEASE_BRANCH])
+    if got is None or got.returncode != 0:
+        got = _run(
+            [
+                "git",
+                "-C",
+                str(src),
+                "checkout",
+                "-b",
+                paths.RELEASE_BRANCH,
+                f"origin/{paths.RELEASE_BRANCH}",
+            ]
+        )
+    if got is None or got.returncode != 0:
+        print(f"  !! could not switch {src} to {paths.RELEASE_BRANCH}.", file=sys.stderr)
+        return 1
+    _run(["git", "-C", str(src), "pull", "--ff-only"])
+    print(f"  now on {paths.RELEASE_BRANCH}")
     return 0
 
 

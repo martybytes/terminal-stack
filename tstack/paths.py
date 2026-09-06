@@ -48,6 +48,14 @@ from . import proc
 # does not match (no dot in any host position).
 _DEV_CLONE_RE = re.compile(r"/(src|public|archive|local|scratch)/[^/]+\.[^/]+/[^/]+/[^/]+/?$")
 
+# The branch a RUNTIME clone tracks. Not the repo's default branch, which is
+# `develop` -- an installer must land a known-good tree, and until this constant
+# existed `git clone` with no --branch inherited the default and landed develop
+# while every documented one-liner was fetched from main. The installers, the two
+# shells and this module all carry the literal (the shells cannot import it);
+# tests/test_release_branch.py asserts they still agree.
+RELEASE_BRANCH = "main"
+
 
 @dataclass(frozen=True)
 class Clone:
@@ -258,6 +266,19 @@ def clone_version(src: Path) -> dict:
         "sha": _git(src, "rev-parse", "HEAD") or "",
         "short": _git(src, "rev-parse", "--short", "HEAD") or "",
         "branch": _git(src, "rev-parse", "--abbrev-ref", "HEAD") or "",
+        "upstream": upstream_branch(src) or "",
         "subject": _git(src, "log", "-1", "--format=%s") or "",
         "dirty": bool(dirty),
     }
+
+
+def upstream_branch(src: Path) -> str | None:
+    """The clone's tracking branch (`origin/main`), or None when it has none.
+
+    None covers three states that look identical to `git log HEAD..@{u}` and are
+    all broken: no tracking branch, a detached HEAD, and -- the one that started
+    this -- a tracking branch whose remote ref has been deleted and pruned. That
+    command reports every one of them as "nothing incoming", which is why the
+    callers ask here first rather than reading its empty output.
+    """
+    return _git(src, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
