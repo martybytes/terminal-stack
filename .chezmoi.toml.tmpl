@@ -36,6 +36,22 @@
 {{-     $os = "wsl" -}}
 {{-   end -}}
 {{- end -}}
+{{- /* ---- distro (Linux only) ----
+       .chezmoi.osRelease is /etc/os-release, and it exists on Linux ONLY -- so
+       it is reached through hasKey, never directly, or every macOS and Windows
+       apply dies on a missing map. Re-emitted as flat [data] keys because
+       .chezmoiignore and the templates both need them and neither should have
+       to repeat this guard.
+
+       Omarchy answers id=omarchy, idLike=arch. distroLike is kept alongside
+       distroId so a future Arch derivative is one `contains` away rather than a
+       new name in a list nobody remembers to update. */ -}}
+{{- $distroId := "" -}}
+{{- $distroLike := "" -}}
+{{- if hasKey .chezmoi "osRelease" -}}
+{{-   $distroId = lower (index .chezmoi.osRelease "id" | default "") -}}
+{{-   $distroLike = lower (index .chezmoi.osRelease "idLike" | default "") -}}
+{{- end -}}
 {{- /* ---- leader chord -> WezTerm key/mods ---- */ -}}
 {{- $chord := "ctrl-space" -}}
 {{- if hasKey . "leaderChord" -}}{{- $chord = .leaderChord -}}{{- end -}}
@@ -80,6 +96,8 @@ sourceDir = {{ .chezmoi.sourceDir | quote }}
 
 [data]
 os = "{{ $os }}"
+distroId = {{ $distroId | quote }}
+distroLike = {{ $distroLike | quote }}
 {{- if hasKey . "windowsUsername" }}
 windowsUsername = {{ .windowsUsername | quote }}
 {{- end }}

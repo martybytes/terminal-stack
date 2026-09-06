@@ -67,13 +67,44 @@ install-wsl.sh
 install.ps1
 scripts/**
 
-# WezTerm GUI config — applied on macOS only. Native Linux hosts in this stack
-# are headless (ssh/PuTTY); Windows gets windows/.wezterm.lua via the sync hook.
-# .wezterm/** covers the Lua modules (pane_nav.lua) — without the gate they'd
-# litter WSL/native-Linux home dirs with a module nothing requires.
-{{ if ne .chezmoi.os "darwin" }}
+{{- /* tmux: ONE of the two paths, never both.
+
+       tmux reads ~/.tmux.conf OR $XDG_CONFIG_HOME/tmux/tmux.conf, and on tmux
+       3.7c the XDG file wins when both exist. Omarchy ships its own config at
+       the XDG path, so on Omarchy the stack must write THERE -- writing
+       ~/.tmux.conf produced a file tmux never read, which is worse than no file
+       at all because `chezmoi diff` shows it landing.
+
+       Everywhere else keeps ~/.tmux.conf: it is what every other platform in
+       this stack already has, and moving it would be a change with no cause. */ -}}
+{{ if eq (index . "distroId" | default "") "omarchy" }}
+.tmux.conf
+{{ else }}
+.config/tmux/**
+{{ end }}
+
+{{- /* WezTerm GUI config. macOS, and now Omarchy.
+
+       The old comment here said "native Linux hosts in this stack are headless
+       (ssh/PuTTY)", and that premise died with Omarchy: it is a Hyprland desktop
+       with wezterm in `extra`, and the flagship config -- pane_nav, the
+       hand-rolled tab bar, the Claude fleet counts -- was the one thing the
+       stack did not deploy there.
+
+       Gated on the DISTRO rather than on "is this graphical", deliberately.
+       There is no reliable graphical signal at apply time: WAYLAND_DISPLAY is
+       absent when chezmoi runs from a hook or over ssh, and probing for a
+       compositor socket would make the file appear and disappear depending on
+       whether anyone happened to be logged in. Omarchy is a desktop by
+       definition, which makes this deterministic. Generic graphical Linux needs
+       the bootstrap's headless answer persisted first; see docs/omarchy.md.
+
+       Windows gets windows/.wezterm.lua through the sync hook, not this. */ -}}
+{{ if and (ne .chezmoi.os "darwin") (ne (index . "distroId" | default "") "omarchy") }}
 .wezterm.lua
 .wezterm/**
+{{ end }}
+{{ if ne .chezmoi.os "darwin" }}
 .config/ghostty/**
 {{- /* ~/Library/LaunchAgents is a macOS path. On WSL the GUI agents are WINDOWS
        processes and inherit HKCU\Environment, which the plugin's own setup

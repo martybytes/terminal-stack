@@ -140,7 +140,21 @@ hgrep() {
 
 # micro (a nano alternative) is installed by the bootstrap; fall back to nano on
 # machines — e.g. bare ssh servers — where it isn't present.
-if command -v micro >/dev/null 2>&1; then
+#
+# Unless the desktop already picked one. Omarchy exports
+# EDITOR=omarchy-launch-editor, and that value is not a preference — it is the
+# same launcher `omarchy-launch-config-editor` and the Super-key editor binding
+# use, and SUDO_EDITOR is derived from it. Overwriting it here made those open
+# the wrong thing from any shell started under this rc, which is a desktop-level
+# break caused by a shell-level default.
+#
+# Matched on the VALUE rather than on the distro deliberately: this file is not a
+# template (see CLAUDE.md § the re-add rule), it has to stay correct on five
+# platforms, and "someone else's launcher is already in EDITOR" is the actual
+# condition — not "which Linux is this".
+if [[ "${EDITOR:-}" == omarchy-launch-editor* ]]; then
+  : # Omarchy's launcher; leave it, and leave SUDO_EDITOR pointing at it too.
+elif command -v micro >/dev/null 2>&1; then
   export EDITOR='micro'
 else
   export EDITOR='nano'

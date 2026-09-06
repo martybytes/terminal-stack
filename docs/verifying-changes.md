@@ -33,11 +33,34 @@ machine, or a real `chezmoi apply`.
 ## 0. Parity: run it on a real Linux, in two seconds
 
 ```sh
-tests/parity/run.sh                  # debian13, ubuntu2404, ubuntu2204, bash32
+tests/parity/run.sh                  # debian13, ubuntu2404, ubuntu2204, arch, omarchy, bash32
 tests/parity/run.sh ubuntu2204       # one target
-tests/parity/run.sh --shell debian13 # a shell inside it, to poke about
-tests/parity/run.sh bootstrap        # RUN linux-bootstrap.sh, end to end
+tests/parity/run.sh --shell omarchy  # a shell inside it, to poke about
+tests/parity/run.sh bootstrap        # RUN linux-bootstrap.sh on apt, end to end
+tests/parity/run.sh omarchy-bootstrap  # ... and on pacman
+tests/parity/run.sh arch-bootstrap     # ... with no omarchy-* commands present
 ```
+
+`run.sh` escalates to `sudo docker` on its own when a plain `docker info` fails
+and a passwordless `sudo docker info` works. Omarchy deliberately does not put
+you in the `docker` group, so without that the parity run would be unavailable
+on one of the platforms it gates. It never prompts and never changes the
+machine's security posture.
+
+### Arch and Omarchy
+
+`arch` is plain `archlinux:latest`: the case `bootstrap/_common-arch.sh` has to
+keep working for, and the one nobody developing this on an Omarchy laptop hits
+by accident. `omarchy` adds Omarchy's `/etc/os-release`, its pacman repo, and
+the REAL `omarchy-pkg-*` scripts extracted from the real package - extracted
+rather than stubbed, because a stub agrees with whatever we assumed. The package
+itself is not installed: it depends on hyprland, quickshell, sddm and uwsm, none
+of which runs in a container.
+
+This is the gate that would have caught the bug the whole platform started
+with - `install-linux.sh` died at `sudo apt-get update`, the first line of the
+bootstrap, on every Arch host. `bash -n` cannot see that and a static resolver
+cannot either. See `docs/omarchy.md`.
 
 ### `bootstrap` runs the installer, and is not in the default set
 

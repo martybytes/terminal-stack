@@ -67,9 +67,15 @@ install_apps() {
     case "$(uname -s)" in
         Darwin) ts_brew_install_apps $apps ;;
         *)
-            if command -v apt-get >/dev/null 2>&1; then
+            # Same choice the bootstrap makes, made the same way -- a
+            # `command -v apt-get` here was why `tstack config apps` silently
+            # recorded a selection and installed nothing on any Arch host.
+            # shellcheck source=_detect.sh
+            . "$SRC/bootstrap/_detect.sh"
+            _lib="$(ts_common_lib)"
+            if [ "$(ts_pkg_manager)" != none ] && [ -f "$SRC/bootstrap/$_lib" ]; then
                 # shellcheck source=_common-debian.sh
-                . "$SRC/bootstrap/_common-debian.sh"
+                . "$SRC/bootstrap/$_lib"
                 common_install_selected_apps "$apps"
             else
                 echo "tstack config: no supported package manager; recorded selection only."

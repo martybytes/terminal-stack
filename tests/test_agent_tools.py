@@ -942,11 +942,17 @@ def test_terminal_emulator_stays_optional_on_every_platform():
     )
     mac = (ROOT / "bootstrap/mac-bootstrap.sh").read_text(encoding="utf-8")
     assert "Terminal emulator: none selected" in mac
-    deb = (ROOT / "bootstrap/_common-debian.sh").read_text(encoding="utf-8")
-    assert "Terminal emulator: none selected" in deb
-    # WSL and headless hosts are never asked and never install one.
-    assert "if ! ts_is_headless && ! _ts_is_wsl; then TS_WIZ_ASK_TERMINALS=1; fi" in deb
-    assert "if ts_is_headless || _ts_is_wsl; then return 0; fi" in deb
+    # Both halves of the POSIX installer contract, not just the apt one: the
+    # pacman side is a separate implementation of common_install_terminals and
+    # would otherwise be free to make the emulator mandatory.
+    for lib in ("bootstrap/_common-debian.sh", "bootstrap/_common-arch.sh"):
+        body = (ROOT / lib).read_text(encoding="utf-8")
+        assert "Terminal emulator: none selected" in body, lib
+        assert "if ts_is_headless || _ts_is_wsl; then return 0; fi" in body, lib
+    # WSL and headless hosts are never asked. The question lives in the shared
+    # orchestration, so there is one place for it rather than one per distro.
+    posix = (ROOT / "bootstrap/_common-posix.sh").read_text(encoding="utf-8")
+    assert "if ! ts_is_headless && ! _ts_is_wsl; then TS_WIZ_ASK_TERMINALS=1; fi" in posix
 
 
 def test_wezterm_env_vars_map_onto_channels():
@@ -1151,8 +1157,17 @@ def test_ts_config_exposes_wezterm():
 # --- app catalog: groups, new tools, the ai group ------------------------------
 
 
-def _sh_eval(snippet):
-    """Run a snippet with bootstrap/_config.sh sourced, return stdout."""
+def _sh_eval(snippet, distro="debian"):
+    """Run a snippet with bootstrap/_config.sh sourced, return stdout.
+
+    `distro` is pinned rather than inherited because these tests are about the
+    CATALOG FILE, not about the laptop running them. ts_apps_load applies a
+    distro veto on top of the platform column -- Omarchy hands language runtimes
+    to mise, so fnm/node/python are not offered there and the `runtimes` group
+    disappears entirely. Inheriting the live value made this whole block pass or
+    fail depending on whose machine it ran on, which is the opposite of a gate.
+    Distro-specific behaviour is asserted in tests/test_distro.py, deliberately.
+    """
     r = subprocess.run(
         [BASH, "-c", f". bootstrap/_config.sh >/dev/null 2>&1; {snippet}"],
         cwd=ROOT,
@@ -1161,6 +1176,7 @@ def _sh_eval(snippet):
         check=False,
         timeout=300,
         start_new_session=True,
+        env={**os.environ, "TS_DISTRO_ID": distro, "TS_DISTRO_LIKE": ""},
     )
     assert r.returncode == 0, r.stderr
     return r.stdout.strip()
@@ -1239,6 +1255,13 @@ def test_python_and_runtimes_are_in_the_questionnaire():
     for tool in ("python", "uv", "pipx", "ruff", "ipython", "httpie", "poetry", "pre-commit"):
         assert tool in py, f"{tool} missing from the python group"
     assert set(_sh_eval("ts_app_group_members runtimes").split()) == {"fnm", "node"}
+    # ... and on Omarchy the group is gone entirely, because both of its members
+    # are mise's job there. Asserted here rather than only in test_distro.py so
+    # the two halves of this rule sit next to each other.
+    assert not _sh_eval('echo "$TS_APP_GROUPS"', distro="omarchy").split().count("runtimes")
+    assert "python" in _sh_eval('echo "$TS_APP_GROUPS"', distro="omarchy").split(), (
+        "the veto took the whole python group, not just the `python` runtime"
+    )
     # python's binary is python3, not python.
     assert _sh_eval("ts_app_bin python") == "python3"
     for tool in [*py, "fnm"]:
@@ -1305,11 +1328,20 @@ def test_agent_clis_are_not_installed_through_a_package_manager():
 
 
 def test_arch_aware_github_fallbacks():
-    """The eza/delta/lazydocker fallbacks used to hard-code x86_64 and miss on arm64."""
-    deb = (ROOT / "bootstrap/_common-debian.sh").read_text(encoding="utf-8")
-    for line in deb.splitlines():
-        if "common_install_github_binary" in line:
-            assert "x86_64" not in line, f"arch-blind fallback: {line.strip()}"
+    """The eza/delta/lazydocker fallbacks used to hard-code x86_64 and miss on arm64.
+
+    Every installer library, not just the apt one: _common-arch.sh fetches llmfit
+    the same way, and an arch-blind pattern there fails *silently on ARM only* --
+    the asset regex matches nothing and the tool is quietly absent.
+    """
+    for lib in (
+        "bootstrap/_common-debian.sh",
+        "bootstrap/_common-arch.sh",
+        "bootstrap/_common-posix.sh",
+    ):
+        for line in (ROOT / lib).read_text(encoding="utf-8").splitlines():
+            if "common_install_github_binary" in line:
+                assert "x86_64" not in line, f"arch-blind fallback in {lib}: {line.strip()}"
 
 
 def test_ts_config_wizard_replays_the_whole_questionnaire():
@@ -1584,7 +1616,7 @@ def test_common_arch_tag_rust_uses_aarch64_not_arm64():
     `gnu` yields `arm64`. Getting this wrong fails *silently on ARM only*: the
     asset regex matches nothing, x86_64 boxes keep working, and the tool is
     quietly missing on every Pi/ARM server."""
-    lib = ROOT / "bootstrap/_common-debian.sh"
+    lib = ROOT / "bootstrap/_common-posix.sh"
     fn = re.search(r"^common_arch_tag\(\) \{.*?^\}", lib.read_text(encoding="utf-8"), re.S | re.M)
     assert fn, "common_arch_tag not found"
 
@@ -1953,7 +1985,9 @@ def test_tmux_title_format_uses_the_variable_name_not_the_shorthand():
     address `session_name`: inside #{...} tmux wants the variable name, and
     `#{s/^cc-//:#S}` silently evaluates to an EMPTY string — a blank tab title,
     which is worse than the noisy one it replaced."""
-    conf = (ROOT / "dot_tmux.conf.tmpl").read_text(encoding="utf-8")
+    # The body moved into .chezmoitemplates so ~/.tmux.conf and the Omarchy
+    # ~/.config/tmux/tmux.conf cannot drift; this is where it lives now.
+    conf = (ROOT / ".chezmoitemplates/tmux-core").read_text(encoding="utf-8")
     line = next(l for l in conf.splitlines() if l.startswith("set -g set-titles-string"))
     assert "session_name" in line, "must use the variable name, not #S"
     assert ":#S}" not in line, "#{...:#S} renders empty — see the comment above it"
@@ -2066,14 +2100,17 @@ def test_wizard_answers_persist_before_any_optional_install():
     # The agent WIRING needs the CLIs installed, so it alone stays late.
     assert mac.index("ts_agents_apply_wizard") > mac.index("ts_save_config")
 
-    deb = (ROOT / "bootstrap/_common-debian.sh").read_text(encoding="utf-8")
+    # common_install_all is in _common-posix.sh: the ordering it encodes is the
+    # product of two separate incidents, and a per-distro copy would have been
+    # two places for it to be got wrong.
+    deb = (ROOT / "bootstrap/_common-posix.sh").read_text(encoding="utf-8")
     body = deb[deb.index("common_install_all() {") :]
     body = body[: body.index("\n}\n")]
     body = _uncommented(body)  # index the calls, not the prose about them
     hook = body.index("TS_PERSIST_HOOK")
     for installer in ("common_install_selected_apps", "common_install_terminals"):
         assert hook < body.index(installer), (
-            f"_common-debian.sh: {installer} runs before the persistence hook"
+            f"_common-posix.sh: {installer} runs before the persistence hook"
         )
     # chezmoi must precede the hook: ts_save_config runs `chezmoi init`.
     assert body.index("common_chezmoi") < hook
@@ -3097,3 +3134,133 @@ def test_the_prompt_template_preserves_the_trailing_newline():
 #     -> a Python module either imports or does not; mypy and the suite cover it
 #   test_nightly_is_preticked_even_when_stable_is_installed
 #     -> covered by test_both_preticked_collapses_before_the_first_render
+
+
+# --- ~/.claude/settings.json behind a symlink ---------------------------------
+#
+# chezmoi's modify_ script produces bytes; CHEZMOI does the write, and it writes
+# a regular file. Probed on archlinux with chezmoi 2.72, a symlinked target and a
+# one-line modify_ script: the splice succeeded, the link was gone, and the file
+# the other tool tracked was left behind at its old content -- still referenced
+# by its repo, now permanently stale, with nothing anywhere saying so. On this
+# fleet that other tool is omarchy-dots, which stows ~/.claude/settings.json.
+#
+# run_before_25/run_after_25 put the write back through the link. These tests RUN
+# them, because the whole failure is a filesystem effect that no amount of
+# grepping the scripts would have caught.
+
+LINK_RECORD = ROOT / "run_before_25-claude-settings-link-record.sh"
+LINK_RESTORE = ROOT / "run_after_25-claude-settings-link-restore.sh"
+
+
+def _run_link_script(script, home, state):
+    return subprocess.run(
+        [BASH, str(script)],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+        start_new_session=True,
+        env={"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(home),
+             "XDG_STATE_HOME": str(state)},
+    )
+
+
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+def test_the_settings_splice_is_written_through_its_symlink(tmp_path):
+    """The whole point: the tracked file receives the splice, and the link lives."""
+    home = tmp_path / "home"
+    state = tmp_path / "state"
+    (home / ".claude").mkdir(parents=True)
+    tracked = tmp_path / "dots" / "settings.json"
+    tracked.parent.mkdir()
+    tracked.write_text('{"model": "opus"}\n', encoding="utf-8")
+    link = home / ".claude" / "settings.json"
+    link.symlink_to(tracked)
+
+    assert _run_link_script(LINK_RECORD, home, state).returncode == 0
+    # Stand in for chezmoi: replace the link with the spliced regular file.
+    link.unlink()
+    link.write_text('{"model": "opus", "statusLine": {"type": "command"}}\n', encoding="utf-8")
+
+    assert _run_link_script(LINK_RESTORE, home, state).returncode == 0
+    assert link.is_symlink(), "the symlink was not restored"
+    assert link.resolve() == tracked.resolve()
+    assert "statusLine" in tracked.read_text(encoding="utf-8"), (
+        "the tracked file did not receive the splice"
+    )
+
+
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+def test_the_link_pair_is_a_no_op_on_an_ordinary_file(tmp_path):
+    """The common case, on every machine that does not symlink this file. A pair
+    of apply hooks that only works on one fleet is a pair that breaks four."""
+    home = tmp_path / "home"
+    state = tmp_path / "state"
+    (home / ".claude").mkdir(parents=True)
+    plain = home / ".claude" / "settings.json"
+    plain.write_text('{"model": "opus"}\n', encoding="utf-8")
+
+    assert _run_link_script(LINK_RECORD, home, state).returncode == 0
+    assert not (state / "terminal-stack" / "claude-settings-symlink").exists()
+    assert _run_link_script(LINK_RESTORE, home, state).returncode == 0
+    assert not plain.is_symlink()
+    assert plain.read_text(encoding="utf-8") == '{"model": "opus"}\n'
+
+
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+def test_a_stale_record_cannot_recreate_a_link_the_user_removed(tmp_path):
+    """The record is cleared at the START of every apply, not only on success.
+
+    Without that, a machine where the file WAS a link and deliberately is not any
+    more would have the link silently restored on the next apply -- the stack
+    undoing a change the user made, from a file they cannot see."""
+    home = tmp_path / "home"
+    state = tmp_path / "state"
+    (home / ".claude").mkdir(parents=True)
+    (home / ".claude" / "settings.json").write_text("{}\n", encoding="utf-8")
+    record = state / "terminal-stack" / "claude-settings-symlink"
+    record.parent.mkdir(parents=True)
+    record.write_text(f"{tmp_path}/gone.json\n", encoding="utf-8")
+
+    assert _run_link_script(LINK_RECORD, home, state).returncode == 0
+    assert not record.exists(), "run_before did not clear a stale record"
+
+
+def test_the_two_link_scripts_do_not_share_a_source_name():
+    """chezmoi strips the run_before_/run_after_ prefix to name the source entry,
+    so a matching pair collapses into one and the apply dies with "inconsistent
+    state" before a single target is written. Found by running it."""
+    assert LINK_RECORD.name.replace("run_before_", "") != LINK_RESTORE.name.replace(
+        "run_after_", ""
+    )
+
+
+def test_the_restore_needs_no_diffutils():
+    """`cmp` lives in diffutils, which a minimal Arch container does not have --
+    it failed with "command not found" on the first end-to-end run. There is
+    nothing to buy: git compares content, so an identical write leaves the other
+    tool's repo clean."""
+    body = LINK_RESTORE.read_text(encoding="utf-8")
+    for line in body.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            continue
+        assert not stripped.startswith(("cmp ", "if cmp", "diff ")), stripped
+
+
+def test_the_theme_key_is_omarchys_on_omarchy():
+    """`omarchy-theme-set-claude --activate` writes "custom:omarchy" and keeps
+    ~/.claude/themes/omarchy.json in step with the desktop, which Claude Code
+    hot-reloads. A flat light/dark token over the top of that flaps on every
+    apply and every theme change, with nothing to explain it."""
+    src = (ROOT / "dot_claude/modify_settings.json.tmpl").read_text(encoding="utf-8")
+    theme_line = next(ln for ln in src.splitlines() if '"theme":' in ln)
+    assert '{{ end }}' in theme_line, "the theme key is not gated at all"
+    gate = next(ln for ln in src.splitlines() if 'ne (index . "distroId"' in ln)
+    assert '"omarchy"' in gate
+    # statusLine and hooks stay ours everywhere -- only `theme` is ceded.
+    assert '"statusLine"' in src and '"hooks"' in src
+    for key in ('"statusLine"', '"hooks"'):
+        line = next(ln for ln in src.splitlines() if key in ln)
+        assert "distroId" not in line, f"{key} must not be distro-gated"
