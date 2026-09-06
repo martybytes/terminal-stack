@@ -37,7 +37,7 @@ before anything was written.
 | `~/.config/starship.toml` | **stack** | The prompt is the part you chose; `tstack config prompt` still owns it |
 | `chezmoi` binary | **Omarchy** (pacman, `extra/chezmoi`) | Debian has no package, which is the only reason the apt side curls it |
 | Language runtimes | **Omarchy** (mise) | `omarchy install dev-env <lang>` is entirely `mise use --global`, and the shims are on PATH from `env-bootstrap`. `fnm`, `node` and `python` are vetoed from the catalog here |
-| Nerd Font | **Omarchy** (`ttf-jetbrains-mono-nerd-basic`) | The stack's download step guards on `fc-list`, which that package already satisfies, so it self-skips |
+| Nerd Font | **Omarchy** (`ttf-jetbrains-mono-nerd-basic`) | The stack's download step guards on `fc-list`, which that package already satisfies, so it self-skips. It did not, until a real install on this box showed it downloading ~30 MB anyway — see below |
 | `~/.zshrc`, `~/.wezterm.lua`, `doc`/`ws`/`wso`/`tstack` | **stack** | The terminal is the stack's half of the machine |
 
 ## The tmux trap, and what the stack does about it
@@ -75,24 +75,59 @@ and `tmux-theme`, so they cannot drift.
 ## zsh here
 
 Omarchy is bash-first and the bootstrap leaves the login shell alone. zsh is
-still installed and `~/.zshrc` is still applied, so:
+installed and `~/.zshrc` is applied, so:
 
 ```sh
 zsh -l              # the stack's zsh, on demand
 ```
 
-**The stack still uses oh-my-zsh here, as on every other platform.** Omarchy
-ships an official `omarchy-zsh` package (repo `omarchy`, deps `zsh eza mise
-zoxide starship fzf fd bat zsh-syntax-highlighting`) which is the intended route
-— but it generates its own `~/.zshrc`, and chezmoi owns that file whole, so both
-cannot hold it. Adopting it means restructuring the stack's zsh content into a
-sourced fragment; that is not done. Until then oh-my-zsh stays: it is
-self-contained in `~/.oh-my-zsh` and removable in one step.
+**The zsh base here is `omarchy-zsh`, not oh-my-zsh.** It is Omarchy's own
+official package (repo `omarchy`, deps `zsh eza mise zoxide starship fzf fd bat
+zsh-syntax-highlighting`), and it is the zsh half of the same aliases, functions
+and environment the desktop's bash rc provides — so `zsh -l` stops being a
+different machine from the one Super+Return opens. The bootstrap installs it on
+Omarchy and installs oh-my-zsh everywhere else, including plain Arch.
 
-`EDITOR` is the one env collision that mattered, and it is fixed: `dot_zshrc`
-leaves `omarchy-launch-editor` alone rather than overwriting it with `micro`.
-That value is not a preference — the same launcher backs
-`omarchy-launch-config-editor`, the Super-key editor binding and `SUDO_EDITOR`.
+It is **sourced, not adopted**. `omarchy-setup-zsh` generates its own
+`~/.zshrc`, and chezmoi owns that file whole-file — both cannot hold it. But the
+generated file is only two `source` lines, so `dot_zshrc` takes those directly
+and ownership is never contested. Same shape as tmux here: source theirs, then
+apply ours. **Do not run `omarchy-setup-zsh`.**
+
+`inits` is deliberately not sourced. It runs starship, zoxide, mise and fzf init,
+all of which `dot_zshrc` does itself — and the prompt is a saved setting
+(`tstack config prompt`), so sourcing both would register two sets of precmd
+hooks for one prompt.
+
+### The collision that abandons the rest of your rc
+
+zsh expands aliases at **parse** time. Omarchy defines `c` and `cy` as aliases;
+the stack defines both as functions. Defining a function whose name is a live
+alias is a parse error — and a parse error in an rc does not stop at that line,
+it abandons **the whole rest of the file**. Measured, with omarchy-zsh installed
+and `dot_zshrc` as `~/.zshrc`:
+
+```
+/root/.zshrc:470: defining function based on alias `cy'
+/root/.zshrc:470: parse error near `()'
+ws=none  doc=none  tstack=none          <- everything after line 470
+```
+
+Wrapping the definition in `if … fi` does **not** help: zsh parses the whole
+block before evaluating the condition. The fix is to escape the name —
+`\cy()` — which suppresses the expansion so the block parses on every platform,
+with the guard then deciding whether the function is defined at all.
+
+Exactly two names collide, computed rather than assumed, and both are deferred
+to Omarchy: `c` (opencode there, Cursor here — different programs) and `cy`.
+`tests/test_omarchy_zsh.py` pins the alias set, so a future stack function named
+`d`, `t` or `g` is caught by a test rather than in somebody's shell. The repo has
+met this shape before: it is why `dot_zshrc` does not load oh-my-zsh's `z`
+plugin.
+
+`zsh-syntax-highlighting` is sourced last of all, after `~/.zshrc.local` — it
+wraps every ZLE widget defined before it and nothing after, which is why
+omarchy-zsh's own aggregate ends with the same line.
 
 Do **not** `chsh -s /usr/bin/zsh` on Omarchy. It takes away the entire
 `default/bash/rc` chain with no warning.
@@ -270,11 +305,20 @@ write), so a pair of apply hooks does:
 and restores the link. Not Omarchy-specific — any dotfile manager that symlinks
 this file hits the same thing.
 
-Two traps found by running it: the two scripts' **basenames must differ**
+Three traps found by running it: the two scripts' **basenames must differ**
 (chezmoi strips the `run_before_`/`run_after_` prefix to name the source entry,
 and a matching pair collapses into one with `inconsistent state`, killing the
-whole apply), and the restore may not use `cmp` (diffutils is not present on a
-minimal Arch install).
+whole apply); the restore may not use `cmp` (diffutils is not present on a
+minimal Arch install); and the walk may not use **`readlink -f`**, which is
+GNU-only — the same rule `bootstrap/_smb.sh` and `services/_stack.sh` already
+write down. That last one would have failed silently and on macOS only: nothing
+recorded, restore never runs, and a symlinked `settings.json` clobbered exactly
+as before. The walk is by hand, handles relative links and chains, and is
+bounded at 40 hops so a symlink cycle cannot hang an apply.
+
+It does not preserve the link's *form*: a relative chain is restored as one
+absolute link to the file at the end of it. Same inode, same writes; a dotfile
+manager that authored a relative link will simply rewrite it on its next run.
 
 ## Docker
 
@@ -299,15 +343,36 @@ between them and the network — which is why it is a gate and not a convention.
 The Omarchy-specific part is therefore only the access question above, not
 exposure.
 
+## The font guard, and why a real install found it
+
+The ownership table says the Nerd Font download self-skips because
+`ttf-jetbrains-mono-nerd-basic` already satisfies the `fc-list` guard. Installing
+on a throwaway account showed it downloading anyway, every time.
+
+The guard was `fc-list | grep -q "JetBrainsMono Nerd Font"`, and the bootstraps
+run under `set -euo pipefail`. `grep -q` exits the instant it matches; `fc-list`
+is still writing thousands of lines into a pipe nobody is reading; SIGPIPE makes
+the **pipeline** exit 141; and under `pipefail` the guard therefore reports
+"missing" *precisely because it found the font*.
+
+```
+$ fc-list | grep -c 'JetBrainsMono Nerd Font'      # 4 families present
+$ bash -c 'set -o pipefail; fc-list | grep -q "JetBrainsMono Nerd Font"; echo $?'
+141
+```
+
+It is a race, which is why it survived: on a machine with few fonts `fc-list`
+finishes before `grep` exits and the guard is right. It is also not
+Omarchy-specific — it was wrong on Debian and macOS too, just less often.
+
+Fixed by capturing first and matching with `case`, the idiom this repo already
+teaches one function away (`ts_report_installed_apps`: "Capture FIRST, then
+process", after a pipeline under `pipefail` killed the whole function). Two
+behavioural tests pin both directions, plus a scan for the same shape around the
+other high-output producers.
+
 ## Known gaps
 
-- **`omarchy-zsh` as the zsh base**, with the stack's content as a sourced
-  fragment, replacing oh-my-zsh. `~/.zshrc` is owned whole-file by chezmoi and
-  generated by `omarchy-zsh`, so both cannot hold it as things stand.
-- **`c` still means Cursor here and opencode in Omarchy's bash.** Harmless
-  today (bash aliases do not reach a zsh session) and resolved by the
-  `omarchy-zsh` work above. `EDITOR` is fixed: the shell no longer overwrites
-  `omarchy-launch-editor`.
 - **Generic graphical Linux** for the WezTerm config, which needs the
   bootstrap's headless answer persisted.
 - **Ghostty's `shell-integration-features`** is `no-cursor,ssh-env` upstream,

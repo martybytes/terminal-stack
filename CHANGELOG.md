@@ -4,6 +4,54 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+### Fixed
+
+- **The Nerd Font guard was inverted by `pipefail`, and re-downloaded ~30 MB on
+  every install (09/01/2026).** Found by installing on a throwaway account on a
+  real Omarchy desktop, which is the only way it could have been found. The
+  guard was `fc-list | grep -q "JetBrainsMono Nerd Font"`; the bootstraps run
+  under `set -euo pipefail`; `grep -q` exits on the first match while `fc-list`
+  is still writing thousands of lines into a pipe nobody is reading; SIGPIPE
+  makes the PIPELINE exit 141. So the guard reported "missing" precisely because
+  it had found the font. A race, which is why it survived -- on a machine with
+  few fonts `fc-list` finishes first and the guard is right -- and NOT
+  Omarchy-specific: it was wrong on Debian and macOS too, just less often.
+  Fixed by capturing first and matching with `case`, the idiom the repo already
+  teaches one function away. Two behavioural tests pin both directions (present
+  -> skip, absent -> download) and a third scans the bootstrap libraries for the
+  same shape around other high-output producers.
+
+### Added
+
+- **Omarchy's own zsh is the base there now, not oh-my-zsh (09/01/2026).**
+  `omarchy-zsh` is Omarchy's official package and the zsh half of the aliases,
+  functions and environment its bash rc provides, so `zsh -l` stops being a
+  different machine from the one Super+Return opens. The bootstrap installs it
+  on Omarchy through a new `common_zsh_base` contract point and installs
+  oh-my-zsh everywhere else, plain Arch included.
+
+  It is SOURCED, not adopted: `omarchy-setup-zsh` generates its own `~/.zshrc`
+  and chezmoi owns that file whole-file, but the generated file is only two
+  `source` lines, so `dot_zshrc` takes those directly and the generator is never
+  run. `inits` is skipped out of the aggregate -- it initialises starship,
+  zoxide, mise and fzf, all of which this rc already does, and the prompt is a
+  saved setting, so two inits means two precmd hooks for one prompt. The
+  oh-my-zsh source is now guarded, since it is no longer installed everywhere.
+  `zsh-syntax-highlighting` is sourced last of all, after `~/.zshrc.local`.
+
+  **The part that was not obvious, and could only be found by running it:** zsh
+  expands aliases at PARSE time. Omarchy defines `c` and `cy` as aliases, this
+  stack defines both as functions, and defining a function over a live alias is
+  a parse error that abandons THE REST OF THE FILE -- `ws`, `doc`, `tstack` and
+  the `cc*` wrappers all silently absent, on one distro only, from a line 470
+  lines earlier. Wrapping the definitions in `if ... fi` does NOT help: zsh
+  parses the whole block before evaluating the condition. Escaping the name
+  (`\cy()`) does. Exactly two names collide, computed rather than assumed, and
+  both defer to Omarchy; `tests/test_omarchy_zsh.py` carries the alias set so a
+  future stack function called `d`, `t` or `g` is caught by a test rather than
+  by somebody's shell going quiet. Same shape as the oh-my-zsh `z` plugin this
+  repo already refuses to load.
+
 ### Added
 
 - **The Omarchy desktop integration (09/01/2026).** Omarchy themes the terminals
@@ -47,6 +95,16 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **The settings.json link walk no longer uses `readlink -f` (09/01/2026).**
+  It is GNU-only, and this pair runs on macOS on every apply -- BSD readlink had
+  no `-f` for years and `realpath` is absent on older releases, a rule
+  `bootstrap/_smb.sh` and `services/_stack.sh` already write down. The failure
+  would have been silent and macOS-only: nothing recorded, the restore never
+  runs, and a symlinked settings.json clobbered exactly as before. Replaced with
+  a manual walk that handles relative links and chains and is bounded at 40 hops,
+  because a symlink cycle would otherwise hang the apply forever. It does not
+  preserve the link's FORM -- a relative chain is restored as one absolute link
+  to the file at the end of it, same inode and same writes.
 - **`~/.claude/settings.json` survives an apply as a symlink (09/01/2026).**
   chezmoi's `modify_` script produces bytes; CHEZMOI does the write, and it
   writes a regular file. Measured on archlinux with chezmoi 2.72: the splice

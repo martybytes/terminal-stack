@@ -788,12 +788,32 @@ def test_agent_binaries_resolve_lazily_not_at_shell_load():
     assert "was not found on PATH when this profile loaded" not in ps
 
 
-def test_cursor_launcher_is_defined_unconditionally():
+def test_cursor_launcher_is_not_gated_on_the_binary():
+    """`c` must not be defined conditionally on whether `cursor` is INSTALLED.
+
+    That gate left `c` undefined for the life of any shell started before
+    Cursor's shell command was added; the body resolves the binary per call
+    instead, so a mid-session install just works.
+
+    It IS gated on which zsh base is loaded, and that is a different condition
+    with a different failure: where Omarchy's base is present, `c` is its alias
+    for opencode -- a different program -- and defining a FUNCTION over a live
+    alias is a zsh parse error that abandons the rest of the rc. That gate is
+    decided once at load and cannot go stale mid-session, which is exactly what
+    the binary check could not say. See tests/test_omarchy_zsh.py.
+    """
     zsh = (ROOT / "dot_zshrc").read_text(encoding="utf-8")
-    # Gating the *definition* on `command -v cursor` left `c` undefined for the
-    # life of any shell that started before Cursor's shell command was installed.
     assert "command -v cursor >/dev/null 2>&1 && c()" not in zsh
-    assert "\nc() {" in zsh
+    # The definition is still there, escaped so the block parses where `c` is an
+    # alias. Anchored to a line start: the prose above it names `\c()` too.
+    assert any(ln.startswith("\\c() {") for ln in zsh.splitlines()), (
+        "the cursor launcher is gone entirely"
+    )
+    # ...and the only guard around it is the base check, never a binary probe.
+    idx = next(i for i, ln in enumerate(zsh.splitlines()) if ln.startswith("\\c() {"))
+    window = "\n".join(zsh.splitlines()[max(0, idx - 3) : idx])
+    assert '[[ -z "$_TS_OMARCHY_ZSH" ]]' in window
+    assert "command -v cursor" not in window
 
 
 @pytest.mark.skipif(not shutil.which("zsh"), reason="zsh is unavailable")
@@ -3209,6 +3229,77 @@ def test_the_link_pair_is_a_no_op_on_an_ordinary_file(tmp_path):
 
 
 @pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+def test_a_relative_symlink_and_a_chain_both_resolve(tmp_path):
+    """`readlink -f` would have done this in one call -- and it is GNU-only.
+
+    This pair runs on macOS on every apply, where BSD readlink had no -f for
+    years and `realpath` is absent on older releases; the repo already writes
+    that rule down twice (bootstrap/_smb.sh, services/_stack.sh). The failure
+    would have been silent and macOS-only: nothing recorded, restore never runs,
+    and a symlinked settings.json gets clobbered exactly as before.
+
+    So the walk is by hand, and it has to handle what `-f` handled: a RELATIVE
+    link, and a CHAIN.
+    """
+    home = tmp_path / "home"
+    state = tmp_path / "state"
+    (home / ".claude").mkdir(parents=True)
+    tracked = tmp_path / "dots" / "settings.json"
+    tracked.parent.mkdir()
+    tracked.write_text('{"model": "opus"}\n', encoding="utf-8")
+
+    # ~/.claude/settings.json -> ../hop.json -> ../dots/settings.json,
+    # every hop RELATIVE, which is what `readlink -f` used to flatten for us.
+    # Each link resolves against its OWN directory: hop.json lives in home/, so
+    # `../dots/...` is tmp_path/dots/... .
+    hop = home / "hop.json"
+    hop.symlink_to(Path("..") / "dots" / "settings.json")
+    (home / ".claude" / "settings.json").symlink_to(Path("..") / "hop.json")
+
+    assert _run_link_script(LINK_RECORD, home, state).returncode == 0
+    record = state / "terminal-stack" / "claude-settings-symlink"
+    assert record.exists(), "a relative two-hop chain was not resolved"
+    assert Path(record.read_text(encoding="utf-8").strip()).resolve() == tracked.resolve()
+
+
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+def test_a_symlink_cycle_does_not_hang_the_apply(tmp_path):
+    """An apply that hangs forever is worse than one that skips a nicety."""
+    home = tmp_path / "home"
+    state = tmp_path / "state"
+    (home / ".claude").mkdir(parents=True)
+    a = home / ".claude" / "settings.json"
+    b = home / ".claude" / "other.json"
+    a.symlink_to(b)
+    b.symlink_to(a)
+
+    done = subprocess.run(
+        [BASH, str(LINK_RECORD)],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+        start_new_session=True,
+        env={"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(home),
+             "XDG_STATE_HOME": str(state)},
+    )
+    assert done.returncode == 0
+    assert not (state / "terminal-stack" / "claude-settings-symlink").exists()
+
+
+def test_the_link_scripts_avoid_the_gnu_only_flags():
+    """readlink -f and realpath are both absent on macOS releases this stack
+    supports. Named here so the next edit does not quietly reintroduce one."""
+    for script in (LINK_RECORD, LINK_RESTORE):
+        for line in script.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                continue
+            assert "readlink -f" not in stripped, f"{script.name}: {stripped}"
+            assert not stripped.startswith("realpath"), f"{script.name}: {stripped}"
+
+
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_a_stale_record_cannot_recreate_a_link_the_user_removed(tmp_path):
     """The record is cleared at the START of every apply, not only on success.
 
@@ -3264,3 +3355,97 @@ def test_the_theme_key_is_omarchys_on_omarchy():
     for key in ('"statusLine"', '"hooks"'):
         line = next(ln for ln in src.splitlines() if key in ln)
         assert "distroId" not in line, f"{key} must not be distro-gated"
+
+
+# --- the Nerd Font guard, under pipefail --------------------------------------
+
+
+def _font_guard_script(fc_list_body: str) -> str:
+    """common_nerd_font_jetbrains, with its world stubbed and pipefail ON.
+
+    pipefail is the whole point: the bootstraps set it, and it is what turned
+    this guard inside out.
+    """
+    lib = (ROOT / "bootstrap/_common-posix.sh").read_text(encoding="utf-8")
+    fn = re.search(r"(?m)^common_nerd_font_jetbrains\(\) \{.*?^\}", lib, re.S).group(0)
+    return (
+        "set -euo pipefail\n"
+        'INFO=""\n'
+        "ts_is_headless() { return 1; }\n"
+        # The `;` matters: bash rejects `{ cmd }` without a terminator.
+        f"fc-list() {{ {fc_list_body}; }}\n"
+        'curl() { echo "DOWNLOAD-ATTEMPTED"; }\n'
+        "unzip() { :; }\n"
+        "fc-cache() { :; }\n"
+        "mktemp() { echo /dev/null; }\n"
+        f"{fn}\n"
+        "common_nerd_font_jetbrains\n"
+    )
+
+
+def _run_font_guard(fc_list_body: str) -> str:
+    got = subprocess.run(
+        [BASH, "-c", _font_guard_script(fc_list_body)],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+        start_new_session=True,
+    )
+    return got.stdout + got.stderr
+
+
+# A match on the FIRST line, then thousands more. That is the exact race: with
+# `fc-list | grep -q`, grep exits on line one while fc-list is still writing, and
+# under pipefail the SIGPIPE (141) makes the pipeline "fail" -- so the guard
+# concludes the font is MISSING precisely because it found it.
+_MATCH_THEN_BULK = (
+    'echo "/f.ttf: JetBrainsMono Nerd Font:style=Regular"; '
+    "i=0; while [ $i -lt 4000 ]; do "
+    'echo "/other$i.ttf: Some Other Font:style=Regular"; i=$((i+1)); done'
+)
+
+
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+def test_the_font_guard_is_not_inverted_by_pipefail():
+    """THE regression.
+
+    Measured on a fresh Omarchy account: fc-list matched 4 JetBrainsMono Nerd
+    Font families and the guard downloaded ~30 MB anyway, on every single
+    install. It is a race -- on a machine with few fonts fc-list finishes first
+    and the guard is right -- which is why it survived this long.
+    """
+    out = _run_font_guard(_MATCH_THEN_BULK)
+    assert "DOWNLOAD-ATTEMPTED" not in out, (
+        "the font is present and the guard downloaded anyway (pipefail + grep -q)"
+    )
+    assert "already in fontconfig" in out
+
+
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+def test_the_font_guard_still_downloads_when_the_font_really_is_absent():
+    """The other half. A guard that never downloads is not a fix."""
+    out = _run_font_guard('echo "/other.ttf: Some Other Font:style=Regular"')
+    assert "DOWNLOAD-ATTEMPTED" in out
+    assert "already in fontconfig" not in out
+
+
+def test_no_bootstrap_library_pipes_a_long_producer_into_grep_q():
+    """`<something that writes a lot> | grep -q` is unsafe under pipefail.
+
+    Scoped to the producers that actually write enough to lose the race --
+    `fc-list` and `ps` -- rather than to every `grep -q` in the tree: a producer
+    emitting one line finishes before grep exits and is fine, and a blanket ban
+    would be noise nobody could act on.
+    """
+    offenders = []
+    for path in sorted((ROOT / "bootstrap").glob("*.sh")):
+        for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if line.strip().startswith("#"):
+                continue
+            if re.search(r"\b(fc-list|ps)\b[^|]*\|\s*grep\s+-q", line):
+                offenders.append(f"{path.name}:{n}: {line.strip()}")
+    assert not offenders, (
+        "capture the output first and match with `case`, or grep -c: under "
+        "pipefail these lose to SIGPIPE.\n" + "\n".join(offenders)
+    )

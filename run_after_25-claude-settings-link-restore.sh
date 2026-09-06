@@ -18,6 +18,14 @@
 #
 # Non-fatal throughout: an apply must not fail because somebody else's symlink
 # could not be restored. The dotfiles are the deliverable.
+#
+# ONE THING IT DOES NOT PRESERVE: the link's FORM. The original may have been
+# relative (`../dots/settings.json`) and possibly a chain; what is recreated is a
+# single absolute link to the file at the end of it. Functionally identical --
+# same inode, same writes -- but a dotfile manager that authored a relative link
+# will see a different one and may rewrite it on its next run, which is fine and
+# is where it belongs. Preserving the exact chain would mean restoring links this
+# script did not create, and that is somebody else's tree.
 
 set -u
 
