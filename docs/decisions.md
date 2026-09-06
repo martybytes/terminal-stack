@@ -324,6 +324,8 @@ We use (2). Templating fails three ways that the env var doesn't: it requires `c
 
 The installer only persists `WORKSPACE_DIR` to `~/.zshrc.local` when the user's answer differs from what autodetect would find — a machine whose workspace is in a standard location carries zero local config.
 
+*(Amended: the root is now changeable after install, by `ws --set <dir>` or `tstack workspace set <path>`, and it is still not a chezmoi key. A fourth reason arrived with the command: `store.set` writes `key = "<value>"` into TOML unescaped, so `schema.Setting.validate` refuses any text value containing a backslash — a Windows workspace path could not be a `[data]` key even if the other three objections were answered. The writer moved to `tstack/workspace.py`, which emits the same `export WORKSPACE_DIR="<path>"` line the installer does and matches on `^\s*export\s+WORKSPACE_DIR=`, so the four writers that exist can each find and replace the others' output. `ws --set` stays a shell function purely because a child process cannot export into its parent: it runs the command and exports the path the command prints on stdout, which is why that command prints the path and nothing else there.)*
+
 ## Why does `tstack rollback` use a recorded SHA file instead of `git reflog`?
 
 `tstack update` writes the pre-pull HEAD to `~/.local/state/terminal-stack/rollback-sha` before pulling, and `tstack rollback` resets to exactly that. The alternative — `git reset --hard HEAD@{1}` — is shorter but wrong in practice: the reflog entry one back is whatever git did last, which after a few manual operations in the clone (branch switches, amends on a dev machine where the clone doubles as a checkout) is not "the state before the last tstack update". An explicit file is unambiguous, human-inspectable (`cat` it to see where rollback would land), and survives `git gc`. The file is only written when an update actually has incoming commits, so a no-op `tstack update` can't clobber a real rollback point. Both commands refuse to run over a dirty working tree for the same dev-checkout reason.
@@ -874,6 +876,80 @@ reports the likely culprit by name rather than a raw sharing-violation message.
 Nothing is ever deleted. The old roots are left in place after a migration for the user
 to remove by hand once they have verified — the same discipline as the `.bak` convention
 elsewhere in this repo.
+
+## Why the workspace root moves across volumes when `wso migrate` refuses to
+
+The entry above says `wso` refuses a cross-volume move, and it should keep refusing. This
+one is the exception, and the difference is what is being moved.
+
+`wso migrate` relocates individual repos *within* a tree, one at a time, dozens of times,
+non-interactively. Crossing a volume there turns a rename into a copy-then-delete for
+each of them, and a partly copied repo whose original is already unlinked is the worst
+outcome available — from an operation the user was not thinking hard about because it
+usually moves nothing.
+
+Moving the ROOT is the opposite case in every respect. It happens once, deliberately,
+because a workspace has outgrown its disk, and crossing a volume is the entire point:
+"move my workspace to the big drive" is not a request that can be satisfied by a rename.
+Refusing would mean the command cannot do the only thing anyone would run it for.
+
+So the safety is bought a different way rather than by refusing:
+
+1. **Preflight refuses for a reason it can name** — destination exists and is not empty,
+   parent missing, not writable, less than 110% of the tree's size free, the calling
+   shell standing inside the source, the tree being moved into itself, or the
+   terminal-stack runtime clone sitting inside it. "Refused" with no reason just moves
+   the problem to whatever the user guesses next.
+2. **The copy preserves hardlinks** (`rsync -aHAX`). Git object stores and worktrees
+   hardlink; losing that silently inflates the copy and breaks `git worktree`. `cp -a` is
+   the fallback when rsync is absent, and it says so, because it cannot.
+3. **Verification is a separate pass**, not a return code. A second rsync in dry-run mode
+   reports anything it would still transfer, which is exactly "what is not identical
+   yet". Directory-attribute-only rows are excluded: destination directory mtimes settle
+   after their contents are written, so they always differ and never mean anything.
+4. **Nothing is unlinked until after that passes**, and then only behind a confirm.
+
+The ordering is the argument. An interruption at any point before step 4 leaves the
+original complete, so the failure mode `wso migrate` refuses to risk cannot occur here —
+not because copying got safer, but because the delete moved to the far side of a
+verification. A failed verification exits non-zero, leaves both trees, and does **not**
+repoint the root: pointing the workspace at a copy that did not verify would be a worse
+outcome than doing nothing, and it is the one the naive "copy, then save" ordering
+produces.
+
+`--keep-source` declines the removal outright, and `TS_WS_YES=1` skips the prompt for
+scripts. The prompt defaults to no, and to no when stdin is not a terminal.
+
+## Why `--org` matches the owner segment rather than the path
+
+`--org` existed on `status`, `sync` and `unarchive` as `case "$d" in *"/$org"/*)`, and
+that substring test was wrong in three ways that all returned a wrong answer silently
+rather than erroring:
+
+- `--org github.com` matched every repo in the tree. The host is a path segment too.
+- A *repo* named like an owner matched, so `--org martybytes` also selected
+  `someone/martybytes`.
+- `--org martsamp77` matched nothing after a migration. The tree carries the canonical
+  owner and the flag carried what the user typed, and nothing said so.
+
+One helper (`ts_ws_org_match` / `Test-TsWsOrgMatch`) now matches the owner segment of
+`<tier>/<host>/<owner>/<repo>` with the rename map applied to both sides, and the three
+existing call sites were retrofitted onto it rather than left as a fourth spelling.
+
+Two verbs are deliberately different. `plan` and `migrate` filter the **destination**,
+because a misfiled repo's whole point is that its current folder does not say who owns
+it — filtering on the source path would hide exactly the repos the plan exists to find.
+Rows with no destination (blocked, unparseable origin) survive every filter: they need a
+human, and hiding them behind a flag is how they get forgotten. And `orphans` has no
+owner to match at all — a repo with no remote is a repo nothing derives an owner for —
+so its empty result names the filter instead of reading as "you have none".
+
+Adding the filter to `plan` forced a smaller fix worth recording. `cmd_plan`'s first
+positional was its *mode* string, so the dispatcher had to call it with no arguments,
+which meant `wso plan --org x` silently discarded the flag and printed an unfiltered
+plan. Mode became `--mode`, and the dispatcher now forwards `"$@"` to every verb, with
+`identity` and `doctor` rejecting anything they are given. A flag that is ignored without
+comment is worse than one that errors.
 
 ## Runtime clone location: canonical app-data paths, invisible dev clones
 

@@ -17,6 +17,86 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
   author in. `run_after_` rather than `run_once_`, so a deleted `~/bin` is
   restored on the next apply; it never pulls. (Shipped as `478712c`, which added
   no entry here — this is that entry, written when the omission was found.)
+- **The workspace root can be moved, including to another disk (09/06/2026).**
+  `ws --set <dir>`, `ws --show` and a new `tstack workspace` (`show`, `set`,
+  `move`, `reset`; also reachable as `tstack config workspace`) change the root
+  after install. Until now the only writer was the installer, so changing it
+  afterwards meant hand-editing `~/.zshrc.local`.
+
+  The root stays out of chezmoi `[data]`, for the three reasons
+  `docs/decisions.md` already gives and a fourth that arrived with the command:
+  `store.set` writes `key = "<value>"` into TOML unescaped, so
+  `schema.Setting.validate` refuses any value containing a backslash -- a Windows
+  workspace path could not be a `[data]` key at all. `tstack/workspace.py` is now
+  the one Python writer of that line, and it emits the same
+  `export WORKSPACE_DIR="<path>"` the installer does so the writers can each
+  replace the others' output. `ws --set` stays a shell function purely because a
+  child process cannot export into its parent: it runs the command and exports
+  the path the command prints, which is why that command's stdout is the path and
+  nothing else.
+
+  `--move` relocates the tree, **across volumes**, which is exactly what
+  `wso migrate` refuses to do. Moving individual repos non-interactively and
+  moving the root once, deliberately, onto a bigger disk are different risks, so
+  the safety is bought by ordering rather than by refusing: preflight that names
+  its reason (non-empty destination, no space, your shell standing inside the
+  tree, the runtime clone inside the tree), a copy that preserves hardlinks
+  (`rsync -aHAX` -- git object stores use them), an **independent** verification
+  pass, and only then a confirmed removal of the original. Nothing is unlinked
+  before that, and a failed verification exits non-zero without repointing the
+  root at a copy it does not trust.
+
+  It refuses when symlinks elsewhere in `$HOME` point **into** the tree, which is
+  what a dotfiles repo stowed from your workspace looks like. The machine this
+  was built on had 26 of them -- the bar, Hyprland's config, `~/.ssh/config`,
+  `~/.claude/CLAUDE.md` -- all relative and rooted at `$HOME`, so the move would
+  have dangled every one and the breakage would have surfaced at the next login
+  rather than at move time. The refusal counts them, recognises the stow layout,
+  and prints the exact `stow -R` line for the packages it found. `--keep-source`
+  is the way through and is why that flag exists: the originals stay while the
+  links are repointed, so nothing is ever broken, not even briefly.
+
+  `tstack ui` gains a row for it. It is the third store the dashboard writes,
+  after chezmoi `[data]` and agentmemory's `.env`, and it routes through its own
+  writer for the same reason those do.
+
+  Both the copy and the verification try `rsync -aHAX`, then `-aH`, then `-a`
+  (the copy then falls to `cp -a`), announcing what each downgrade costs. Not a
+  hard-coded flag set: macOS ships openrsync, which rejects the ACL and xattr
+  flags outright, so `-aHAX` failed the entire copy there -- caught by CI rather
+  than by review. `--progress` and not `--info=progress2` for the same reason,
+  and only when a terminal is watching.
+
+  The verification carries the sharper edge of that bug. It originally checked
+  only whether rsync could be *started*, so a non-zero exit with empty stdout --
+  exactly what openrsync produces when it rejects a flag -- read as "no
+  differences found" and returned **true for a copy it had never compared**,
+  with a confirmed `rm -rf` of the original on the other side. A verifier that
+  cannot run now refuses rather than passing, and a test pins that specifically.
+
+- **`--org` on every bulk `wso` verb, and it now means what it says
+  (09/06/2026).** `synceverything`, `plan`, `migrate`, `archive` and `orphans`
+  accept `--org <owner>`; `status`, `sync` and `unarchive` already did, though
+  only `wso -h` said so -- `doc common/workspace-org` did not list
+  `wso sync --org`, so it was effectively invisible. `wso synceverything --org
+  martybytes` clones just that owner's missing repos, and rejects an owner that
+  is not yours *before* the sync rather than after fast-forwarding every repo on
+  the machine.
+
+  The filter itself was wrong. It was a substring test over the whole path, once
+  per verb, and it silently matched the host (`--org github.com` selected
+  everything), matched a *repo* named like an owner, and missed a renamed owner
+  entirely -- the tree carries the canonical name, the flag carried what you
+  typed. There is now one helper (`ts_ws_org_match` / `Test-TsWsOrgMatch`) that
+  matches the owner segment with `workspace.conf`'s rename map applied to both
+  sides, and the three existing call sites were retrofitted onto it.
+
+  `plan` and `migrate` deliberately filter the **destination** instead: a
+  misfiled repo's whole point is that its folder does not say who owns it. Rows
+  with no destination -- blocked repos, unparseable origins -- survive every
+  filter, because they are the ones that need a human. `orphans` has no owner to
+  match at all, so its empty result names the filter rather than reading as "you
+  have none".
 
 - **herdr, the terminal multiplexer that hosts coding agents (09/04/2026).**
   Offered by the app picker on every platform and never pre-ticked, installed
@@ -83,6 +163,20 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
   all seven copies of the constant and fails on drift; nothing in the suite had
   ever asserted a branch name before. Rationale in `docs/decisions.md` § "One
   branch, because two of them broke the installer".
+- **`wso plan` silently discarded its arguments (09/06/2026).** The dispatcher
+  was `plan) shift; cmd_plan ;;`, because `cmd_plan`'s first positional was its
+  mode string, so `wso plan --org x` printed an unfiltered plan with nothing to
+  say the flag had been ignored. Mode is now `--mode`, the dispatcher forwards
+  `"$@"` to every verb, and `identity` and `doctor` reject what they are given
+  rather than ignoring it. `synceverything` was also missing from the
+  unknown-command hint.
+
+- **`tests/test_ui.py` was asserting less than it claimed (09/06/2026).**
+  `test_every_setting_reaches_the_dashboard` compared *every* dashboard row
+  against the schema, and passed only because `llm_rows()` happens to return
+  nothing when there is no stack `.env` -- on a machine that has one it would
+  have failed for the wrong reason. Scoped to the settings store, which is what
+  it meant.
 
 - **The Omarchy tests failed on Windows CI, and only there (09/06/2026).** Three
   of them: green on Linux, macOS and WSL, red on `windows-latest` from the moment

@@ -4,21 +4,23 @@
 #
 # Usage:
 #   wso status [--dirty] [--org X]  what is dirty / unpushed / detached (read-only)
-#   wso plan                        preview the migration; never writes
-#   wso migrate [--fix-remotes]     execute it (moves only; asks first)
+#   wso plan [--org X]              preview the migration; never writes
+#   wso migrate [--fix-remotes] [--org X]   execute it (moves only; asks first)
 #   wso sync [--org X]              fast-forward-only update of what is here
-#   wso synceverything              sync, then clone every missing org repo
-#   wso archive [--days N]          interactive: threshold, checklist, confirm
+#   wso synceverything [--org X]    sync, then clone every missing org repo
+#   wso archive [--days N] [--org X]  interactive: threshold, checklist, confirm
 #   wso unarchive [name|--org X|--all|--undo-last] [--update]
 #   wso get <url|owner/repo>        clone to the derived path
-#   wso orphans [--push]            repos with no remote (they exist on one disk)
+#   wso orphans [--push] [--org X]  repos with no remote (they exist on one disk)
 #   wso identity                    write this machine's git identity rules
 #   wso doctor                      tools, config and tree health
 #
 # Layout is <root>/<tier>/<host>/<owner>/<repo>; see bootstrap/workspace.conf.
-# Honors TS_DRY_RUN=1 (preview only) everywhere that writes.
+# --org matches the OWNER segment and applies workspace.conf's rename map.
+# Honors TS_DRY_RUN=1 (preview only) everywhere that writes. `ws --set` moves
+# the workspace root itself; see `tstack workspace`.
 #
-# --- end of --help text (lines 2-19; keep Show-TsWsHelp in _workspace_cmd.ps1
+# --- end of --help text (lines 2-21; keep Show-TsWsHelp in _workspace_cmd.ps1
 # --- byte-identical to it) -----------------------------------------------------
 # This is the bash half, driven by the `wso` wrapper in dot_zshrc and runnable
 # standalone. bootstrap/_workspace.ps1 + _workspace_cmd.ps1 are the Windows twin.
@@ -78,7 +80,7 @@ cmd_status() {
     while IFS= read -r d; do
         [ -n "$d" ] || continue
         case "$d" in */.git) continue ;; esac
-        [ -n "$org_filter" ] && case "$d" in *"/$org_filter/"*) ;; *) continue ;; esac
+        ts_ws_org_match "$d" "$org_filter" || continue
         n=$((n + 1))
         st="$(ts_ws_git_state "$d")"
         dirty="$(printf '%s' "$st" | cut -f1)"
@@ -177,14 +179,43 @@ ts_ws_mark_dupes() {
                 else print line[i] } }'
 }
 
+# --mode is how cmd_migrate says "this one is for real"; it used to be a bare
+# $1, which is why the dispatcher had to call `cmd_plan` with no arguments and
+# therefore silently swallowed anything the user typed after `wso plan`.
+# Filter a plan by owner. Unlike every other --org site this matches the
+# DESTINATION, because a misfiled repo's whole point is that its current folder
+# does not say who owns it -- `wso plan --org 37metrics` has to show the clone
+# sitting in a directory called `flipoff` whose origin is 37metrics/rotari.
+# Rows with no destination (blocked, and anything with an unparseable origin)
+# have no owner to compare, so they survive every filter: they are the rows
+# that need a human, and hiding them behind a flag is how they get forgotten.
+ts_ws_plan_filter_org() {
+    local org="$1" line dest
+    if [ -z "$org" ]; then cat; return 0; fi
+    while IFS= read -r line; do
+        dest="$(printf '%s' "$line" | cut -f3)"
+        if [ -z "$dest" ]; then printf '%s\n' "$line"; continue; fi
+        if ts_ws_org_match "$dest" "$org"; then printf '%s\n' "$line"; fi
+    done
+    return 0
+}
+
 cmd_plan() {
-    local plan movec=0 conflictc=0 blockedc=0 inplacec=0
-    plan="$(ts_ws_build_plan | ts_ws_mark_dupes)"
+    local plan movec=0 conflictc=0 blockedc=0 inplacec=0 mode="" org_filter=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --mode) mode="${2:-}"; shift 2 ;;
+            --org)  org_filter="${2:-}"; shift 2 ;;
+            *) echo "wso plan: unknown option: $1" >&2; return 2 ;;
+        esac
+    done
+    plan="$(ts_ws_build_plan | ts_ws_mark_dupes | ts_ws_plan_filter_org "$org_filter")"
     echo
     echo "=============================================================================="
     echo " Workspace migration plan"
     echo " Root: $ROOT"
-    echo " Mode: ${1:-DRY RUN — nothing is moved}"
+    [ -n "$org_filter" ] && echo " Org:  $org_filter"
+    echo " Mode: ${mode:-DRY RUN — nothing is moved}"
     echo "=============================================================================="
     local tier
     for tier in src public local scratch; do
@@ -234,15 +265,16 @@ cmd_plan() {
 # ----------------------------------------------------------------- migrate ----
 
 cmd_migrate() {
-    local fix_remotes=0
+    local fix_remotes=0 org_filter=""
     while [ $# -gt 0 ]; do
         case "$1" in
             --fix-remotes) fix_remotes=1; shift ;;
+            --org)         org_filter="${2:-}"; shift 2 ;;
             *) echo "wso migrate: unknown option: $1" >&2; return 2 ;;
         esac
     done
     ts_ws_warn_if_drvfs migrate
-    cmd_plan "EXECUTE"
+    cmd_plan --mode EXECUTE ${org_filter:+--org "$org_filter"} || return $?
     local plan="$TS_WS_PLAN" movec
     movec="$(printf '%s\n' "$plan" | awk -F'\t' '$1=="move"' | grep -c . || true)"
     if [ "$movec" -eq 0 ]; then echo "$INFO Nothing to move."; return 0; fi
@@ -353,19 +385,35 @@ cmd_sync() {
     done
     while IFS= read -r d; do
         [ -n "$d" ] || continue
-        [ -n "$org_filter" ] && case "$d" in *"/$org_filter/"*) ;; *) continue ;; esac
+        ts_ws_org_match "$d" "$org_filter" || continue
         ts_ws_sync_one "$d"
     done < <(ts_ws_managed_repos "src public local")
-    ts_ws_report_missing
+    ts_ws_report_missing "$org_filter"
 }
 
 # What exists in your orgs but not on this machine. Reported, never cloned —
 # putting 100 repos on a laptop is a decision, not a default.
+# The owners a run covers: every src/ owner, or just the one --org named.
+# Canonicalised, so `--org martsamp77` selects the martybytes org rather than
+# quietly selecting nothing -- the tree carries the canonical name, and so does
+# the workspace.conf `org` line the loop below reads.
+ts_ws_owners_for_filter() {
+    local org="$1" owner want
+    if [ -z "$org" ]; then ts_ws_own_owners; return 0; fi
+    want="$(ts_ws_lower "$(ts_ws_canon_owner "$org")")"
+    for owner in $(ts_ws_own_owners); do
+        if [ "$(ts_ws_lower "$owner")" = "$want" ]; then printf '%s\n' "$owner"; return 0; fi
+    done
+    echo "wso: '$org' is not one of your orgs (workspace.conf lists: $(ts_ws_own_owners))" >&2
+    return 1
+}
+
 ts_ws_report_missing() {
     command -v gh >/dev/null 2>&1 || return 0
-    local owner missing=0 line repo host
+    local owner missing=0 line repo host org_filter="${1:-}" owners
     host="$(ts_ws_setting host_default github.com)"
-    for owner in $(ts_ws_own_owners); do
+    owners="$(ts_ws_owners_for_filter "$org_filter")" || return 0
+    for owner in $owners; do
         while IFS= read -r repo; do
             [ -n "$repo" ] || continue
             [ -d "$ROOT/src/$host/$owner/$repo" ] && continue
@@ -374,7 +422,11 @@ ts_ws_report_missing() {
             if [ "$missing" -le 20 ]; then printf '   missing: %s/%s\n' "$owner" "$repo"; fi
         done < <(gh repo list "$owner" --limit 500 --json name -q '.[].name' 2>/dev/null)
     done
-    if [ "$missing" -gt 0 ]; then
+    if [ "$missing" -gt 0 ] && [ -n "$org_filter" ]; then
+        echo "--"
+        printf '%d %s repo(s) are not on this machine. `wso synceverything --org %s` clones them.\n' \
+            "$missing" "$org_filter" "$org_filter"
+    elif [ "$missing" -gt 0 ]; then
         echo "--"
         printf '%d repo(s) in your orgs are not on this machine. `wso synceverything` clones them.\n' "$missing"
     fi
@@ -382,14 +434,25 @@ ts_ws_report_missing() {
 }
 
 cmd_synceverything() {
+    local org_filter=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --org) org_filter="${2:-}"; shift 2 ;;
+            *) echo "wso synceverything: unknown option: $1" >&2; return 2 ;;
+        esac
+    done
     command -v gh >/dev/null 2>&1 || {
         echo "wso: gh not found — needed to enumerate your orgs. Install it (wso doctor lists how)." >&2
         return 1
     }
-    cmd_sync
+    local owners
+    # Resolve the filter BEFORE the sync, so a typo'd org fails in a second
+    # rather than after fast-forwarding every repo on the machine.
+    owners="$(ts_ws_owners_for_filter "$org_filter")" || return 2
+    cmd_sync ${org_filter:+--org "$org_filter"}
     local owner repo host cloned=0
     host="$(ts_ws_setting host_default github.com)"
-    for owner in $(ts_ws_own_owners); do
+    for owner in $owners; do
         while IFS= read -r repo; do
             [ -n "$repo" ] || continue
             local dest="$ROOT/src/$host/$owner/$repo"
@@ -447,10 +510,11 @@ cmd_get() {
 # ----------------------------------------------------------------- orphans ----
 
 cmd_orphans() {
-    local do_push=0
+    local do_push=0 org_filter=""
     while [ $# -gt 0 ]; do
         case "$1" in
             --push) do_push=1; shift ;;
+            --org)  org_filter="${2:-}"; shift 2 ;;
             *) echo "wso orphans: unknown option: $1" >&2; return 2 ;;
         esac
     done
@@ -459,6 +523,12 @@ cmd_orphans() {
         [ -n "$d" ] || continue
         [ -e "$d/.git" ] || continue
         [ -z "$(ts_ws_origin "$d")" ] || continue
+        # An orphan has no remote, so nothing derives its owner and it
+        # normally sits in local/, which has no owner segment at all. --org
+        # therefore only ever matches one that is parked at an owner path --
+        # a clone whose origin was stripped. Filtering to nothing is a real
+        # answer here, so the empty message below names the filter.
+        ts_ws_org_match "$d" "$org_filter" || continue
         found=$((found + 1))
         local commits branches
         commits="$(git -C "$d" rev-list --all --count 2>/dev/null || echo 0)"
@@ -466,7 +536,10 @@ cmd_orphans() {
         printf '%-44s %6s commits   %s\n' "${d#"$ROOT"/}" "$commits" "${branches% }"
         if [ "$do_push" -eq 1 ]; then ts_ws_push_orphan "$d"; fi
     done < <(ts_ws_all_repos)
-    if [ "$found" -eq 0 ]; then
+    if [ "$found" -eq 0 ] && [ -n "$org_filter" ]; then
+        echo "$INFO No remote-less repos under $org_filter/. Orphans have no owner to"
+        echo "     derive, so most of them live in local/ and no --org can match them."
+    elif [ "$found" -eq 0 ]; then
         echo "$INFO No repos without a remote. Nothing here exists on only one disk."
     else
         echo "--"
@@ -502,10 +575,11 @@ ts_ws_push_orphan() {
 # ----------------------------------------------------------------- archive ----
 
 cmd_archive() {
-    local days=""
+    local days="" org_filter=""
     while [ $# -gt 0 ]; do
         case "$1" in
             --days) days="${2:-}"; shift 2 ;;
+            --org)  org_filter="${2:-}"; shift 2 ;;
             *) echo "wso archive: unknown option: $1" >&2; return 2 ;;
         esac
     done
@@ -518,11 +592,16 @@ cmd_archive() {
     fi
     case "$days" in ''|*[!0-9]*) echo "wso archive: --days needs a number, got '$days'" >&2; return 2 ;; esac
 
-    echo "$INFO Scanning src/ for repos untouched for $days+ days…"
+    if [ -n "$org_filter" ]; then
+        echo "$INFO Scanning src/$org_filter for repos untouched for $days+ days…"
+    else
+        echo "$INFO Scanning src/ for repos untouched for $days+ days…"
+    fi
     local -a paths=() labels=() ticks=() whys=()
     local d act age why
     while IFS= read -r d; do
         [ -n "$d" ] || continue
+        ts_ws_org_match "$d" "$org_filter" || continue
         act="$(ts_ws_last_activity "$d")"
         age="$(ts_ws_days_since "$act")"
         [ "$age" -ge "$days" ] || continue
@@ -541,7 +620,7 @@ cmd_archive() {
 
     local n=${#paths[@]}
     if [ "$n" -eq 0 ]; then
-        echo "$INFO Nothing in src/ is older than $days days. That is the correct outcome most months."
+        echo "$INFO Nothing in src/${org_filter:+$org_filter/} is older than $days days. That is the correct outcome most months."
         return 0
     fi
 
@@ -638,7 +717,7 @@ cmd_unarchive() {
             ;;
         all)  while IFS= read -r d; do picks+=("$d"); done < <(ts_ws_managed_repos archive) ;;
         org)  while IFS= read -r d; do
-                  case "$d" in */"$org"/*) picks+=("$d") ;; esac
+                  ts_ws_org_match "$d" "$org" && picks+=("$d")
               done < <(ts_ws_managed_repos archive) ;;
         name) while IFS= read -r d; do
                   case "$(basename -- "$d")" in *"$name"*) picks+=("$d") ;; esac
@@ -684,6 +763,7 @@ cmd_unarchive() {
 # machine-specific and the emails are personal, and CLAUDE.md forbids either in
 # the source tree.
 cmd_identity() {
+    [ $# -eq 0 ] || { echo "wso identity: unknown option: $1" >&2; return 2; }
     local gitdir="${XDG_CONFIG_HOME:-$HOME/.config}/git"
     local out="$gitdir/terminal-stack-workspace.gitconfig"
     local host owner root_fwd
@@ -755,6 +835,7 @@ cmd_identity() {
 # ------------------------------------------------------------------ doctor ----
 
 cmd_doctor() {
+    [ $# -eq 0 ] || { echo "wso doctor: unknown option: $1" >&2; return 2; }
     local issues=0 t p
     echo "$INFO Workspace"
     printf '  root            %s\n' "$ROOT"
@@ -805,7 +886,7 @@ cmd_doctor() {
 
 case "${1:-}" in
     ""|status)      shift || true; cmd_status "$@" ;;
-    plan)           shift; cmd_plan ;;
+    plan)           shift; cmd_plan "$@" ;;
     migrate)        shift; cmd_migrate "$@" ;;
     sync)           shift; cmd_sync "$@" ;;
     synceverything) shift; cmd_synceverything "$@" ;;
@@ -813,8 +894,8 @@ case "${1:-}" in
     unarchive)      shift; cmd_unarchive "$@" ;;
     get)            shift; cmd_get "$@" ;;
     orphans)        shift; cmd_orphans "$@" ;;
-    identity)       shift; cmd_identity ;;
-    doctor)         shift; cmd_doctor ;;
-    -h|--help|help) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//' ;;
-    *) echo "wso: unknown command '$1' (try: status, plan, migrate, sync, archive, unarchive, get, orphans, identity, doctor, --help)" >&2; exit 2 ;;
+    identity)       shift; cmd_identity "$@" ;;
+    doctor)         shift; cmd_doctor "$@" ;;
+    -h|--help|help) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//' ;;
+    *) echo "wso: unknown command '$1' (try: status, plan, migrate, sync, synceverything, archive, unarchive, get, orphans, identity, doctor, --help)" >&2; exit 2 ;;
 esac

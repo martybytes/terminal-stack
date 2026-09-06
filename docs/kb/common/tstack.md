@@ -12,6 +12,7 @@ commands any more, and no aliases for them.
 | `tstack rollback` | undo the last update |
 | `tstack apply` | re-apply the dotfiles, explaining any conflict first (POSIX) |
 | `tstack services` | the Docker service stacks - see `doc services` |
+| `tstack workspace` | the workspace root, and moving it - see `doc common/workspace-nav` |
 | `tstack mux` | the WezTerm multiplexer domain |
 | `tstack wezterm` | WezTerm channel and updates |
 | `tstack ghostty` | the managed Ghostty config; `status`, `diff`, `on`, `off` |
@@ -27,6 +28,29 @@ commands any more, and no aliases for them.
 
 A subcommand reported as "not available on <platform>" is deliberate, not a
 broken install: `smb` has no PowerShell implementation.
+
+## `tstack workspace` — the one setting that is not in the store
+
+Everything `tstack config` writes lands in chezmoi `[data]` (and the `config.json`
+mirror on Windows). The workspace root does not, and cannot: it has to be readable by a
+machine that never runs chezmoi, and changeable without an apply. It lives as one
+`export WORKSPACE_DIR=` line in `~/.zshrc.local` (`$env:WORKSPACE_DIR` in
+`profile.local.ps1`), which is where the installer has always put it.
+
+```
+tstack workspace                          the root, its layer, repo counts per tier
+tstack workspace set /mnt/data/Workspace  pin it; moves nothing
+tstack workspace set <path> --move        pin it and relocate the tree
+tstack workspace reset                    drop the pin; back to autodetect
+```
+
+`ws --set <dir>` is the same writer from inside a shell, and takes effect immediately
+because the shell function exports what the command prints. The bare command needs a new
+shell — a child process cannot change its parent's environment.
+
+`--move` handles a cross-volume move, which `wso migrate` deliberately refuses: it
+copies, verifies the copy independently, and only then offers to remove the original.
+Full sequence and the reasoning in `doc common/workspace-nav`.
 
 `doctor`, `services`, `mux`, `wezterm`, `agents`, `ghostty`, `wizard`, `ui` and (on POSIX) `config` are one Python program
 that runs identically on Windows, WSL, Linux and macOS. `update`, `rollback`,
@@ -198,6 +222,7 @@ Run it bare for an interactive menu; `tstack config show` just prints the state.
 | `tstack config herdr [on\|off\|status\|update]` | hand-off to `tstack herdr` — see `doc common/tools/herdr` |
 | `tstack config tts …` | agent voice — see `doc common/tts` |
 | `tstack config mux [on\|off\|…]` | hand-off to `tstack mux` (WezTerm multiplexer domain) |
+| `tstack config workspace [set <path> [--move]\|reset]` | hand-off to `tstack workspace` — see `doc common/workspace-nav` |
 | `tstack config restore <on\|off>` | reopen the last WezTerm session at startup (default off) |
 | `tstack config wezterm` | your build + date, newest per channel, count of what changed since |
 | `tstack config wezterm changes` | the full upstream changelog since your build, paged |

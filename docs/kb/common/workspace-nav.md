@@ -3,6 +3,9 @@
 | Command | What it does |
 |---|---|
 | `ws` | cd to the workspace — `$WORKSPACE_DIR` (zsh `~/.zshrc.local` / pwsh `profile.local.ps1`) if set, else autodetected |
+| `ws --set [dir]` | pin `WORKSPACE_DIR` in the per-machine override file (default: current dir) |
+| `ws --set <dir> --move` | pin it **and relocate the tree there**, across volumes if needed |
+| `ws --show` | print the resolved root and which layer it came from |
 | `wsp` | cd to the `*_Personal` / `*-Personal` sibling |
 | `wspu` | cd to `public/github.com` in the organised tree, else the `*_Public` / `*-Public` sibling |
 | `ws37` `ws42` `wsmb` `wsmd` | cd to `src/github.com/<owner>` for 37metrics / dimension42ai / martybytes / moleculardesigns |
@@ -16,7 +19,86 @@
 | `zi` | zoxide interactive picker when there are multiple matches |
 | `zoxide-prune` | drop dead paths from zoxide's database (pwsh) |
 
-Autodetect probes (first existing wins): `/mnt/c/DATA/Workspace`, `~/Documents/Workspace`, `~/workspace`, `~/Workspace` (pwsh also `C:\DATA\Workspace`).
+## Where the root comes from, and how to change it
+
+Resolution order, evaluated at **call time** (not shell startup — `~/.zshrc.local` is
+sourced at the *end* of `.zshrc`, so anything resolved earlier would miss it):
+
+1. `$WORKSPACE_DIR` from the environment
+2. the `export WORKSPACE_DIR=` line in `~/.zshrc.local` (`$env:WORKSPACE_DIR` in
+   `profile.local.ps1`), which is what puts it in the environment for a new shell
+3. the first existing autodetect probe: `/mnt/c/DATA/Workspace`,
+   `~/Documents/Workspace`, `~/workspace`, `~/Workspace` — pwsh probes
+   `C:\DATA\Workspace`, `~\workspace`, `~\Documents\Workspace`
+
+The root is deliberately **not** a chezmoi setting. It has to be readable by a machine
+that never runs chezmoi, and changeable without an apply. `ws --show` and
+`tstack workspace` both report which of the three layers actually won, which is the only
+way to explain a save that appears to do nothing — a shell that exported the old value at
+startup keeps winning until you start a new one.
+
+| Command | What it does |
+|---|---|
+| `tstack workspace` | the root, the layer it came from, and repo counts per tier |
+| `tstack workspace set <path>` | pin it; moves nothing |
+| `tstack workspace set <path> --move` | pin it and relocate the tree |
+| `tstack workspace reset` | drop the pin; go back to autodetect |
+
+`ws --set` and `tstack workspace set` are the same writer — `ws` runs the command and
+then exports the path it prints, which is why it takes effect in the shell you typed it
+in while the bare command needs a new one. A child process cannot change its parent's
+environment; that is the whole reason `ws` stays a shell function.
+
+### Moving the tree
+
+`wso migrate` refuses a cross-volume move on purpose: copy-then-delete can half-finish,
+and a partly copied repo whose original is already gone is the worst outcome available.
+Moving the *root* is the one case where crossing a volume is the entire point — a
+workspace outgrowing its disk — so `--move` buys the same safety differently:
+
+1. **Preflight**, which refuses for a reason it names: destination exists and is not
+   empty, not enough free space, your shell is standing inside the tree, the
+   terminal-stack runtime clone is inside it, or **symlinks elsewhere in `$HOME`
+   point into the tree**.
+2. **Copy**, preserving hardlinks (`rsync -aHAX`) — git object stores and worktrees use
+   them.
+3. **Verify** independently, with a second rsync pass that reports anything still
+   different. A failure stops here with the original intact.
+4. **Only then** offer to remove the original, behind a confirm (`--yes` or `TS_WS_YES=1`
+   to skip, `--keep-source` to decline).
+
+Nothing is unlinked before step 4, so an interruption at any earlier point leaves the
+original complete. Uncommitted work, stashes, reflogs and untracked files all survive,
+because the copy is of the directory and not a re-clone.
+
+### Symlinks pointing into the workspace
+
+A dotfiles repo living in the workspace and stowed into `$HOME` is the usual reason,
+and it is the one failure here that is invisible until your next login. On the machine
+this guard was written for, 26 links pointed into `~/Workspace` — the Quickshell bar,
+Hyprland's config, `~/.ssh/config`, `~/.config/git/config`, `~/.claude/CLAUDE.md`. They
+are relative links rooted at `$HOME`, so moving the tree dangles every one of them and
+nothing says so at the time.
+
+`--move` therefore refuses, counts them, and — when the targets share a `<repo>/stow/`
+ancestor — prints the exact `stow -R` line for the packages it found. The way through is
+`--keep-source`, which is what the flag is for:
+
+```sh
+tstack workspace set /new/path --move --keep-source
+cd /new/path/<...>/your-dotfiles
+stow -R --no-folding -d stow -t "$HOME" <packages>
+find ~ -maxdepth 4 -xtype l          # must print nothing
+rm -rf /old/path                     # only now
+```
+
+The originals stay in place while the links are repointed, so **no link is ever broken**
+— not for a second. `--allow-inbound-symlinks` moves anyway, for the case where you know
+the links are disposable.
+
+A root on a filesystem that `$HOME` is not on gets one warning worth reading: if that
+mount is ever missing — `nofail` in fstab makes that silent — the path still exists as a
+bare mountpoint, and `ws` lands in an empty tree with no error.
 
 `wsp`/`wspu`/`wsw` derive from that root by suffix, underscore first then dash — so
 `Workspace_Work` and `Workspace-Work` both resolve. When the work tree lives somewhere

@@ -18,6 +18,7 @@ from __future__ import annotations
 import io
 from contextlib import redirect_stdout
 from dataclasses import dataclass
+from pathlib import Path
 
 from .. import schema
 
@@ -28,6 +29,11 @@ from .. import schema
 # field rather than a second screen.
 SETTINGS = "settings"
 LLM = "llm"
+# The workspace root is the third store, for the same reason the second one
+# exists: it is a real setting people come here to change, and it does not live
+# in chezmoi [data]. It lives in ~/.zshrc.local, because it has to be readable
+# by a shell that never ran chezmoi -- see tstack/workspace.py.
+WORKSPACE = "workspace"
 
 
 @dataclass(frozen=True)
@@ -89,22 +95,26 @@ def rows() -> list[Row]:
     Schema declaration order, not alphabetical: the schema groups related keys
     together and that grouping is the only ordering anyone has thought about.
     """
-    return [
-        Row(
-            key=str(r["key"]),
-            label=str(r["label"]),
-            group=str(r["group"]),
-            kind=str(r["kind"]),
-            value=str(r["value"]),
-            default=str(r["default"]),
-            source=str(r["source"]),
-            note=str(r["note"]),
-            options=_strings(r["options"]),
-            choices=str(r["choices"]),
-            flags=frozenset(_strings(r["flags"])),
-        )
-        for r in schema.snapshot()
-    ] + llm_rows()
+    return (
+        [
+            Row(
+                key=str(r["key"]),
+                label=str(r["label"]),
+                group=str(r["group"]),
+                kind=str(r["kind"]),
+                value=str(r["value"]),
+                default=str(r["default"]),
+                source=str(r["source"]),
+                note=str(r["note"]),
+                options=_strings(r["options"]),
+                choices=str(r["choices"]),
+                flags=frozenset(_strings(r["flags"])),
+            )
+            for r in schema.snapshot()
+        ]
+        + workspace_rows()
+        + llm_rows()
+    )
 
 
 # AgentMemory's chat provider, as dashboard rows. The keys are the .env's own,
@@ -122,6 +132,62 @@ LLM_ROWS = (
         "empty leaves every LLM feature off even with an endpoint set",
     ),
 )
+
+
+# The one key here is the env var, because that is what the RC file says, what
+# every doc calls it, and what someone greps for.
+def workspace_rows() -> list[Row]:
+    """The workspace root, and which layer it actually came from.
+
+    Editing this pins it in ~/.zshrc.local. It never moves the tree -- a
+    dashboard cell is the wrong place to start a multi-gigabyte copy that wants
+    a preflight, a verify and a confirm. `tstack workspace set <path> --move`
+    is that, and the note says so.
+    """
+    from .. import workspace
+
+    resolved = workspace.resolve()
+    return [
+        Row(
+            key="WORKSPACE_DIR",
+            label="Workspace root",
+            group="shell",
+            kind="text",
+            value=str(resolved.path) if resolved.path else "",
+            default="",
+            source=resolved.source,
+            note=(
+                "where ws/wsp/wso work; saved to ~/.zshrc.local, not chezmoi. "
+                "Editing here repoints only -- `tstack workspace set <path> --move` "
+                "relocates the tree"
+            ),
+            options=(),
+            choices="",
+            flags=frozenset({schema.SHELL}),
+            store=WORKSPACE,
+        )
+    ]
+
+
+def save_workspace(key: str, value: str) -> tuple[bool, str]:
+    """Pin the workspace root. Repoints; never moves anything."""
+    from .. import workspace
+
+    if key != "WORKSPACE_DIR":
+        return (False, f"unknown setting: {key}")
+    stripped = value.strip()
+    try:
+        if not stripped:
+            cleared = workspace.clear_override(lambda _m: None)
+            after = workspace.resolve()
+            if not cleared:
+                return (True, f"nothing was pinned; autodetect gives {after.display}")
+            return (True, f"pin removed; autodetect gives {after.display}")
+        written = workspace.write_override(Path(stripped), lambda _m: None)
+    except OSError as exc:
+        return (False, f"{type(exc).__name__}: {exc}")
+    tail = "" if written.is_dir() else " (which does not exist yet)"
+    return (True, f"saved WORKSPACE_DIR = {written}{tail}; needs a new shell")
 
 
 def llm_rows() -> list[Row]:

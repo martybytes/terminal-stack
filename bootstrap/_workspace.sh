@@ -89,6 +89,31 @@ ts_ws_is_own_owner() {
     [ "$(ts_ws_tier_for_owner "$1")" = "src" ]
 }
 
+# Does <path> belong to <owner>? The one --org filter, shared by every verb.
+#
+# Three things the old per-verb `case "$d" in *"/$org"/*)` substring test got
+# wrong, each of which silently returned the wrong set rather than erroring:
+#   `--org github.com` matched every repo, because the host is a path segment;
+#   a REPO named like an owner matched, because any segment counted; and
+#   `--org martsamp77` matched nothing after a migration, because the tree
+#   carries the canonical owner while the flag carried what the user typed.
+# So: match the OWNER segment only, and canonicalise both sides first.
+#
+# Layout is <root>/<tier>/<host>/<owner>/<repo>, so relative to the root the
+# owner is the third segment. An empty filter always matches -- callers pass
+# "$org_filter" unguarded and expect "no filter" to mean "everything".
+ts_ws_org_match() {
+    local path="$1" org="$2" rel want got
+    [ -n "$org" ] || return 0
+    rel="${path#"${ROOT:-$(ts_ws_root 2>/dev/null)}"/}"
+    # Third segment; empty when the path is shallower than <tier>/<host>/<owner>.
+    got="$(printf '%s\n' "$rel" | awk -F/ 'NF>=3 { print $3 }')"
+    [ -n "$got" ] || return 1
+    want="$(ts_ws_lower "$(ts_ws_canon_owner "$org")")"
+    got="$(ts_ws_lower "$(ts_ws_canon_owner "$got")")"
+    [ "$got" = "$want" ]
+}
+
 # Every owner mapped to src/, space separated — used by status/sync/orphans.
 ts_ws_own_owners() {
     ts_ws_load_config

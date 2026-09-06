@@ -12,6 +12,7 @@ so the failure a person sees is "pip install textual", not a traceback.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import ClassVar
 
 from textual.app import App, ComposeResult
@@ -438,9 +439,18 @@ class SettingsApp(App[None]):
         # installed yet. A text box is still better than refusing to edit.
         self.push_screen(EditScreen(row), done)
 
+    # One writer per store, chosen by the row rather than by the key: the key
+    # alone cannot say which store it belongs to, and guessing is how a second
+    # writer gets born.
+    WRITERS: ClassVar[dict[str, Callable[[str, str], tuple[bool, str]]]] = {
+        model.LLM: model.save_llm,
+        model.WORKSPACE: model.save_workspace,
+    }
+
     def commit(self, key: str, value: str) -> None:
         row = next((r for r in self.shown if r.key == key), None)
-        writer = model.save_llm if row is not None and row.store == model.LLM else model.save
+        store = row.store if row is not None else model.SETTINGS
+        writer = self.WRITERS.get(store, model.save)
         ok, message = writer(key, value)
         self.action_reload()
         self.show_detail(message if ok else f"refused: {message}")

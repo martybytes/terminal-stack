@@ -82,6 +82,47 @@ function Get-TsWsOwnOwners {
     return @($c.Orgs.Keys | Where-Object { $c.Orgs[$_] -eq 'src' } | Sort-Object)
 }
 
+# Does <Path> belong to <Org>? The one --org filter, shared by every verb.
+# Twin of ts_ws_org_match in _workspace.sh; keep the semantics identical.
+#
+# Three things the old per-verb "-notmatch \$org\" substring test got wrong,
+# each of which silently returned the wrong set rather than erroring:
+# "--org github.com" matched every repo because the host is a path segment; a
+# REPO named like an owner matched because any segment counted; and
+# "--org martsamp77" matched nothing after a migration, because the tree
+# carries the canonical owner while the flag carried what the user typed.
+# So: match the OWNER segment only, and canonicalise both sides first.
+#
+# Layout is <root>/<tier>/<host>/<owner>/<repo>, so relative to the root the
+# owner is the third segment. An empty filter always matches -- callers pass
+# $org unguarded and expect "no filter" to mean "everything".
+function Test-TsWsOrgMatch([string]$Path, [string]$Org) {
+    if (-not $Org) { return $true }
+    $root = Get-TsWsRoot
+    if (-not $root) { return $false }
+    $rel = $Path
+    if ($rel.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) {
+        $rel = $rel.Substring($root.Length)
+    }
+    $parts = @($rel -split '[\\/]+' | Where-Object { $_ })
+    if ($parts.Count -lt 3) { return $false }
+    $got = (Get-TsWsCanonOwner $parts[2]).ToLower()
+    return $got -eq (Get-TsWsCanonOwner $Org).ToLower()
+}
+
+# The owners a run covers: every src/ owner, or just the one --org named.
+# Canonicalised, so "--org martsamp77" selects the martybytes org rather than
+# quietly selecting nothing. Returns $null (and warns) on an unknown org.
+function Get-TsWsOwnersForFilter([string]$Org) {
+    $all = Get-TsWsOwnOwners
+    if (-not $Org) { return $all }
+    $want = (Get-TsWsCanonOwner $Org).ToLower()
+    $hit = @($all | Where-Object { $_.ToLower() -eq $want })
+    if ($hit.Count) { return $hit }
+    Write-Warning "wso: '$Org' is not one of your orgs (workspace.conf lists: $($all -join ', '))"
+    return $null
+}
+
 # --------------------------------------------------------------- workspace ----
 
 # Reuses the profile's Get-TsWorkspace when it is loaded; falls back to the same

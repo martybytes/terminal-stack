@@ -67,6 +67,7 @@ Usage:
   tstack config mux [...]          the WezTerm mux domain
   tstack config wezterm [...]      build info and channel switching
   tstack config ghostty [...]      the managed Ghostty config (macOS)
+  tstack config workspace [...]    the workspace root, and moving it
 
   tstack config apps               re-pick the installed CLI tools
   tstack config tts [...]          voice notifications
@@ -111,7 +112,13 @@ NATIVE = (
 # every answer and threw them away.
 DELEGATED = ("apps", "tts", "reconfigure", "wizard")
 # Handed to another ported command rather than reimplemented here.
-HANDOFF = {"mux": "mux", "wezterm": "wezterm", "ghostty": "ghostty", "herdr": "herdr"}
+HANDOFF = {
+    "mux": "mux",
+    "wezterm": "wezterm",
+    "ghostty": "ghostty",
+    "herdr": "herdr",
+    "workspace": "workspace",
+}
 
 # The unknown-verb hint. DERIVED, not restated: three hand-written copies of
 # this list had each drifted differently -- bash omitted `memory` and `prompt`,
