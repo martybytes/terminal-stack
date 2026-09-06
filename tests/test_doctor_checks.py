@@ -161,6 +161,70 @@ def test_a_single_clone_produces_no_note(monkeypatch, tmp_path):
     assert report.results == []
 
 
+def _version(branch: str, upstream: str, dirty: bool = False) -> dict:
+    return {
+        "path": "",
+        "sha": "",
+        "short": "",
+        "branch": branch,
+        "upstream": upstream,
+        "subject": "",
+        "dirty": dirty,
+    }
+
+
+def test_a_clone_on_the_release_branch_is_ok(monkeypatch, tmp_path):
+    monkeypatch.setattr(paths, "clone_version", lambda _s: _version("main", "origin/main"))
+    report = Report()
+    doctor.check_clone_branch(report, tmp_path / "runtime")
+    assert statuses(report)["clone-branch"] == checks.OK
+
+
+def test_a_clone_on_another_live_branch_is_a_note_not_a_failure(monkeypatch, tmp_path):
+    """Testing unreleased work on a runtime clone is legitimate; say so, don't fail."""
+    monkeypatch.setattr(paths, "clone_version", lambda _s: _version("develop", "origin/develop"))
+    report = Report()
+    doctor.check_clone_branch(report, tmp_path / "runtime")
+    assert statuses(report)["clone-branch"] == checks.NOTE
+    assert report.issues == 0
+    assert "develop" in report.results[0].message
+
+
+def test_a_clone_whose_upstream_is_gone_fails(monkeypatch, tmp_path):
+    """The state that started this: branch merged and deleted, so nothing can pull."""
+    monkeypatch.setattr(paths, "clone_version", lambda _s: _version("feat/gone", ""))
+    report = Report()
+    doctor.check_clone_branch(report, tmp_path / "runtime")
+    assert statuses(report)["clone-branch"] == checks.FAIL
+    assert "feat/gone" in report.results[0].message
+
+
+def test_a_detached_head_is_named_as_such(monkeypatch, tmp_path):
+    monkeypatch.setattr(paths, "clone_version", lambda _s: _version("HEAD", ""))
+    report = Report()
+    doctor.check_clone_branch(report, tmp_path / "runtime")
+    assert "detached HEAD" in report.results[0].message
+
+
+def test_a_dev_clone_is_never_nagged_about_its_branch(monkeypatch, tmp_path):
+    """A dev checkout on a feature branch is the point of a dev checkout."""
+    monkeypatch.setattr(paths, "is_dev_clone", lambda _p: True)
+    monkeypatch.setattr(paths, "clone_version", lambda _s: _version("feat/x", ""))
+    report = Report()
+    doctor.check_clone_branch(report, tmp_path / "dev")
+    assert report.results == []
+
+
+def test_repair_refuses_to_switch_a_dirty_clone(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(paths, "is_dev_clone", lambda _p: False)
+    monkeypatch.setattr(paths, "clone_version", lambda _s: _version("feat/gone", "", dirty=True))
+    ran = []
+    monkeypatch.setattr(doctor, "_run", lambda argv, **k: ran.append(argv))
+    assert doctor.repair_clone_branch(tmp_path) == 1
+    assert ran == [], "a branch switch must not touch uncommitted work"
+    assert "uncommitted changes" in capsys.readouterr().err
+
+
 def test_git_hooks_are_only_checked_in_a_dev_clone(tmp_path):
     runtime = tmp_path / "runtime"
     (runtime / ".githooks").mkdir(parents=True)

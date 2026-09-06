@@ -82,7 +82,11 @@ canonical location, else legacy defaults; a pin with no clone behind it is warne
 about and skipped rather than obeyed. Dev clones at workspace tier paths are
 never picked up unless pinned, so `tstack update` can't mutate the tree you develop
 in. Then: prints a one-line notice if the clone sits at a legacy path (`tstack doctor
---repair` moves it); warns about any **other** clones on
+--repair` moves it); checks the clone's **branch** — every runtime clone tracks
+`main`, and one whose branch has no upstream on the remote (typically a feature
+branch that was merged and deleted) can never pull, so the update stops and names
+`tstack doctor --repair` rather than reporting "already up to date" and applying a
+stale tree; warns about any **other** clones on
 the machine — only the resolved one is updated, and a forgotten old clone would
 silently re-deploy an old profile (pwsh offers to pin the choice); fetches and lists
 the incoming commits; records the pre-pull HEAD as the rollback point; pulls
@@ -108,7 +112,14 @@ project — a folder name is not proof), that `~/.zshrc` carries the stack block
 the `doc` command, and that `zsh`/`starship` are on PATH. Leftover clones are noted
 but don't fail the check. `--quiet` hides the per-check ok lines.
 
-`tstack doctor --repair` fixes what it finds, confirming each step: offers to **move**
+A runtime clone on the wrong **branch** is reported too: on `main` it is an `ok`,
+on another live branch a note (testing unreleased work is legitimate), and with no
+upstream at all a failure — that clone can never pull. Dev clones at workspace
+tier paths are exempt, because a feature branch is the whole point of one.
+
+`tstack doctor --repair` fixes what it finds, confirming each step: returns a
+runtime clone to `main` when its branch has drifted or lost its upstream (clean
+trees only — it never switches branches under uncommitted work); offers to **move**
 a legacy-path clone to the canonical location (git state intact) — or, when that
 location is **already occupied**, switches to the clone living there and offers the
 other one for removal, since the move itself refuses an existing destination and the

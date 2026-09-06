@@ -767,7 +767,7 @@ The fix is to treat `sourceDir` as something the installer **owns and corrects**
 
 ## Why re-clone fresh (not adopt-in-place) when an old clone is found
 
-When the installer finds an old clone at a different path, it clones fresh to the chosen location and *offers to delete* the old one, rather than adopting the old clone where it sits. Adopt-in-place is less disruptive but inherits whatever state the old clone carried — a detached HEAD, a half-finished rebase, a wrong branch, local edits — and silently makes that the source of truth. A fresh clone is guaranteed to be `main` at a known-good commit, which is what an *installer* (as opposed to `tstack update`) should guarantee. Deletion is never automatic: the cleanup checklist shows each old clone's last commit, pre-ticks it, and removes nothing without an explicit confirmation; the keep-list (`~/.zshrc.local`/`profile.local.ps1`, `~/.doc.local`, rollback state, `*.local.md`) is never offered.
+When the installer finds an old clone at a different path, it clones fresh to the chosen location and *offers to delete* the old one, rather than adopting the old clone where it sits. Adopt-in-place is less disruptive but inherits whatever state the old clone carried — a detached HEAD, a half-finished rebase, a wrong branch, local edits — and silently makes that the source of truth. A fresh clone is guaranteed to be the release branch at a known-good commit, which is what an *installer* (as opposed to `tstack update`) should guarantee. That sentence was false for nine days — `git clone` took no `--branch`, so it landed whatever GitHub's default branch was — and the section below is what made it true again. Deletion is never automatic: the cleanup checklist shows each old clone's last commit, pre-ticks it, and removes nothing without an explicit confirmation; the keep-list (`~/.zshrc.local`/`profile.local.ps1`, `~/.doc.local`, rollback state, `*.local.md`) is never offered.
 
 ## Why headless is auto-detected (and what it changes)
 
@@ -971,6 +971,79 @@ the canonical path, by design. That combination used to be a dead end, so `-Repa
 resolves it directly: if the occupant is a real stack clone it becomes the one in use and
 the cleanup menu offers the other; if it is merely a directory in the way, it says so and
 names the fix.
+
+## One branch, because two of them broke the installer
+
+`curl … /main/install-mac.sh | bash` died on a machine that had been running the
+stack for months:
+
+```
+Your configuration specifies to merge with the ref 'refs/heads/feat/local-bin-bootstrap'
+from the remote, but no such ref was fetched.
+```
+
+The runtime clone was sitting on a feature branch that had been merged and
+deleted upstream. That is the visible half. The invisible half is why it was on
+one at all, and why nothing had noticed.
+
+**The installer and the installed tree came from different branches.** Every
+documented one-liner — `README.md`, `INSTALL.md`, `install.ps1`'s own printed
+hints — fetches `install-*.sh` from `main`. That script then ran `git clone
+"$REPO_URL" "$TARGET_DIR"` with no `--branch`, which takes the repo's **default**
+branch. On 08/28/2026 the default became `develop`. From that day, the script you
+ran came from the release branch and the tree it installed came from the
+integration branch, and no test, doc or check anywhere named a branch, so nothing
+could see it. `ts_relocate_clone` preserves the current branch across a move, so
+machines installed before that date stayed on `main` and machines installed after
+landed on `develop`, with nothing reconciling the two.
+
+**`tstack update` read the broken state as a healthy one.** It decided whether
+anything was incoming from the output of `git log --oneline 'HEAD..@{u}'` with
+stderr discarded. Empty output means "nothing to pull" — and it is also what that
+command produces when it **fails**, which it does in all three of: no tracking
+branch, a detached HEAD, and a tracking branch whose remote ref is gone. So a
+clone on a deleted branch printed `==> already up to date`, exited 0, applied the
+stale tree, and did that forever. The `git pull --ff-only` that would have
+surfaced the error only runs inside the `if incoming` arm, so it was never
+reached. Worse than the installer's loud crash, because nothing ever said so.
+
+Three changes, and one deletion of a distinction:
+
+1.  **`RELEASE_BRANCH` is a constant, carried six times.** `tstack/paths.py` holds
+    it; the four installers and the two shells repeat the literal because they
+    cannot import Python, and the installers run before any clone exists.
+    `tests/test_release_branch.py` reads all seven and fails on drift — the same
+    shape as `tests/test_apps_catalog.py`, and for the same reason.
+2.  **The installers pin it and realign an existing clone.** `git clone --branch`,
+    plus `ts_align_branch` / `Set-TsCloneBranch` before the pull that the
+    misalignment breaks. A clone with no upstream is returned to the release
+    branch without asking, because that state is broken rather than chosen; a
+    clone on a *live* other branch is asked about, defaulting to switching, and
+    left alone when nobody is there to answer, because that one may be a
+    deliberate test of unreleased work. Neither ever touches a dirty tree —
+    switching branches under uncommitted work either fails or carries it across,
+    and both are things to do to someone's work only with their say-so.
+3.  **Both update twins ask for the upstream by name** (`rev-parse --abbrev-ref
+    --symbolic-full-name '@{u}'`) instead of inferring it from an empty diff, and
+    fetch with `--prune` — without which a deleted branch still looks alive
+    through its stale remote-tracking ref, which is the version of this bug that
+    survives a `git fetch`. No upstream now stops the update and names the
+    repair; it never applies. `tstack doctor`'s `check_clone_branch` is the
+    standing version, and `--repair` performs the switch.
+
+The distinction deleted is `develop` itself. Having the default branch and the
+release branch be different branches bought nothing here — this is a
+single-maintainer repo where every phase branch is already gated by protection
+and full CI on the way in — and it cost an install, silently, for nine days.
+`main` is now the default, the integration branch and the release branch, and
+`AGENTS.md` § Branches is the authority. The pin in the installers stays anyway:
+it is what stops a future settings change on GitHub from deciding what an install
+gets.
+
+**Dev clones are exempt from all of it.** A checkout at a workspace tier path is
+where branches are supposed to be, and `check_clone_branch` returns early there —
+same reasoning as `check_clone_location`'s dev-clone arm. A check that nags where
+the behaviour is correct trains the reader to ignore it.
 
 ## Why the wizard re-prompts instead of defaulting on bad input
 

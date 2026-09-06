@@ -19,20 +19,25 @@ invariants are in `CLAUDE.md`; the two are deliberately separate.
 
 ## Branches
 
-`develop` is the default branch and the integration branch. `main` is the
-release branch: **protected**, and reachable only through a pull request whose
-CI is green.
+`main` is the default branch, the integration branch and the release branch:
+**protected**, and reachable only through a pull request whose CI is green.
 
 - **One branch per phase**, named for the work (`feat/…`, `fix/…`, `docs/…`),
-  cut from `develop`.
-- Merge with `git merge --no-ff` into `develop`. Never commit straight to
-  `main`, never force-push.
-- **Push the phase branch, not `develop` or `main`.** The user pulls it
-  deliberately.
-- `develop` → `main` is a pull request, always. Protection on `main` requires
-  one and requires every CI check to pass, so this is not a convention that can
-  be forgotten — but note that admins are exempt, which makes it a rule you keep
-  rather than one that keeps you.
+  cut from `main`.
+- Every branch reaches `main` by pull request, always. Never commit straight to
+  `main`, never force-push. Protection requires the PR and requires every CI
+  check to pass, so this is not a convention that can be forgotten — but note
+  that admins are exempt, which makes it a rule you keep rather than one that
+  keeps you.
+- **Push the phase branch, not `main`.** The user pulls it deliberately.
+- **`main` is also what an installed machine tracks** (`tstack/paths.py`
+  `RELEASE_BRANCH`, pinned by all four installers). The two used to be different
+  branches, which is how a documented one-liner fetched from `main` came to clone
+  the integration branch instead. Anything merged here is on its way to every
+  machine on the next `tstack update`.
+- `develop` was the integration branch until 09/06/2026. Keeping the default and
+  the release branch apart bought nothing and cost an install: see
+  `docs/decisions.md` § "One branch, because two of them broke the installer".
 - The port described in `REVAMP-PLAN.md` is phased; each phase is its own branch
   and must meet the completion contract below before the next one starts.
 
