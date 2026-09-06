@@ -137,6 +137,7 @@ $saveArgs = @{
     AgentmemoryEnabled = $wizard.Agentmemory
     MemoryBackend      = $wizard.MemoryBackend
     StarshipPreset     = $wizard.StarshipPreset
+    HerdrConfig        = $wizard.Herdr
 }
 # Added only when the wizard actually produced one. Save-TsConfig carries a
 # stored value forward on the strength of $PSBoundParameters.ContainsKey, so
@@ -161,8 +162,9 @@ Install-TsTerminals -Selected $wizard.Terminals
 # is also why the two non-winget routes below are repeated here rather than
 # delegated: skip either one and the tools it owns are silently never installed.
 foreach ($id in $selectedApps) {
-    if (Test-TsAppIsAi $id) { continue }   # not winget packages; handled below
-    if (Test-TsAppIsPy $id) { continue }   # PyPI, not winget; handled below
+    if (Test-TsAppIsAi $id) { continue }      # not winget packages; handled below
+    if (Test-TsAppIsPy $id) { continue }      # PyPI, not winget; handled below
+    if (Test-TsAppIsHerdr $id) { continue }   # herdr.dev's own installer; handled below
     if ($script:TsWingetIds.ContainsKey($id)) {
         Install-WingetPackage -Id $script:TsWingetIds[$id] -Because $id | Out-Null
     } else {
@@ -177,6 +179,7 @@ if (@($selectedApps | Where-Object { Test-TsAppIsPy $_ }).Count) {
     foreach ($id in $selectedApps) { if (Test-TsAppIsPy $id) { Install-TsPyTool $id } }
 }
 foreach ($id in $selectedApps) { if (Test-TsAppIsAi $id) { Install-TsAiCli $id } }
+foreach ($id in $selectedApps) { if (Test-TsAppIsHerdr $id) { Install-TsHerdr } }
 Update-TsSessionPath
 Show-TsInstalledApps $selectedApps
 

@@ -235,14 +235,12 @@ def test_the_installer_never_runs_apt_unguarded():
 
 
 def _linux_catalog_ids() -> list[str]:
-    """Catalog ids a Linux box could install, minus the AI route.
+    """Every catalog id a Linux box could install, routed or not.
 
-    The `ai` group is an install ROUTE, not a package: its members go to
-    ts_install_ai_cli and no package manager carries any of them.
+    Which of these pacman is responsible for is decided in bash, by the route
+    functions themselves -- see the test below.
     """
-    return [
-        a.id for a in apps.catalog() if a.group != "ai" and a.platforms in ("all", "posix", "linux")
-    ]
+    return [a.id for a in apps.catalog() if a.platforms in ("all", "posix", "linux")]
 
 
 @pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
@@ -256,8 +254,22 @@ def test_every_installable_catalog_id_has_an_arch_package():
     """
     ids = _linux_catalog_ids()
     assert ids, "the catalog reader returned nothing; the rest of this is vacuous"
-    script = f". bootstrap/_common-arch.sh >/dev/null 2>&1\nfor i in {' '.join(ids)}; do\n"
-    script += '  ts_arch_pkg "$i" >/dev/null 2>&1 || echo "$i"\ndone\n'
+    # ASK BASH which ids pacman is even responsible for, rather than restating the
+    # rule here. Some tools arrive by an explicit route instead of a package
+    # manager -- the `ai` group through ts_install_ai_cli, and `herdr` through
+    # herdr.dev's own installer -- and apps.conf says the route is an id LIST, not
+    # a group, precisely so a tool can sit in the group it belongs to. A Python
+    # filter on `group != "ai"` missed herdr and failed this gate the first time
+    # the two features met; the route functions cannot drift from themselves.
+    script = (
+        ". bootstrap/_config.sh >/dev/null 2>&1\n"
+        ". bootstrap/_common-arch.sh >/dev/null 2>&1\n"
+        f"for i in {' '.join(ids)}; do\n"
+        '  ts_app_is_ai "$i" && continue\n'
+        '  ts_app_is_herdr "$i" && continue\n'
+        '  ts_arch_pkg "$i" >/dev/null 2>&1 || echo "$i"\n'
+        "done\n"
+    )
     got = subprocess.run(
         [BASH, "-c", script],
         cwd=ROOT,

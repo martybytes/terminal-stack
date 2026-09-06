@@ -40,12 +40,12 @@ from __future__ import annotations
 
 import os
 import shutil
-import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 from . import platform as plat
+from . import proc
 
 Say = Callable[[str], None]
 
@@ -327,11 +327,8 @@ def status(say: Say) -> int:
 def _run(argv: list[str]) -> str:
     if not shutil.which(argv[0]):
         return ""
-    try:
-        out = subprocess.run(argv, capture_output=True, text=True, timeout=30, check=False)
-    except (OSError, subprocess.SubprocessError):
-        return ""
-    return out.stdout.strip()
+    out = proc.capture(argv, timeout=30)
+    return "" if out is None else out.stdout.strip()
 
 
 def theme_mode() -> str:

@@ -316,6 +316,12 @@ def _stub_everything(monkeypatch, tmp_path, *, healthy: bool) -> None:
         (home / ".claude/plugins/cache/agentmemory/agentmemory").mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("CODEX_HOME", str(home / ".codex"))
     monkeypatch.setattr(doctor.shutil, "which", lambda t: "/usr/bin/" + t)
+    # herdr is optional, and its checks read the real machine. The `which` stub
+    # above answers yes to every program, so without this the sandbox grows a
+    # herdr AND a tmux and reports the prefix collision between them -- on a box
+    # that has neither. Say which machine this is pretending to be rather than
+    # inheriting whatever the developer running the suite happens to have.
+    monkeypatch.setattr(doctor.herdr, "binary", lambda: None)
 
 
 def test_collect_runs_every_check_without_touching_the_machine(monkeypatch, tmp_path):

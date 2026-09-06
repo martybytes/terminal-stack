@@ -1520,7 +1520,16 @@ function Set-TerminalStackConfig {
             Invoke-TsSync $src
             Write-Host '==> done. (atuin has no PowerShell integration; this affects WSL shells only.)'
         }
-        default { Write-Warning "tstack config: unknown command '$Action' (show, get, set, leader, theme, tmux, apps, tts, mux, restore, atuin, prompt, ghostty, memory, agents, wezterm, wizard)" }
+        # Same hand-off, for the same reason: `tstack herdr` is the one Python
+        # implementation and it carries verbs of its own (status/on/off/update).
+        # Reimplementing the splice here is exactly the drift the ported commands
+        # exist to end -- and it would be a SECOND writer of a file the stack
+        # only part-owns.
+        'herdr'  {
+            $herdrArgs = @(@($Value) + @($Rest) | Where-Object { $_ })
+            Invoke-TstackSub -Name 'herdr' -Forwarded $herdrArgs
+        }
+        default { Write-Warning "tstack config: unknown command '$Action' (show, get, set, leader, theme, tmux, apps, tts, mux, restore, atuin, prompt, ghostty, herdr, memory, agents, wezterm, wizard)" }
     }
 }
 

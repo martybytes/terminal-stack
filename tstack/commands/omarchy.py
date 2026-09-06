@@ -17,7 +17,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .. import omarchy, paths, store
+from .. import omarchy, paths, proc, store
 from .. import platform as plat
 
 HELP = """tstack omarchy - the Omarchy desktop integration.
@@ -99,14 +99,10 @@ def _update_check() -> int:
     git = ["git", "-C", str(source)]
     try:
         subprocess.run([*git, "fetch", "--quiet"], check=False, timeout=120)
-        out = subprocess.run(
-            [*git, "log", "--oneline", "HEAD..@{u}"],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=60,
-        )
     except (OSError, subprocess.SubprocessError):
+        return 0
+    out = proc.capture([*git, "log", "--oneline", "HEAD..@{u}"], timeout=60)
+    if out is None:
         return 0
     incoming = [line for line in out.stdout.splitlines() if line.strip()]
     if not incoming:

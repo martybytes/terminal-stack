@@ -1053,6 +1053,12 @@ def test_the_app_prompt_runs_on_a_fresh_machine_under_set_u():
         "export TS_APPS=recommended TS_CC_TTS=off TS_MEMORY_BACKEND=none TS_CAVEMAN=off\n"
         "export TS_ATUIN=off TS_WEZ_MUX=off TS_WEZ_RESTORE=off TS_HEADROOM_CURSOR=mcp\n"
         "export TS_STARSHIP_PRESET=terminal-stack TS_TMUX=ctrl-b\n"
+        # Every question this script does not pin is one it will sit and wait on.
+        # TS_HERDR is only asked when herdr is installed or was just ticked, so
+        # omitting it passed on a machine without herdr and hung on one with it --
+        # which is exactly the sort of "passes here, hangs there" the pin exists
+        # to prevent. A new question belongs in this list on the day it lands.
+        "export TS_HERDR=off\n"
         "ts_wizard_collect >/dev/null\n"
         'printf "%s" "$TS_WIZ_APPS"\n'
     )
