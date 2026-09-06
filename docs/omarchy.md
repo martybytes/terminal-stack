@@ -37,7 +37,7 @@ before anything was written.
 | `~/.config/starship.toml` | **stack** | The prompt is the part you chose; `tstack config prompt` still owns it |
 | `chezmoi` binary | **Omarchy** (pacman, `extra/chezmoi`) | Debian has no package, which is the only reason the apt side curls it |
 | Language runtimes | **Omarchy** (mise) | `omarchy install dev-env <lang>` is entirely `mise use --global`, and the shims are on PATH from `env-bootstrap`. `fnm`, `node` and `python` are vetoed from the catalog here |
-| Nerd Font | **Omarchy** (`ttf-jetbrains-mono-nerd-basic`) | The stack's download step guards on `fc-list`, which that package already satisfies, so it self-skips |
+| Nerd Font | **Omarchy** (`ttf-jetbrains-mono-nerd-basic`) | The stack's download step guards on `fc-list`, which that package already satisfies, so it self-skips. It did not, until a real install on this box showed it downloading ~30 MB anyway — see below |
 | `~/.zshrc`, `~/.wezterm.lua`, `doc`/`ws`/`wso`/`tstack` | **stack** | The terminal is the stack's half of the machine |
 
 ## The tmux trap, and what the stack does about it
@@ -342,6 +342,34 @@ between them and the network — which is why it is a gate and not a convention.
 
 The Omarchy-specific part is therefore only the access question above, not
 exposure.
+
+## The font guard, and why a real install found it
+
+The ownership table says the Nerd Font download self-skips because
+`ttf-jetbrains-mono-nerd-basic` already satisfies the `fc-list` guard. Installing
+on a throwaway account showed it downloading anyway, every time.
+
+The guard was `fc-list | grep -q "JetBrainsMono Nerd Font"`, and the bootstraps
+run under `set -euo pipefail`. `grep -q` exits the instant it matches; `fc-list`
+is still writing thousands of lines into a pipe nobody is reading; SIGPIPE makes
+the **pipeline** exit 141; and under `pipefail` the guard therefore reports
+"missing" *precisely because it found the font*.
+
+```
+$ fc-list | grep -c 'JetBrainsMono Nerd Font'      # 4 families present
+$ bash -c 'set -o pipefail; fc-list | grep -q "JetBrainsMono Nerd Font"; echo $?'
+141
+```
+
+It is a race, which is why it survived: on a machine with few fonts `fc-list`
+finishes before `grep` exits and the guard is right. It is also not
+Omarchy-specific — it was wrong on Debian and macOS too, just less often.
+
+Fixed by capturing first and matching with `case`, the idiom this repo already
+teaches one function away (`ts_report_installed_apps`: "Capture FIRST, then
+process", after a pipeline under `pipefail` killed the whole function). Two
+behavioural tests pin both directions, plus a scan for the same shape around the
+other high-output producers.
 
 ## Known gaps
 

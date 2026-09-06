@@ -3296,3 +3296,97 @@ def test_the_theme_key_is_omarchys_on_omarchy():
     for key in ('"statusLine"', '"hooks"'):
         line = next(ln for ln in src.splitlines() if key in ln)
         assert "distroId" not in line, f"{key} must not be distro-gated"
+
+
+# --- the Nerd Font guard, under pipefail --------------------------------------
+
+
+def _font_guard_script(fc_list_body: str) -> str:
+    """common_nerd_font_jetbrains, with its world stubbed and pipefail ON.
+
+    pipefail is the whole point: the bootstraps set it, and it is what turned
+    this guard inside out.
+    """
+    lib = (ROOT / "bootstrap/_common-posix.sh").read_text(encoding="utf-8")
+    fn = re.search(r"(?m)^common_nerd_font_jetbrains\(\) \{.*?^\}", lib, re.S).group(0)
+    return (
+        "set -euo pipefail\n"
+        'INFO=""\n'
+        "ts_is_headless() { return 1; }\n"
+        # The `;` matters: bash rejects `{ cmd }` without a terminator.
+        f"fc-list() {{ {fc_list_body}; }}\n"
+        'curl() { echo "DOWNLOAD-ATTEMPTED"; }\n'
+        "unzip() { :; }\n"
+        "fc-cache() { :; }\n"
+        "mktemp() { echo /dev/null; }\n"
+        f"{fn}\n"
+        "common_nerd_font_jetbrains\n"
+    )
+
+
+def _run_font_guard(fc_list_body: str) -> str:
+    got = subprocess.run(
+        [BASH, "-c", _font_guard_script(fc_list_body)],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+        start_new_session=True,
+    )
+    return got.stdout + got.stderr
+
+
+# A match on the FIRST line, then thousands more. That is the exact race: with
+# `fc-list | grep -q`, grep exits on line one while fc-list is still writing, and
+# under pipefail the SIGPIPE (141) makes the pipeline "fail" -- so the guard
+# concludes the font is MISSING precisely because it found it.
+_MATCH_THEN_BULK = (
+    'echo "/f.ttf: JetBrainsMono Nerd Font:style=Regular"; '
+    "i=0; while [ $i -lt 4000 ]; do "
+    'echo "/other$i.ttf: Some Other Font:style=Regular"; i=$((i+1)); done'
+)
+
+
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+def test_the_font_guard_is_not_inverted_by_pipefail():
+    """THE regression.
+
+    Measured on a fresh Omarchy account: fc-list matched 4 JetBrainsMono Nerd
+    Font families and the guard downloaded ~30 MB anyway, on every single
+    install. It is a race -- on a machine with few fonts fc-list finishes first
+    and the guard is right -- which is why it survived this long.
+    """
+    out = _run_font_guard(_MATCH_THEN_BULK)
+    assert "DOWNLOAD-ATTEMPTED" not in out, (
+        "the font is present and the guard downloaded anyway (pipefail + grep -q)"
+    )
+    assert "already in fontconfig" in out
+
+
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+def test_the_font_guard_still_downloads_when_the_font_really_is_absent():
+    """The other half. A guard that never downloads is not a fix."""
+    out = _run_font_guard('echo "/other.ttf: Some Other Font:style=Regular"')
+    assert "DOWNLOAD-ATTEMPTED" in out
+    assert "already in fontconfig" not in out
+
+
+def test_no_bootstrap_library_pipes_a_long_producer_into_grep_q():
+    """`<something that writes a lot> | grep -q` is unsafe under pipefail.
+
+    Scoped to the producers that actually write enough to lose the race --
+    `fc-list` and `ps` -- rather than to every `grep -q` in the tree: a producer
+    emitting one line finishes before grep exits and is fine, and a blanket ban
+    would be noise nobody could act on.
+    """
+    offenders = []
+    for path in sorted((ROOT / "bootstrap").glob("*.sh")):
+        for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if line.strip().startswith("#"):
+                continue
+            if re.search(r"\b(fc-list|ps)\b[^|]*\|\s*grep\s+-q", line):
+                offenders.append(f"{path.name}:{n}: {line.strip()}")
+    assert not offenders, (
+        "capture the output first and match with `case`, or grep -c: under "
+        "pipefail these lose to SIGPIPE.\n" + "\n".join(offenders)
+    )

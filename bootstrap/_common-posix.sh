@@ -63,27 +63,47 @@ common_nerd_font_jetbrains() {
         echo "$INFO Headless server — skipping Nerd Font download (no GUI terminal renders it here)."
         return 0
     fi
-    if ! fc-list 2>/dev/null | grep -q "JetBrainsMono Nerd Font"; then
-        echo "$INFO Downloading JetBrainsMono Nerd Font zip"
-        mkdir -p "$HOME/.local/share/fonts/JetBrainsMonoNerdFont"
-        local tmp_zip
-        tmp_zip=$(mktemp /tmp/jbm-nf.XXXXXX.zip)
-        curl -fL --silent --show-error \
-            -o "$tmp_zip" \
-            https://github.com/ryanoasis/nerd-fonts/releases/latest/download/JetBrainsMono.zip
-        # `-o` overwrites without prompting. Without it, a re-run where the
-        # files already exist on disk (e.g. fontconfig lost them but the .ttf
-        # files survived) prompts "replace ...? [y]es..." on stdin, which is
-        # /dev/null under the curl|bash installer flow and aborts the unzip.
-        unzip -qo "$tmp_zip" -d "$HOME/.local/share/fonts/JetBrainsMonoNerdFont/"
-        rm -f "$tmp_zip"
-        fc-cache -f "$HOME/.local/share/fonts" >/dev/null
-    else
-        # The guard is fontconfig, not a package name, and that is what makes
-        # this a no-op on Omarchy: ttf-jetbrains-mono-nerd-basic already
-        # satisfies it, so no second copy of the family lands in ~/.local/share.
-        echo "$INFO JetBrainsMono Nerd Font already in fontconfig"
-    fi
+
+    # Capture FIRST, then match. NOT `fc-list | grep -q`, which is broken here in
+    # a way that hides itself: the bootstraps run under `set -euo pipefail`,
+    # `grep -q` exits the moment it matches, fc-list is still writing thousands of
+    # lines into a pipe nobody is reading any more, and SIGPIPE makes the PIPELINE
+    # exit 141. Under pipefail the guard therefore reported "missing" precisely
+    # when the font IS present, and every install re-downloaded ~30 MB it already
+    # had. Measured on a fresh Omarchy account: fc-list matches 4 families, guard
+    # says download.
+    #
+    # It is a race, which is why nobody noticed: on a machine with few fonts
+    # fc-list finishes before grep exits and the guard is right. The repo has met
+    # this shape before -- see the "Capture FIRST, then process" note in
+    # ts_report_installed_apps, where a pipeline under pipefail killed the whole
+    # function.
+    #
+    # The guard is fontconfig, not a package name, and that is what makes this a
+    # no-op on Omarchy: ttf-jetbrains-mono-nerd-basic already satisfies it, so no
+    # second copy of the family lands in ~/.local/share.
+    local installed_fonts=""
+    installed_fonts="$(fc-list 2>/dev/null || true)"
+    case "$installed_fonts" in
+        *"JetBrainsMono Nerd Font"*)
+            echo "$INFO JetBrainsMono Nerd Font already in fontconfig"
+            return 0 ;;
+    esac
+
+    echo "$INFO Downloading JetBrainsMono Nerd Font zip"
+    mkdir -p "$HOME/.local/share/fonts/JetBrainsMonoNerdFont"
+    local tmp_zip
+    tmp_zip=$(mktemp /tmp/jbm-nf.XXXXXX.zip)
+    curl -fL --silent --show-error \
+        -o "$tmp_zip" \
+        https://github.com/ryanoasis/nerd-fonts/releases/latest/download/JetBrainsMono.zip
+    # `-o` overwrites without prompting. Without it, a re-run where the files
+    # already exist on disk (e.g. fontconfig lost them but the .ttf files
+    # survived) prompts "replace ...? [y]es..." on stdin, which is /dev/null under
+    # the curl|bash installer flow and aborts the unzip.
+    unzip -qo "$tmp_zip" -d "$HOME/.local/share/fonts/JetBrainsMonoNerdFont/"
+    rm -f "$tmp_zip"
+    fc-cache -f "$HOME/.local/share/fonts" >/dev/null
 }
 
 # Prompt helper for curl|bash flows: stdin is the script pipe, so read from

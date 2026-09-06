@@ -4,6 +4,23 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+### Fixed
+
+- **The Nerd Font guard was inverted by `pipefail`, and re-downloaded ~30 MB on
+  every install (09/01/2026).** Found by installing on a throwaway account on a
+  real Omarchy desktop, which is the only way it could have been found. The
+  guard was `fc-list | grep -q "JetBrainsMono Nerd Font"`; the bootstraps run
+  under `set -euo pipefail`; `grep -q` exits on the first match while `fc-list`
+  is still writing thousands of lines into a pipe nobody is reading; SIGPIPE
+  makes the PIPELINE exit 141. So the guard reported "missing" precisely because
+  it had found the font. A race, which is why it survived -- on a machine with
+  few fonts `fc-list` finishes first and the guard is right -- and NOT
+  Omarchy-specific: it was wrong on Debian and macOS too, just less often.
+  Fixed by capturing first and matching with `case`, the idiom the repo already
+  teaches one function away. Two behavioural tests pin both directions (present
+  -> skip, absent -> download) and a third scans the bootstrap libraries for the
+  same shape around other high-output producers.
+
 ### Added
 
 - **Omarchy's own zsh is the base there now, not oh-my-zsh (09/01/2026).**
