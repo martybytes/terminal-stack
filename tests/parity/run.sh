@@ -29,12 +29,25 @@ cd "$root"
 # targets below exist to gate, a bare `docker` is permission-denied and the
 # whole parity run is unavailable.
 #
-# Escalates only when a plain `docker info` fails AND a passwordless
+# A ROOTLESS daemon is checked before sudo, because it is this user's own and
+# needs no elevation at all -- the third answer to that trade, next to the group
+# and to sudoless Docker. `docker context use rootless` already makes a bare
+# `docker` find it, so the first branch usually wins; the socket probe is for a
+# box that has the daemon and has not made it the default context, which would
+# otherwise escalate for nothing.
+#
+# Escalates only when neither of those reaches a daemon AND a passwordless
 # `sudo docker info` works: nothing here prompts, and nothing here changes the
-# machine's security posture. If neither works the first docker call fails with
-# its own message, which is the right one to read.
+# machine's security posture. If none works the first docker call fails with its
+# own message, which is the right one to read.
 DOCKER=(docker)
-if ! docker info >/dev/null 2>&1 && sudo -n docker info >/dev/null 2>&1; then
+rootless_sock="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/docker.sock"
+if docker info >/dev/null 2>&1; then
+    :
+elif [ -S "$rootless_sock" ] && DOCKER_HOST="unix://$rootless_sock" docker info >/dev/null 2>&1; then
+    DOCKER=(env "DOCKER_HOST=unix://$rootless_sock" docker)
+    echo "==> using the rootless daemon at $rootless_sock"
+elif sudo -n docker info >/dev/null 2>&1; then
     DOCKER=(sudo docker)
     echo "==> using 'sudo docker' (the daemon is not reachable as this user)"
 fi

@@ -4,6 +4,38 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+### Changed
+
+- **The parity runner prefers a rootless daemon over `sudo` (09/07/2026).**
+  Omarchy leaves the install user out of the `docker` group on purpose — it is
+  root-equivalent — so a bare `docker` is permission-denied and
+  `tests/parity/run.sh` fell straight to `sudo docker`. On a box where that wants
+  a password, an unattended caller (`scripts/preflight.sh`) could only skip the
+  whole parity run, which is how a Python 3.10 failure reached CI that Ubuntu
+  22.04 would have caught locally in two seconds.
+
+  The probe is now three-deep: a plain `docker` (which a `rootless` context
+  already satisfies), then a rootless socket at `$XDG_RUNTIME_DIR/docker.sock`,
+  then `sudo -n docker`. Sudo comes **last**, so a machine that needs no
+  elevation is never asked for it, and every probe stays non-interactive.
+  `tests/test_distro.py` pins that ordering — escalating when it did not have to
+  is the regression worth catching.
+
+  `scripts/preflight.sh` also moves its body into `main()`. bash reads a script
+  incrementally by byte offset, and this one now runs for minutes while the
+  parity images build — editing it in that window shifts every later offset, so
+  bash resumes mid-token and dies with a syntax error on a valid line. That
+  happened during this change, on a file `bash -n` accepts. A function body is
+  parsed in full before it is called, which is why get.docker.com does the same.
+
+  `doc linux/docker` gains the Omarchy section this needs: the three ways to
+  reach a daemon and what each costs, the Arch specifics (the rootless files are
+  AUR, and the package ships the systemd user units so no setuptool has to be
+  forced past a running system socket), why the **context** rather than
+  `DOCKER_HOST` — a session-wide `DOCKER_HOST` drags Lazydocker onto the rootless
+  daemon where it sees none of the rootful containers — and how to move a named
+  volume between the two engines.
+
 ### Added
 
 - **`scripts/preflight.sh`, and two guards for the axes no container can reach

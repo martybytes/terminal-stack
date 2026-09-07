@@ -30,145 +30,166 @@
 # Bash 3.2 clean: this repo runs on macOS, where /bin/bash is 3.2.
 set -u
 
-root="$(cd "$(dirname "$0")/.." && pwd)"
-cd "$root" || exit 1
-# shellcheck source=/dev/null
-. "$root/.githooks/_gates.sh"
+# EVERYTHING BELOW LIVES IN main(), AND THAT IS LOAD-BEARING.
+#
+# bash reads a script INCREMENTALLY, by byte offset, as it executes. This one
+# runs for minutes -- the parity containers build images -- and editing it in
+# that window shifts every later offset, so bash resumes mid-token and dies
+# with a syntax error on a line that is perfectly valid. Measured, not
+# theorised: a one-line comment edit during a live run produced
+#
+#     ./scripts/preflight.sh: line 155: syntax error near unexpected token `('
+#
+# on a file that `bash -n` accepts. A function body is parsed in full before
+# it is called, so the edit cannot reach the run in progress. Same reason
+# get.docker.com wraps itself.
+main() {
+    root="$(cd "$(dirname "$0")/.." && pwd)"
+    cd "$root" || exit 1
+    # shellcheck source=/dev/null
+    . "$root/.githooks/_gates.sh"
 
-PARITY=1
-MERGE=1
-BASE="origin/main"
-for arg in "$@"; do
-    case "$arg" in
-        --no-parity) PARITY=0 ;;
-        --no-merge)  MERGE=0 ;;
-        --base=*)    BASE="${arg#--base=}" ;;
-        -h|--help)
-            echo 'scripts/preflight.sh [--no-parity] [--no-merge] [--base=<ref>]'
-            echo
-            echo '  Runs the gates, the suite, the Linux parity containers and a'
-            echo '  test-merge against main. macOS and Windows are CI-only.'
-            exit 0 ;;
-        *) echo "preflight: unknown argument '$arg'" >&2; exit 2 ;;
+    PARITY=1
+    MERGE=1
+    BASE="origin/main"
+    for arg in "$@"; do
+        case "$arg" in
+            --no-parity) PARITY=0 ;;
+            --no-merge)  MERGE=0 ;;
+            --base=*)    BASE="${arg#--base=}" ;;
+            -h|--help)
+                echo 'scripts/preflight.sh [--no-parity] [--no-merge] [--base=<ref>]'
+                echo
+                echo '  Runs the gates, the suite, the Linux parity containers and a'
+                echo '  test-merge against main. macOS and Windows are CI-only.'
+                exit 0 ;;
+            *) echo "preflight: unknown argument '$arg'" >&2; exit 2 ;;
+        esac
+    done
+
+    failed=""
+    note() { printf '\n==> %s\n' "$1"; }
+    fail() { failed="$failed $1"; printf '!! %s FAILED\n' "$1"; }
+
+    # ---------------------------------------------------------------- the gates --
+    ruff="$(gate_runner ruff)"
+    mypy="$(gate_runner mypy)"
+    pytest="$(gate_runner pytest)"
+
+    note "lint / format / types"
+    if [ -n "$ruff" ]; then
+        $ruff check tstack tests || fail "ruff check"
+        $ruff format --check tstack || fail "ruff format"
+    else
+        echo "   ruff NOT RUN - install it, or uv"
+        fail "ruff (unavailable)"
+    fi
+    if [ -n "$mypy" ]; then
+        $mypy || fail "mypy"
+    else
+        echo "   mypy NOT RUN - install it, or uv"
+        fail "mypy (unavailable)"
+    fi
+
+    # pytest-cov has to live in the SAME environment as pytest, so an ephemeral uvx
+    # run names it rather than probing for it here -- the rule .githooks/pre-push
+    # already writes down. Without it the run still happens, without the floor;
+    # silently dropping the whole suite would be worse than dropping the number.
+    case "$pytest" in
+        uvx*) cov="uvx --quiet --from pytest --with pytest-cov pytest"; have_cov=1 ;;
+        "")   cov=""; have_cov=0 ;;
+        *)    cov="$pytest"
+              if $pytest --co -q --cov >/dev/null 2>&1; then have_cov=1; else have_cov=0; fi ;;
     esac
-done
 
-failed=""
-note() { printf '\n==> %s\n' "$1"; }
-fail() { failed="$failed $1"; printf '!! %s FAILED\n' "$1"; }
-
-# ---------------------------------------------------------------- the gates --
-ruff="$(gate_runner ruff)"
-mypy="$(gate_runner mypy)"
-pytest="$(gate_runner pytest)"
-
-note "lint / format / types"
-if [ -n "$ruff" ]; then
-    $ruff check tstack tests || fail "ruff check"
-    $ruff format --check tstack || fail "ruff format"
-else
-    echo "   ruff NOT RUN - install it, or uv"
-    fail "ruff (unavailable)"
-fi
-if [ -n "$mypy" ]; then
-    $mypy || fail "mypy"
-else
-    echo "   mypy NOT RUN - install it, or uv"
-    fail "mypy (unavailable)"
-fi
-
-# pytest-cov has to live in the SAME environment as pytest, so an ephemeral uvx
-# run names it rather than probing for it here -- the rule .githooks/pre-push
-# already writes down. Without it the run still happens, without the floor;
-# silently dropping the whole suite would be worse than dropping the number.
-case "$pytest" in
-    uvx*) cov="uvx --quiet --from pytest --with pytest-cov pytest"; have_cov=1 ;;
-    "")   cov=""; have_cov=0 ;;
-    *)    cov="$pytest"
-          if $pytest --co -q --cov >/dev/null 2>&1; then have_cov=1; else have_cov=0; fi ;;
-esac
-
-note "suite"
-if [ -z "$pytest" ]; then
-    echo "   pytest NOT RUN - install it, or uv"
-    fail "pytest (unavailable)"
-else
-    if [ "$have_cov" = 1 ]; then
-        set -- tests/ --cov -q
-        runner="$cov"
+    note "suite"
+    if [ -z "$pytest" ]; then
+        echo "   pytest NOT RUN - install it, or uv"
+        fail "pytest (unavailable)"
     else
-        echo "   pytest-cov missing - running WITHOUT the coverage floor."
-        set -- tests/ -q
-        runner="$pytest"
-    fi
-    if gate_needs_pythonpath "$runner"; then
-        PYTHONPATH="$root${PYTHONPATH:+:$PYTHONPATH}" $runner "$@" || fail "pytest"
-    else
-        $runner "$@" || fail "pytest"
-    fi
-fi
-
-# ------------------------------------------------------- the parity containers
-# Never prompts. `sudo -n docker` is how tests/parity/run.sh escalates, and on a
-# box where that wants a password an unattended preflight would hang on it --
-# so the reachability probe is the same non-interactive one, and a miss is a
-# printed line rather than a wait. Omarchy leaves you out of the docker group on
-# purpose (membership is equivalent to passwordless root);
-# omarchy-setup-security-sudoless-docker is its documented opt-in.
-if [ "$PARITY" -eq 1 ]; then
-    note "parity containers (debian, ubuntu 24.04, ubuntu 22.04 = Python 3.10, arch, bash 3.2)"
-    if docker info >/dev/null 2>&1 || sudo -n docker info >/dev/null 2>&1; then
-        bash "$root/tests/parity/run.sh" || fail "parity"
-    else
-        echo "   SKIPPED - docker needs a password here, and preflight never prompts."
-        echo "   Enable it with: omarchy-setup-security-sudoless-docker"
-        echo "   Or run it yourself:  tests/parity/run.sh"
-    fi
-fi
-
-# ------------------------------------------------------- the merge with main --
-# The check the CLAUDE.md incident asked for. A throwaway worktree, so the tree
-# you are standing in is never touched and an interrupted run cannot leave a
-# half-merged checkout behind.
-if [ "$MERGE" -eq 1 ]; then
-    note "merge with $BASE"
-    if ! git rev-parse --verify -q "$BASE" >/dev/null; then
-        echo "   SKIPPED - no $BASE locally; fetch it first."
-    else
-        wt="$(mktemp -d "${TMPDIR:-/tmp}/ts-preflight-XXXXXX")"
-        # Always clean up: a stale worktree makes every later run fail to add one.
-        trap 'git worktree remove --force "$wt" >/dev/null 2>&1; rm -rf "$wt"' EXIT
-        if git worktree add -q --detach "$wt" HEAD >/dev/null 2>&1; then
-            if git -C "$wt" merge --no-commit --no-ff "$BASE" >/dev/null 2>&1; then
-                echo "   merges cleanly"
-            else
-                conflicts="$(git -C "$wt" diff --name-only --diff-filter=U | tr '\n' ' ')"
-                if [ -n "$conflicts" ]; then
-                    echo "   CONFLICTS: $conflicts"
-                    fail "merge (conflicts)"
-                fi
-            fi
-            # Run the suite on the merge RESULT even when it conflicted: the
-            # non-conflicting half is still what main is about to receive, and
-            # the size gate that started all this lives there.
-            if [ -n "$pytest" ]; then
-                if gate_needs_pythonpath "$pytest"; then
-                    ( cd "$wt" && PYTHONPATH="$wt" $pytest tests/ -q ) || fail "merged suite"
-                else
-                    ( cd "$wt" && $pytest tests/ -q ) || fail "merged suite"
-                fi
-            fi
+        if [ "$have_cov" = 1 ]; then
+            set -- tests/ --cov -q
+            runner="$cov"
         else
-            echo "   SKIPPED - could not create a worktree"
+            echo "   pytest-cov missing - running WITHOUT the coverage floor."
+            set -- tests/ -q
+            runner="$pytest"
+        fi
+        if gate_needs_pythonpath "$runner"; then
+            PYTHONPATH="$root${PYTHONPATH:+:$PYTHONPATH}" $runner "$@" || fail "pytest"
+        else
+            $runner "$@" || fail "pytest"
         fi
     fi
-fi
 
-# ------------------------------------------------------------------ the verdict
-printf '\n'
-if [ -n "$failed" ]; then
-    echo "preflight: FAILED -$failed"
-    echo "macOS and Windows are still only covered by CI."
-    exit 1
-fi
-echo "preflight: OK. macOS and Windows are still only covered by CI."
+    # ------------------------------------------------------- the parity containers
+    # Never prompts, and mirrors run.sh's order: a plain `docker` (which a `rootless`
+    # context already satisfies), then a rootless socket, then a passwordless
+    # `sudo -n docker`. Sudo comes last so a machine that needs no elevation is never
+    # asked for it, and every probe is non-interactive so an unattended preflight
+    # cannot hang on a password -- a miss is a printed line rather than a wait.
+    # Omarchy leaves you out of the docker group on purpose (membership is equivalent
+    # to passwordless root), which is what makes rootless the way in: doc linux/docker.
+    if [ "$PARITY" -eq 1 ]; then
+        note "parity containers (debian, ubuntu 24.04, ubuntu 22.04 = Python 3.10, arch, bash 3.2)"
+        rootless_sock="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/docker.sock"
+        if docker info >/dev/null 2>&1 \
+           || { [ -S "$rootless_sock" ] && DOCKER_HOST="unix://$rootless_sock" docker info >/dev/null 2>&1; } \
+           || sudo -n docker info >/dev/null 2>&1; then
+            bash "$root/tests/parity/run.sh" || fail "parity"
+        else
+            echo "   SKIPPED - no daemon this user can reach, and preflight never prompts."
+            echo "   Rootless Docker is the way in without the docker group: see"
+            echo "   doc linux/docker. Or run it yourself:  tests/parity/run.sh"
+        fi
+    fi
+
+    # ------------------------------------------------------- the merge with main --
+    # The check the CLAUDE.md incident asked for. A throwaway worktree, so the tree
+    # you are standing in is never touched and an interrupted run cannot leave a
+    # half-merged checkout behind.
+    if [ "$MERGE" -eq 1 ]; then
+        note "merge with $BASE"
+        if ! git rev-parse --verify -q "$BASE" >/dev/null; then
+            echo "   SKIPPED - no $BASE locally; fetch it first."
+        else
+            wt="$(mktemp -d "${TMPDIR:-/tmp}/ts-preflight-XXXXXX")"
+            # Always clean up: a stale worktree makes every later run fail to add one.
+            trap 'git worktree remove --force "$wt" >/dev/null 2>&1; rm -rf "$wt"' EXIT
+            if git worktree add -q --detach "$wt" HEAD >/dev/null 2>&1; then
+                if git -C "$wt" merge --no-commit --no-ff "$BASE" >/dev/null 2>&1; then
+                    echo "   merges cleanly"
+                else
+                    conflicts="$(git -C "$wt" diff --name-only --diff-filter=U | tr '\n' ' ')"
+                    if [ -n "$conflicts" ]; then
+                        echo "   CONFLICTS: $conflicts"
+                        fail "merge (conflicts)"
+                    fi
+                fi
+                # Run the suite on the merge RESULT even when it conflicted: the
+                # non-conflicting half is still what main is about to receive, and
+                # the size gate that started all this lives there.
+                if [ -n "$pytest" ]; then
+                    if gate_needs_pythonpath "$pytest"; then
+                        ( cd "$wt" && PYTHONPATH="$wt" $pytest tests/ -q ) || fail "merged suite"
+                    else
+                        ( cd "$wt" && $pytest tests/ -q ) || fail "merged suite"
+                    fi
+                fi
+            else
+                echo "   SKIPPED - could not create a worktree"
+            fi
+        fi
+    fi
+
+    # ------------------------------------------------------------------ the verdict
+    printf '\n'
+    if [ -n "$failed" ]; then
+        echo "preflight: FAILED -$failed"
+        echo "macOS and Windows are still only covered by CI."
+        exit 1
+    fi
+    echo "preflight: OK. macOS and Windows are still only covered by CI."
+}
+
+main "$@"
