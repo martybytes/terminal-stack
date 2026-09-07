@@ -138,6 +138,21 @@ ts_ws_root() {
     return 1
 }
 
+# The LOCAL (machine-disk) workspace root, or return 1. Mirrors
+# _ts_workspace_local in dot_zshrc: $LOCAL_WORKSPACE_DIR, else ~/LocalWorkspace
+# when it exists.
+#
+# wso must never plan a migration out of it. Its repos are there precisely
+# because they cannot live on a mount that may be absent -- a dotfiles repo
+# stowed into $HOME, whose links dangle silently the moment the volume misses
+# its `nofail` mount. Relocating one into the main tree re-creates, in one
+# non-interactive command, exactly the failure it was moved to avoid.
+ts_ws_local_root() {
+    [ -n "${LOCAL_WORKSPACE_DIR:-}" ] && { printf '%s\n' "$LOCAL_WORKSPACE_DIR"; return 0; }
+    [ -d "$HOME/LocalWorkspace" ] && { printf '%s\n' "$HOME/LocalWorkspace"; return 0; }
+    return 1
+}
+
 ts_ws_state_dir() {
     printf '%s\n' "${XDG_STATE_HOME:-$HOME/.local/state}/terminal-stack"
 }
@@ -418,7 +433,8 @@ ts_ws_latest_run_log() {
 # --------------------------------------------------------------- scanning ----
 
 # Scan roots: the workspace itself plus its legacy siblings (Workspace_Public,
-# Workspace-md, ...), plus anything in $TS_WS_EXTRA_ROOTS.
+# Workspace-md, ...), plus anything in $TS_WS_EXTRA_ROOTS -- minus the local
+# root, which is never migrated (see ts_ws_local_root).
 #
 # The sibling list comes from enumerating the parent directory rather than from
 # guessing suffixes. That matters on Windows and macOS, whose filesystems are
@@ -426,8 +442,9 @@ ts_ws_latest_run_log() {
 # directory twice and every repo inside it gets planned twice. Listing the
 # parent yields each real entry exactly once, under its true on-disk name.
 ts_ws_scan_roots() {
-    local root parent base d name lbase lname extra
+    local root parent base d name lbase lname extra loc
     root="$(ts_ws_root)" || return 1
+    loc="$(ts_ws_local_root 2>/dev/null || true)"
     parent="$(dirname -- "$root")"
     base="$(basename -- "$root")"
     lbase="$(ts_ws_lower "$base")"
@@ -447,7 +464,17 @@ ts_ws_scan_roots() {
             [ -d "$extra" ] && printf '%s
 ' "$extra"
         done
-    } | awk 'NF && !seen[tolower($0)]++'
+    } | awk 'NF && !seen[tolower($0)]++' | while IFS= read -r d; do
+        # Drop the local root and anything under it, even when someone listed it
+        # in TS_WS_EXTRA_ROOTS -- that variable names LEGACY roots, whose whole
+        # point is to be emptied into the organised tree, and the local root is
+        # the one root that must stay where it is. Skipped when the workspace IS
+        # the local root, or the guard would leave wso with no roots at all.
+        if [ -n "$loc" ] && [ "$loc" != "$root" ]; then
+            case "$d" in "$loc"|"$loc"/*) continue ;; esac
+        fi
+        printf '%s\n' "$d"
+    done
     return 0
 }
 

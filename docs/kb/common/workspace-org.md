@@ -40,7 +40,8 @@ Jump shortcuts (shell functions, because a child process cannot change your dire
 | `wsmd` | `src/github.com/moleculardesigns` |
 | `wspu` | `public/github.com` (falls back to the old `*_Public` sibling) |
 | `wsar` | `archive/github.com` |
-| `wsj` | fuzzy-jump to any repo anywhere in the tree |
+| `wsj` | fuzzy-jump to any repo in any root |
+| `wsloc` | the local (machine-disk) root, which `wso` never touches |
 | `wsj ironcl` | pre-filter the picker |
 
 ## What `--org` matches
@@ -224,6 +225,7 @@ upstream's business.
 | `TS_WS_VERBOSE=1` | show per-repo detail that is normally summarised |
 | `TS_WS_DAYS` | the `wso archive` threshold, skipping the prompt (`--days` still wins) |
 | `TS_WS_EXTRA_ROOTS` | extra legacy roots to include when scanning for repos to migrate |
+| `LOCAL_WORKSPACE_DIR` | the local (machine-disk) root — **never** scanned or migrated, even if `TS_WS_EXTRA_ROOTS` names it; see `doc common/workspace-nav` |
 | `TS_WS_MOVE_RETRIES` | how many times a failed rename is retried (Windows holds directory handles open asynchronously) |
 | `WORKSPACE_DIR` | the workspace root itself — see `doc common/workspace-nav` |
 

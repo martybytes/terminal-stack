@@ -141,6 +141,22 @@ function Get-TsWsRoot {
     return $null
 }
 
+# The LOCAL (machine-disk) workspace root, or $null. Mirrors
+# Get-TsWorkspaceLocal in the profile: $env:LOCAL_WORKSPACE_DIR, else
+# ~\LocalWorkspace when it exists.
+#
+# wso must never plan a migration out of it. Its repos are there precisely
+# because they cannot live on a volume that may be absent -- a dotfiles repo
+# stowed into $HOME, whose links dangle silently the moment that volume misses
+# its mount. Relocating one into the main tree re-creates, in one
+# non-interactive command, exactly the failure it was moved to avoid.
+function Get-TsWsLocalRoot {
+    if ($env:LOCAL_WORKSPACE_DIR) { return $env:LOCAL_WORKSPACE_DIR }
+    $d = Join-Path $env:USERPROFILE 'LocalWorkspace'
+    if (Test-Path -LiteralPath $d) { return $d }
+    return $null
+}
+
 function Get-TsWsStateDir { Join-Path $env:LOCALAPPDATA 'terminal-stack' }
 
 # The ACTIVE terminal-stack runtime clone (the one tstack update updates), resolved.
@@ -401,7 +417,8 @@ function Get-TsWsLatestRunLog([string]$Kind) {
 # ---------------------------------------------------------------- scanning ----
 
 # Scan roots: the workspace plus its legacy siblings (Workspace_Public,
-# Workspace-md, ...). The sibling list comes from enumerating the parent rather
+# Workspace-md, ...), minus the local root, which is never migrated (see
+# Get-TsWsLocalRoot). The sibling list comes from enumerating the parent rather
 # than guessing suffixes — NTFS is case-insensitive, so probing both "-md" and
 # "-MD" finds the same directory twice and plans every repo inside it twice.
 function Get-TsWsScanRoots {
@@ -423,8 +440,23 @@ function Get-TsWsScanRoots {
             if ($e -and (Test-Path -LiteralPath $e)) { $out.Add($e) }
         }
     }
+    # Drop the local root and anything under it, even when someone listed it in
+    # TS_WS_EXTRA_ROOTS -- that variable names LEGACY roots, whose whole point is
+    # to be emptied into the organised tree, and the local root is the one root
+    # that must stay where it is. Skipped when the workspace IS the local root,
+    # or the guard would leave wso with no roots at all.
+    $loc = Get-TsWsLocalRoot
+    if ($loc) {
+        $loc = $loc.TrimEnd('\')
+        if ($loc -eq $root) { $loc = $null }
+    }
     $seen = @{}
-    return @($out | Where-Object { $k = $_.ToLower(); if ($seen[$k]) { $false } else { $seen[$k] = $true; $true } })
+    return @($out |
+        Where-Object {
+            -not $loc -or ($_.TrimEnd('\') -ne $loc -and
+                           -not $_.StartsWith($loc + '\', [StringComparison]::OrdinalIgnoreCase))
+        } |
+        Where-Object { $k = $_.ToLower(); if ($seen[$k]) { $false } else { $seen[$k] = $true; $true } })
 }
 
 # Immediate children of each scan root, minus tier dirs and dotfiles. Tier dirs
