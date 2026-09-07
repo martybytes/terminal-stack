@@ -872,6 +872,49 @@ def check_git_hooks(report: Report, src: Path | None) -> None:
         )
 
 
+def check_git_ssh_command(report: Report) -> None:
+    r"""Which ssh binary git runs on Windows.
+
+    Unset, git uses Git for Windows' BUNDLED MSYS ssh, which cannot speak
+    \\.\pipe\openssh-ssh-agent -- so every git command over ssh asks for the key
+    passphrase while `ssh-add -l` in the same pane lists the keys. Measured in
+    one pane, one environment: System32's ssh authenticated to GitHub and the
+    bundled one returned `Permission denied (publickey)`.
+
+    Windows-side only. The value ships in the Windows gitconfig mirror, so a
+    failure here means the sync has not run yet or something overrode it later
+    in ~/.gitconfig -- both worth naming, because the symptom (a passphrase
+    prompt) looks like an agent problem and is not.
+    """
+    if not plat.is_windows_side():
+        return
+    got = _run(["git", "config", "--get", "core.sshCommand"])
+    value = got.stdout.strip() if got and got.returncode == 0 else ""
+    if not value:
+        report.fail(
+            "git-ssh-command",
+            "git will use Git for Windows' bundled ssh, which cannot reach the agent",
+            "fix: tstack apply (the Windows gitconfig sets core.sshCommand)",
+        )
+        return
+    exe = Path(value.strip('"'))
+    if not exe.is_file():
+        report.fail(
+            "git-ssh-command",
+            f"core.sshCommand points at a missing binary: {value}",
+            "fix: install the Windows OpenSSH client, or clear core.sshCommand",
+        )
+        return
+    if exe.name.lower() != "ssh.exe" or "system32" not in str(exe).lower():
+        report.note(
+            "git-ssh-command",
+            f"core.sshCommand is not Windows OpenSSH: {value}",
+            "the agent pipe needs C:/Windows/System32/OpenSSH/ssh.exe",
+        )
+        return
+    report.ok("git-ssh-command", "git uses Windows OpenSSH, so the agent works")
+
+
 def collect() -> Report:
     report = Report()
     chezmoi = check_chezmoi(report)
@@ -891,6 +934,7 @@ def collect() -> Report:
     check_clone_branch(report, src)
     check_other_clones(report, src)
     check_git_hooks(report, src)
+    check_git_ssh_command(report)
     return report
 
 

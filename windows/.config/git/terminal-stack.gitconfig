@@ -9,8 +9,18 @@
 # the settings below, put yours BELOW the [include] line in ~/.gitconfig.
 #
 # Canonical copy: dot_config/git/terminal-stack.gitconfig.
-# windows/.config/git/terminal-stack.gitconfig is a byte-identical mirror —
-# edit the canonical file, then copy it over (same convention as starship.toml).
+# windows/.config/git/terminal-stack.gitconfig is a mirror of it, and the two are
+# identical except for ONE line: the Windows copy sets core.sshCommand and the
+# canonical copy must never gain it. Edit the canonical file, copy it over, then
+# put that line back. tests/test_gitconfig.py pins exactly that shape, so an
+# accidental drift in either direction fails rather than going quiet.
+#
+# Why the exception: git on Windows otherwise runs Git for Windows' bundled MSYS
+# ssh, which cannot speak the named pipe the Windows agent listens on, so every
+# git command asks for the key passphrase while `ssh-add -l` cheerfully lists the
+# keys. The value is an absolute Windows path, which would break git on every
+# POSIX target — hence Windows-only rather than a shared line.
+# docs/decisions.md § "Why the Windows gitconfig pins core.sshCommand".
 
 [alias]
 	st = status
@@ -26,6 +36,14 @@
 # all platforms (Git for Windows ships sh + less), so the guard is portable.
 [core]
 	pager = "sh -c 'if command -v delta >/dev/null 2>&1; then delta; else less -R; fi'"
+
+	# Which ssh git runs. Windows-only, and the one line this file does not share
+	# with its canonical twin. Unset, git uses Git for Windows' bundled MSYS ssh,
+	# which cannot reach \\.\pipe\openssh-ssh-agent and so falls back to prompting
+	# for the passphrase on EVERY command while the agent holds the keys the whole
+	# time. Native OpenSSH speaks the pipe. Forward slashes: git accepts them on
+	# Windows and they survive .gitconfig escaping.
+	sshCommand = C:/Windows/System32/OpenSSH/ssh.exe
 
 [interactive]
 	diffFilter = "sh -c 'if command -v delta >/dev/null 2>&1; then delta --color-only; else cat; fi'"

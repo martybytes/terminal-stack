@@ -6,6 +6,44 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **Every git command asked for the key passphrase while the agent held the keys
+  (09/07/2026).** `git fetch` prompted in PowerShell and in a fresh WezTerm alike,
+  and `ssh-add -l` in the same pane listed both keys the whole time. Nothing was
+  wrong with the agent, and this was not a regression from the `SSH_AUTH_SOCK`
+  pipe fix: with `core.sshCommand` unset, git runs **Git for Windows' bundled
+  MSYS ssh**, which cannot open `\\.\pipe\openssh-ssh-agent` and so never sees the
+  agent at all. One pane, both binaries: System32's ssh authenticated to GitHub,
+  the bundled one returned `Permission denied (publickey)`. Interactively that
+  denial becomes a passphrase prompt, which is what a human sees. Before this,
+  a repo-wide grep for `sshCommand`/`GIT_SSH`/`usr/bin/ssh` returned zero hits —
+  which ssh git runs had never been pinned.
+
+  `windows/.config/git/terminal-stack.gitconfig` now sets
+  `core.sshCommand = C:/Windows/System32/OpenSSH/ssh.exe`. That deliberately
+  **breaks the byte-identical mirror** the two gitconfigs kept, because the value
+  is an absolute Windows path and the canonical copy is applied to WSL, macOS and
+  native Linux, where it would break git outright. The shared header now states
+  the real rule, the new `tests/test_gitconfig.py` pins it in both directions
+  (there was no gitconfig test at all before), and `tstack doctor` reports
+  `git-ssh-command` — a *note*, not a failure, when it points at some other ssh,
+  since routing through 1Password is a legitimate choice.
+
+- **The agent probe could never fire on Debian or Ubuntu (09/07/2026).** Found
+  while working out why WSL had no agent. `dot_zshrc` recovered
+  `$XDG_RUNTIME_DIR/ssh-agent.socket` — the **Arch** name, which omarchy-dots'
+  bash half uses — but Debian and Ubuntu's `/usr/lib/openssh/agent-launch`
+  creates `openssh_agent` instead. Two of the three targets this stack ships to
+  were silently uncovered since the block was written. It now tries both, Arch
+  first: that path is the contract with the bash half, and if the two ever chose
+  different sockets a machine would talk to two agents. Verified in real zsh —
+  the Debian socket is found, Arch wins when both exist, a forwarded `ssh -A`
+  value survives, a stale path is replaced, and a machine with no socket is left
+  alone.
+
+  It still does not *start* an agent. On Ubuntu 24.04 `ssh-agent.service` is
+  `static` and ordered before the graphical session, so on a headless host or WSL
+  nothing pulls it in — documented in `doc ssh-config` rather than fixed, because
+  shipping a unit that spawns an agent is a behaviour change of its own.
 - **`tstack ui`'s install advice, all three lines of which failed (09/07/2026).**
   It printed `uv tool install textual`, `pipx install textual` and
   `pip install --user textual`. On an Omarchy box every one fails:

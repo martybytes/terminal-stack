@@ -28,3 +28,10 @@ makes `gp` *push* and `gl` *pull*; here they always mean pull / log.
 
 `git diff` pages through **delta** (side-by-side, syntax-highlighted) — wired by
 the same include at `~/.config/git/terminal-stack.gitconfig`.
+
+## ssh on Windows
+
+git is pinned to Windows' native OpenSSH (`core.sshCommand`) by the stack's
+gitconfig. Without it git uses Git for Windows' bundled MSYS ssh, which cannot
+reach the agent's named pipe and asks for the key passphrase on every command.
+`tstack doctor` reports it as `git-ssh-command`; details in `doc ssh-config`.
