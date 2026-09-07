@@ -151,6 +151,7 @@ through `sudo`.
 ```bash
 sudo docker info                            # the normal path here
 omarchy-setup-security-sudoless-docker      # opt in, behind its warning
+# ...or rootless Docker: your own daemon, no group at all - doc linux/docker
 systemctl is-active docker.socket
 sudo ufw status                             # ufw-docker is installed
 ```
@@ -192,7 +193,7 @@ tstack apply                                # re-render everything
 | a tool "NOT FOUND on PATH" | `pacman -Q <pkg>`; then `tstack config apps` |
 | WezTerm ignores `omarchy theme set` | `tstack omarchy status` — is the template `current`? |
 | `tstack omarchy sync` says "not ours" | a file of that name exists that the stack did not write; move it aside |
-| `docker` permission denied | expected: `sudo docker`, or `omarchy-setup-security-sudoless-docker` |
+| `docker` permission denied | expected. `sudo docker`, or rootless Docker (no group, no prompt — `doc linux/docker`), or `omarchy-setup-security-sudoless-docker` |
 | `~/.claude/settings.json` is no longer a symlink | the restore hook failed; `tstack apply` again and read its stderr |
 | Claude Code theme flapping | the stack should not write `theme` on Omarchy; check `chezmoi data \| grep distroId` |
 | `starship` from the wrong place | `command -v starship` must be `/usr/bin/starship`, not `/usr/local/bin` |

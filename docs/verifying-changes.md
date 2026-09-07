@@ -713,12 +713,18 @@ of the savings, came to 40,234, and blocked a PR after the push. Preflight
 test-merges `origin/main` into a throwaway worktree and re-runs the suite on the
 result, so that arrives in seconds instead of after a round trip.
 
-**The parity step never prompts.** `tests/parity/run.sh` escalates to
-`sudo docker`, and on a box where that wants a password an unattended preflight
-would hang. The probe is the same non-interactive `sudo -n docker info`, and a
-miss prints how to enable Docker rather than waiting. Omarchy leaves you out of
-the `docker` group deliberately — membership is equivalent to passwordless root —
-and `omarchy-setup-security-sudoless-docker` is its documented opt-in.
+**The parity step never prompts.** `tests/parity/run.sh` tries three daemons in
+order: a plain `docker` (which a `rootless` context already satisfies), then a
+rootless socket at `$XDG_RUNTIME_DIR/docker.sock`, then a passwordless
+`sudo -n docker`. Sudo comes last so a machine that needs no elevation is never
+asked for it, and every probe is non-interactive so an unattended preflight
+cannot hang on a password.
+
+On Omarchy a bare `docker` is permission-denied by design — the `docker` group is
+root-equivalent, so the install user is left out of it — which makes **rootless
+Docker** the way to get parity running unattended without either the group or
+`omarchy-setup-security-sudoless-docker`. Setup is in `doc linux/docker`
+§ "Reaching the daemon without the docker group".
 
 **What it still cannot cover: macOS and Windows.** Containers share the host
 kernel, so Docker on Linux runs neither, and no local tooling will change that.

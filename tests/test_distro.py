@@ -487,6 +487,31 @@ def test_wezterm_knows_pacman():
 # ── parity coverage ───────────────────────────────────────────────────────────
 
 
+def test_the_parity_runner_prefers_a_rootless_daemon_over_sudo():
+    """Escalating when it did not have to is the regression worth pinning.
+
+    Omarchy leaves the install user out of the `docker` group on purpose --
+    membership is root-equivalent -- so a bare `docker` is permission-denied and
+    the runner used to fall straight to `sudo docker`. On a box where that wants
+    a password, an unattended caller (scripts/preflight.sh) can only skip the
+    whole parity run.
+
+    Rootless Docker is the third answer, next to the group and to sudoless
+    Docker: a daemon this user owns, on a socket this user owns. `docker context
+    use rootless` makes a bare `docker` find it, so the plain probe usually wins;
+    the socket probe covers a box that has the daemon without making it the
+    default context. Either way sudo must come LAST, or the machine that needs no
+    elevation is asked for it anyway.
+    """
+    run_sh = (ROOT / "tests/parity/run.sh").read_text(encoding="utf-8")
+    assert "/docker.sock" in run_sh, "no rootless socket probe"
+    rootless = run_sh.index("rootless_sock")
+    escalate = run_sh.index("DOCKER=(sudo docker)")
+    assert rootless < escalate, "the sudo fallback must come after the rootless probe"
+    # And it still never prompts: the escalation probe stays non-interactive.
+    assert "sudo -n docker info" in run_sh, "the sudo probe must keep -n"
+
+
 def test_the_parity_runner_covers_arch_and_omarchy():
     """The gate that would have caught the original bug. `bash -n` cannot see an
     unset variable and a static resolver cannot see an empty catalog; only
