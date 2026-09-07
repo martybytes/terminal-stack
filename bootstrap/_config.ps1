@@ -376,7 +376,7 @@ function Get-TsConfig {
         cavemanEnabled = 'off'; agentmemoryEnabled = 'off'
         memoryBackend = 'agentmemory'
         starshipPreset = 'terminal-stack'; atuinEnabled = 'off'
-        herdrConfig = 'off'
+        herdrConfig = 'off'; herdrShell = 'auto'
     }
 }
 

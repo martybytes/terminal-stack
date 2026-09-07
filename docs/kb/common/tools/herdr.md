@@ -50,10 +50,16 @@ whole-file-copying `~/.claude/settings.json`. So ownership is per **key**:
 ```toml
 [theme]
 name = "terminal"  # managed by terminal-stack
+
+[terminal]
+default_shell = "/usr/bin/zsh"  # managed by terminal-stack
 ```
 
-That is the entire set. Every other byte of the file, comments and formatting
-included, survives a write untouched.
+That is the entire set — two lines, each carrying the marker. Every other byte of
+the file, comments and formatting included, survives a write untouched. The
+second line is conditional and explained under "Which shell your panes run":
+`auto` defers to a `default_shell` you wrote yourself, which is what keeps the
+`"pwsh"` machine above intact.
 
 **Why `terminal`.** herdr ships eleven built-in themes (`catppuccin`, `terminal`,
 `tokyo-night`, `dracula`, `nord`, `gruvbox`, `one-dark`, `solarized`, `kanagawa`,
@@ -68,6 +74,70 @@ the first write, or, when the stack created the file itself, removes only the
 marked line. It is deliberately not a `.chezmoiremove` rule and not a sync-side
 delete: both of those run on every machine and would reach a box that never opted
 in.
+
+## Which shell your panes run
+
+herdr spawns your **login shell** by default. On Omarchy that is bash and always
+will be — the fleet never runs `chsh`, because Omarchy's own desktop is
+bash-first — while the shell this stack actually configures, with the prompt, the
+tools and the agent wrappers, is zsh. So the default gives you a pane that is not
+the machine the rest of the stack set up. That is what `herdrShell` fixes.
+
+| Command | What it does |
+|---|---|
+| `tstack config herdr shell auto` | the shell this stack configures here (the default) |
+| `tstack config herdr shell zsh` | name one explicitly — also `bash`, `pwsh` |
+| `tstack config herdr shell login` | herdr's own behaviour; the stack owns no shell key |
+
+`auto` is OS-aware, and the map is four platforms and two answers:
+
+| Platform | `auto` resolves to | Login shell there |
+|---|---|---|
+| Windows | `pwsh` | whatever `$PROFILE`'s host is |
+| macOS | `zsh` | usually zsh already |
+| Ubuntu / Debian | `zsh` | usually zsh already |
+| Omarchy | `zsh` | **bash**, deliberately |
+
+Omarchy is the row that makes it a setting rather than a guess.
+
+Three things worth knowing:
+
+**It writes an absolute path**, resolved on the machine, never a bare name. The
+herdr *server* is long-lived and keeps the environment it started with, so its
+`PATH` is not your shell's — the same property that cost this stack an ssh agent
+in every pane (`doc ssh-config`). What is **stored** is the choice, not the path:
+a path would be wrong on the other side of a combined Windows+WSL machine, and a
+Windows one carries backslashes, which the settings store cannot hold.
+
+**A shell that is not installed is never written.** A `default_shell` pointing at
+something absent breaks every new pane; leaving herdr on the login shell it was
+already using is strictly better, and `tstack herdr status` says which happened.
+
+**`auto` defers to a `default_shell` you wrote yourself.** An unmarked line in
+this file is yours — that is the rule the whole section above is built on, and
+the first machine this shipped to had a hand-written `default_shell = "pwsh"`.
+Naming a shell explicitly is how you hand the key over; the file is backed up
+before the first write either way.
+
+```bash
+tstack herdr status            # the setting, what it resolved to, and why
+herdr server reload-config     # apply it; open panes keep the shell they have
+```
+
+`shell_mode` (`login` / `non_login`) stays yours — the stack owns
+`[terminal] default_shell` and nothing else in that table.
+
+One cosmetic thing worth knowing: a key the stack re-adds after `login` removed it
+is inserted at the **top of its table**, not back where it was. Nothing is lost —
+your lines and comments all survive — but a comment you wrote directly above the
+old position now sits above whatever followed it. Keep such a comment with the
+line if the position matters to you.
+
+One implementation on all four platforms: `tstack/commands.conf` gives `herdr` a
+`python` column for POSIX *and* Windows, so there is no bash writer and no pwsh
+twin. Saving the setting and re-splicing the file have to happen together, and
+splitting that across three implementations is how a store and a file come to
+disagree.
 
 ## Where the config lives
 

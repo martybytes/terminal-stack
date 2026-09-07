@@ -40,6 +40,41 @@ ssh -o IdentitiesOnly=yes -i ~/.ssh/id_orion marty@host   # force one key, ignor
 ssh-keygen -R orion             # drop a stale known_hosts entry after a rebuild
 ```
 
+## The agent is missing inside a multiplexer, and only there
+
+The give-away is the mirror of the Windows one below: `ssh` works in a plain
+terminal and fails in every herdr (or tmux, or wezterm-mux) pane, while
+`ssh-add -l` from that terminal lists your keys the whole time.
+
+```bash
+echo "$SSH_AUTH_SOCK"                    # empty, or a path that no longer exists
+ls -l "${XDG_RUNTIME_DIR}/ssh-agent.socket"   # the real one, still there
+systemctl --user status ssh-agent.socket
+```
+
+A multiplexer **server** captures its environment once, when it starts, and
+hands that same copy to every pane it will ever spawn. `environment.d(5)` is read
+by the systemd user manager before it starts anything, so it reaches services
+started *after* that — and never reaches a server that was already running. Add
+`SSH_AUTH_SOCK` there today and a server started yesterday still hands out
+shells without it, indefinitely, with nothing to see.
+
+The socket path is stable, so the shell rc recomputes it: `dot_zshrc` exports
+`$XDG_RUNTIME_DIR/ssh-agent.socket` when `SSH_AUTH_SOCK` is unset **or points at
+a socket that is gone**, and leaves any live value alone so a forwarded `ssh -A`
+agent still wins. Because the fix is in the shell and not the server, **every new
+pane is already correct** — no server restart, nothing to detach.
+
+An already-open pane keeps the environment it started with. Fix that one in
+place, or just open a new one:
+
+```bash
+export SSH_AUTH_SOCK="${XDG_RUNTIME_DIR}/ssh-agent.socket"
+```
+
+Interactive shells only, on purpose — `ssh host 'cmd'` runs a non-interactive
+shell and still has no agent. Use `ssh host -t`.
+
 ## The agent on Windows is a pipe, not a socket
 
 Windows OpenSSH reaches its agent over the named pipe `\\.\pipe\openssh-ssh-agent`,

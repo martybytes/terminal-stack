@@ -20,6 +20,42 @@ else
 fi
 unset _bin_os
 
+# SSH_AUTH_SOCK, for panes whose multiplexer server started before it existed.
+#
+# The agent's socket path is STABLE -- $XDG_RUNTIME_DIR/ssh-agent.socket, which
+# systemd socket-activates -- so a shell can always recompute it. What no shell
+# can recompute is a long-lived server's environment: herdr, tmux and
+# wezterm-mux-server each capture theirs at start and hand that same copy to
+# every pane they will ever spawn. environment.d(5) reaches only what the user
+# manager starts AFTER it is read, so a variable added later never arrives, and
+# the symptom is "ssh works in a terminal but not in my multiplexer" with a
+# perfectly healthy agent throughout. Measured on this fleet: a herdr server
+# started 09/04, the environment.d file landed 09/06, and every pane opened
+# since got a shell with no SSH_AUTH_SOCK at all.
+#
+# This is the zsh half of a fix omarchy-dots already made for bash in
+# ~/.config/bash/rc.local. Same machine, same variable removed: bash recovered
+# it and zsh did not, which is the whole bug -- herdr panes run zsh.
+#
+# Never fight a live value. An `ssh -A` forwarded agent and 1Password's
+# IdentityAgent both arrive as a working socket and both must win. A value that
+# is set but is NOT a socket is dead -- the classic being a path from a previous
+# login, inherited by a server that outlived it -- and replacing that is only
+# ever an improvement.
+#
+# The two tests make this correct off Linux without naming a platform. macOS has
+# launchd's own live socket, so the first test stops there; it has no
+# $XDG_RUNTIME_DIR, so the second finds nothing. Windows is not this file's
+# problem and must never get a socket path -- pwsh points at the named pipe
+# instead (`doc ssh-config`).
+#
+# Interactive shells only, like its bash twin: zsh reads this file only when
+# interactive, so `ssh host 'cmd'` still has no agent. Use `ssh host -t`. The
+# honest fix is PermitUserEnvironment, which is not worth it.
+if [[ ! -S "${SSH_AUTH_SOCK:-}" && -S "${XDG_RUNTIME_DIR:-/run/user/$UID}/ssh-agent.socket" ]]; then
+  export SSH_AUTH_SOCK="${XDG_RUNTIME_DIR:-/run/user/$UID}/ssh-agent.socket"
+fi
+
 # Path to your Oh My Zsh installation.
 export ZSH="$HOME/.oh-my-zsh"
 

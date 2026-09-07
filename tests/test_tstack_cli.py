@@ -8,6 +8,7 @@ backs.
 
 from __future__ import annotations
 
+import ast
 import re
 import shutil
 import subprocess
@@ -343,6 +344,87 @@ def test_every_subprocess_call_in_the_suite_has_a_timeout():
         "every test subprocess needs timeout= (a hang stalls the suite) and "
         "start_new_session=True (no controlling terminal, so a /dev/tty prompt "
         "cannot block): " + "; ".join(offenders)
+    )
+
+
+def _suite_trees():
+    """(path, parsed module) for every test module. AST, not regex.
+
+    A regex over this file finds the examples in these guards' own docstrings and
+    fails on them -- which is how the first cut of both was written. Parsing sees
+    code and only code, so the rule can be stated in prose right next to it.
+    """
+    for path in sorted(ROOT.glob("tests/*.py")):
+        yield path, ast.parse(path.read_text(encoding="utf-8"))
+
+
+def test_no_test_shells_out_to_a_literal_bash():
+    """Launching a literal `bash` passes here and fails on Windows only.
+
+    The Windows runner has no POSIX bash. `tests/shell_support` finds the one
+    compatible shell there (git-bash) and `bash_path` translates the drive-letter
+    paths it cannot otherwise open, which is why every long-standing bash test in
+    this suite goes through `BASH` and `bash_path`. Three tests in
+    `test_workspace_nav.py` did not, and the failure was a Windows-only
+    `returncode 1` with an empty stderr: nothing in it says "wrong bash".
+
+    macOS and Windows cannot be containerised, so this axis is read rather than
+    run -- the argument `test_no_shell_file_uses_a_gnu_only_spelling` already
+    makes for BSD utilities. A regression guard: the suite passes it today.
+
+    Scoped to argv[0] of a real subprocess launch. A literal "bash" in a fixture
+    is DATA, not a launch: `monkeypatch.setattr(memory, "adapter", lambda:
+    ["bash", "x.sh"])` is correct and must keep passing.
+    """
+    offenders = []
+    for path, tree in _suite_trees():
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not node.args:
+                continue
+            func = node.func
+            if not (isinstance(func, ast.Attribute) and func.attr == "run"):
+                continue
+            if not (isinstance(func.value, ast.Name) and func.value.id == "subprocess"):
+                continue
+            argv = node.args[0]
+            if not (isinstance(argv, ast.List) and argv.elts):
+                continue
+            first = argv.elts[0]
+            if isinstance(first, ast.Constant) and first.value == "bash":
+                offenders.append(f"{path.relative_to(ROOT)}:{node.lineno}")
+    assert not offenders, (
+        "these launch a literal `bash`, which does not exist on the Windows "
+        "runner; use BASH and bash_path from tests/shell_support: " + "; ".join(offenders)
+    )
+
+
+def test_no_test_binds_a_unix_socket_under_tmp_path():
+    """A socket bound under `tmp_path` passes here and fails on macOS only.
+
+    A unix socket's `sun_path` is about 104 bytes. Linux hands out
+    `/tmp/pytest-of-user/pytest-3/...` and fits; macOS hands out
+    `/private/var/folders/qb/.../pytest-of-runner/pytest-0/...` and does not, so
+    the bind raises `OSError: AF_UNIX path too long` on that platform alone.
+    `tests/test_ssh_auth_sock.py` did this and was green everywhere but macOS.
+
+    The fix is a short base, `tempfile.mkdtemp(dir="/tmp")`, which on macOS is
+    the same `/private/tmp` under a name that fits. A regression guard: the
+    suite passes it today.
+    """
+    offenders = []
+    for path, tree in _suite_trees():
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not node.args:
+                continue
+            func = node.func
+            if not (isinstance(func, ast.Attribute) and func.attr == "bind"):
+                continue
+            names = {n.id for n in ast.walk(node.args[0]) if isinstance(n, ast.Name)}
+            if "tmp_path" in names:
+                offenders.append(f"{path.relative_to(ROOT)}:{node.lineno}")
+    assert not offenders, (
+        "a unix socket bound under pytest's tmp_path exceeds AF_UNIX's ~104-byte "
+        'sun_path on macOS; use tempfile.mkdtemp(dir="/tmp"): ' + "; ".join(offenders)
     )
 
 

@@ -6,6 +6,86 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Added
 
+- **`scripts/preflight.sh`, and two guards for the axes no container can reach
+  (09/07/2026).** The hooks check the working tree; CI checks the MERGE of that
+  tree with `main`, on four operating systems and six containers. Two of those
+  differences had each already cost a red PR.
+
+  A branch that is green alone can be red merged. `CLAUDE.md` has a hard
+  40,000-byte cap; `main` sat at 39,957 and two branches each trimmed the *same*
+  index lines to fit under it, so the merge kept both additions and one copy of
+  the savings — 40,234, and #26 blocked after the push. Nothing local looked at
+  the merge, and branch protection's `strict_up_to_date` correctly refused it
+  only once GitHub had it. Preflight now test-merges `origin/main` into a
+  throwaway worktree and re-runs the suite on the result.
+
+  And `tomllib` is 3.11+: `tests/parity/run.sh` has been running Ubuntu 22.04
+  (Python 3.10) in about two seconds this whole time, and it simply was not run.
+  Preflight runs it — but never prompts, because `tests/parity/run.sh` escalates
+  to `sudo docker` and an unattended hang is worse than a skipped step. The
+  probe is `sudo -n docker info`, and a miss prints how to enable Docker.
+
+  **macOS and Windows cannot be containerised** — containers share the host
+  kernel — so those two axes are read rather than run, which is a stronger gate
+  than a container because it catches the class rather than one path. Joining
+  `test_no_shell_file_uses_a_gnu_only_spelling`:
+  `test_no_test_shells_out_to_a_literal_bash` (git-bash is the only bash on the
+  Windows runner, and it cannot open a drive-letter path) and
+  `test_no_test_binds_a_unix_socket_under_tmp_path` (macOS hands out a
+  `/private/var/folders/...` prefix that blows AF_UNIX's ~104-byte `sun_path`).
+  Both are AST scans rather than regexes — a regex over the suite matches the
+  examples in these guards' own docstrings, which is how the first cut of each
+  was written — and both are regression guards: the tree passes them today.
+
+  `CLAUDE.md` is trimmed to 39,057 bytes, giving ~1 KB of working room instead
+  of 43. Only narrative already carried by `docs/decisions.md` and
+  `docs/powershell-quirks.md` was displaced; every invariant and trap stays.
+
+  Not done, deliberately: no CI job was cut and no path filters added. Every
+  failure this week was a real portability bug found by exactly the job one
+  would be tempted to drop, and on a public repo the standard runners are free.
+
+
+### Fixed
+
+- **zsh restores `SSH_AUTH_SOCK`, so agents work in herdr and tmux panes
+  (09/06/2026).** `ssh` worked from a terminal and failed in every herdr pane,
+  with the agent healthy throughout.
+
+  A multiplexer *server* captures its environment once, at start, and hands that
+  same copy to every pane it will ever spawn. `environment.d(5)` is read by the
+  systemd user manager before it starts anything, so it reaches what starts
+  after — and never reaches a server already running. Measured here: the herdr
+  server started 09/04, the `environment.d` file exporting `SSH_AUTH_SOCK`
+  landed 09/06, and every pane opened since ran a shell without it.
+
+  What made it look like herdr's bug is that it was only half true. omarchy-dots
+  had already fixed the **bash** side in `~/.config/bash/rc.local`; `dot_zshrc`
+  had nothing. Same machine, same variable removed: `bash -ic` recovered it and
+  listed two keys, `zsh -ic` reported "Could not open a connection to your
+  authentication agent". herdr panes run zsh. So this is the zsh half of an
+  existing fix rather than a new mechanism, and it names the same socket path on
+  purpose — if the twins ever disagree, a machine gets two agents.
+
+  The socket path is stable (`$XDG_RUNTIME_DIR/ssh-agent.socket`, systemd
+  socket-activated), so the rc recomputes it when `SSH_AUTH_SOCK` is unset **or
+  points at a socket that is gone** — the latter being a path from a previous
+  login, inherited by a server that outlived it. A live value is never touched,
+  so a forwarded `ssh -A` agent and 1Password's `IdentityAgent` both still win,
+  and a machine with no such socket is left exactly as it was. Those two tests
+  are what keep it correct off Linux: macOS has launchd's live socket and no
+  `$XDG_RUNTIME_DIR`, and Windows must never see a socket path there at all
+  (`doc ssh-config`). Interactive shells only, like its bash twin.
+
+  Because the fix is in the shell and not the server, **every new pane is
+  already correct** — no server restart and nothing to detach. `doc ssh-config`
+  gained the diagnosis, `doc troubleshooting` an index row, and
+  `doc tools/herdr` a section on `[terminal] default_shell` (which stays a
+  machine-local key, since the first box this shipped to had `"pwsh"` there).
+
+
+### Added
+
 - **A second, machine-local workspace root (09/06/2026).** `$LOCAL_WORKSPACE_DIR`,
   else `~/LocalWorkspace` when it exists, resolved at call time like everything
   else here and resolving to nothing on the machines that have one root. `wsloc`
