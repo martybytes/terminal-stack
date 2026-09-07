@@ -4,6 +4,40 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+### Fixed
+
+- **`tstack ui`'s install advice, all three lines of which failed (09/07/2026).**
+  It printed `uv tool install textual`, `pipx install textual` and
+  `pip install --user textual`. On an Omarchy box every one fails:
+
+  ```
+  uv tool  : No executables are provided by package `textual`; removing tool
+  pipx     : No apps associated with package textual
+  pip      : zsh: command not found: pip
+  ```
+
+  The first two are not a platform quirk — `uv tool` and `pipx` install
+  *applications* into isolated venvs and refuse a package with no entry points.
+  textual is a library (its CLI is the separate `textual-dev` package), so
+  neither could ever have worked, on any platform. The third is Arch shipping no
+  bare `pip`, and PEP 668 refusing the write even where one exists.
+
+  The advice is probed per machine now, leading with the path that needs nothing
+  decided: `uv run --with textual <clone>/tstack/main.py ui` installs nothing at
+  all. Then `sudo pacman -S python-textual` on Arch, else
+  `python3 -m pip install --user textual` with `--break-system-packages` added
+  only when the interpreter really is externally managed — read from the same
+  marker file pip itself reads, rather than inferred from the distro. And it now
+  says *why* the tool installers cannot work, because that is the first thing a
+  reader reaches for.
+
+  `python3-textual` is deliberately not suggested off Arch: Debian 13 ships
+  textual 2.1.2 and Ubuntu 24.04 still ships 0.1.13, old enough that naming it
+  would send someone to a version this app cannot run. Verified in the parity
+  containers rather than assumed. `doc common/tstack` carried the same three bad
+  lines and is corrected too.
+
+
 ### Changed
 
 - **The parity runner prefers a rootless daemon over `sudo` (09/07/2026).**

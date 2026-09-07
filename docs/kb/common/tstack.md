@@ -148,11 +148,25 @@ writer and no second set of validation rules. Nothing here starts a container or
 installs anything; it edits settings.
 
 Textual is the one third-party library this program uses and only this command
-needs it, which is why it is not installed for you:
+needs it, which is why it is not installed for you. Run `tstack ui` without it and
+it prints the way to get it on **that** machine; the short version:
 
 ```sh
-uv tool install textual     # or pipx install textual, or pip install --user textual
+uv run --with textual "$TERMINAL_STACK_DIR/tstack/main.py" ui   # no install at all
+sudo pacman -S python-textual                                   # Arch/Omarchy: 8.2.8
+python3 -m pip install --user --break-system-packages textual   # elsewhere
 ```
+
+**Not `uv tool install textual` or `pipx install textual`.** Both install
+*applications* into isolated venvs and refuse a package with no entry points —
+textual is a library, and its CLI is the separate `textual-dev` package — so
+neither works on any platform. Both were recommended here until someone tried
+them. `--break-system-packages` is needed only where PEP 668 marks the
+interpreter as externally managed, which `tstack ui` detects by reading the same
+marker file pip does.
+
+Distro packages lag badly outside Arch — Debian 13 has textual 2.1.2 and Ubuntu
+24.04 still has 0.1.13 — so `python3-textual` is deliberately not suggested there.
 
 ## `tstack doctor`
 
