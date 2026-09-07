@@ -60,9 +60,12 @@ started *after* that — and never reaches a server that was already running. Ad
 shells without it, indefinitely, with nothing to see.
 
 The socket path is stable, so the shell rc recomputes it: `dot_zshrc` exports
-`$XDG_RUNTIME_DIR/ssh-agent.socket` when `SSH_AUTH_SOCK` is unset **or points at
-a socket that is gone**, and leaves any live value alone so a forwarded `ssh -A`
-agent still wins. Because the fix is in the shell and not the server, **every new
+`$XDG_RUNTIME_DIR/ssh-agent.socket` (Arch) or `$XDG_RUNTIME_DIR/openssh_agent`
+(Debian/Ubuntu, whose `agent-launch` uses that name) when `SSH_AUTH_SOCK` is
+unset **or points at a socket that is gone**, and leaves any live value alone so
+a forwarded `ssh -A` agent still wins. Arch is tried first: it is the name the
+bash half in omarchy-dots uses, and the two must agree or a machine ends up
+talking to two agents. Because the fix is in the shell and not the server, **every new
 pane is already correct** — no server restart, nothing to detach.
 
 An already-open pane keeps the environment it started with. Fix that one in
@@ -74,6 +77,28 @@ export SSH_AUTH_SOCK="${XDG_RUNTIME_DIR}/ssh-agent.socket"
 
 Interactive shells only, on purpose — `ssh host 'cmd'` runs a non-interactive
 shell and still has no agent. Use `ssh host -t`.
+
+### On a headless host there may be no agent to find
+
+WSL and a plain server have no graphical session, and Ubuntu's
+`ssh-agent.service` is `static` (nothing to `enable`) and ordered
+`Before=graphical-session-pre.target` — so nothing ever starts it and no socket
+is created. The block above then correctly does nothing: it recovers a socket,
+it does not conjure one.
+
+```bash
+ls -l "${XDG_RUNTIME_DIR}"/ssh-agent.socket "${XDG_RUNTIME_DIR}"/openssh_agent 2>/dev/null
+systemctl --user is-active ssh-agent.service
+```
+
+If both are absent, start one for the session yourself:
+
+```bash
+eval "$(ssh-agent -s)" && ssh-add ~/.ssh/id_ed25519
+```
+
+The stack deliberately ships no ssh-agent code on POSIX, so this stays a
+per-machine choice rather than something an apply turns on.
 
 ## The agent on Windows is a pipe, not a socket
 
@@ -100,3 +125,23 @@ OpenSSH accepts a pipe path there.
 `IdentityAgent` in this file is the same trap wearing a different hat: it
 overrides the pipe per-host. Leave it unset unless you are deliberately routing
 through 1Password, KeeAgent or Pageant.
+
+## git on Windows needs pointing at that pipe too
+
+Windows OpenSSH speaks the pipe; **Git for Windows' bundled MSYS ssh does not**,
+and that is the one git runs unless told otherwise. The symptom is a passphrase
+prompt on every git command while `ssh-add -l` happily lists your keys. The
+stack sets this in the Windows gitconfig:
+
+```gitconfig
+[core]
+	sshCommand = C:/Windows/System32/OpenSSH/ssh.exe
+```
+
+```powershell
+git config --get core.sshCommand   # expect that path
+git ls-remote origin HEAD          # expect a SHA, no prompt
+```
+
+Never set this on WSL, macOS or Linux — an absolute Windows path there breaks
+git outright. See `doc troubleshooting`.

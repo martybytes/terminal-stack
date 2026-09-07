@@ -29,6 +29,7 @@ a socket path in SSH_AUTH_SOCK breaks every ssh (`doc ssh-config`).
 
 from __future__ import annotations
 
+import contextlib
 import shutil
 import subprocess
 from pathlib import Path
@@ -87,6 +88,30 @@ def runtime():
     shutil.rmtree(base, ignore_errors=True)
 
 
+@contextlib.contextmanager
+def _runtime_holding(*names: str):
+    """An $XDG_RUNTIME_DIR holding a real listening socket per name given.
+
+    Same short-path reasoning as `runtime` above; see its docstring.
+    """
+    import socket
+    import tempfile
+
+    base = tempfile.mkdtemp(dir="/tmp", prefix="ts-ssh-")
+    open_socks = []
+    try:
+        for name in names:
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            sock.bind(str(Path(base) / name))
+            sock.listen(1)
+            open_socks.append(sock)
+        yield Path(base)
+    finally:
+        for sock in open_socks:
+            sock.close()
+        shutil.rmtree(base, ignore_errors=True)
+
+
 pytestmark = pytest.mark.skipif(not shutil.which("zsh"), reason="zsh is unavailable")
 
 
@@ -115,6 +140,30 @@ def test_a_machine_with_no_socket_is_left_exactly_as_it_was(tmp_path):
     empty.mkdir()
     assert _resolve(tmp_path, empty, None) == ""
     assert _resolve(tmp_path, empty, "/some/forwarded.sock") == "/some/forwarded.sock"
+
+
+def test_the_debian_socket_name_is_found_too(tmp_path):
+    """Ubuntu's /usr/lib/openssh/agent-launch creates `openssh_agent`, not
+    `ssh-agent.socket`. Probing only the Arch name meant this block could never
+    fire on WSL or a Debian server -- two of the three targets this ships to,
+    and the reason `ssh-add -l` found no agent in WSL at all."""
+    with _runtime_holding("openssh_agent") as rt:
+        assert _resolve(tmp_path, rt, None) == str(rt / "openssh_agent")
+
+
+def test_arch_wins_when_a_machine_somehow_has_both(tmp_path):
+    """The order is the contract with omarchy-dots, which owns the bash half.
+    If the two halves ever chose different sockets the machine would end up
+    talking to two agents, so the shared name has to keep winning."""
+    with _runtime_holding("ssh-agent.socket", "openssh_agent") as rt:
+        assert _resolve(tmp_path, rt, None) == str(rt / "ssh-agent.socket")
+
+
+def test_a_live_value_survives_the_debian_socket_too(tmp_path):
+    """The live-value rule is not allowed to weaken as names are added."""
+    with _runtime_holding("openssh_agent") as rt:
+        forwarded = rt / "openssh_agent"
+        assert _resolve(tmp_path, rt, str(forwarded)) == str(forwarded)
 
 
 def test_the_probe_does_not_fork(tmp_path):

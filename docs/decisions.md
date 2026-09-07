@@ -3539,3 +3539,87 @@ end.
 It had been failing on every Windows machine for as long as the preview has
 existed, and it took eleven tests in `tests/test_wizard.py` with it. They were red
 locally and read as a Python 3.14 quirk. They were not.
+
+## Why the Windows gitconfig pins `core.sshCommand`
+
+After a `tstack update`, every git command over ssh asked for the key
+passphrase — in PowerShell and in a brand-new WezTerm alike — while `ssh-add -l`
+in the same pane listed both keys. The agent was healthy throughout.
+
+Unset, `core.sshCommand` leaves git running **Git for Windows' bundled MSYS**
+ssh (`C:\Program Files\Git\usr\bin\ssh.exe`), which cannot speak the named pipe
+`\\.\pipe\openssh-ssh-agent` that the Windows agent listens on. One pane, one environment,
+both binaries:
+
+| ssh binary | `-T git@github.com` |
+|---|---|
+| `C:/Windows/System32/OpenSSH/ssh.exe` | `Hi martybytes! You've successfully authenticated` |
+| `C:/Program Files/Git/usr/bin/ssh.exe` | `Permission denied (publickey)` |
+
+Non-interactively that is a denial; interactively ssh falls back to prompting,
+which is what a human sees. Pointing git at native OpenSSH fixes it — verified
+with `GIT_SSH_COMMAND` set and `git ls-remote origin HEAD` returning a SHA with
+no prompt.
+
+**This was never a regression from the `SSH_AUTH_SOCK` pipe fix.** MSYS ssh could
+never use the Windows agent; that fix repaired native `ssh` and left `git`
+untouched, which is why the symptom only became visible once `ssh` itself
+started working. Before this change a repo-wide grep for `sshCommand`, `GIT_SSH`,
+`GIT_SSH_COMMAND`, `System32/OpenSSH` and `usr/bin/ssh` returned **zero hits**:
+which ssh binary git runs had never been pinned anywhere.
+
+### Why the mirror diverges, when it never had before
+
+`dot_config/git/terminal-stack.gitconfig` and its Windows copy were byte-identical
+by convention, stated in their shared header. The fix cannot honour that: the
+value is an **absolute Windows path**, and the canonical copy is applied to WSL,
+macOS and native Linux, where `core.sshCommand = C:/…` breaks git outright.
+
+Three options were weighed. A portable `sh -c` guard in the shared file (the
+idiom `core.pager` already uses there) would have kept the mirror intact, but
+hides a platform decision inside a shell one-liner that every POSIX machine then
+evaluates on every remote operation. Having the bootstrap write
+`git config --global core.sshCommand` alongside the `include.path` line it
+already adds would avoid touching either file, but only fixes machines that
+re-run the bootstrap and puts stack policy in the user's own `~/.gitconfig`.
+The mirror diverges instead: one line, in the file that already carries every
+other git setting, visible in a diff.
+
+So the header now states the real rule — identical **except** `core.sshCommand`,
+canonical must never gain it — and `tests/test_gitconfig.py` pins that shape in
+both directions. There was no gitconfig test of any kind before; a mirror that
+silently loses the line puts the passphrase prompts back, and a canonical file
+that silently gains it breaks every POSIX target, so both directions had to fail
+loudly rather than quietly.
+
+`tstack doctor` reports it as `git-ssh-command`. A value pointing at some other
+ssh is a **note, not a failure** — routing through 1Password or a custom agent is
+a legitimate choice, and failing an install over it would train people to ignore
+the exit code.
+
+## Why the agent probe names two sockets
+
+Found while investigating why WSL had no agent at all. `dot_zshrc` recovered
+`$XDG_RUNTIME_DIR/ssh-agent.socket` — the **Arch** name, which is what
+omarchy-dots' bash half uses. Debian and Ubuntu's `/usr/lib/openssh/agent-launch`
+creates **`$XDG_RUNTIME_DIR/openssh_agent`** instead. The probe could therefore
+never fire on WSL or a Debian server: two of the three targets this stack ships
+to, silently, since the block was written.
+
+Arch stays **first**. `tests/test_ssh_auth_sock.py` pins that path as the contract
+with omarchy-dots, which owns the bash half in a repo we do not control — if the
+two halves ever chose different sockets, a machine would end up talking to two
+agents. Adding the Debian name as a *fallback* keeps that contract exactly.
+
+Verified in real zsh: the Debian socket is found, the Arch one wins when both
+exist, a forwarded `ssh -A` value survives, a stale path is replaced, and a
+machine with no socket is left alone.
+
+**What this does not do is start an agent.** On Ubuntu 24.04 `ssh-agent.service`
+is `static` (no `[Install]` section) and ordered `Before=graphical-session-pre.target`,
+so with no graphical session in WSL nothing pulls it in and no socket is ever
+created — its `ConditionPathExists=/etc/X11/Xsession.options` and `use-ssh-agent`
+gates both pass; only the session is missing. Shipping a unit that spawns an agent
+on headless hosts is a behaviour change, and the Omarchy audit put it on the record
+that the stack contains no ssh-agent code. That decision deserves its own change,
+not a rider on a git fix.

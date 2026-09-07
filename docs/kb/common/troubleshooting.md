@@ -147,7 +147,8 @@ If 3110 answers and 3111 does not, the console is down, not agentmemory.
 
 The multiplexer's **server** hands every pane the environment it was started
 with, so a `SSH_AUTH_SOCK` added after that never arrives. `dot_zshrc` recomputes
-it from `$XDG_RUNTIME_DIR/ssh-agent.socket`, so new panes are already right;
+it from `$XDG_RUNTIME_DIR/ssh-agent.socket` (Arch) or `openssh_agent`
+(Debian/Ubuntu), so new panes are already right;
 an open one is fixed with an `export`. Full detail: `doc ssh-config`.
 
 ## `ssh` / `git push` says "Error connecting to agent" (Windows, WezTerm)
@@ -160,7 +161,7 @@ and fails in every WezTerm pane, however many times you restart the service.
 | `$env:SSH_AUTH_SOCK` **from the failing pane** | must be `\\.\pipe\openssh-ssh-agent`. A `...\wezterm\agent.<pid>` path, or an empty value, is the bug |
 | `[System.IO.Directory]::GetFiles('\\.\pipe\') -match 'openssh'` | the agent's pipe exists — if it does, the service is not your problem |
 | `Get-Service ssh-agent` | Running is necessary, and tells you almost nothing on its own |
-| `Get-Command ssh-add -All` | System32's OpenSSH should win over Git for Windows' `usr/bin` copy |
+| `Get-Command ssh-add -All` | System32's OpenSSH should win over Git for Windows' `usr/bin` copy. This is about **PATH only** — `git` picks its ssh separately, see the next section |
 
 Windows OpenSSH reaches its agent over a **named pipe**, but honours
 `SSH_AUTH_SOCK` ahead of it whenever that variable is set — so anything that sets
@@ -171,6 +172,33 @@ older config — restart WezTerm (a new tab is not enough) after `tstack update`
 
 **Never fix this by setting `SSH_AUTH_SOCK` to a socket path or starting a Unix
 `ssh-agent`** — neither can serve Windows OpenSSH. Concepts: `doc ssh-config`.
+
+## Every git command asks for the passphrase, but `ssh` works (Windows)
+
+Different bug from the one above, and the give-away is the opposite: `ssh` and
+`ssh-add -l` are **fine**, only `git` prompts — and the path it names is
+MSYS-spelled (`/c/Users/...`) rather than `C:\Users\...`.
+
+| check | what it means |
+|---|---|
+| `git config --get core.sshCommand` | must be `C:/Windows/System32/OpenSSH/ssh.exe`. Empty is the bug |
+| `tstack doctor` | reports it as `git-ssh-command` |
+| `git ls-remote origin HEAD` | the real test: a SHA and no prompt |
+
+With `core.sshCommand` unset, git runs **Git for Windows' bundled MSYS ssh**, not
+the one on your PATH. That build cannot open the agent's named pipe, so it never
+finds your keys and asks for the passphrase every single time. The stack sets
+the value in the Windows gitconfig, so the fix is usually just:
+
+```powershell
+tstack apply
+```
+
+Then open a new pane. If it still prompts, something below the `[include]` line
+in your own `~/.gitconfig` is overriding it — the stack's file resolves last
+among includes, but a plain setting in `~/.gitconfig` after that line wins.
+
+Concepts: `doc ssh-config`. Full diagnosis: `docs/powershell-quirks.md`.
 
 ## A port is already in use
 

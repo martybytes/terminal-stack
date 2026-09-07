@@ -172,6 +172,59 @@ ssh-add -l
 Full rationale and the measured config matrix: `decisions.md` § "Why the Windows
 WezTerm config pins `SSH_AUTH_SOCK` to the named pipe".
 
+## Every git command asks for the key passphrase, but `ssh` works
+
+**Symptom.** In every shell — PowerShell, a fresh WezTerm pane, Git Bash —
+`git fetch` / `push` / `pull` prompts:
+
+```
+Enter passphrase for key '/c/Users/<you>/.ssh/id_ed25519_...':
+```
+
+while `ssh-add -l` in that same pane lists the keys, `ssh -T git@github.com`
+authenticates, and the agent service is Running. Note the `/c/Users/...` path in
+the prompt: that spelling is MSYS, and it is the tell.
+
+**Cause.** With `core.sshCommand` unset, git runs **Git for Windows' bundled**
+ssh (`C:\Program Files\Git\usr\bin\ssh.exe`), not the `ssh.exe` your PATH resolves.
+That binary is an MSYS build and cannot open the named pipe
+`\\.\pipe\openssh-ssh-agent`, so it never sees the agent and falls back to asking you.
+One pane, one environment, both binaries:
+
+```powershell
+& 'C:/Windows/System32/OpenSSH/ssh.exe'   -o BatchMode=yes -T git@github.com  # authenticated
+& 'C:/Program Files/Git/usr/bin/ssh.exe'  -o BatchMode=yes -T git@github.com  # Permission denied
+```
+
+`BatchMode=yes` is what makes this a clean comparison — without it the second
+one prompts instead of failing, which is the behaviour being diagnosed.
+
+**Fix.** Point git at Windows OpenSSH. The stack ships this in the Windows
+gitconfig mirror (`windows/.config/git/terminal-stack.gitconfig`), so a
+`tstack apply` is normally all it takes:
+
+```gitconfig
+[core]
+	sshCommand = C:/Windows/System32/OpenSSH/ssh.exe
+```
+
+Forward slashes: git accepts them on Windows and they survive `.gitconfig`
+escaping. The canonical POSIX copy must **never** gain this line — an absolute
+Windows path there breaks git on WSL, macOS and native Linux.
+
+**Check it:**
+
+```powershell
+git config --get core.sshCommand   # expect C:/Windows/System32/OpenSSH/ssh.exe
+git ls-remote origin HEAD          # expect a SHA and no prompt
+tstack doctor                      # expect: git-ssh-command
+```
+
+Do **not** try to fix this by setting `SSH_AUTH_SOCK` to a socket path or
+starting a Unix `ssh-agent` — neither can serve Windows OpenSSH, and the pipe
+was never the broken part. Rationale and the full option comparison:
+`decisions.md` § "Why the Windows gitconfig pins `core.sshCommand`".
+
 ## Claude Code overwrites the tab title
 
 **Symptom.** Our `cc` PowerShell wrapper set the per-project tab title (then `cc • <project>`; today the bare project leaf) via OSC 0 (`Write-Host -NoNewline "ESC ]0;cc • myproject BEL"`). Claude Code launches, and the tab title changes to the conversation slug (e.g., `distinguish-claude-code-tabs-pwsh`).
