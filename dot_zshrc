@@ -1195,7 +1195,32 @@ _ts_workspace_sibling() {
   done
   return 1
 }
-ws()   { cd "$(_ts_workspace)" 2>/dev/null || echo "ws: no workspace found — export WORKSPACE_DIR in ~/.zshrc.local" >&2 }
+# `ws --set` is the sibling of `wsw --set`, with one difference that decides the
+# shape: the WRITE lives in `tstack workspace`, not here. A child process cannot
+# export into its parent, so the shell half exists only to run that command and
+# then export the path it echoes back on stdout -- which is why that command
+# prints the path and nothing else there. One writer, and the live shell follows
+# immediately instead of needing a re-source.
+_ts_workspace_set() {
+  local out
+  out="$(command tstack workspace set "$@")" || return $?
+  [[ -n "$out" ]] || return 1
+  export WORKSPACE_DIR="$out"
+  echo "ws: WORKSPACE_DIR=$out"
+}
+ws() {
+  case "${1:-}" in
+    --set|-s) shift; _ts_workspace_set "${@:-$PWD}"; return $? ;;
+    --show)   command tstack workspace show; return $? ;;
+    -h|--help)
+      print -r -- 'ws                  cd to the workspace root'
+      print -r -- 'ws --set [dir]      define it in ~/.zshrc.local (default: current dir)'
+      print -r -- 'ws --set <dir> --move   ... and relocate the tree there'
+      print -r -- 'ws --show           print the resolved path and where it came from'
+      return 0 ;;
+  esac
+  cd "$(_ts_workspace)" 2>/dev/null || echo "ws: no workspace found — run 'ws --set <dir>' or export WORKSPACE_DIR in ~/.zshrc.local" >&2
+}
 wsp()  { cd "$(_ts_workspace_sibling Personal)" 2>/dev/null || echo "wsp: no *_Personal sibling of $(_ts_workspace 2>/dev/null)" >&2 }
 # wspu prefers the organised public/ tier and falls back to the old *_Public
 # sibling root, so it keeps working before, during and after `wso migrate`.

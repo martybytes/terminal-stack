@@ -29,9 +29,45 @@ function Get-TsWorkspaceSibling([string]$Suffix) {
     }
     return $null
 }
+# `ws --set` is the sibling of `wsw --set`, with one difference that decides the
+# shape: the WRITE lives in `tstack workspace`, not here. A child process cannot
+# set a variable in its parent, so this half exists only to run that command and
+# then set the path it echoes back on stdout -- which is why that command prints
+# the path and nothing else there. One writer, and this session follows at once
+# instead of needing a reload.
+function Set-TsWorkspaceRoot {
+    # $Argv is passed by name, never splatted. Splatting an array whose elements
+    # can start with '-' re-parses those elements as parameter tokens, which is
+    # the trap docs/powershell-quirks.md records for `tstack services -h` -- and
+    # `ws --set <dir> --move` is exactly that shape.
+    param([string[]]$Argv = @())
+    if (-not $Argv -or -not $Argv.Count) { $Argv = @((Get-Location).Path) }
+    # stdout is the canonical path and nothing else; every other word the
+    # command says goes to stderr. Take the last line defensively anyway.
+    $out = & tstack workspace set @($Argv)
+    if ($LASTEXITCODE -ne 0 -or -not $out) { return }
+    $env:WORKSPACE_DIR = ([string[]]@($out))[-1]
+    Write-Host "ws: WORKSPACE_DIR=$($env:WORKSPACE_DIR)"
+}
 function ws {
+    if ($args.Count -gt 0) {
+        switch -Regex ([string]$args[0]) {
+            '^(--set|-s|-set)$' {
+                $tail = @(if ($args.Count -gt 1) { $args[1..($args.Count - 1)] } else { @() })
+                Set-TsWorkspaceRoot -Argv $tail; return
+            }
+            '^(--show|-show)$'  { & tstack workspace show; return }
+            '^(-h|--help|-help)$' {
+                Write-Output 'ws                  cd to the workspace root'
+                Write-Output 'ws --set [dir]      define it in profile.local.ps1 (default: current dir)'
+                Write-Output 'ws --set <dir> --move   ... and relocate the tree there'
+                Write-Output 'ws --show           print the resolved path and where it came from'
+                return
+            }
+        }
+    }
     $r = Get-TsWorkspace
-    if ($r) { Set-Location $r } else { Write-Warning 'ws: no workspace found — set $env:WORKSPACE_DIR in profile.local.ps1' }
+    if ($r) { Set-Location $r } else { Write-Warning "ws: no workspace found — run 'ws --set <dir>' or set `$env:WORKSPACE_DIR in profile.local.ps1" }
 }
 function wsp {
     $r = Get-TsWorkspaceSibling 'Personal'

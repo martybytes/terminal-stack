@@ -31,6 +31,7 @@ pytest.importorskip("textual", reason="tstack ui's one optional dependency")
 
 from textual.widgets import DataTable, Input  # noqa: E402
 
+from tstack.ui import model  # noqa: E402
 from tstack.ui.app import EditScreen, SettingsApp  # noqa: E402
 
 
@@ -79,7 +80,15 @@ def test_the_dashboard_mounts_with_every_setting_and_filters_live():
         async with app.run_test() as pilot:
             table = app.query_one("#table", DataTable)
             total = table.row_count
-            assert total == len(schema.SETTINGS)
+            # Not `== len(schema.SETTINGS)`: the dashboard also carries rows that
+            # are deliberately not chezmoi keys -- the workspace root
+            # (~/.zshrc.local) always, agentmemory's chat provider (the stack
+            # .env) when there is a clone to read one from. The invariant is that
+            # every schema setting reaches the screen, which
+            # tests/test_ui.py::test_every_setting_reaches_the_dashboard pins by
+            # key; here it is a floor, so a dropped setting still fails.
+            assert total >= len(schema.SETTINGS)
+            assert total == len(model.rows())
 
             app.query_one("#filter", Input).value = "kokoro"
             await settle(pilot, lambda: table.row_count < total, "the filter to apply")

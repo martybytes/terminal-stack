@@ -53,8 +53,14 @@ def test_every_setting_reaches_the_dashboard():
     Derived from the schema rather than from a list here, so a setting added
     tomorrow appears without anyone remembering to register it -- which is the
     failure this repo has had four times over, in four hand-maintained key lists.
+
+    Scoped to the SETTINGS store, because the dashboard also carries rows that
+    are deliberately not chezmoi keys: agentmemory's chat provider (the stack
+    .env) and the workspace root (~/.zshrc.local). Unscoped, this passed only
+    while `llm_rows()` happened to return nothing on the machine running it --
+    a green assertion that was not testing what it said.
     """
-    rows = model.rows()
+    rows = [r for r in model.rows() if r.store == model.SETTINGS]
     assert {r.key for r in rows} == set(schema.BY_KEY)
     assert [r.key for r in rows] == [s.key for s in schema.SETTINGS], "declaration order"
 

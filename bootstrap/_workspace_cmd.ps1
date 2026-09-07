@@ -56,7 +56,7 @@ function Invoke-TsWsStatus([string[]]$Arguments) {
     }
     $n = 0; $nd = 0; $nu = 0; $ndet = 0; $nnr = 0
     foreach ($d in (Get-TsWsAllRepos)) {
-        if ($org -and $d -notmatch [regex]::Escape("\$org\")) { continue }
+        if (-not (Test-TsWsOrgMatch $d $org)) { continue }
         $n++
         $st = Get-TsWsGitState $d
         $origin = Get-TsWsOrigin $d
@@ -138,12 +138,25 @@ function Get-TsWsPlan {
     return $rows
 }
 
-function Show-TsWsPlan($Rows, [string]$Mode) {
+# Filter a plan by owner. Unlike every other --org site this matches the
+# DESTINATION, because a misfiled repo's whole point is that its current folder
+# does not say who owns it - "wso plan --org 37metrics" has to show the clone
+# sitting in a directory called "flipoff" whose origin is 37metrics/rotari.
+# Rows with no destination (blocked, and anything with an unparseable origin)
+# have no owner to compare, so they survive every filter: they are the rows
+# that need a human, and hiding them behind a flag is how they get forgotten.
+function Select-TsWsPlanByOrg($Rows, [string]$Org) {
+    if (-not $Org) { return $Rows }
+    return @($Rows | Where-Object { -not $_.Dest -or (Test-TsWsOrgMatch $_.Dest $Org) })
+}
+
+function Show-TsWsPlan($Rows, [string]$Mode, [string]$Org = '') {
     $root = Get-TsWsRoot
     ""
     "=============================================================================="
     " Workspace migration plan"
     " Root: $root"
+    if ($Org) { " Org:  $Org" }
     " Mode: $Mode"
     "=============================================================================="
     foreach ($tier in @('src', 'public', 'local', 'scratch')) {
@@ -180,17 +193,29 @@ function Show-TsWsPlan($Rows, [string]$Mode) {
 
 # ----------------------------------------------------------------- migrate ----
 
-function Invoke-TsWsMigrate([string[]]$Arguments) {
-    $root = Get-TsWsRoot
-    $fixRemotes = $false
-    foreach ($a in $Arguments) {
-        switch -Regex ($a) {
-            '^--fix-remotes$' { $fixRemotes = $true }
-            default { Write-Warning "wso migrate: unknown option: $a"; return }
+function Invoke-TsWsPlan([string[]]$Arguments) {
+    $org = ''
+    for ($i = 0; $i -lt $Arguments.Count; $i++) {
+        switch -Regex ($Arguments[$i]) {
+            '^--org$' { $org = $Arguments[$i + 1]; $i++ }
+            default   { Write-Warning "wso plan: unknown option: $($Arguments[$i])"; return }
         }
     }
-    $rows = Get-TsWsPlan
-    Show-TsWsPlan $rows 'EXECUTE'
+    Show-TsWsPlan (Select-TsWsPlanByOrg (Get-TsWsPlan) $org) 'DRY RUN - nothing is moved' $org
+}
+
+function Invoke-TsWsMigrate([string[]]$Arguments) {
+    $root = Get-TsWsRoot
+    $fixRemotes = $false; $org = ''
+    for ($i = 0; $i -lt $Arguments.Count; $i++) {
+        switch -Regex ($Arguments[$i]) {
+            '^--fix-remotes$' { $fixRemotes = $true }
+            '^--org$'         { $org = $Arguments[$i + 1]; $i++ }
+            default { Write-Warning "wso migrate: unknown option: $($Arguments[$i])"; return }
+        }
+    }
+    $rows = Select-TsWsPlanByOrg (Get-TsWsPlan) $org
+    Show-TsWsPlan $rows 'EXECUTE' $org
     $moves = @($rows | Where-Object { $_.Status -eq 'move' })
     if (-not $moves.Count) { Write-TsWsInfo 'Nothing to move.'; return }
     if ($env:TS_DRY_RUN -eq '1') {
@@ -272,20 +297,22 @@ function Invoke-TsWsSync([string[]]$Arguments) {
         }
     }
     foreach ($d in (Get-TsWsManagedRepos @('src', 'public', 'local'))) {
-        if ($org -and $d -notmatch [regex]::Escape("\$org\")) { continue }
+        if (-not (Test-TsWsOrgMatch $d $org)) { continue }
         Sync-TsWsRepo $d
     }
-    Show-TsWsMissing
+    Show-TsWsMissing $org
 }
 
 # What exists in your orgs but not on this machine. Reported, never cloned -
 # putting 100 repos on a laptop is a decision, not a default.
-function Show-TsWsMissing {
+function Show-TsWsMissing([string]$Org = '') {
     if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { return }
     $root = Get-TsWsRoot
     $hostName = Get-TsWsSetting 'host_default' 'github.com'
     $missing = 0
-    foreach ($owner in (Get-TsWsOwnOwners)) {
+    $owners = Get-TsWsOwnersForFilter $Org
+    if ($null -eq $owners) { return }
+    foreach ($owner in $owners) {
         $names = & gh repo list $owner --limit 500 --json name -q '.[].name' 2>$null
         foreach ($r in $names) {
             if (-not $r) { continue }
@@ -295,22 +322,36 @@ function Show-TsWsMissing {
             if ($missing -le 20) { "   missing: $owner/$r" }
         }
     }
-    if ($missing -gt 0) {
+    if ($missing -gt 0 -and $Org) {
+        "--"
+        "$missing $Org repo(s) are not on this machine. 'wso synceverything --org $Org' clones them."
+    } elseif ($missing -gt 0) {
         "--"
         "$missing repo(s) in your orgs are not on this machine. 'wso synceverything' clones them."
     }
 }
 
-function Invoke-TsWsSyncEverything {
+function Invoke-TsWsSyncEverything([string[]]$Arguments) {
+    $org = ''
+    for ($i = 0; $i -lt $Arguments.Count; $i++) {
+        switch -Regex ($Arguments[$i]) {
+            '^--org$' { $org = $Arguments[$i + 1]; $i++ }
+            default   { Write-Warning "wso synceverything: unknown option: $($Arguments[$i])"; return }
+        }
+    }
     if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
         Write-Warning 'wso: gh not found - needed to enumerate your orgs. See: wso doctor'; return
     }
-    Invoke-TsWsSync @()
+    # Resolve the filter BEFORE the sync, so a typo'd org fails in a second
+    # rather than after fast-forwarding every repo on the machine.
+    $owners = Get-TsWsOwnersForFilter $org
+    if ($null -eq $owners) { return }
+    if ($org) { Invoke-TsWsSync @('--org', $org) } else { Invoke-TsWsSync @() }
     $root = Get-TsWsRoot
     $hostName = Get-TsWsSetting 'host_default' 'github.com'
     $scheme = Get-TsWsSetting 'scheme_own' 'ssh'
     $cloned = 0
-    foreach ($owner in (Get-TsWsOwnOwners)) {
+    foreach ($owner in $owners) {
         $names = & gh repo list $owner --limit 500 --json name -q '.[].name' 2>$null
         foreach ($r in $names) {
             if (-not $r) { continue }
@@ -357,24 +398,34 @@ function Invoke-TsWsGet([string[]]$Arguments) {
 # ----------------------------------------------------------------- orphans ----
 
 function Invoke-TsWsOrphans([string[]]$Arguments) {
-    $doPush = $false
-    foreach ($a in $Arguments) {
-        switch -Regex ($a) {
+    $doPush = $false; $org = ''
+    for ($i = 0; $i -lt $Arguments.Count; $i++) {
+        switch -Regex ($Arguments[$i]) {
             '^--push$' { $doPush = $true }
-            default { Write-Warning "wso orphans: unknown option: $a"; return }
+            '^--org$'  { $org = $Arguments[$i + 1]; $i++ }
+            default { Write-Warning "wso orphans: unknown option: $($Arguments[$i])"; return }
         }
     }
     $root = Get-TsWsRoot
     $found = 0
     foreach ($d in (Get-TsWsAllRepos)) {
         if (Get-TsWsOrigin $d) { continue }
+        # An orphan has no remote, so nothing derives its owner and it normally
+        # sits in local\, which has no owner segment at all. --org therefore
+        # only ever matches one parked at an owner path - a clone whose origin
+        # was stripped. Filtering to nothing is a real answer; the empty
+        # message below names the filter so it does not read as "you have none".
+        if (-not (Test-TsWsOrgMatch $d $org)) { continue }
         $found++
         $commits = & git -C $d rev-list --all --count 2>$null
         $branches = (& git -C $d for-each-ref --format='%(refname:short)' refs/heads 2>$null) -join ' '
         "{0,-44} {1,6} commits   {2}" -f (Get-TsWsRelative $d $root), $commits, $branches
         if ($doPush) { Publish-TsWsOrphan $d }
     }
-    if ($found -eq 0) {
+    if ($found -eq 0 -and $org) {
+        Write-TsWsInfo "No remote-less repos under $org\. Orphans have no owner to"
+        '     derive, so most of them live in local\ and no --org can match them.'
+    } elseif ($found -eq 0) {
         Write-TsWsInfo 'No repos without a remote. Nothing here exists on only one disk.'
     } else {
         "--"
@@ -414,10 +465,11 @@ function Publish-TsWsOrphan([string]$Dir) {
 
 function Invoke-TsWsArchive([string[]]$Arguments) {
     $root = Get-TsWsRoot
-    $days = ''
+    $days = ''; $org = ''
     for ($i = 0; $i -lt $Arguments.Count; $i++) {
         switch -Regex ($Arguments[$i]) {
             '^--days$' { $days = $Arguments[$i + 1]; $i++ }
+            '^--org$'  { $org = $Arguments[$i + 1]; $i++ }
             default { Write-Warning "wso archive: unknown option: $($Arguments[$i])"; return }
         }
     }
@@ -430,10 +482,12 @@ function Invoke-TsWsArchive([string[]]$Arguments) {
     if ($days -notmatch '^\d+$') { Write-Warning "wso archive: --days needs a number, got '$days'"; return }
     $days = [int]$days
 
-    Write-TsWsInfo "Scanning src/ for repos untouched for $days+ days..."
+    if ($org) { Write-TsWsInfo "Scanning src/$org for repos untouched for $days+ days..." }
+    else      { Write-TsWsInfo "Scanning src/ for repos untouched for $days+ days..." }
     $now = [DateTime]::UtcNow
     $items = @()
     foreach ($d in (Get-TsWsManagedRepos @('src'))) {
+        if (-not (Test-TsWsOrgMatch $d $org)) { continue }
         $act = Get-TsWsLastActivity $d
         $age = if ($act) { [int]($now - $act).TotalDays } else { 99999 }
         if ($age -lt $days) { continue }
@@ -444,7 +498,8 @@ function Invoke-TsWsArchive([string[]]$Arguments) {
         $items += [pscustomobject]@{ Path = $d; Label = $label; Ticked = (-not $why); Why = $why }
     }
     if (-not $items.Count) {
-        Write-TsWsInfo "Nothing in src/ is older than $days days. That is the correct outcome most months."
+        $scope = if ($org) { "src/$org/" } else { 'src/' }
+        Write-TsWsInfo "Nothing in $scope is older than $days days. That is the correct outcome most months."
         return
     }
 
@@ -539,7 +594,7 @@ function Invoke-TsWsUnarchive([string[]]$Arguments) {
             }
         }
         'all' { $picks = @(Get-TsWsManagedRepos @('archive')) }
-        'org' { $picks = @(Get-TsWsManagedRepos @('archive') | Where-Object { $_ -match [regex]::Escape("\$org\") }) }
+        'org' { $picks = @(Get-TsWsManagedRepos @('archive') | Where-Object { Test-TsWsOrgMatch $_ $org }) }
         'name'{ $picks = @(Get-TsWsManagedRepos @('archive') | Where-Object { (Split-Path -Leaf $_) -like "*$name*" }) }
         'pick' {
             if (-not (Get-Command fzf -ErrorAction SilentlyContinue)) {
@@ -577,7 +632,10 @@ function Invoke-TsWsUnarchive([string[]]$Arguments) {
 # Writes this machine's git rules. These cannot be tracked: the paths are
 # machine-specific and the emails are personal, and neither may enter the
 # source tree.
-function Invoke-TsWsIdentity {
+function Invoke-TsWsIdentity([string[]]$Arguments) {
+    if ($Arguments -and $Arguments.Count) {
+        Write-Warning "wso identity: unknown option: $($Arguments[0])"; return
+    }
     $root = Get-TsWsRoot
     $gitdir = Join-Path $env:USERPROFILE '.config\git'
     New-Item -ItemType Directory -Path $gitdir -Force | Out-Null
@@ -649,7 +707,10 @@ function Backup-TsWsFile([string]$Path) {
 
 # ------------------------------------------------------------------ doctor ----
 
-function Invoke-TsWsDoctor {
+function Invoke-TsWsDoctor([string[]]$Arguments) {
+    if ($Arguments -and $Arguments.Count) {
+        Write-Warning "wso doctor: unknown option: $($Arguments[0])"; return
+    }
     $root = Get-TsWsRoot
     $issues = 0
     Write-TsWsInfo 'Workspace'
@@ -693,7 +754,7 @@ function Invoke-TsWsDoctor {
 
 # ---------------------------------------------------------------- dispatch ----
 
-# Byte-identical to lines 2-19 of bootstrap/wso.sh, which that script prints for
+# Byte-identical to lines 2-21 of bootstrap/wso.sh, which that script prints for
 # --help by self-extracting its own header. Change one, change the other.
 function Show-TsWsHelp {
     @'
@@ -702,19 +763,21 @@ derivable tree, and makes bulk operations over them safe.
 
 Usage:
   wso status [--dirty] [--org X]  what is dirty / unpushed / detached (read-only)
-  wso plan                        preview the migration; never writes
-  wso migrate [--fix-remotes]     execute it (moves only; asks first)
+  wso plan [--org X]              preview the migration; never writes
+  wso migrate [--fix-remotes] [--org X]   execute it (moves only; asks first)
   wso sync [--org X]              fast-forward-only update of what is here
-  wso synceverything              sync, then clone every missing org repo
-  wso archive [--days N]          interactive: threshold, checklist, confirm
+  wso synceverything [--org X]    sync, then clone every missing org repo
+  wso archive [--days N] [--org X]  interactive: threshold, checklist, confirm
   wso unarchive [name|--org X|--all|--undo-last] [--update]
   wso get <url|owner/repo>        clone to the derived path
-  wso orphans [--push]            repos with no remote (they exist on one disk)
+  wso orphans [--push] [--org X]  repos with no remote (they exist on one disk)
   wso identity                    write this machine's git identity rules
   wso doctor                      tools, config and tree health
 
 Layout is <root>/<tier>/<host>/<owner>/<repo>; see bootstrap/workspace.conf.
-Honors TS_DRY_RUN=1 (preview only) everywhere that writes.
+--org matches the OWNER segment and applies workspace.conf's rename map.
+Honors TS_DRY_RUN=1 (preview only) everywhere that writes. `ws --set` moves
+the workspace root itself; see `tstack workspace`.
 '@
 }
 
@@ -729,17 +792,17 @@ function Invoke-Wso {
     switch -Regex ($cmd) {
         '^$'               { Invoke-TsWsStatus @(); break }
         '^status$'         { Invoke-TsWsStatus $rest; break }
-        '^plan$'           { Show-TsWsPlan (Get-TsWsPlan) 'DRY RUN - nothing is moved'; break }
+        '^plan$'           { Invoke-TsWsPlan $rest; break }
         '^migrate$'        { Invoke-TsWsMigrate $rest; break }
         '^sync$'           { Invoke-TsWsSync $rest; break }
-        '^synceverything$' { Invoke-TsWsSyncEverything; break }
+        '^synceverything$' { Invoke-TsWsSyncEverything $rest; break }
         '^archive$'        { Invoke-TsWsArchive $rest; break }
         '^unarchive$'      { Invoke-TsWsUnarchive $rest; break }
         '^get$'            { Invoke-TsWsGet $rest; break }
         '^orphans$'        { Invoke-TsWsOrphans $rest; break }
-        '^identity$'       { Invoke-TsWsIdentity; break }
-        '^doctor$'         { Invoke-TsWsDoctor; break }
+        '^identity$'       { Invoke-TsWsIdentity $rest; break }
+        '^doctor$'         { Invoke-TsWsDoctor $rest; break }
         '^(-h|--help|help)$' { Show-TsWsHelp; break }
-        default { Write-Warning "wso: unknown command '$cmd' (try: status, plan, migrate, sync, archive, unarchive, get, orphans, identity, doctor, --help)"; break }
+        default { Write-Warning "wso: unknown command '$cmd' (try: status, plan, migrate, sync, synceverything, archive, unarchive, get, orphans, identity, doctor, --help)"; break }
     }
 }
