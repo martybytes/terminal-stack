@@ -69,6 +69,35 @@ marked line. It is deliberately not a `.chezmoiremove` rule and not a sync-side
 delete: both of those run on every machine and would reach a box that never opted
 in.
 
+## Which shell your panes run
+
+herdr spawns your **login shell** by default, which on Omarchy is bash — the
+fleet never runs `chsh`. To get zsh panes, set it in herdr's own config:
+
+```toml
+[terminal]
+default_shell = "/usr/bin/zsh"
+shell_mode = "login"      # or "non_login"
+new_cwd = "follow"
+```
+
+```bash
+herdr server reload-config     # picks it up; existing panes keep their shell
+```
+
+**This key is deliberately yours, not the stack's.** It is the one concrete
+example in the section above of a hand-written value a whole-file render would
+have destroyed — that machine had `default_shell = "pwsh"`, and a fleet-wide
+value would put zsh on it. The right shell is a property of the machine (is zsh
+even installed?), not of the stack, so `tstack herdr` owns `[theme] name` and
+nothing else.
+
+One thing to do first, or zsh panes come up worse than bash ones did: make sure
+the shell restores `SSH_AUTH_SOCK`. A multiplexer server hands every pane the
+environment it started with, so an agent variable added later never arrives —
+`dot_zshrc` recomputes it, but a stale runtime clone will not have that yet.
+`doc ssh-config` § "The agent is missing inside a multiplexer".
+
 ## Where the config lives
 
 | Platform | Path |

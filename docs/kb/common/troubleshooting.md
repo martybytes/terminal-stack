@@ -143,6 +143,13 @@ Four ports, and which one answers tells you what is broken:
 If 3110 answers and 3111 does not, the console is down, not agentmemory.
 `tstack services status` shows all of them. Concepts: `doc agentmemory-console`.
 
+## `ssh` works in a terminal but not in a herdr/tmux pane (Linux)
+
+The multiplexer's **server** hands every pane the environment it was started
+with, so a `SSH_AUTH_SOCK` added after that never arrives. `dot_zshrc` recomputes
+it from `$XDG_RUNTIME_DIR/ssh-agent.socket`, so new panes are already right;
+an open one is fixed with an `export`. Full detail: `doc ssh-config`.
+
 ## `ssh` / `git push` says "Error connecting to agent" (Windows, WezTerm)
 
 The give-away is that **the same command works in cmd.exe or Windows Terminal**

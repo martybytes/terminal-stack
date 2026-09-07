@@ -4,6 +4,44 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+### Fixed
+
+- **zsh restores `SSH_AUTH_SOCK`, so agents work in herdr and tmux panes
+  (09/06/2026).** `ssh` worked from a terminal and failed in every herdr pane,
+  with the agent healthy throughout.
+
+  A multiplexer *server* captures its environment once, at start, and hands that
+  same copy to every pane it will ever spawn. `environment.d(5)` is read by the
+  systemd user manager before it starts anything, so it reaches what starts
+  after — and never reaches a server already running. Measured here: the herdr
+  server started 09/04, the `environment.d` file exporting `SSH_AUTH_SOCK`
+  landed 09/06, and every pane opened since ran a shell without it.
+
+  What made it look like herdr's bug is that it was only half true. omarchy-dots
+  had already fixed the **bash** side in `~/.config/bash/rc.local`; `dot_zshrc`
+  had nothing. Same machine, same variable removed: `bash -ic` recovered it and
+  listed two keys, `zsh -ic` reported "Could not open a connection to your
+  authentication agent". herdr panes run zsh. So this is the zsh half of an
+  existing fix rather than a new mechanism, and it names the same socket path on
+  purpose — if the twins ever disagree, a machine gets two agents.
+
+  The socket path is stable (`$XDG_RUNTIME_DIR/ssh-agent.socket`, systemd
+  socket-activated), so the rc recomputes it when `SSH_AUTH_SOCK` is unset **or
+  points at a socket that is gone** — the latter being a path from a previous
+  login, inherited by a server that outlived it. A live value is never touched,
+  so a forwarded `ssh -A` agent and 1Password's `IdentityAgent` both still win,
+  and a machine with no such socket is left exactly as it was. Those two tests
+  are what keep it correct off Linux: macOS has launchd's live socket and no
+  `$XDG_RUNTIME_DIR`, and Windows must never see a socket path there at all
+  (`doc ssh-config`). Interactive shells only, like its bash twin.
+
+  Because the fix is in the shell and not the server, **every new pane is
+  already correct** — no server restart and nothing to detach. `doc ssh-config`
+  gained the diagnosis, `doc troubleshooting` an index row, and
+  `doc tools/herdr` a section on `[terminal] default_shell` (which stays a
+  machine-local key, since the first box this shipped to had `"pwsh"` there).
+
+
 ### Added
 
 - **`~/bin` on PATH, and `local-bin` cloned on apply (09/06/2026).** `~/bin` holds
