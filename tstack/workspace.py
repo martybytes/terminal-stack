@@ -70,8 +70,10 @@ WINDOWS_LINE = "$env:WORKSPACE_DIR = '{path}'"
 # `~/workspace` before `~/Documents/Workspace` and POSIX probes them the other
 # way round. Preserved rather than harmonised -- a machine whose root is
 # currently found by one order would silently move if this "fixed" it.
+# /mnt/c/DATA/Workspace was the first POSIX candidate and is gone: on WSL it
+# meant `ws` resolved to the Windows workspace over drvfs regardless of $HOME.
+# WORKSPACE_DIR still points there deliberately for anyone who wants it.
 POSIX_CANDIDATES = (
-    "/mnt/c/DATA/Workspace",
     "~/Documents/Workspace",
     "~/workspace",
     "~/Workspace",

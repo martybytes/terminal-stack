@@ -262,8 +262,12 @@ def check_config_stores(report: Report) -> None:
     when it matters. On 2026-08-21 the mirror said false, chezmoi [data] said
     true, the pwsh sync had deleted every TTS hook, and the doctor reported
     "tts daemon healthy".
+
+    Windows only. A WSL install is self-contained: it no longer writes the mirror,
+    so comparing its [data] against a store the Windows install owns reported a
+    divergence on every key the two machines legitimately disagree about.
     """
-    if not plat.is_windows_side():
+    if plat.kind() != plat.WINDOWS:
         return
     mirror = store.mirror_path()
     if not mirror or not mirror.is_file():
@@ -499,16 +503,15 @@ def _daemon_reachable(port: int) -> bool:
 def _check_claude_tts_hooks(report: Report) -> None:
     """A hook that does not exist cannot be degraded, slow, or muted - it is
     simply absent, and every other TTS check still looks healthy. That is the
-    one-line version of the outage that removed all five of them."""
-    if not plat.is_windows_side():
+    one-line version of the outage that removed all five of them.
+
+    Windows only. These hooks live in the Windows profile and are installed by
+    the Windows sync; a WSL install no longer writes them, so checking them from
+    WSL reported on a file another install owns.
+    """
+    if plat.kind() != plat.WINDOWS:
         return
-    if plat.kind() == plat.WSL:
-        user = plat.windows_username()
-        if not user:
-            return
-        settings = Path(f"/mnt/c/Users/{user}/.claude/settings.json")
-    else:
-        settings = Path.home() / ".claude" / "settings.json"
+    settings = Path.home() / ".claude" / "settings.json"
     if not settings.is_file():
         return
     body = settings.read_text(encoding="utf-8", errors="replace")
@@ -790,6 +793,37 @@ def check_clone_location(report: Report, src: Path | None) -> None:
         )
 
 
+def check_wsl_docker_shim(report: Report, src: Path | None) -> None:
+    """WSL + Docker Desktop with this distro's integration OFF + an ext4 clone.
+
+    The canonical WSL clone moved to the Linux filesystem, which is right for
+    every other reason but leaves one sharp edge: on the docker "wsl-shim" path
+    the engine is a WINDOWS process, and it cannot bind-mount a path that reaches
+    it as \\wsl.localhost. Nothing fails at apply time -- it surfaces much later,
+    inside a container, as tar saying "Cannot open: No such file or directory",
+    which reads as a corrupt archive rather than a broken mount.
+
+    A note, not a failure: the stack itself is fine, and this only bites the
+    services stack. The fix is one checkbox, and it is the same one that gives
+    WSL a native Linux docker.
+    """
+    if plat.kind() != plat.WSL or src is None:
+        return
+    from .. import engine
+
+    if engine.docker_kind() != engine.WSL_SHIM:
+        return
+    reason = engine.require_windows_visible(src)
+    if not reason:
+        return
+    report.note(
+        "wsl-docker-shim",
+        "the clone is on the Linux filesystem and Docker here is the Windows engine, "
+        "which cannot bind-mount it",
+        "fix: Docker Desktop -> Settings -> Resources -> WSL Integration, enable this distro",
+    )
+
+
 def check_clone_branch(report: Report, src: Path | None) -> None:
     """A runtime clone must track the release branch, and must track something.
 
@@ -885,8 +919,12 @@ def check_git_ssh_command(report: Report) -> None:
     failure here means the sync has not run yet or something overrode it later
     in ~/.gitconfig -- both worth naming, because the symptom (a passphrase
     prompt) looks like an agent problem and is not.
+
+    Windows only, not "Windows side". On WSL this measured WSL's OWN git, which
+    should use the Linux ssh and never a C:/ path -- so it failed on every WSL
+    host for a setting that would be wrong there if it were set.
     """
-    if not plat.is_windows_side():
+    if plat.kind() != plat.WINDOWS:
         return
     got = _run(["git", "config", "--get", "core.sshCommand"])
     value = got.stdout.strip() if got and got.returncode == 0 else ""
@@ -935,6 +973,7 @@ def collect() -> Report:
     check_other_clones(report, src)
     check_git_hooks(report, src)
     check_git_ssh_command(report)
+    check_wsl_docker_shim(report, src)
     return report
 
 

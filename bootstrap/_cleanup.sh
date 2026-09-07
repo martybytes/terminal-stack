@@ -35,7 +35,10 @@ ts_clone_candidates() {
         "$HOME/Documents/Workspace/terminal-stack" \
         "$HOME/.local/share/chezmoi"
     if [ -r /proc/version ] && grep -qi microsoft /proc/version 2>/dev/null; then
+        # The first is the pre-2026-09 canonical location; still a candidate, or
+        # a machine installed before the move stops finding its own clone.
         printf '%s\n' \
+            "/mnt/c/Users/*/AppData/Local/terminal-stack/stack" \
             "/mnt/c/Users/*/terminal-stack" \
             "/mnt/c/DATA/Workspace/terminal-stack"
     fi

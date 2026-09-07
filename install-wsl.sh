@@ -55,8 +55,11 @@ export WIN_USER
 echo "$INFO Windows username: $WIN_USER"
 
 # 3. Choose clone location ($TERMINAL_STACK_DIR skips the prompt), then clone.
-# Canonical default: the Windows app-data dir the stack already owns, shared by
-# WSL and Windows (see docs/decisions.md § "Runtime clone location").
+# Canonical default: the XDG data home, ON THE LINUX FILESYSTEM -- the same
+# place install-linux.sh uses. This used to default to the Windows app-data dir
+# over /mnt/c, shared with the Windows install, and the drvfs tax was brutal:
+# `git status` measured 1634 ms there against 3 ms on ext4. A WSL install now
+# keeps its files in WSL. See docs/decisions.md § "Runtime clone location".
 REPO_URL='https://github.com/martybytes/terminal-stack.git'
 # The branch a runtime clone tracks, pinned rather than inherited. `git clone`
 # with no --branch takes the repo's DEFAULT branch, so which tree an install got
@@ -65,13 +68,13 @@ REPO_URL='https://github.com/martybytes/terminal-stack.git'
 # Keep in step with tstack/paths.py RELEASE_BRANCH; tests/test_release_branch.py
 # fails if any copy drifts.
 RELEASE_BRANCH='main'
-DEFAULT_DIR="/mnt/c/Users/$WIN_USER/AppData/Local/terminal-stack/stack"
+DEFAULT_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/terminal-stack"
 # Workspace roots, in probe order. Keep in sync with bootstrap/_workspace.sh
 # ts_ws_root — this copy exists because the installer runs before any clone is
 # on disk.
 ts_in_workspace_root() {
     p="${1%/}"
-    for r in "${WORKSPACE_DIR:-}" /mnt/c/DATA/Workspace "$HOME/Documents/Workspace" "$HOME/workspace" "$HOME/Workspace"; do
+    for r in "${WORKSPACE_DIR:-}" "$HOME/Documents/Workspace" "$HOME/workspace" "$HOME/Workspace"; do
         [ -n "$r" ] || continue
         case "$p/" in "${r%/}"/*) return 0 ;; esac
     done
@@ -131,7 +134,8 @@ fi
 # master list: bootstrap/_cleanup.sh ts_clone_candidates.
 if [ ! -d "$TARGET_DIR/.git" ]; then
     LEGACY=""
-    for c in "/mnt/c/Users/$WIN_USER/terminal-stack" \
+    for c in "/mnt/c/Users/$WIN_USER/AppData/Local/terminal-stack/stack" \
+             "/mnt/c/Users/$WIN_USER/terminal-stack" \
              /mnt/c/DATA/Workspace/terminal-stack \
              "$HOME/code/terminal-stack" \
              "$HOME/terminal-stack"; do

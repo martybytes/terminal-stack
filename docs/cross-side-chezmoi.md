@@ -137,7 +137,7 @@ Run on any chezmoi-source file we've just edited through a Windows-side tool. Th
 
 ## Running chezmoi from outside WSL
 
-The chezmoi.toml override at `~/.config/chezmoi/chezmoi.toml` points sourceDir at `/mnt/c/Users/<you>/AppData/Local/terminal-stack/stack`. This path exists in WSL (via the drvfs mount) but not directly on Windows.
+The chezmoi.toml override at `~/.config/chezmoi/chezmoi.toml` points sourceDir at `~/.local/share/terminal-stack` -- on the Linux filesystem, since 09/2026. It used to point at `/mnt/c/Users/<you>/AppData/Local/terminal-stack/stack`, the clone shared with Windows; reaching it over drvfs cost 1634 ms per `git status` against 3 ms on ext4.
 
 If you wanted to run chezmoi from the Windows side natively (without WSL), you'd:
 

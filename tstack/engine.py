@@ -127,6 +127,12 @@ def require_windows_visible(path: Path) -> str | None:
     a container as tar saying "Cannot open: No such file or directory", which
     reads as a broken archive rather than a broken mount.
 
+    This used to be unreachable in practice: the canonical WSL clone was on
+    /mnt/c, so it always passed. Since the clone moved to the Linux filesystem
+    it is reachable for anyone on the shim path -- Docker Desktop with WSL
+    integration OFF for this distro. Turning that integration on is the fix, and
+    that is what the message says now.
+
     Returns None when the path is usable, or the reason it is not.
     """
     # Pure string work on a POSIX path. Path.resolve() must NOT be used here: this
@@ -140,10 +146,10 @@ def require_windows_visible(path: Path) -> str | None:
     return (
         f"{resolved} is inside the WSL filesystem, and the Docker engine here is a "
         "Windows process that cannot bind-mount it.\n"
-        "  fix:  keep the clone under a Windows drive (the canonical "
-        "%LOCALAPPDATA%\\terminal-stack\\stack already is),\n"
-        "        or enable this distro under Docker Desktop -> Settings -> "
-        "Resources -> WSL Integration"
+        "  fix:  enable this distro under Docker Desktop -> Settings -> "
+        "Resources -> WSL Integration, which is what gives WSL a native\n"
+        "        Linux docker. The canonical clone now lives on the Linux "
+        "filesystem, so moving it to a Windows drive is no longer the answer."
     )
 
 

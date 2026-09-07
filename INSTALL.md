@@ -24,7 +24,7 @@ curl -fsSL https://raw.githubusercontent.com/martybytes/terminal-stack/main/inst
 curl -fsSL https://raw.githubusercontent.com/martybytes/terminal-stack/main/install-mac.sh | bash
 ```
 
-**Clone location.** Each installer **prompts** for where to put the repo, pre-filled with the per-platform canonical default (Windows and WSL share **one** clone at `%LOCALAPPDATA%\terminal-stack\stack`, which WSL sees as `/mnt/c/Users/<you>/AppData/Local/terminal-stack/stack`; Linux/macOS `~/.local/share/terminal-stack`). Press Enter to accept, or set `$env:TERMINAL_STACK_DIR` (PowerShell) / `TERMINAL_STACK_DIR=…` (bash) to skip the prompt. If an existing clone sits at an old location, the installer offers to move it to the canonical path (git state intact). The WSL installer auto-detects your Windows username via `cmd.exe` interop, so it runs without prompts under `curl | bash`.
+**Clone location.** Each installer **prompts** for where to put the repo, pre-filled with the per-platform canonical default (Windows `%LOCALAPPDATA%\terminal-stack\stack`; **WSL, Linux and macOS** all use `~/.local/share/terminal-stack`. WSL keeps its clone on the Linux filesystem, not the `/mnt/c` mount -- drvfs made `git status` 1634 ms there against 3 ms on ext4). Press Enter to accept, or set `$env:TERMINAL_STACK_DIR` (PowerShell) / `TERMINAL_STACK_DIR=…` (bash) to skip the prompt. If an existing clone sits at an old location, the installer offers to move it to the canonical path (git state intact). The WSL installer auto-detects your Windows username via `cmd.exe` interop, so it runs without prompts under `curl | bash`.
 
 Two guards on that choice, both there because the alternative bit us:
 
@@ -182,7 +182,7 @@ Open WSL Ubuntu (substitute your Windows username for `<you>`):
 
 ```sh
 wsl -d Ubuntu
-cd /mnt/c/Users/<you>/AppData/Local/terminal-stack/stack
+cd ~/.local/share/terminal-stack
 bash ./bootstrap/wsl-bootstrap.sh
 ```
 

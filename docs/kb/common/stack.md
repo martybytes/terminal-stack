@@ -35,7 +35,7 @@ and they are reached through `tstack <name>`, never by their own names.
 
 | Path | Role |
 |---|---|
-| `%LOCALAPPDATA%\terminal-stack\stack` (WSL: `/mnt/c/Users/<you>/AppData/Local/terminal-stack/stack`) | canonical runtime clone — Windows + WSL share this **one** clone |
+| `%LOCALAPPDATA%\terminal-stack\stack` (Windows) / `~/.local/share/terminal-stack` (WSL, Linux, macOS) | canonical runtime clone. WSL keeps its own on the Linux filesystem: sharing the Windows one over drvfs cost 1634 ms per `git status` against 3 ms on ext4 |
 | `~/.local/share/terminal-stack` | canonical runtime clone — native Linux/macOS |
 | `<workspace>/<tier>/github.com/<owner>/terminal-stack` | dev clone — **invisible** to resolution/doctor/`doc` unless pinned |
 

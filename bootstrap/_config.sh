@@ -905,25 +905,16 @@ ts_install_git_hooks() {
     echo "  git hooks: core.hooksPath -> $want (pre-commit and pre-push gates active)"
 }
 
+# The canonical runtime clone location: %LOCALAPPDATA%\terminal-stack\stack on
+# Windows, the XDG data home on every POSIX target INCLUDING WSL. Pins
 # (TERMINAL_STACK_DIR) are only for NON-canonical locations. Twins:
 # dot_zshrc _ts_canonical_clone, profile/_cleanup.ps1 Get-TsCanonicalCloneDir.
+# WSL used to share the Windows clone over /mnt/c. The drvfs tax was brutal --
+# `git status` 1634 ms there against 3 ms on ext4, and the 229-second apply
+# noted above -- so WSL now uses the XDG data home like every other POSIX
+# target, and the Windows install owns the Windows side. The old location stays
+# in ts_clone_candidates so machines installed before the move still resolve.
 ts_canonical_clone_dir() {
-    if [ -r /proc/version ] && grep -qi microsoft /proc/version 2>/dev/null; then
-        local wu=""
-        wu="$(ts_win_user 2>/dev/null || true)"
-        if [ -n "$wu" ]; then
-            echo "/mnt/c/Users/$wu/AppData/Local/terminal-stack/stack"
-            return 0
-        fi
-        # Last resort: a single existing match wins.
-        local m matches=0 hit=""
-        for m in /mnt/c/Users/*/AppData/Local/terminal-stack/stack; do
-            [ -d "$m" ] || continue
-            matches=$((matches + 1)); hit="$m"
-        done
-        [ "$matches" -eq 1 ] && { echo "$hit"; return 0; }
-        return 1
-    fi
     echo "${XDG_DATA_HOME:-$HOME/.local/share}/terminal-stack"
 }
 
@@ -1474,8 +1465,16 @@ ts_refresh_resolved_theme() {
 }
 
 # Mirror the derived config to the Windows side so sync-windows.ps1 / a
-# Windows-standalone tstack config agree with the WSL source of truth.
+# Windows-standalone tstack config agree with the source of truth.
+#
+# NOT on WSL any more. A WSL install is self-contained and owns only its own
+# settings; writing this mirror made WSL's answers overwrite the Windows
+# install's on every save, from a clone that may be at a different commit. The
+# Windows side keeps its own store and writes it from pwsh.
 ts_mirror_windows_config() {
+    if [ -r /proc/version ] && grep -qi microsoft /proc/version 2>/dev/null; then
+        return 0
+    fi
     [ -d /mnt/c/Users ] || return 0
     # One render up front, so the ~49 reads below cost one chezmoi spawn between them.
     # shellcheck disable=SC2086

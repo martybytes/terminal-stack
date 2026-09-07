@@ -17,8 +17,11 @@
 # export WORK_WORKSPACE_DIR="$HOME/clients/acme"
 
 # ── Workspace location override ───────────────────────────────────────────────
-# ws/wsp/wspu autodetect the workspace from a candidate list (/mnt/c/DATA/Workspace,
-# ~/Documents/Workspace, ~/workspace, ~/Workspace — see _ts_workspace in ~/.zshrc).
+# ws/wsp/wspu autodetect the workspace from a candidate list (~/Documents/Workspace,
+# ~/workspace, ~/Workspace — see _ts_workspace in ~/.zshrc). On WSL the Windows
+# workspace under /mnt/c is NOT a candidate: reaching it over drvfs is slow, and a
+# WSL install keeps its files on the Linux filesystem. Point WORKSPACE_DIR at it
+# here if you want the Windows one anyway.
 # Only set this when the autodetect is wrong for this machine. The installer
 # writes this line for you when your answer differs from the autodetect.
 #

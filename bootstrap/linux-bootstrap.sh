@@ -3,8 +3,9 @@
 # Targets Debian/Ubuntu- and Arch-family distros (Omarchy included). Idempotent.
 # See ../INSTALL.md § Linux for context.
 #
-# Difference vs wsl-bootstrap.sh: no Windows-username prompt, default SOURCE_DIR
-# points at ~/code/terminal-stack instead of /mnt/c/DATA/Workspace/terminal-stack.
+# Difference vs wsl-bootstrap.sh: no Windows-username prompt. SOURCE_DIR itself
+# is identical in both -- dirname $0/.. -- and the installers pass the same
+# canonical default now that WSL keeps its clone on the Linux filesystem too.
 # The post-apply hook (run_after_90-sync-windows.sh) self-no-ops when /mnt/c/Users/
 # is absent, so no extra gating is required here.
 

@@ -127,8 +127,12 @@ common_tty_prompt() {
 # shell-side _ts_workspace() covers the detected case on its own.
 common_workspace_config() {
     local detected="" d choice
-    for d in /mnt/c/DATA/Workspace "$HOME/Documents/Workspace" \
-             "$HOME/workspace" "$HOME/Workspace"; do
+# /mnt/c/DATA/Workspace is deliberately NOT a candidate any more. It was probed
+# FIRST, so on WSL `ws` landed on the Windows workspace over drvfs no matter
+# what existed in $HOME -- the same tax the runtime clone move fixes. A WSL
+# install keeps its workspace on the Linux filesystem; set WORKSPACE_DIR in
+# ~/.zshrc.local to point at the Windows one deliberately.
+    for d in "$HOME/Documents/Workspace" "$HOME/workspace" "$HOME/Workspace"; do
         [ -d "$d" ] && { detected="$d"; break; }
     done
 
