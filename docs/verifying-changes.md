@@ -696,6 +696,38 @@ in `sync-windows.ps1`), and the first `ts_*_set` or `chezmoi init` backfills it.
 
 ## 6. Before you push
 
+Run it:
+
+```sh
+scripts/preflight.sh              # gates, suite, parity containers, merge with main
+scripts/preflight.sh --no-parity  # skip Docker
+scripts/preflight.sh --no-merge   # skip the network
+```
+
+**The merge step is the one the hooks cannot do.** They check your working tree;
+CI checks the merge of it with `main`. A branch that is green alone can be red
+merged, and that has happened here: `CLAUDE.md` has a hard 40,000-byte cap, `main`
+sat at 39,957 with 43 bytes spare, and two branches each trimmed the *same* index
+lines to fit under it. Both were green; the merge kept both additions and one copy
+of the savings, came to 40,234, and blocked a PR after the push. Preflight
+test-merges `origin/main` into a throwaway worktree and re-runs the suite on the
+result, so that arrives in seconds instead of after a round trip.
+
+**The parity step never prompts.** `tests/parity/run.sh` escalates to
+`sudo docker`, and on a box where that wants a password an unattended preflight
+would hang. The probe is the same non-interactive `sudo -n docker info`, and a
+miss prints how to enable Docker rather than waiting. Omarchy leaves you out of
+the `docker` group deliberately — membership is equivalent to passwordless root —
+and `omarchy-setup-security-sudoless-docker` is its documented opt-in.
+
+**What it still cannot cover: macOS and Windows.** Containers share the host
+kernel, so Docker on Linux runs neither, and no local tooling will change that.
+Those axes are read instead of run — `test_no_shell_file_uses_a_gnu_only_spelling`,
+`test_no_test_shells_out_to_a_literal_bash` and
+`test_no_test_binds_a_unix_socket_under_tmp_path` each catch the class on any OS.
+Anything left genuinely needs CI, which is free on this public repo (13
+job-minutes, 3–4 minutes wall clock per run).
+
 - Docs updated *with* the change, not after — and sweep the passing mentions, not
   just the reference tables. See the `-h` landmine below.
 - `CHANGELOG.md` entry under `[Unreleased]`.

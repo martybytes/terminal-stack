@@ -62,6 +62,20 @@ python3 -m mypy
 python3 -m pytest tests/ --cov
 ```
 
+**Before a push, run `scripts/preflight.sh`.** The hooks check the working tree;
+CI checks the MERGE of that tree with `main`, on four operating systems and six
+containers. Preflight closes the gap the hooks structurally cannot: it runs the
+gates, the suite, the Linux parity containers, and a **test-merge against
+`origin/main` with the suite re-run on the result**. It is a script and not a
+hook because it is allowed to be slow, to touch the network and to want Docker.
+
+That merge step exists because of a real red PR: `CLAUDE.md` has a hard
+40,000-byte cap, `main` sat at 39,957, and two branches each trimmed the *same*
+lines to fit. Both were green alone; the merge kept both additions and one copy
+of the savings, and #26 was blocked after the push. `--no-parity` and `--no-merge`
+skip either half; the parity step never prompts for a sudo password, it prints
+how to enable Docker and moves on.
+
 `.githooks/pre-commit` runs the first four; `.githooks/pre-push` adds coverage and
 the characterization fixtures. They only fire when the clone has
 `core.hooksPath=.githooks` - `ts_install_git_hooks` sets it, and until 2026-08-25
@@ -86,7 +100,18 @@ directly, so say which you ran rather than implying the rest: a Windows box has
 pwsh and WSL but no macOS and no native Linux; a Mac has macOS and, with the brew
 install above, pwsh - but no WSL, and `tests/parity/run.sh` needs bash 4+ for
 `declare -A` so it cannot run there either. `.github/workflows/ci.yml` is the only
-thing that covers all four.
+thing that covers all four, and on a public repo its standard runners are free -
+a full run is 13 job-minutes and 3-4 minutes of wall clock, so the matrix is not
+worth trimming.
+
+**macOS and Windows cannot be containerised** - containers share the host kernel
+- so those axes are checked by READING rather than by running, and that gate is
+stronger than a container would be because it catches the class rather than one
+path. `test_no_shell_file_uses_a_gnu_only_spelling` (BSD utilities),
+`test_no_test_shells_out_to_a_literal_bash` (git-bash is the only bash on the
+Windows runner) and `test_no_test_binds_a_unix_socket_under_tmp_path` (macOS
+blows AF_UNIX's ~104-byte `sun_path`) are the three; add to them rather than
+hoping CI catches the next one.
 
 Native Linux is not one of those two, and WSL is not a stand-in for it -
 `tstack/platform.py` reports `wsl` there on purpose. Run it for real:
