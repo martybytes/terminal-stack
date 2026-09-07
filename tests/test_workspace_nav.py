@@ -37,6 +37,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.shell_support import BASH, bash_path
+
 ROOT = Path(__file__).resolve().parent.parent
 ZSHRC = ROOT / "dot_zshrc"
 PROFILE = ROOT / "windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1"
@@ -92,8 +94,13 @@ def test_a_machine_with_no_local_root_still_has_exactly_one(tmp_path):
     """The common case. Nothing here may assume a second root exists."""
     home = tmp_path / "home"
     (home / "Workspace").mkdir(parents=True)
-    out = _run_zsh("_ts_ws_roots", home)
-    assert out.split() == [str(home / "Workspace")]
+    roots = _run_zsh("_ts_ws_roots", home).split()
+    # The COUNT is the claim. Not the spelling: macOS and Windows are
+    # case-insensitive, and `_ts_workspace` probes `~/workspace` before
+    # `~/Workspace`, so what comes back is the probe's capitalisation and not
+    # the directory's. Asserting the string passed on Linux and failed on macOS.
+    assert len(roots) == 1
+    assert roots[0].lower() == str(home / "Workspace").lower()
 
 
 @pytest.mark.skipif(not shutil.which("zsh"), reason="zsh is unavailable")
@@ -170,11 +177,21 @@ def test_wsloc_lands_in_the_local_root(two_roots):
 # -------------------------------------------------------------- organiser ----
 
 
+needs_bash = pytest.mark.skipif(BASH is None, reason="needs bash")
+
+
 def _run_scan(home: Path, env: dict[str, str]) -> list[str]:
-    full = {"HOME": str(home), "PATH": "/usr/bin:/bin"}
-    full.update(env)
+    r"""ts_ws_scan_roots in a real bash, with paths that bash can open.
+
+    `bash_path` rather than str(): on a Windows runner the only compatible bash
+    is git-bash, which cannot open `C:\...` -- the same translation every other
+    bash test here already does.
+    """
+    full = {"HOME": bash_path(home), "PATH": "/usr/bin:/bin"}
+    full.update({k: bash_path(v) if k != "PATH" else v for k, v in env.items()})
+    assert BASH is not None
     result = subprocess.run(
-        ["bash", "-c", f'. "{WS_SH}"; ts_ws_scan_roots'],
+        [BASH, "-c", f'. "{bash_path(WS_SH)}"; ts_ws_scan_roots'],
         env=full,
         text=True,
         capture_output=True,
@@ -186,24 +203,27 @@ def _run_scan(home: Path, env: dict[str, str]) -> list[str]:
     return result.stdout.split()
 
 
+@needs_bash
 def test_wso_never_scans_the_local_root(two_roots):
     home, main, local = two_roots
-    assert _run_scan(home, {"WORKSPACE_DIR": str(main)}) == [str(main)]
-    assert str(local) not in _run_scan(home, {"WORKSPACE_DIR": str(main)})
+    assert _run_scan(home, {"WORKSPACE_DIR": str(main)}) == [bash_path(main)]
+    assert bash_path(local) not in _run_scan(home, {"WORKSPACE_DIR": str(main)})
 
 
+@needs_bash
 def test_extra_roots_cannot_re_add_the_local_root(two_roots):
     """TS_WS_EXTRA_ROOTS means "legacy root, empty this into the tree" -- the
     one thing the local root must never be, however it got named."""
     home, main, local = two_roots
     roots = _run_scan(home, {"WORKSPACE_DIR": str(main), "TS_WS_EXTRA_ROOTS": str(local)})
-    assert roots == [str(main)]
+    assert roots == [bash_path(main)]
 
 
+@needs_bash
 def test_the_guard_does_not_fire_when_the_workspace_is_the_local_root(two_roots):
     """Otherwise wso is left with no roots at all and silently plans nothing."""
     home, _, local = two_roots
-    assert _run_scan(home, {"WORKSPACE_DIR": str(local)}) == [str(local)]
+    assert _run_scan(home, {"WORKSPACE_DIR": str(local)}) == [bash_path(local)]
 
 
 # ------------------------------------------------------------ both shells ----
