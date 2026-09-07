@@ -66,17 +66,25 @@ def _resolve(tmp_path: Path, runtime_dir: Path | None, current: str | None) -> s
 
 
 @pytest.fixture
-def runtime(tmp_path):
-    """An $XDG_RUNTIME_DIR holding a real listening ssh-agent.socket."""
-    import socket
+def runtime():
+    """An $XDG_RUNTIME_DIR holding a real listening ssh-agent.socket.
 
-    d = tmp_path / "run"
-    d.mkdir()
+    NOT under pytest's `tmp_path`. A unix socket's `sun_path` is about 104
+    bytes, and macOS hands out `/private/var/folders/../pytest-of-runner/...`
+    which is most of that before the filename -- the bind fails with "AF_UNIX
+    path too long". `/tmp` is short on every platform this runs on, and on
+    macOS it is the same `/private/tmp` by a shorter name.
+    """
+    import socket
+    import tempfile
+
+    base = tempfile.mkdtemp(dir="/tmp", prefix="ts-ssh-")
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    sock.bind(str(d / "ssh-agent.socket"))
+    sock.bind(str(Path(base) / "ssh-agent.socket"))
     sock.listen(1)
-    yield d
+    yield Path(base)
     sock.close()
+    shutil.rmtree(base, ignore_errors=True)
 
 
 pytestmark = pytest.mark.skipif(not shutil.which("zsh"), reason="zsh is unavailable")

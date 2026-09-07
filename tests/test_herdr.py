@@ -570,14 +570,16 @@ def test_a_windows_path_is_a_toml_literal_string(monkeypatch):
     monkeypatch.setattr(plat, "find_pwsh", lambda: r"C:\Program Files\PowerShell\7\pwsh.exe")
     out = herdr.splice("[theme]\n")
     assert r"default_shell = 'C:\Program Files\PowerShell\7\pwsh.exe'" in out
-    # and it round-trips through a real TOML parser
-    import tomllib
-
+    # ...and it round-trips through a real TOML parser. tomllib is 3.11+, and
+    # `tests/parity/run.sh` deliberately runs on each distro's OWN Python --
+    # ubuntu:22.04 is 3.10 -- so the parse is skipped there rather than
+    # dragging in a dependency for it. The assertion above still runs.
+    tomllib = pytest.importorskip("tomllib")
     assert tomllib.loads(out)["terminal"]["default_shell"].endswith("pwsh.exe")
 
 
 def test_every_spliced_file_is_still_valid_toml(monkeypatch):
-    import tomllib
+    tomllib = pytest.importorskip("tomllib")  # 3.11+; see the test above
 
     monkeypatch.setattr(store, "get", lambda key, default="": "zsh")
     monkeypatch.setattr(herdr.shutil, "which", lambda name: f"/usr/bin/{name}")
