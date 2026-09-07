@@ -135,6 +135,13 @@ ghosttyConfig = {{ index . "ghosttyConfig" | default "on" | quote }}
        write, on that machine only. Never a .chezmoiremove: that runs everywhere
        and would wipe a hand-written config on a box that never opted in. */}}
 herdrConfig = {{ index . "herdrConfig" | default "off" | quote }}
+{{- /* Which shell herdr spawns in a pane. The CHOICE is stored, never a path:
+       a path is wrong on the other side of a combined Windows+WSL machine, and
+       a Windows one carries backslashes, which this store cannot hold. `auto`
+       resolves to the shell the STACK configures -- pwsh on Windows, zsh
+       everywhere else -- which on Omarchy is deliberately not the login shell,
+       since that box is bash-first and the fleet never runs chsh. */}}
+herdrShell = {{ index . "herdrShell" | default "auto" | quote }}
 {{- /* Per-computer agent integrations. These are deliberately user-global but
        machine-local: a laptop without the Docker services stays off. */}}
 headroomEnabled = {{ index . "headroomEnabled" | default "off" | quote }}

@@ -472,3 +472,116 @@ def test_the_command_routes_on_and_off(config, monkeypatch):
 def test_the_command_routes_update(config, monkeypatch, capsys):
     monkeypatch.setattr(herdr, "version", lambda: None)
     assert command.main(["update"]) == 1
+
+
+# ------------------------------------------------------------- the pane shell
+
+
+def test_auto_is_the_shell_the_stack_configures_not_the_login_shell(monkeypatch):
+    """The whole point of the setting. On Omarchy the login shell is bash and
+    stays bash -- the fleet never runs chsh -- while the shell this stack sets
+    up, with the prompt and the agent wrappers, is zsh. herdr spawning the login
+    shell therefore gives a pane that is not the machine the stack configured.
+    """
+    for kind, expected in (
+        (plat.WINDOWS, "pwsh"),
+        (plat.MACOS, "zsh"),
+        (plat.LINUX, "zsh"),
+        (plat.WSL, "zsh"),
+    ):
+        monkeypatch.setattr(plat, "kind", lambda k=kind: k)
+        assert herdr.auto_shell() == expected, kind
+
+
+def test_omarchy_gets_zsh_even_though_its_login_shell_is_bash(monkeypatch):
+    monkeypatch.setattr(plat, "kind", lambda: plat.LINUX)
+    monkeypatch.setattr(plat, "is_omarchy", lambda: True)
+    assert herdr.auto_shell() == "zsh"
+
+
+def test_the_resolved_value_is_an_absolute_path(monkeypatch):
+    """A bare name is resolved against the herdr SERVER's PATH, which is not
+    your shell's -- that server is long-lived and keeps the environment it
+    started with, which is the property that already cost this repo an ssh agent
+    in every pane."""
+    monkeypatch.setattr(store, "get", lambda key, default="": "zsh")
+    monkeypatch.setattr(herdr.shutil, "which", lambda name: f"/usr/bin/{name}")
+    path, _ = herdr.resolve_shell()
+    assert path == "/usr/bin/zsh"
+
+
+def test_a_shell_that_is_not_installed_is_never_written(monkeypatch):
+    """Writing a default_shell that does not exist breaks every NEW pane. Leaving
+    herdr on the login shell it was already using is strictly better."""
+    monkeypatch.setattr(store, "get", lambda key, default="": "fish")
+    monkeypatch.setattr(herdr.shutil, "which", lambda name: None)
+    path, why = herdr.resolve_shell()
+    assert path is None
+    assert "not installed" in why
+    assert herdr.SHELL_KEY not in herdr.splice("[theme]\n")
+
+
+def test_login_means_the_stack_owns_no_shell_key(monkeypatch):
+    monkeypatch.setattr(store, "get", lambda key, default="": "login")
+    assert herdr.resolve_shell()[0] is None
+    assert herdr.SHELL_KEY not in herdr.splice("[theme]\n")
+
+
+def test_auto_defers_to_a_default_shell_you_wrote_yourself(monkeypatch):
+    """This module's premise is that an unmarked line is yours. The first box it
+    shipped to had a hand-written `default_shell = "pwsh"`; a default that
+    quietly took that over would be the same silent loss a whole-file render
+    causes, only slower."""
+    monkeypatch.setattr(store, "get", lambda key, default="": "auto")
+    monkeypatch.setattr(herdr.shutil, "which", lambda name: f"/usr/bin/{name}")
+    out = herdr.splice(HAND_WRITTEN)
+    assert 'default_shell = "pwsh"' in out
+    assert herdr.MARKER not in out.split("default_shell")[1].split("\n")[0]
+
+
+def test_naming_a_shell_explicitly_takes_the_key_over(monkeypatch):
+    """Deferring is what `auto` does. An explicit choice is a decision, and the
+    file is backed up before the first write either way."""
+    monkeypatch.setattr(store, "get", lambda key, default="": "zsh")
+    monkeypatch.setattr(herdr.shutil, "which", lambda name: f"/usr/bin/{name}")
+    out = herdr.splice(HAND_WRITTEN)
+    assert '"pwsh"' not in out
+    assert f'default_shell = "/usr/bin/zsh"  # {herdr.MARKER}' in out
+
+
+def test_turning_the_shell_key_off_removes_the_line_it_wrote(monkeypatch):
+    """A splice that leaves its last value behind is not a splice. `login` after
+    `zsh` must take our line out, or the setting says one thing forever and the
+    file says another."""
+    monkeypatch.setattr(store, "get", lambda key, default="": "zsh")
+    monkeypatch.setattr(herdr.shutil, "which", lambda name: f"/usr/bin/{name}")
+    written = herdr.splice("[theme]\n")
+    assert herdr.SHELL_KEY in written
+
+    monkeypatch.setattr(store, "get", lambda key, default="": "login")
+    assert herdr.SHELL_KEY not in herdr.splice(written)
+
+
+def test_a_windows_path_is_a_toml_literal_string(monkeypatch):
+    r"""A backslash is an ESCAPE in a basic string, so "C:\Users\x" is wrong --
+    and silently wrong whenever the escape happens to be a valid one."""
+    monkeypatch.setattr(store, "get", lambda key, default="": "pwsh")
+    monkeypatch.setattr(plat, "kind", lambda: plat.WINDOWS)
+    monkeypatch.setattr(plat, "find_pwsh", lambda: r"C:\Program Files\PowerShell\7\pwsh.exe")
+    out = herdr.splice("[theme]\n")
+    assert r"default_shell = 'C:\Program Files\PowerShell\7\pwsh.exe'" in out
+    # and it round-trips through a real TOML parser
+    import tomllib
+
+    assert tomllib.loads(out)["terminal"]["default_shell"].endswith("pwsh.exe")
+
+
+def test_every_spliced_file_is_still_valid_toml(monkeypatch):
+    import tomllib
+
+    monkeypatch.setattr(store, "get", lambda key, default="": "zsh")
+    monkeypatch.setattr(herdr.shutil, "which", lambda name: f"/usr/bin/{name}")
+    for start in ("", "[theme]\n", HAND_WRITTEN, '[terminal]\nnew_cwd = "follow"\n'):
+        parsed = tomllib.loads(herdr.splice(start))
+        assert parsed["theme"]["name"] == herdr.THEME
+        assert parsed["terminal"]["default_shell"]

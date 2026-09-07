@@ -61,6 +61,7 @@ Usage:
   tstack config restore <on|off>   reopen the last session on launch
   tstack config atuin <on|off>     atuin owns Ctrl+R
   tstack config herdr <on|off>     the managed herdr config
+  tstack config herdr shell <v>    which shell a herdr pane runs (auto|zsh|bash|pwsh|login)
   tstack config memory <backend>   agentmemory | headroom | none | status
   tstack config agents [...]       per-machine agent wiring
   tstack config prompt [...]       status | list | preview | <preset>
@@ -239,6 +240,13 @@ def show(out: Out) -> int:
     # Every platform, unlike the ghostty row below: herdr runs on all four, so
     # the setting means something wherever this is read.
     out.say(_row("herdr", store.get("herdrConfig", "off"), "tstack config herdr on|off"))
+    out.say(
+        _row(
+            "herdr shell",
+            store.get("herdrShell", "auto"),
+            "tstack config herdr shell auto|zsh|bash|pwsh|login",
+        )
+    )
     # macOS alone, matching the one target `tstack ghostty` still has. This was
     # briefly widened to WSL and Windows for the noctty mirror; that mirror is
     # gone, so printing the row anywhere else would advertise a setting that

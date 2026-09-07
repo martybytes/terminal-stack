@@ -64,9 +64,26 @@ MARKER = "managed by terminal-stack"
 # The value written for `[theme] name`. See the module docstring.
 THEME = "terminal"
 
-# The table and key the stack owns. Anything outside this pair is left alone.
+# The table/key pairs the stack can own. Ownership stays per KEY: every byte
+# outside these two lines is someone else's and survives a write untouched.
 TABLE = "theme"
 KEY = "name"
+SHELL_TABLE = "terminal"
+SHELL_KEY = "default_shell"
+
+# What `herdrShell` may be. `auto` is the point of the setting -- see auto_shell.
+# `login` means the stack owns no shell key at all, which is herdr's own
+# behaviour: spawn the login shell.
+SHELL_OPTIONS = ("auto", "zsh", "bash", "pwsh", "login")
+
+
+@dataclass(frozen=True)
+class Owned:
+    """One line the stack writes: `[table] key = value`."""
+
+    table: str
+    key: str
+    value: str
 
 
 @dataclass(frozen=True)
@@ -111,6 +128,100 @@ def setting() -> str:
     return value if value in ("on", "off") else "off"
 
 
+def shell_setting() -> str:
+    value = store.get("herdrShell", "auto")
+    return value if value in SHELL_OPTIONS else "auto"
+
+
+def auto_shell() -> str:
+    """The shell THIS STACK configures on this platform, by name.
+
+    Not the login shell, which is the whole reason the setting exists. On
+    Omarchy the login shell is bash and always will be -- the fleet never runs
+    `chsh`, because Omarchy's own desktop is bash-first -- while the shell this
+    stack actually configures, with the prompt, the tools and the agent
+    wrappers, is zsh. herdr spawning the login shell therefore gives a pane that
+    is not the machine the rest of the stack set up.
+
+    macOS and Debian/Ubuntu land on zsh for the same reason and by a shorter
+    road: it is what `dot_zshrc` is. Windows is pwsh, where `$PROFILE` is the
+    file the stack owns. That is the whole map -- four platforms, two answers,
+    and neither is "whatever /etc/passwd says".
+    """
+    return "pwsh" if plat.kind() == plat.WINDOWS else "zsh"
+
+
+def _hand_written_shell(text: str) -> str | None:
+    """A `default_shell` already in the file that is NOT ours, if there is one."""
+    line_re = _key_re(SHELL_KEY)
+    table = ""
+    for line in text.splitlines():
+        found = _TABLE_RE.match(line)
+        if found:
+            table = found.group(1).strip()
+            continue
+        if table != SHELL_TABLE or line.lstrip().startswith("#"):
+            continue
+        if line_re.match(line) and MARKER not in line:
+            return line.strip()
+    return None
+
+
+def resolve_shell(text: str = "") -> tuple[str | None, str]:
+    """(the path to write, why) -- or (None, why not).
+
+    An ABSOLUTE path, never a bare name, and resolved on the machine at write
+    time rather than stored. Both halves of that matter:
+
+    * Stored, a path would be wrong on the other side of a combined
+      Windows+WSL machine, and a Windows one carries backslashes, which
+      `schema.Setting.validate` refuses for exactly this store (it writes
+      chezmoi.toml unescaped). So `[data]` holds the CHOICE and this resolves it.
+    * Absolute, because the herdr SERVER's PATH is not your shell's. That server
+      is long-lived and keeps the environment it started with -- the same
+      property that cost this repo an ssh agent in every pane -- so a bare
+      `zsh` is resolved against an environment nobody has looked at.
+
+    A shell that is not installed returns None. Writing a `default_shell` that
+    does not exist would break every new pane, which is far worse than leaving
+    herdr on the login shell it was already using, so the key is simply not
+    written and `status` says why.
+    """
+    choice = shell_setting()
+    if choice == "login":
+        return None, "login (herdr spawns your login shell; the stack owns no shell key)"
+    if choice == "auto":
+        # `auto` DEFERS to a value you wrote yourself. This module's whole
+        # premise is that a line without our marker is yours -- the first box it
+        # shipped to had a hand-written `default_shell = "pwsh"` -- and a
+        # default that quietly took that over would be the same silent loss a
+        # whole-file render causes, just slower. Naming a shell explicitly
+        # (`tstack herdr shell zsh`) is how you hand the key over; that is a
+        # choice, and the file is backed up before the first write either way.
+        existing = _hand_written_shell(text)
+        if existing is not None:
+            return None, f"auto, deferring to your own `{existing}`"
+    name = auto_shell() if choice == "auto" else choice
+    found = plat.find_pwsh() if name == "pwsh" else shutil.which(name)
+    if not found:
+        return None, f"{name} is not installed here, so the login shell is left alone"
+    return found, f"auto -> {name}" if choice == "auto" else name
+
+
+def owned(text: str = "") -> list[Owned]:
+    """Every line the stack writes on this machine, given the file it is writing.
+
+    `text` matters because ownership of the shell key is conditional: see
+    `resolve_shell`. Passing nothing means "no file yet", which is the right
+    reading for a machine that has none.
+    """
+    items = [Owned(TABLE, KEY, THEME)]
+    path, _ = resolve_shell(text)
+    if path is not None:
+        items.append(Owned(SHELL_TABLE, SHELL_KEY, path))
+    return items
+
+
 # ------------------------------------------------------------------- the splice
 
 
@@ -127,60 +238,116 @@ def _newline(text: str) -> str:
     return "\n"
 
 
-def _owned_line() -> str:
-    return f'{KEY} = "{THEME}"  # {MARKER}'
+def _toml(value: str) -> str:
+    r"""`value` as a TOML string, correct for a Windows path.
+
+    A backslash is an ESCAPE in a basic string, so `"C:\Users\x"` is wrong --
+    and worse than wrong when the escape happens to be a valid one, because then
+    it parses and means something else. A literal (single-quoted) string has no
+    escapes at all, which is exactly what a path wants. Windows paths may also
+    contain a single quote, so that is checked rather than assumed.
+    """
+    if "\\" in value and "'" not in value:
+        return f"'{value}'"
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+def _owned_line(item: Owned) -> str:
+    return f"{item.key} = {_toml(item.value)}  # {MARKER}"
 
 
 _TABLE_RE = re.compile(r"^\s*\[([^\]]+)\]\s*$")
-_KEY_RE = re.compile(rf"^\s*{KEY}\s*=")
+
+
+def _key_re(key: str) -> re.Pattern[str]:
+    return re.compile(rf"^\s*{re.escape(key)}\s*=")
 
 
 def splice(text: str) -> str:
-    """Return `text` with `[theme] name` set to ours, and nothing else changed.
+    """Return `text` with every key the stack owns set, and nothing else changed.
 
-    Three cases, in the order they are checked:
+    Ownership is a SET now, not a single key: `[theme] name` always, and
+    `[terminal] default_shell` when `herdrShell` resolves to a shell that
+    actually exists on this machine. A key the stack could own but currently
+    does not -- `herdrShell = login`, or a zsh that is not installed -- has its
+    own line REMOVED rather than left behind, or turning the setting off would
+    leave the last value it wrote in force forever, which is the failure mode a
+    splice is supposed to be immune to.
 
-    * the key exists in `[theme]`  -> that line is replaced
-    * `[theme]` exists without it  -> the line is inserted just after the header
-    * no `[theme]` at all          -> a two-line table is appended
+    For each owned key, three cases in the order they are checked:
+
+    * the key exists in its table  -> that line is replaced
+    * the table exists without it  -> the line is inserted just after the header
+    * no such table at all         -> a two-line table is appended
 
     Appending at end-of-file is safe in TOML: table order does not matter, and
-    EOF is top level, so the new header cannot land inside somebody else's table.
+    EOF is top level, so a new header cannot land inside somebody else's table.
 
     A COMMENTED key (`# name = "catppuccin"`, which is what
     `herdr --default-config` emits) is deliberately not a match. It is
     documentation, not a setting, and rewriting it would both lose the comment
     and leave the real value ambiguous.
     """
+    items = owned(text)
+    for item in items:
+        text = _set_key(text, item)
+    held = {(item.table, item.key) for item in items}
+    for table, key in ((TABLE, KEY), (SHELL_TABLE, SHELL_KEY)):
+        if (table, key) not in held:
+            text = _drop_key(text, key)
+    return text
+
+
+def _set_key(text: str, item: Owned) -> str:
+    """`text` with this one line written, wherever it belongs."""
     newline = _newline(text)
     lines = text.splitlines()
+    line_re = _key_re(item.key)
     table = ""
     for index, line in enumerate(lines):
         found = _TABLE_RE.match(line)
         if found:
             table = found.group(1).strip()
             continue
-        if table != TABLE:
+        if table != item.table:
             continue
         if line.lstrip().startswith("#"):
             continue
-        if _KEY_RE.match(line):
-            if line.strip() == _owned_line():
+        if line_re.match(line):
+            if line.strip() == _owned_line(item):
                 return text
-            lines[index] = _owned_line()
+            lines[index] = _owned_line(item)
             return newline.join(lines) + newline
 
     for index, line in enumerate(lines):
         found = _TABLE_RE.match(line)
-        if found and found.group(1).strip() == TABLE:
-            lines.insert(index + 1, _owned_line())
+        if found and found.group(1).strip() == item.table:
+            lines.insert(index + 1, _owned_line(item))
             return newline.join(lines) + newline
 
     if lines and lines[-1].strip():
         lines.append("")
-    lines.append(f"[{TABLE}]")
-    lines.append(_owned_line())
+    lines.append(f"[{item.table}]")
+    lines.append(_owned_line(item))
     return newline.join(lines) + newline
+
+
+def _drop_key(text: str, key: str) -> str:
+    """`text` with OUR line for `key` removed, and any other line for it kept.
+
+    Marker-gated, like `unsplice`: a `default_shell` the user has since written
+    by hand is theirs, and removing it because it sits where ours did is the
+    silent loss this whole module exists to avoid.
+    """
+    line_re = _key_re(key)
+    kept = [line for line in text.splitlines() if not (MARKER in line and line_re.match(line))]
+    if len(kept) == len(text.splitlines()):
+        return text
+    newline = _newline(text)
+    if not kept:
+        return ""
+    return newline.join(kept) + newline
 
 
 def unsplice(text: str) -> str:
@@ -437,10 +604,17 @@ def status(say: Say) -> int:
     ours = is_ours(spot.config)
     if ours is None:
         say(f"  {spot.config}  (absent)")
-    elif ours:
-        say(f"  {spot.config}  (carries our [{TABLE}] {KEY})")
-    else:
-        say(f"  {spot.config}  (yours; `tstack herdr on` splices one key and backs it up first)")
+    text = _read(spot.config)
+    if ours:
+        keys = ", ".join(f"[{i.table}] {i.key}" for i in owned(text))
+        say(f"  {spot.config}  (carries our {keys})")
+    elif ours is False:
+        say(f"  {spot.config}  (yours; `tstack herdr on` splices our keys and backs it up first)")
+
+    path, why = resolve_shell(text)
+    say(f"  pane shell: {shell_setting()}  ({why})")
+    if path is not None:
+        say(f"    -> {path}")
     saved = newest_backup(spot.directory)
     if saved:
         say(f"  newest backup: {saved}")
@@ -473,6 +647,32 @@ def turn_on(say: Say, apply: Apply) -> int:
     return 0
 
 
+def set_shell(value: str, say: Say, apply: Apply) -> int:
+    """Save `herdrShell` and re-splice, so the setting and the file agree.
+
+    Saving without re-splicing is the drift `tstack config memory` already
+    refuses to allow: the store would say zsh and the config would still say
+    whatever it said, with nothing to explain the difference.
+
+    Re-splicing when the managed config is OFF would be a write to a file the
+    user has told us to leave alone, so that only saves.
+    """
+    if value not in SHELL_OPTIONS:
+        say(f"tstack herdr shell: must be one of: {', '.join(SHELL_OPTIONS)}")
+        return 2
+    store.set("herdrShell", value)
+    _, why = resolve_shell(_read(target().config))
+    say(f"==> herdr pane shell: {value}  ({why})")
+    if setting() == "on":
+        render(say)
+        say(f"  reload it with: {binary() or 'herdr'} server reload-config")
+        say("  open panes keep the shell they started with.")
+    else:
+        say("  herdr config is off, so nothing was written. `tstack herdr on` applies it.")
+    apply()
+    return 0
+
+
 def turn_off(say: Say, apply: Apply) -> int:
     """Restore the backup, or take our one line back out. Never unlinks."""
     store.set("herdrConfig", "off")
@@ -487,7 +687,7 @@ def turn_off(say: Say, apply: Apply) -> int:
         after = unsplice(before)
         if after != before:
             _write(spot.config, after)
-            say(f"==> removed our [{TABLE}] {KEY} from {spot.config}")
+            say(f"==> removed our keys from {spot.config}")
         else:
             say(f"==> nothing of ours in {spot.config}; left it alone")
 

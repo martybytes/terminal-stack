@@ -181,6 +181,19 @@ SETTINGS: tuple[Setting, ...] = (
         flags=frozenset({STANDALONE}),
     ),
     Setting(
+        "herdrShell",
+        "herdr pane shell",
+        "choice",
+        "shell",
+        "auto",
+        options=("auto", "zsh", "bash", "pwsh", "login"),
+        note=(
+            "auto = the shell this stack configures here (pwsh on Windows, zsh elsewhere), "
+            "not the login shell; login = herdr's own default"
+        ),
+        flags=frozenset({STANDALONE}),
+    ),
+    Setting(
         "ghosttyConfig",
         "Managed Ghostty config",
         "choice",

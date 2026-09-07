@@ -3315,6 +3315,52 @@ would remember.
 
 The repo has met this exact failure before. It is why `dot_zshrc` does not load
 oh-my-zsh's `z` plugin: "(eval):...: defining function based on alias `z'".
+## Why herdr's pane shell is a setting, and why `auto` means the stack's shell
+
+The entry below says the stack owns `[theme] name` "and nothing else", and names
+`[terminal] default_shell = "pwsh"` as the hand-written value a whole-file render would
+have destroyed. Owning that exact key afterwards deserves an explanation.
+
+The case that forced it is Omarchy. herdr spawns the **login shell**, which there is
+bash and always will be: Omarchy's desktop is bash-first and the fleet never runs `chsh`
+(`docs/omarchy.md`). The shell this stack actually configures — the prompt, the tools,
+the agent wrappers, `dot_zshrc` — is zsh. So on the one platform where the two differ,
+herdr's default hands you a pane that is not the machine the rest of the stack set up.
+No amount of theme splicing fixes that, and telling each machine to hand-write the key
+is how a fleet setting comes to be forgotten on the third box.
+
+`auto` therefore means **the shell this stack configures**, not the login shell: `pwsh`
+on Windows, `zsh` on macOS, Ubuntu and Omarchy. Two answers across four platforms, and
+neither is read from `/etc/passwd`.
+
+Four constraints shaped the rest, and each one is a test.
+
+**The choice is stored; the path is resolved.** `[data]` holds `auto`/`zsh`/`bash`/
+`pwsh`/`login`. It could not hold a path even if that were desirable: a Windows path
+carries backslashes and `schema.Setting.validate` refuses those for this store, because
+`store.set` writes `key = "<value>"` into chezmoi.toml unescaped. A stored path would
+also be wrong on the other side of a combined Windows+WSL machine, which shares one
+store and runs two independent herdr servers.
+
+**What is written is absolute.** The herdr server is long-lived and keeps the
+environment it started with, so its `PATH` is not the shell's — the same property that
+had already cost this repo an ssh agent in every pane. A bare `zsh` would be resolved
+against an environment nobody has looked at.
+
+**A missing shell is never written.** A `default_shell` pointing at something absent
+breaks every new pane. Leaving herdr on the login shell it was already using is strictly
+better, so the key is omitted and `status` says why.
+
+**`auto` defers to a hand-written value.** This is the one that keeps faith with the
+module's premise: a line without the marker is yours. The `"pwsh"` machine in that
+docstring must not have its shell changed by a *default*, and it does not — `auto` sees
+an unmarked `default_shell` and stands down. Naming a shell explicitly takes the key
+over, because that is a decision rather than a default, and the file is backed up before
+the first write either way. `login` removes the line the stack wrote: a splice that
+leaves its last value behind after being turned off is not a splice.
+
+`shell_mode` stays unowned. The stack owns one key in `[terminal]`, not the table.
+
 ## Why herdr is opt-in, spliced rather than rendered, and keeps its own prefix
 
 herdr is a terminal multiplexer that hosts coding agents: one Rust binary running

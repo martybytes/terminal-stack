@@ -1025,7 +1025,7 @@ TS_MIRROR_DATA_KEYS="
     ccTtsSummarizer ccTtsTemplateError ccTtsTemplatePermission ccTtsTemplateQuestion 
     ccTtsTemplateWaiting ccTtsVoicePool leaderChord tmuxPrefix windowsUsername
     weztermMux weztermRestore atuinEnabled starshipPreset headroomEnabled headroomCursorMode
-    cavemanEnabled agentmemoryEnabled playwrightEnabled memoryBackend herdrConfig
+    cavemanEnabled agentmemoryEnabled playwrightEnabled memoryBackend herdrConfig herdrShell
 "
 
 ts_data_prefetch() {
@@ -1290,6 +1290,24 @@ ts_atuin_set() {
 ts_herdr_get() {
     local v; v="$(ts_data_get herdrConfig 2>/dev/null || true)"
     case "$v" in on|off) echo "$v" ;; *) echo off ;; esac
+}
+
+# Which shell a herdr pane runs: auto|zsh|bash|pwsh|login, default auto.
+#
+# READ ONLY on this side. `tstack herdr shell` is the one writer and it is
+# Python on ALL FOUR platforms (tstack/commands.conf gives herdr a python column
+# for both), so unlike every other setting here there is no bash writer and no
+# pwsh twin to keep in step -- saving and re-splicing the config file have to
+# happen together, and splitting that across three implementations is how the
+# store and the file come to disagree.
+#
+# `auto` is not "the login shell". It is the shell THIS STACK configures: pwsh
+# on Windows, zsh on macOS, Ubuntu and Omarchy. On Omarchy those differ on
+# purpose -- the login shell is bash and stays bash, because the fleet never
+# runs chsh -- which is the case that made this a setting at all.
+ts_herdr_shell_get() {
+    local v; v="$(ts_data_get herdrShell 2>/dev/null || true)"
+    case "$v" in auto|zsh|bash|pwsh|login) echo "$v" ;; *) echo auto ;; esac
 }
 
 # ts_herdr_set <on|off> — persist, regenerate derived keys, mirror to Windows.
