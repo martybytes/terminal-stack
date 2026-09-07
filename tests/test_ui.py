@@ -311,3 +311,68 @@ def test_clearing_the_endpoint_clears_the_model_and_the_labels(monkeypatch, tmp_
     provider = llmconfig.read(tmp_path)
     assert provider.base_url == "" and provider.model == ""
     assert provider.provider_label == llmconfig.UNCONFIGURED_PROVIDER
+
+
+# ------------------------------------------- the missing-dependency message ----
+
+
+def test_the_missing_textual_message_never_suggests_a_tool_installer():
+    """`uv tool install textual` and `pipx install textual` both FAIL, everywhere.
+
+    Both install APPLICATIONS into isolated venvs and refuse a package with no
+    entry points; textual is a library, its CLI being the separate `textual-dev`
+    package. This module shipped all three of
+
+        uv tool install textual
+        pipx install textual
+        pip install --user textual
+
+    and on an Omarchy box every one failed -- the first two for that reason, the
+    third because Arch ships no bare `pip` and PEP 668 would refuse the write
+    anyway. Advice that cannot work is worse than none: it is read as settled and
+    stops the reader looking further.
+    """
+    from tstack.commands import ui
+
+    # A COMMAND line, not a mention: the message names both in order to warn
+    # against them, and a blunt substring check fails on its own disclaimer --
+    # the same way a regex guard matches the example in its own docstring.
+    offered = [
+        line.strip()
+        for line in ui.missing().splitlines()
+        if line.strip().startswith(("uv tool install", "pipx install"))
+    ]
+    assert not offered, f"still recommending a tool installer: {offered}"
+    # ...and it says why, because a reader will otherwise reach for them.
+    assert "entry points" in ui.missing()
+
+
+def test_the_missing_textual_message_is_probed_per_machine(monkeypatch):
+    """Arch has a current textual (8.2.8); Debian 13 has 2.1.2 and Ubuntu 24.04
+    still has 0.1.13, old enough that naming `python3-textual` there would send
+    someone to a version this app cannot run. So pacman is suggested only on
+    Arch, and the PEP 668 override only where the marker actually exists."""
+    from tstack.commands import ui
+
+    monkeypatch.setattr(ui.plat, "is_arch", lambda: True)
+    assert "pacman -S python-textual" in "\n".join(ui._install_hint())
+
+    monkeypatch.setattr(ui.plat, "is_arch", lambda: False)
+    monkeypatch.setattr(ui, "_externally_managed", lambda: True)
+    hint = "\n".join(ui._install_hint())
+    assert "pacman" not in hint
+    assert "--break-system-packages" in hint
+
+    monkeypatch.setattr(ui, "_externally_managed", lambda: False)
+    assert "--break-system-packages" not in "\n".join(ui._install_hint())
+
+
+def test_the_no_install_path_is_offered_when_uv_is_present(monkeypatch):
+    """It needs nothing decided and nothing written, so it leads."""
+    from tstack.commands import ui
+
+    monkeypatch.setattr(ui.shutil, "which", lambda name: "/usr/bin/uv" if name == "uv" else None)
+    assert "uv run --with textual" in "\n".join(ui._install_hint())
+
+    monkeypatch.setattr(ui.shutil, "which", lambda name: None)
+    assert "uv run" not in "\n".join(ui._install_hint())
