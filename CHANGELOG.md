@@ -6,6 +6,36 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Added
 
+- **A second, machine-local workspace root (09/06/2026).** `$LOCAL_WORKSPACE_DIR`,
+  else `~/LocalWorkspace` when it exists, resolved at call time like everything
+  else here and resolving to nothing on the machines that have one root. `wsloc`
+  goes straight there; `wsj` and `ws37`/`ws42`/`wsmb`/`wsmd` search it after the
+  main root, so a single-root machine behaves exactly as before and a two-root
+  machine only gains destinations. Both shells.
+
+  It exists for the repos that cannot live on the main root. A workspace on a
+  mounted data volume is normal — `ws --set --move` exists to put one there — but
+  a dotfiles repo stowed into `$HOME` does not survive it: if the mount is ever
+  missing, and `nofail` in fstab makes that silent, the mountpoint is still there
+  and the tree under it is empty, so every stowed link dangles with nothing said
+  until the next login. `doc common/workspace-nav` had already written that
+  warning down for `--move`; this is the durable answer to it rather than another
+  warning about it.
+
+  Two details are load-bearing. `wsj`'s rows are root-relative, which is what
+  keeps them readable and what makes them ambiguous the moment there are two
+  roots — so rows from the main root stay relative and rows from any other root
+  are absolute with `$HOME` collapsed to `~`, and the row's first character now
+  says which root it came from. And **`wso` never scans the local root**:
+  `migrate` derives a destination from `origin` and moves repos into the
+  organised main tree non-interactively, which for a stowed dotfiles repo would
+  put it straight back on the volume it was moved off. It is dropped from the
+  scan even when `TS_WS_EXTRA_ROOTS` names it — that variable means "legacy root,
+  empty this into the tree", the exact opposite — and the guard stands down when
+  the workspace *is* the local root, or `wso` would be left with no roots and a
+  plan that silently contains nothing. `docs/decisions.md` § "Why the local
+  workspace root is a second root, not a fourth candidate".
+
 - **`~/bin` on PATH, and `local-bin` cloned on apply (09/06/2026).** `~/bin` holds
   personal tools and lives in a separate private repo. Nothing here put it on
   PATH — it resolved only because RVM happens to prepend it, which breaks

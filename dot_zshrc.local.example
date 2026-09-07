@@ -24,6 +24,19 @@
 #
 # export WORKSPACE_DIR="$HOME/src"
 
+# ── Local (machine-disk) workspace root ───────────────────────────────────────
+# A SECOND root, searched by wsj/wsmb/... after the main one, and reached
+# directly with `wsloc`. It defaults to ~/LocalWorkspace when that exists, so
+# most machines need no line here at all.
+#
+# It exists for repos that cannot live on the main root: a workspace on a
+# mounted data volume takes every symlink into it down with the mount, and
+# `nofail` in fstab makes that silent -- the mountpoint is still there and the
+# tree under it is empty. A dotfiles repo stowed into $HOME is the usual case.
+# `wso` never scans or migrates this root, deliberately.
+#
+# export LOCAL_WORKSPACE_DIR="$HOME/LocalWorkspace"
+
 # Where `db` / `dbx` jump to. Only needed when Dropbox is somewhere the
 # autodetect misses — it already reads Dropbox's own info.json and probes
 # ~/Library/CloudStorage/Dropbox and ~/Dropbox.

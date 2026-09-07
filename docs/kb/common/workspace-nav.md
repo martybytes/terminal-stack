@@ -10,7 +10,8 @@
 | `wspu` | cd to `public/github.com` in the organised tree, else the `*_Public` / `*-Public` sibling |
 | `ws37` `ws42` `wsmb` `wsmd` | cd to `src/github.com/<owner>` for 37metrics / dimension42ai / martybytes / moleculardesigns |
 | `wsar` | cd to `archive/github.com` |
-| `wsj [query]` | fuzzy-jump to any repo in the tree (fzf; falls back to a filtered menu) |
+| `wsj [query]` | fuzzy-jump to any repo in any root (fzf; falls back to a filtered menu) |
+| `wsloc` | cd to the local (machine-disk) root — `$LOCAL_WORKSPACE_DIR` if set, else `~/LocalWorkspace` |
 | `wsw` | cd to the work workspace — `$WORK_WORKSPACE_DIR` if set, else the `*_Work` / `*-Work` sibling |
 | `wsw --set [dir]` | write `WORK_WORKSPACE_DIR` into `~/.zshrc.local` / `profile.local.ps1` (default: current dir) |
 | `wsw --show` | print the resolved work workspace without changing directory |
@@ -30,6 +31,32 @@ sourced at the *end* of `.zshrc`, so anything resolved earlier would miss it):
 3. the first existing autodetect probe: `/mnt/c/DATA/Workspace`,
    `~/Documents/Workspace`, `~/workspace`, `~/Workspace` — pwsh probes
    `C:\DATA\Workspace`, `~\workspace`, `~\Documents\Workspace`
+
+### The local root
+
+Some repos cannot live on the main root. A workspace on a mounted data volume is the
+usual reason: if that mount is ever missing — `nofail` in fstab makes that silent — the
+path still exists as a bare mountpoint and the tree under it is empty. A dotfiles repo
+stowed into `$HOME` does not survive that; every link into it dangles, and nothing says
+so until the next login.
+
+So there is a **second** root, on the machine's own disk, in the same
+`<root>/src/github.com/<owner>/<repo>` shape: `$LOCAL_WORKSPACE_DIR` if set, else
+`~/LocalWorkspace` when it exists. It is a second root and not a fourth autodetect
+candidate — a machine can have both, and most have only the main one.
+
+`wsj`, `ws37`/`ws42`/`wsmb`/`wsmd` and `wsloc` search it; the main root is searched
+first, so nothing about a single-root machine changes. In `wsj`'s picker a row from the
+main root stays relative (`src/github.com/o/repo`) and a row from any other root is
+absolute with `~` (`~/LocalWorkspace/src/github.com/o/dots`), so the row's first
+character says which root it came from — otherwise the same relative path under two
+roots would be a coin flip.
+
+**`wso` deliberately does not touch it.** `wso migrate` moves repos *into* the organised
+main tree, which for a stowed dotfiles repo is the exact breakage above, arriving
+non-interactively. The local root is dropped from the scan even when
+`TS_WS_EXTRA_ROOTS` names it: that variable means "legacy root, empty this into the
+tree", which is the opposite of what this root is for.
 
 The root is deliberately **not** a chezmoi setting. It has to be readable by a machine
 that never runs chezmoi, and changeable without an apply. `ws --show` and
@@ -75,10 +102,11 @@ because the copy is of the directory and not a re-clone.
 
 A dotfiles repo living in the workspace and stowed into `$HOME` is the usual reason,
 and it is the one failure here that is invisible until your next login. On the machine
-this guard was written for, 26 links pointed into `~/Workspace` — the Quickshell bar,
+this guard was written for, 26 links pointed into the workspace — the Quickshell bar,
 Hyprland's config, `~/.ssh/config`, `~/.config/git/config`, `~/.claude/CLAUDE.md`. They
 are relative links rooted at `$HOME`, so moving the tree dangles every one of them and
-nothing says so at the time.
+nothing says so at the time. (That repo has since moved to the local root above, which
+is the durable fix; this guard is for every machine that has not done that yet.)
 
 `--move` therefore refuses, counts them, and — when the targets share a `<repo>/stow/`
 ancestor — prints the exact `stow -R` line for the packages it found. The way through is
@@ -116,6 +144,8 @@ Set `DROPBOX_DIR` in `~/.zshrc.local` / `profile.local.ps1` to override.
 
 `ws37`/`ws42`/`wsmb`/`wsmd`/`wsar`/`wsj` address the organised tree that `wso` builds —
 see `doc common/workspace-org`. They fall back to the archive tier when an owner has no
-live `src/` directory, so they keep working as repos move between tiers. `wspu` prefers
+live `src/` directory, so they keep working as repos move between tiers, and (apart from
+`wsar`, whose tier is a main-root one) on to the local root when the owner is not in the
+main one at all. `wspu` prefers
 the new `public/` tier and only falls back to the old `*_Public` sibling root, so it
 behaves correctly before, during and after a migration.

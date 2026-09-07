@@ -1338,17 +1338,55 @@ db() {
 }
 dbx() { db "$@" }
 
+# --- the local workspace root -------------------------------------------------
+# A SECOND root, deliberately not another candidate for the first. The main
+# workspace usually lives on a mounted data volume; a dotfiles repo stowed into
+# $HOME cannot, because `nofail` in fstab makes a missing mount SILENT — the
+# mountpoint still exists, the tree under it is empty, and every link into it
+# dangles with nothing said until the next login. So the repos that have to
+# survive that live on the machine's own disk, in the same
+# <root>/src/github.com/<owner>/<repo> shape as everything else.
+#
+# $LOCAL_WORKSPACE_DIR wins; otherwise ~/LocalWorkspace when it exists. Resolved
+# at CALL time like _ts_workspace, and it returns 1 when there is none: most
+# machines have exactly one root and nothing below may assume a second.
+_ts_workspace_local() {
+  [[ -n "${LOCAL_WORKSPACE_DIR:-}" ]] && { echo "$LOCAL_WORKSPACE_DIR"; return 0 }
+  [[ -d "$HOME/LocalWorkspace" ]] && { echo "$HOME/LocalWorkspace"; return 0 }
+  return 1
+}
+# Every root the jumps below search, main first. Deduped, because a machine that
+# has pointed WORKSPACE_DIR at its local root has one root and not two — and
+# listing it twice would show every repo twice in wsj.
+_ts_ws_roots() {
+  local main="" loc
+  if main="$(_ts_workspace)"; then echo "$main"; fi
+  loc="$(_ts_workspace_local)" || return 0
+  [[ "$loc" == "$main" ]] || echo "$loc"
+}
+wsloc() {
+  local d
+  d="$(_ts_workspace_local)" || {
+    echo "wsloc: no local workspace — expected ~/LocalWorkspace, or export LOCAL_WORKSPACE_DIR in ~/.zshrc.local" >&2
+    return 1 }
+  cd "$d"
+}
+
 # --- organised tree: per-owner jumps -----------------------------------------
 # Repos live at <workspace>/<tier>/<host>/<owner>/<repo>; see `doc workspace-org`.
 # These stay shell functions rather than moving into `wso` because a child
 # process cannot change the parent shell's directory.
 _ts_ws_org_cd() {
   local owner="$1" name="$2" root d
-  root="$(_ts_workspace)" || { echo "$name: no workspace found" >&2; return 1 }
-  for d in "$root/src/github.com/$owner" "$root/archive/github.com/$owner"; do
-    [[ -d "$d" ]] && { cd "$d"; return 0 }
+  local -a roots
+  roots=(${(f)"$(_ts_ws_roots)"})
+  (( ${#roots[@]} )) || { echo "$name: no workspace found" >&2; return 1 }
+  for root in "${roots[@]}"; do
+    for d in "$root/src/github.com/$owner" "$root/archive/github.com/$owner"; do
+      [[ -d "$d" ]] && { cd "$d"; return 0 }
+    done
   done
-  echo "$name: $root/src/github.com/$owner does not exist yet — run 'wso plan'" >&2
+  echo "$name: ${roots[1]}/src/github.com/$owner does not exist yet — run 'wso plan'" >&2
   return 1
 }
 ws37()  { _ts_ws_org_cd 37metrics        ws37 }
@@ -1362,15 +1400,31 @@ wsar()  {
   echo "wsar: nothing archived on this machine yet" >&2; return 1
 }
 
-# wsj — fuzzy-jump to any repo in the tree. This is what makes the deep paths
+# wsj — fuzzy-jump to any repo in any root. This is what makes the deep paths
 # free: you never type them. Falls back to a numbered menu without fzf.
+#
+# Rows from the MAIN root stay root-relative, as they always were. Rows from any
+# other root are absolute with $HOME collapsed to ~, so the two are told apart by
+# the row's FIRST CHARACTER and each maps back to exactly one directory. Showing
+# both root-relative would need a guess between roots whenever the same relative
+# path exists under two of them, and guessing silently is the failure this whole
+# file is written to avoid.
 wsj() {
-  local root d sel n i
-  root="$(_ts_workspace)" || { echo "wsj: no workspace found" >&2; return 1 }
-  local -a repos
-  repos=("${(@f)$(find "$root"/{src,public,archive,local} -maxdepth 5 -name .git -prune 2>/dev/null \
-                  | sed 's|/\.git$||' | sed "s|^$root/||" | sort)}")
-  (( ${#repos[@]} )) || { echo "wsj: no repos found under $root — run 'wso plan'" >&2; return 1 }
+  local root d sel n i primary=1
+  local -a roots repos found
+  roots=(${(f)"$(_ts_ws_roots)"})
+  (( ${#roots[@]} )) || { echo "wsj: no workspace found" >&2; return 1 }
+  for root in "${roots[@]}"; do
+    found=(${(f)"$(find "$root"/{src,public,archive,local} -maxdepth 5 -name .git -prune 2>/dev/null \
+                   | sed 's|/\.git$||' | sort)"})
+    if (( primary )); then
+      repos+=("${found[@]#"$root"/}")
+    else
+      repos+=("${found[@]/#"$HOME"/~}")
+    fi
+    primary=0
+  done
+  (( ${#repos[@]} )) || { echo "wsj: no repos found under ${roots[1]} — run 'wso plan'" >&2; return 1 }
   if command -v fzf >/dev/null 2>&1; then
     sel="$(printf '%s\n' "${repos[@]}" | fzf --height 40% --reverse \
            --query="${1:-}" --prompt 'repo> ')" || return 0
@@ -1386,7 +1440,12 @@ wsj() {
   else
     echo "wsj: fzf not installed — pass a search term, e.g. 'wsj ironcl'" >&2; return 1
   fi
-  [[ -n "$sel" ]] && cd "$root/$sel"
+  [[ -n "$sel" ]] || return 0
+  case "$sel" in
+    '~'/*) cd "${sel/#\~/$HOME}" ;;
+    /*)    cd "$sel" ;;
+    *)     cd "${roots[1]}/$sel" ;;
+  esac
 }
 
 # wso — workspace organizer. Thin wrapper; the work happens in the clone so the

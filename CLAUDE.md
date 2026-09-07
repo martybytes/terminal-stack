@@ -35,7 +35,7 @@ CI covers macOS, which no local run can; `tests/parity/run.sh` covers native Deb
 
 chezmoi natively only manages `$HOME` on the machine where it runs. We need Windows `C:\Users\<you>\`, WSL `/home/<you>/`, and native Linux `/home/<you>/` covered by the same source tree. The solution:
 
-1. **WSL- and native-Linux-targeted files** use chezmoi's standard `dot_*` / `dot_config/` / `executable_*` naming at the repo root → applied to `$HOME` normally. The same files cover both: WSL-specific code paths (e.g., `wezterm cli set-tab-title`) are already guarded by `$WEZTERM_PANE` and no-op outside WezTerm, so they're harmless on native Linux servers reached via ssh/PuTTY.
+1. **WSL- and native-Linux-targeted files** use chezmoi's standard `dot_*` / `dot_config/` / `executable_*` naming at the repo root → applied to `$HOME` normally. One set covers both: the WSL-specific code paths are already guarded (`$WEZTERM_PANE`) and no-op elsewhere.
 2. **Windows-targeted files** live under `windows/` and are **excluded** from chezmoi's apply by `.chezmoiignore` (`windows/**`).
 3. **`run_after_90-sync-windows.sh`** walks `windows/` after each apply and mirrors every file to `/mnt/c/Users/<you>/<same relative path>`, with `.bak.YYYYMMDD[.N]` backups for any overwrite. **On native Linux the hook exits cleanly when `/mnt/c/Users/` is missing** — same script, three platforms.
 
@@ -45,7 +45,7 @@ chezmoi natively only manages `$HOME` on the machine where it runs. We need Wind
 
 **Per-machine overrides.** `dot_zshrc` sources `~/.zshrc.local` at the end if it exists; `$PROFILE` dot-sources `Documents\PowerShell\profile.local.ps1` the same way. Neither is tracked by chezmoi — use them for peer-sync helpers, server-role aliases, `WORKSPACE_DIR` overrides, anything that shouldn't propagate. See `dot_zshrc.local.example` / `windows/Documents/PowerShell/profile.local.ps1.example` for the documented patterns.
 
-**Workspace navigation** (`ws`/`wsp`/`wspu`/`wsw`, both shells) resolves at call time: `$WORKSPACE_DIR` if set, else the first existing autodetect candidate (`/mnt/c/DATA/Workspace`, `~/Documents/Workspace`, `~/workspace`, `~/Workspace`; pwsh probes `C:\DATA\Workspace`, `~\workspace`, `~\Documents\Workspace`). Never chezmoi templating (`docs/decisions.md` §); a Windows path can't be a `[data]` key anyway — `validate` refuses a backslash. **`tstack/workspace.py` is the one writer**; `ws --set` and `tstack config workspace` reach it. `--move` crosses volumes where `wso migrate` refuses to, and the ORDER is the safety — preflight, copy `-H`, INDEPENDENT verify, confirmed delete; **a failed verify must not repoint the root**. Preflight also **refuses when symlinks in `$HOME` point INTO the tree** (a stowed dotfiles repo; 26 of them here, incl. the bar and `~/.ssh/config`) — invisible until next login; `--keep-source` is the way through. `ws --set` must stay a shell function, so **that command's stdout is the path and nothing else**. `docs/decisions.md` §. `wsp`/`wspu`/`wsw` are suffix siblings of that root (`_Personal`/`-Personal`, `_Public`/`-Public`, `_Work`/`-Work`); `wsw` additionally honours `$WORK_WORKSPACE_DIR` and can write it via `wsw --set`.
+**Workspace navigation** (`ws`/`wsp`/`wspu`/`wsw`/`wsloc`, both shells) resolves at call time: `$WORKSPACE_DIR`, else the first autodetect candidate that exists (lists in `doc common/workspace-nav`). Never chezmoi templating — a Windows path can't be a `[data]` key, `validate` refuses a backslash. **`tstack/workspace.py` is the one writer** (`ws --set`, `tstack config workspace`), and **`ws --set`'s stdout is the path and nothing else** because the shell half must stay a function. `--move` crosses volumes where `wso migrate` refuses to; the ORDER is the safety — preflight, copy `-H`, INDEPENDENT verify, confirmed delete, and **a failed verify must not repoint the root**. Preflight also **refuses when symlinks in `$HOME` point INTO the tree** (a stowed dotfiles repo, invisible until next login); `--keep-source` is the way through. `wsp`/`wspu`/`wsw` are suffix siblings (`_Personal`/`_Public`/`_Work`, dash spellings too); `wsw` also honours `$WORK_WORKSPACE_DIR`. **`$LOCAL_WORKSPACE_DIR` (else `~/LocalWorkspace`) is a SECOND root, never a fourth candidate** — it holds what can't live on a mounted volume, since a missed `nofail` mount leaves an empty tree and dangles every stowed link, silently. **`wso` must never scan it** (`migrate` would move that repo back onto the volume): both scanners drop it **even when `TS_WS_EXTRA_ROOTS` names it**, standing down only when the workspace *is* it. **`wsj` rows are main-root-relative but absolute-with-`~` for any other root** — a relative row is ambiguous once there are two. The jumps (`ws37`/`ws42`/`wsmb`/`wsmd`/`wsar`/`wsj`/`wsloc`/`wspu`) stay shell functions, a child cannot cd its parent, and all but `wsar` search the local root after the main one. `docs/decisions.md` §§.
 
 **Workspace organizer (`wso`).** Keeps repos in `<workspace>/<tier>/github.com/<owner>/<repo>` — implemented twice, `bootstrap/_workspace.sh` + `bootstrap/wso.sh` (bash: WSL/Linux/macOS) and `bootstrap/_workspace.ps1` + `bootstrap/_workspace_cmd.ps1` (pwsh: Windows). The two are parallel implementations, not a wrapper and a shim: change one, change the other, and keep `-h` output byte-identical. Both are chezmoi-ignored (`bootstrap/**`) and run from the clone, so `tstack update` ships fixes without a profile re-sync.
 
@@ -54,8 +54,6 @@ The layout map is `bootstrap/workspace.conf` — **tracked**, so all machines ag
 **`--org` is ONE helper** (`ts_ws_org_match` / `Test-TsWsOrgMatch`) on every bulk verb: the **owner segment**, rename map applied. `plan`/`migrate` filter the **destination**, keeping destination-less rows. `cmd_plan`'s mode is `--mode`, not `$1`, and the dispatcher forwards `"$@"` — dropping it ran `wso plan --org x` unfiltered. `docs/decisions.md` § "Why `--org` matches the owner segment".
 
 Two invariants worth not breaking. A repo's destination is derived from its `origin` remote, never the folder name — that is what catches misfiled and double-cloned repos, and `docs/decisions.md` explains why `local/` exists rather than guessing an owner for a remote-less repo. And the tier-name skip in `ts_ws_scan_candidates` / `Get-TsWsScanCandidates` applies **only directly under the workspace root**: a sibling root can hold a repo named `public` or `local`, and skipping it there drops a real repo from the plan.
-
-The jump shortcuts (`ws37`/`ws42`/`wsmb`/`wsmd`/`wsar`/`wsj`, and the repointed `wspu`) must stay shell functions in `dot_zshrc` and `$PROFILE` — a child process cannot change the parent shell's directory.
 
 **Runtime clone location.** The runtime clone — the one `tstack update` pulls and chezmoi applies from — lives at a canonical path: `%LOCALAPPDATA%\terminal-stack\stack` shared by Windows + WSL, `~/.local/share/terminal-stack` on native Linux/macOS; pins (`TERMINAL_STACK_DIR`) are only for non-canonical locations. Dev clones at workspace tier paths are **invisible** to resolution, doctor, and doc probes unless pinned — `tstack update` never touches the dev tree. Relocating a legacy-path clone is `tstack doctor --repair`'s job (`tstack update` only prints a notice), as is returning one to **`main`** — the branch every runtime clone tracks (`RELEASE_BRANCH`, `tests/test_release_branch.py`), pinned via `git clone --branch`, never GitHub's default. A clone whose branch was merged and deleted can never pull; `update` refuses rather than saying "already up to date". `docs/decisions.md` §§ "Runtime clone location…" / "One branch…".
 
@@ -105,7 +103,7 @@ And `wso` blocks migration of **any** un-tiered terminal-stack clone, not merely
 
 **Update/rollback.** `tstack update` records the pre-pull HEAD to a state file (`~/.local/state/terminal-stack/rollback-sha` / `%LOCALAPPDATA%\terminal-stack\rollback-sha`) before pulling; `tstack rollback` resets to it and re-applies. Both refuse on a dirty clone. Written only when commits are actually incoming.
 
-Source → destination mapping for the `windows/` subtree is **relative-path-preserving**: `windows/.wezterm.lua` → `/mnt/c/Users/<you>/.wezterm.lua`. To add a new Windows-side file, drop it at the mirror path under `windows/` — no script changes needed. Full mechanism in `docs/cross-side-chezmoi.md`.
+The `windows/` subtree maps **relative-path-preserving**: `windows/.wezterm.lua` → `/mnt/c/Users/<you>/.wezterm.lua`. Adding a Windows-side file is dropping it at the mirror path — no script changes. `docs/cross-side-chezmoi.md`.
 
 **Username resolution.** No source file hard-codes a username. WSL/native templates use chezmoi's engine (`{{ .chezmoi.homeDir }}`); Windows-side templates under `windows/` use a literal `__WIN_USER__` token the sync substitutes. **When adding a Windows-side templated file use `__WIN_USER__`, never Go-template syntax.** `ARCHITECTURE.md` § "Username resolution".
 
@@ -158,15 +156,15 @@ same-day backup. Stated in full, with the incident behind it, in
 ## Where to look
 
 - `README.md` — what the stack delivers, top-level layout
-- `ARCHITECTURE.md` — the cross-side problem and our solution in 30s
+- `ARCHITECTURE.md` — the cross-side problem and the solution, in 30s
 - `INSTALL.md` — scripted (Phase 0 → 10) and manual install paths
 - `CHANGELOG.md` — curated change history; `git log` is authoritative
-- `docs/cross-side-chezmoi.md` — deep dive on the chezmoi + run_after mechanism
-- `docs/developing-wezterm.md` — edit → sync/apply → reload loop for WezTerm config (Windows `sync-windows.ps1`, macOS chezmoi)
-- `docs/powershell-quirks.md` — every weird Windows-side workaround with cause and fix
-- `docs/verifying-changes.md` — how to check a change before committing, including `tests/parity/run.sh`
+- `docs/cross-side-chezmoi.md` — the chezmoi + run_after mechanism in depth
+- `docs/developing-wezterm.md` — edit → sync/apply → reload loop for WezTerm config
+- `docs/powershell-quirks.md` — every Windows-side workaround, with cause and fix
+- `docs/verifying-changes.md` — checking a change before committing; `tests/parity/run.sh`
 - `docs/decisions.md` — design choices that aren't obvious from the code
 
 ## Personal-path note
 
-A literal username in a source file is a regression — see **Username resolution** above for the two tokens. `LICENSE` is the one place a real name remains; update on fork if you care.
+A literal username in a source file is a regression — see **Username resolution** for the two tokens. `LICENSE` is the one place a real name remains.

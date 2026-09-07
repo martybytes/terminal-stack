@@ -165,11 +165,15 @@ write it. The stack splices `statusLine` and `hooks`, cedes `theme` to
 ls -la ~/.claude/settings.json            # should still be a symlink after an apply
 jq -r .theme ~/.claude/settings.json      # custom:omarchy, Omarchy's
 jq -r .statusLine.command ~/.claude/settings.json   # ours
-git -C ~/Workspace/src/github.com/martybytes/omarchy-dots status --short
+git -C "$(dirname "$(readlink -f ~/.claude/settings.json)")" status --short
 ```
 
-That last one should show the tracked file changing when the stack's hooks
-change -- that is the write going through, not around, the link.
+That last one follows the link to whichever repo actually owns the file and
+should show it changing when the stack's hooks change -- that is the write going
+through, not around, the link. It reads the link rather than naming a path
+because a stowed dotfiles repo usually lives on the LOCAL workspace root
+(`wsloc`, `~/LocalWorkspace/...`), not under `$WORKSPACE_DIR`: a workspace on a
+mounted volume takes every link into it down with the mount, silently.
 
 ## Troubleshooting
 

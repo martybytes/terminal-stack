@@ -23,6 +23,17 @@
 #
 # $env:WORKSPACE_DIR = 'D:\src'
 
+# ── Local (machine-disk) workspace root ───────────────────────────────────────
+# A SECOND root, searched by wsj/wsmb/... after the main one, and reached
+# directly with `wsloc`. It defaults to ~\LocalWorkspace when that exists, so
+# most machines need no line here at all.
+#
+# It exists for repos that cannot live on the main root: a workspace on a
+# removable or network volume takes every link into it down with the volume, and
+# the failure is silent. `wso` never scans or migrates this root, deliberately.
+#
+# $env:LOCAL_WORKSPACE_DIR = 'D:\LocalWorkspace'
+
 # Where `db` / `dbx` jump to. Only needed when Dropbox is somewhere the
 # autodetect misses — it already reads Dropbox's own info.json and probes
 # %USERPROFILE%\Dropbox.

@@ -789,11 +789,15 @@ def test_candidates_survives_a_machine_with_no_home(monkeypatch):
 def stowed(tree, tmp_path, monkeypatch):
     """A workspace with a stow-shaped dotfiles repo in it, linked from $HOME.
 
-    The real shape this exists for: omarchy-dots at
-    <workspace>/src/github.com/<owner>/omarchy-dots/stow/<pkg>/<path>, with 26
-    relative links from $HOME into it -- the bar, Hyprland, ~/.ssh/config,
+    The real shape this exists for: a stowed dotfiles repo at
+    <workspace>/src/github.com/<owner>/<repo>/stow/<pkg>/<path>, with 26 relative
+    links from $HOME into it -- the bar, Hyprland, ~/.ssh/config,
     ~/.claude/CLAUDE.md. A move dangles every one and the breakage only shows up
     at the next login.
+
+    That repo has since moved to the LOCAL workspace root, which is the durable
+    fix (tests/test_workspace_nav.py). This guard is still the one every machine
+    that has not done that gets.
     """
     home = tmp_path / "home"
     (home / ".config" / "hypr").mkdir(parents=True)
