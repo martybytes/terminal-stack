@@ -349,7 +349,7 @@ def test_git_ssh_command_unset_is_a_failure(monkeypatch):
     """The reported bug: git falls back to Git for Windows' bundled MSYS ssh,
     which cannot reach the agent pipe, so every command prompts for the
     passphrase while ssh-add lists the keys."""
-    monkeypatch.setattr(plat, "is_windows_side", lambda: True)
+    as_platform(monkeypatch, plat.WINDOWS)
     monkeypatch.setattr(
         doctor, "_run", lambda argv, **k: subprocess.CompletedProcess(argv, 1, "", "")
     )
@@ -362,7 +362,7 @@ def test_git_ssh_command_unset_is_a_failure(monkeypatch):
 def test_git_ssh_command_pointing_at_a_missing_binary_is_a_failure(monkeypatch, tmp_path):
     """A machine without the Windows OpenSSH client feature. Naming the gap
     beats git failing with a bare exec error on every fetch."""
-    monkeypatch.setattr(plat, "is_windows_side", lambda: True)
+    as_platform(monkeypatch, plat.WINDOWS)
     gone = tmp_path / "System32" / "OpenSSH" / "ssh.exe"
     monkeypatch.setattr(
         doctor, "_run", lambda argv, **k: subprocess.CompletedProcess(argv, 0, str(gone), "")
@@ -375,7 +375,7 @@ def test_git_ssh_command_pointing_at_a_missing_binary_is_a_failure(monkeypatch, 
 def test_git_ssh_command_set_to_another_ssh_is_a_note_not_a_failure(monkeypatch, tmp_path):
     """Someone may deliberately route through 1Password or a custom agent. That
     is their call -- say so, do not fail an install over it."""
-    monkeypatch.setattr(plat, "is_windows_side", lambda: True)
+    as_platform(monkeypatch, plat.WINDOWS)
     other = tmp_path / "ssh.exe"
     other.write_text("", encoding="utf-8")
     monkeypatch.setattr(
@@ -390,7 +390,7 @@ def test_git_ssh_command_pointing_at_windows_openssh_is_ok(monkeypatch, tmp_path
     native = tmp_path / "Windows" / "System32" / "OpenSSH" / "ssh.exe"
     native.parent.mkdir(parents=True)
     native.write_text("", encoding="utf-8")
-    monkeypatch.setattr(plat, "is_windows_side", lambda: True)
+    as_platform(monkeypatch, plat.WINDOWS)
     monkeypatch.setattr(
         doctor, "_run", lambda argv, **k: subprocess.CompletedProcess(argv, 0, str(native), "")
     )
