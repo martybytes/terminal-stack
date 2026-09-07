@@ -86,18 +86,60 @@ function wspu {
     if ($r) { Set-Location $r } else { Write-Warning 'wspu: no public\ tier and no *_Public sibling' }
 }
 
+# --- the local workspace root -------------------------------------------------
+# A SECOND root, deliberately not another candidate for the first. The main
+# workspace usually lives on a mounted data volume; a dotfiles repo stowed into
+# $HOME cannot, because a missing mount is SILENT - the mountpoint still exists,
+# the tree under it is empty, and every link into it dangles with nothing said
+# until the next login. So the repos that have to survive that live on the
+# machine's own disk, in the same <root>\src\github.com\<owner>\<repo> shape.
+#
+# $env:LOCAL_WORKSPACE_DIR wins; otherwise ~\LocalWorkspace when it exists.
+# Resolved at call time like Get-TsWorkspace, and $null when there is none: most
+# machines have exactly one root and nothing below may assume a second.
+function Get-TsWorkspaceLocal {
+    if ($env:LOCAL_WORKSPACE_DIR) { return $env:LOCAL_WORKSPACE_DIR }
+    $d = Join-Path $env:USERPROFILE 'LocalWorkspace'
+    if (Test-Path -LiteralPath $d) { return $d }
+    return $null
+}
+# Every root the jumps below search, main first. Deduped, because a machine that
+# has pointed WORKSPACE_DIR at its local root has one root and not two - and
+# listing it twice would show every repo twice in wsj.
+function Get-TsWsNavRoots {
+    $out = [System.Collections.Generic.List[string]]::new()
+    $main = Get-TsWorkspace
+    if ($main) { $out.Add($main.TrimEnd('\')) }
+    $loc = Get-TsWorkspaceLocal
+    if ($loc) {
+        $loc = $loc.TrimEnd('\')
+        if (-not $main -or $loc -ne $main.TrimEnd('\')) { $out.Add($loc) }
+    }
+    return @($out)
+}
+function wsloc {
+    $d = Get-TsWorkspaceLocal
+    if (-not $d) {
+        Write-Warning "wsloc: no local workspace - expected ~\LocalWorkspace, or set `$env:LOCAL_WORKSPACE_DIR in profile.local.ps1"
+        return
+    }
+    Set-Location $d
+}
+
 # --- organised tree: per-owner jumps -----------------------------------------
 # Repos live at <workspace>\<tier>\<host>\<owner>\<repo>; see `doc workspace-org`.
 # These stay profile functions rather than moving into `wso` because a child
 # process cannot change the parent shell's directory.
 function Set-TsWsOrgLocation([string]$Owner, [string]$Name) {
-    $root = Get-TsWorkspace
-    if (-not $root) { Write-Warning "${Name}: no workspace found"; return }
-    foreach ($d in @((Join-Path $root "src\github.com\$Owner"),
-                     (Join-Path $root "archive\github.com\$Owner"))) {
-        if (Test-Path -LiteralPath $d) { Set-Location $d; return }
+    $roots = Get-TsWsNavRoots
+    if (-not $roots.Count) { Write-Warning "${Name}: no workspace found"; return }
+    foreach ($root in $roots) {
+        foreach ($d in @((Join-Path $root "src\github.com\$Owner"),
+                         (Join-Path $root "archive\github.com\$Owner"))) {
+            if (Test-Path -LiteralPath $d) { Set-Location $d; return }
+        }
     }
-    Write-Warning "${Name}: $root\src\github.com\$Owner does not exist yet - run 'wso plan'"
+    Write-Warning "${Name}: $($roots[0])\src\github.com\$Owner does not exist yet - run 'wso plan'"
 }
 function ws37 { Set-TsWsOrgLocation '37metrics'        'ws37' }
 function ws42 { Set-TsWsOrgLocation 'dimension42ai'    'ws42' }
@@ -112,21 +154,39 @@ function wsar {
     Write-Warning 'wsar: nothing archived on this machine yet'
 }
 
-# wsj — fuzzy-jump to any repo in the tree. This is what makes the deep paths
+# wsj — fuzzy-jump to any repo in any root. This is what makes the deep paths
 # free: you never type them. Falls back to a filtered menu without fzf.
+#
+# Rows from the MAIN root stay root-relative, as they always were. Rows from any
+# other root are absolute with the profile directory collapsed to ~, so the two
+# are told apart by the row's FIRST CHARACTER and each maps back to exactly one
+# directory. Showing both root-relative would need a guess between roots
+# whenever the same relative path exists under two of them.
 function wsj {
     param([string]$Query)
-    $root = Get-TsWorkspace
-    if (-not $root) { Write-Warning 'wsj: no workspace found'; return }
+    $roots = Get-TsWsNavRoots
+    if (-not $roots.Count) { Write-Warning 'wsj: no workspace found'; return }
     $repos = @()
-    foreach ($t in @('src', 'public', 'archive', 'local')) {
-        $p = Join-Path $root $t
-        if (-not (Test-Path -LiteralPath $p)) { continue }
-        $repos += Get-ChildItem -LiteralPath $p -Directory -Recurse -Depth 4 -Force -ErrorAction SilentlyContinue |
-                  Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName '.git') } |
-                  ForEach-Object { $_.FullName.Substring($root.Length).TrimStart('\') }
+    $primary = $true
+    foreach ($root in $roots) {
+        foreach ($t in @('src', 'public', 'archive', 'local')) {
+            $p = Join-Path $root $t
+            if (-not (Test-Path -LiteralPath $p)) { continue }
+            $found = Get-ChildItem -LiteralPath $p -Directory -Recurse -Depth 4 -Force -ErrorAction SilentlyContinue |
+                     Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName '.git') }
+            if ($primary) {
+                $repos += @($found | ForEach-Object { $_.FullName.Substring($root.Length).TrimStart('\') })
+            } else {
+                $repos += @($found | ForEach-Object {
+                    if ($_.FullName.StartsWith($env:USERPROFILE, [StringComparison]::OrdinalIgnoreCase)) {
+                        '~' + $_.FullName.Substring($env:USERPROFILE.Length)
+                    } else { $_.FullName }
+                })
+            }
+        }
+        $primary = $false
     }
-    if (-not $repos.Count) { Write-Warning "wsj: no repos found under $root - run 'wso plan'"; return }
+    if (-not $repos.Count) { Write-Warning "wsj: no repos found under $($roots[0]) - run 'wso plan'"; return }
     $sel = $null
     if (Get-Command fzf -ErrorAction SilentlyContinue) {
         $sel = $repos | Sort-Object | fzf --height 40% --reverse --query "$Query" --prompt 'repo> '
@@ -143,7 +203,10 @@ function wsj {
     } else {
         Write-Warning "wsj: fzf not installed - pass a search term, e.g. 'wsj ironcl'"; return
     }
-    if ($sel) { Set-Location (Join-Path $root $sel) }
+    if (-not $sel) { return }
+    if ($sel.StartsWith('~')) { Set-Location ($env:USERPROFILE + $sel.Substring(1)) }
+    elseif ([System.IO.Path]::IsPathRooted($sel)) { Set-Location $sel }
+    else { Set-Location (Join-Path ($roots[0]) $sel) }
 }
 
 # Work workspace. $env:WORK_WORKSPACE_DIR (set in profile.local.ps1) wins;

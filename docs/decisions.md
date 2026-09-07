@@ -920,6 +920,57 @@ produces.
 `--keep-source` declines the removal outright, and `TS_WS_YES=1` skips the prompt for
 scripts. The prompt defaults to no, and to no when stdin is not a terminal.
 
+## Why the local workspace root is a second root, not a fourth candidate
+
+The workspace root resolves to one directory: `$WORKSPACE_DIR`, else the first existing
+autodetect probe. Adding `~/LocalWorkspace` to that probe list would have been the
+one-line change, and it would have been wrong in both directions — on a machine with a
+real workspace it never fires, and on a machine without one it silently redefines *the*
+workspace as the local disk.
+
+The two roots are not alternatives. They answer different questions:
+
+- The main root is where project work lives, and it is expected to be large. Putting it
+  on a mounted data volume is normal and is what `--move` exists to do.
+- The local root is where repos live that **cannot** be on that volume. A dotfiles repo
+  stowed into `$HOME` is the case that forces it: if the mount is ever missing —
+  `nofail` in fstab makes that silent — the mountpoint still exists, the tree under it is
+  empty, and every stowed link dangles. Nothing says so until the next login, when the
+  bar, the window manager's config and `~/.ssh/config` are all simply gone.
+
+`doc common/workspace-nav` had already written that warning down for `ws --move`. The
+local root is the durable answer to it rather than a warning about it.
+
+So: `$LOCAL_WORKSPACE_DIR`, else `~/LocalWorkspace` when it exists, resolved at call time
+like everything else here, and **returning nothing on a machine that has neither**. Most
+machines have one root, and every consumer had to keep working unchanged on those.
+
+Three consequences worth stating, because each is a place this could have gone wrong.
+
+**The jumps search roots in order, main first.** `wsj` and `ws37`/`ws42`/`wsmb`/`wsmd`
+take the first hit, so a single-root machine behaves exactly as before and a two-root
+machine only ever gains destinations. `wsar` is left alone: `archive/` is a tier `wso`
+builds, and `wso` does not build one there.
+
+**`wsj`'s rows had to become self-describing.** The picker showed root-RELATIVE paths,
+which is what keeps them readable, and a relative row is ambiguous the moment there are
+two roots — `src/github.com/o/x` could be either. Rows from the main root stay relative;
+rows from any other root are absolute with `$HOME` collapsed to `~`. The row's first
+character now says which root it came from and the selection maps back to exactly one
+directory, with no rule about which root wins a collision — because there are no
+collisions.
+
+**`wso` must never see it.** This is the one that could do damage. `wso migrate` derives
+a destination from a repo's `origin` and moves it into the organised main tree,
+non-interactively, dozens at a time. Doing that to a stowed dotfiles repo puts it back on
+the volume it was moved off, re-creating the exact silent breakage the local root exists
+to prevent — from a command the user was not thinking hard about, because it usually
+moves nothing. `ts_ws_scan_roots` / `Get-TsWsScanRoots` therefore drop that root and
+everything under it, and drop it **even when `TS_WS_EXTRA_ROOTS` names it**: that
+variable means "legacy root, empty this into the tree", which is the precise opposite.
+The guard stands down when the workspace *is* the local root, or it would leave `wso`
+with no roots at all and a plan that silently contains nothing.
+
 ## Why `--org` matches the owner segment rather than the path
 
 `--org` existed on `status`, `sync` and `unarchive` as `case "$d" in *"/$org"/*)`, and
