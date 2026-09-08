@@ -62,7 +62,19 @@ class App:
 
     def installable(self, machine: str) -> bool:
         """`machine` is a tstack.platform kind: macos, linux, wsl or windows."""
-        if machine == plat.LINUX and self.id in MISE_OWNED and plat.is_omarchy():
+        # No `machine` gate on the veto, deliberately. The awk twin in
+        # ts_apps_load keys on the DISTRO alone, and this side used to add
+        # `machine == plat.LINUX` on top -- an extra condition the twin does not
+        # have, which is drift the moment anything answers omarchy while kind()
+        # says something other than linux.
+        #
+        # That is not hypothetical. A parity container on a WSL2 HOST shares the
+        # host kernel, so /proc/version says "microsoft" inside it and both
+        # readers report `wsl` -- at which point bash still vetoed fnm/node/python
+        # on Omarchy and Python did not. `tests/parity/run.sh omarchy` was red on
+        # any WSL dev box and green in CI, where the runner is native Linux.
+        # Omarchy owns those binaries through mise whatever kind() thinks.
+        if self.id in MISE_OWNED and plat.is_omarchy():
             return False
         if self.platforms == ALL:
             return True

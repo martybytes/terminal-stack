@@ -374,7 +374,7 @@ def test_omarchy_owns_the_runtime_managers():
 
 
 @pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
-def test_the_mise_veto_agrees_between_bash_and_python():
+def test_the_mise_veto_agrees_between_bash_and_python(monkeypatch):
     """Two readers of one rule. They disagreed once already, on the platform
     axis, and the picker offered a tool the installer's catalog lacked."""
     got = subprocess.run(
@@ -396,6 +396,38 @@ def test_the_mise_veto_agrees_between_bash_and_python():
     for vetoed in apps.MISE_OWNED:
         assert vetoed not in offered, f"bash still offers {vetoed} on Omarchy"
     assert "uv" in offered, "the veto took uv with it"
+
+    # And the Python half, which this test's name has always promised and never
+    # actually read. It used to gate the veto on `machine == plat.LINUX`, a
+    # condition the awk twin above does not have, so the two agreed only while
+    # kind() said linux -- and a parity container on a WSL2 host says `wsl`,
+    # because it shares the host kernel and /proc/version carries "microsoft".
+    # Every kind is checked rather than just linux: the rule is about the distro,
+    # so a machine axis must not be able to switch it off.
+    monkeypatch.setenv("TS_DISTRO_ID", "omarchy")
+    plat.clear_distro_cache()
+    apps.clear_cache()
+    try:
+        assert plat.is_omarchy()
+        for machine in (plat.LINUX, plat.WSL, plat.MACOS):
+            ids = set(apps.ids(machine))
+            for vetoed in apps.MISE_OWNED:
+                assert vetoed not in ids, f"python still offers {vetoed} on Omarchy/{machine}"
+            assert "uv" in ids, f"the veto took uv with it on {machine}"
+        # Whole-catalog comparison, at the kind BOTH readers resolved for
+        # themselves. Naming a kind here instead would compare Python on that one
+        # against bash on this host, and the platform column would light up
+        # (nvtop is `linux`, and a WSL host answers wsl) for no real reason.
+        here = set(apps.ids(plat.kind()))
+        assert here == offered, (
+            "the two readers disagree on Omarchy:\n"
+            f"  python only: {sorted(here - offered)}\n"
+            f"  bash only:   {sorted(offered - here)}"
+        )
+    finally:
+        monkeypatch.delenv("TS_DISTRO_ID", raising=False)
+        plat.clear_distro_cache()
+        apps.clear_cache()
 
 
 # ── tmux: one path, never both ────────────────────────────────────────────────

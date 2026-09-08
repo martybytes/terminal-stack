@@ -37,6 +37,23 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **The two app-catalog readers vetoed differently on Omarchy (09/07/2026).**
+  `bootstrap/_config.sh`'s awk filter drops `fnm`/`node`/`python` there keyed on the
+  **distro alone**; `tstack/apps.py` gated the same veto on `machine == plat.LINUX` as
+  well — an extra condition the twin it names does not have. Invisible on real hardware,
+  where an Omarchy box answers `linux`. Visible in exactly one place: a parity container
+  on a **WSL2 host**, which shares the host kernel, so `/proc/version` says `microsoft`
+  inside it and both readers resolve `wsl` — bash still vetoed the three runtimes and
+  Python no longer did. `tests/parity/run.sh omarchy` was red on every WSL dev box and
+  green in CI, whose runners are native Linux, so nothing could report it.
+
+  The veto is distro-only now, matching the awk filter exactly.
+  `test_the_mise_veto_agrees_between_bash_and_python` has always been named for two
+  readers and only ever read the bash one — its own docstring says *"They disagreed once
+  already, on the platform axis"* — so it now drives the Python side too, across
+  `linux`/`wsl`/`macos`, and compares the whole catalog at the kind both readers resolved
+  for themselves. It catches the regression on a plain WSL box, with no container.
+
 - **The WSL test leg could not go green (09/07/2026).** Four tests failed on WSL and
   nowhere else. Two were the pwsh catalog-parity pair: `plat.find_pwsh()` reaches the
   *Windows* pwsh through interop, and a WSL install keeps its checkout on the Linux
