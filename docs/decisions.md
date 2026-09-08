@@ -1002,14 +1002,50 @@ plan. Mode became `--mode`, and the dispatcher now forwards `"$@"` to every verb
 `identity` and `doctor` rejecting anything they are given. A flag that is ignored without
 comment is worse than one that errors.
 
-## Runtime clone location: canonical app-data paths, invisible dev clones
+## Runtime clone location: Windows app-data, POSIX XDG, invisible dev clones
 
 The runtime clone — the one `tstack update` pulls and chezmoi applies from — lives at a
 **canonical location** per platform:
 
-- Windows + WSL (shared, ONE clone for both worlds): `%LOCALAPPDATA%\terminal-stack\stack`,
-  which WSL reaches as `/mnt/c/Users/<you>/AppData/Local/terminal-stack/stack`.
-- Native Linux / macOS: `${XDG_DATA_HOME:-~/.local/share}/terminal-stack`.
+- Windows: `%LOCALAPPDATA%\terminal-stack\stack`.
+- Every POSIX target, **WSL included**: `${XDG_DATA_HOME:-~/.local/share}/terminal-stack`.
+
+**WSL used to share the Windows clone** through `/mnt/c`, and that was wrong. drvfs is
+not a small tax, it is a different order of magnitude -- measured on one machine, two
+real clones of this repo:
+
+| operation | `/mnt/c` (drvfs) | `~` (ext4) |
+|---|---|---|
+| `git status`, avg of 3 | **1634 ms** | **3 ms** |
+| `find -type f` over the tree | 306 ms | 47 ms |
+
+~540x on the operation every git command, prompt and hook performs. The cost was already
+on the record from the other side: the comment at `bootstrap/_config.sh` notes 229 seconds
+for 49 chezmoi spawns *"because the source dir lives on /mnt/c"*. And the old default was
+actively harmful on a machine that had done the right thing by hand -- the installer
+offered to *relocate* an existing Linux-side clone onto the mount.
+
+So a WSL install is now self-contained on the Linux filesystem, and the Windows install
+owns the Windows side. `state_dir()` already sent WSL to XDG; this is the same split,
+applied to the clone.
+
+**The two original arguments survive intact.** App-data is outside every workspace root,
+so `wso migrate` can never relocate the runtime clone out from under the install -- and
+`~/.local/share` is not a workspace root either, so XDG satisfies that equally.
+`tests/test_tstack_core.py` already pinned `~/.local/share/terminal-stack` as *not* a dev
+clone (the leading dot in `.local` breaks the `/local/` bound), so the new default was
+proven safe against that regex before it became the default.
+
+**The old location stays a legacy candidate** in all three POSIX lists, or every machine
+installed before the move stops resolving its own clone. `install-wsl.sh` scans it first
+and offers the move, which is how an existing install migrates.
+
+One sharp edge the move creates, and it is worth knowing: on the docker **wsl-shim** path
+(Docker Desktop with this distro's WSL integration OFF) the engine is a Windows process
+that cannot bind-mount an ext4 path. `require_windows_visible` was effectively unreachable
+while the canonical clone lived on `/mnt/c`; it is reachable now. `tstack doctor` reports
+it as `wsl-docker-shim`, a note, and the fix is to turn that integration on -- which is
+also what gives WSL a native Linux docker.
 
 Why there: the stack already owns `%LOCALAPPDATA%\terminal-stack` (config.json,
 rollback-sha, the docs/kb mirror, workspace state), chezmoi itself uses the same
@@ -3623,3 +3659,54 @@ gates both pass; only the session is missing. Shipping a unit that spawns an age
 on headless hosts is a behaviour change, and the Omarchy audit put it on the record
 that the stack contains no ssh-agent code. That decision deserves its own change,
 not a rider on a git fix.
+
+## Why a WSL install stopped writing to the Windows side
+
+Moving the WSL clone to ext4 (above) settled where files live. It left a second question:
+should a WSL apply still *provision Windows*? It used to -- `run_after_90-sync-windows.sh`
+mirrored `windows/**`, `dot_codex/**` and `docs/kb/**` into `/mnt/c/Users/<you>/`, rendered
+the Windows starship config and TTS config, and installed a Windows TTS EXE.
+
+It no longer does, on WSL. The reason is that once WSL and Windows each have their own
+clone, **both sides write the same destinations**, and `scripts/sync-windows.ps1` is a full
+parallel implementation of the same mirror, not a stub. Two writers, two clones, possibly
+two commits:
+
+- Each renders `$PROFILE`, `.wezterm.lua` and `settings.json` from its own tree. They
+  differ by a byte, so each backs the other's version up and overwrites it -- you collect
+  `.bak.YYYYMMDD.1`, `.2`, `.3` on every alternating apply.
+- They read *different config stores*: the bash hook renders from chezmoi `[data]`, the
+  pwsh script from `config.json`. `doctor`'s `config-divergence` check exists precisely
+  because those drift, and the 2026-08-21 incident it records is exactly this shape -- the
+  mirror said false, `[data]` said true, and a pwsh sync deleted every TTS hook while
+  doctor reported "tts daemon healthy".
+
+Nothing detected or refused a second writer; the only mitigation was a byte-comparison
+before write, which makes *identical* clones idempotent and does nothing for the real case.
+
+So: the hook no-ops on WSL and says so rather than skipping silently, because somebody who
+used to get their Windows profile provisioned from WSL needs to know it moved. Windows is
+delivered by `scripts/sync-windows.ps1` (`tstack update` in PowerShell), which was already
+a complete standalone path. The config mirror stopped too, in both twins
+(`ts_mirror_windows_config`, `_refresh_windows_mirror`) -- a WSL save must not reach into
+a store another install owns.
+
+**What deliberately stays**, because the thing genuinely lives on the Windows side and no
+Linux equivalent exists. This is a READ list, not a write list, and it is the difference
+between "self-contained" and "isolated":
+
+- **mux interop** (`tasklist.exe`, `taskkill.exe`, `wezterm.exe`): with a Windows-hosted
+  WezTerm the mux server really is a Windows process, invisible to `pgrep` inside WSL.
+- **TTS playback**: WSL2 has no reliable audio device; the daemon is a Windows EXE.
+- **Theme `follow`**: the light/dark setting only exists in the Windows registry.
+- **GUI agent config**: Cursor and Codex run as Windows processes and keep their settings
+  in the Windows profile.
+- **`windowsUsername`**: still needed to find any of the above.
+- **`.chezmoiignore`'s WezTerm gate**: WSL correctly gets no `.wezterm.lua`, because the
+  Windows install owns it. Do not "fix" this by adding a WSL branch unless someone is
+  actually running a Linux WezTerm inside WSL.
+
+Three doctor checks were narrowed from `is_windows_side()` (Windows **or** WSL) to Windows
+only, because they measured files a WSL install no longer owns: `config-divergence`, the
+Claude TTS hook check, and `git-ssh-command` -- that last one was measuring *WSL's own*
+git and demanding a `C:/` path that would be wrong there if it were set.

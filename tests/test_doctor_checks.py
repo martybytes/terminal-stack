@@ -102,7 +102,10 @@ def test_windows_does_not_demand_zsh_on_path(monkeypatch):
 
 
 def test_config_store_divergence_is_reported_with_both_values(monkeypatch, tmp_path):
-    as_platform(monkeypatch, plat.WSL)
+    """Windows-side rule, unchanged. Only the platform moved: a WSL install no
+    longer writes the mirror, so it is the Windows install that must notice the
+    two stores disagreeing."""
+    as_platform(monkeypatch, plat.WINDOWS)
     mirror = tmp_path / "config.json"
     mirror.write_text("{}", encoding="utf-8")
     monkeypatch.setattr(store, "mirror_path", lambda: mirror)
@@ -280,11 +283,64 @@ def test_git_hooks_set_in_a_dev_clone_is_ok(monkeypatch, tmp_path):
     assert statuses(report)["git-hooks"] == checks.OK
 
 
+def test_the_wsl_docker_shim_warns_about_an_ext4_clone(monkeypatch, tmp_path):
+    """The one sharp edge the clone move creates. On the docker "wsl-shim" path
+    the engine is a Windows process that cannot bind-mount a path reaching it as
+    a 9p share -- and it surfaces inside a container as tar reporting a missing
+    file, which reads as a corrupt archive rather than a broken mount.
+
+    A note, not a failure: the stack is fine, only the services stack is hurt,
+    and the fix is one checkbox.
+    """
+    from tstack import engine
+
+    as_platform(monkeypatch, plat.WSL)
+    monkeypatch.setattr(engine, "docker_kind", lambda: engine.WSL_SHIM)
+    report = Report()
+    doctor.check_wsl_docker_shim(report, Path("/home/u/.local/share/terminal-stack"))
+    assert statuses(report)["wsl-docker-shim"] == checks.NOTE
+    assert "WSL Integration" in report.results[0].hint
+
+
+def test_a_native_docker_on_wsl_says_nothing(monkeypatch):
+    """The common case, and the one this machine is in: Docker Desktop with WSL
+    integration ON gives a native Linux docker, which mounts ext4 fine."""
+    from tstack import engine
+
+    as_platform(monkeypatch, plat.WSL)
+    monkeypatch.setattr(engine, "docker_kind", lambda: engine.NATIVE)
+    report = Report()
+    doctor.check_wsl_docker_shim(report, Path("/home/u/.local/share/terminal-stack"))
+    assert report.results == []
+
+
+def test_the_shim_check_is_silent_off_wsl(monkeypatch):
+    as_platform(monkeypatch, plat.WINDOWS)
+    report = Report()
+    doctor.check_wsl_docker_shim(report, Path("C:/x"))
+    assert report.results == []
+
+def test_the_config_stores_are_not_compared_on_wsl(monkeypatch, tmp_path):
+    """A WSL install owns only its own settings now. Comparing them against a
+    store the Windows install writes reported a divergence on every key the two
+    machines are entitled to disagree about."""
+    as_platform(monkeypatch, plat.WSL)
+    mirror = tmp_path / "config.json"
+    mirror.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(store, "mirror_path", lambda: mirror)
+    monkeypatch.setattr(store, "divergences", lambda: [("weztermMux", "on", "false")])
+    report = Report()
+    doctor.check_config_stores(report)
+    assert report.results == []
+
 def test_git_ssh_command_is_windows_only(monkeypatch):
     """A C:/ path in core.sshCommand would break git on every POSIX target, so
     the setting is not shipped there and the check must stay silent."""
-    monkeypatch.setattr(plat, "is_windows_side", lambda: False)
+    as_platform(monkeypatch, plat.WSL)
     report = Report()
+    doctor.check_git_ssh_command(report)
+    assert report.results == [], "on WSL this measured WSL's own git, which must use Linux ssh"
+    as_platform(monkeypatch, plat.LINUX)
     doctor.check_git_ssh_command(report)
     assert report.results == []
 
@@ -293,7 +349,7 @@ def test_git_ssh_command_unset_is_a_failure(monkeypatch):
     """The reported bug: git falls back to Git for Windows' bundled MSYS ssh,
     which cannot reach the agent pipe, so every command prompts for the
     passphrase while ssh-add lists the keys."""
-    monkeypatch.setattr(plat, "is_windows_side", lambda: True)
+    as_platform(monkeypatch, plat.WINDOWS)
     monkeypatch.setattr(
         doctor, "_run", lambda argv, **k: subprocess.CompletedProcess(argv, 1, "", "")
     )
@@ -306,7 +362,7 @@ def test_git_ssh_command_unset_is_a_failure(monkeypatch):
 def test_git_ssh_command_pointing_at_a_missing_binary_is_a_failure(monkeypatch, tmp_path):
     """A machine without the Windows OpenSSH client feature. Naming the gap
     beats git failing with a bare exec error on every fetch."""
-    monkeypatch.setattr(plat, "is_windows_side", lambda: True)
+    as_platform(monkeypatch, plat.WINDOWS)
     gone = tmp_path / "System32" / "OpenSSH" / "ssh.exe"
     monkeypatch.setattr(
         doctor, "_run", lambda argv, **k: subprocess.CompletedProcess(argv, 0, str(gone), "")
@@ -319,7 +375,7 @@ def test_git_ssh_command_pointing_at_a_missing_binary_is_a_failure(monkeypatch, 
 def test_git_ssh_command_set_to_another_ssh_is_a_note_not_a_failure(monkeypatch, tmp_path):
     """Someone may deliberately route through 1Password or a custom agent. That
     is their call -- say so, do not fail an install over it."""
-    monkeypatch.setattr(plat, "is_windows_side", lambda: True)
+    as_platform(monkeypatch, plat.WINDOWS)
     other = tmp_path / "ssh.exe"
     other.write_text("", encoding="utf-8")
     monkeypatch.setattr(
@@ -334,7 +390,7 @@ def test_git_ssh_command_pointing_at_windows_openssh_is_ok(monkeypatch, tmp_path
     native = tmp_path / "Windows" / "System32" / "OpenSSH" / "ssh.exe"
     native.parent.mkdir(parents=True)
     native.write_text("", encoding="utf-8")
-    monkeypatch.setattr(plat, "is_windows_side", lambda: True)
+    as_platform(monkeypatch, plat.WINDOWS)
     monkeypatch.setattr(
         doctor, "_run", lambda argv, **k: subprocess.CompletedProcess(argv, 0, str(native), "")
     )

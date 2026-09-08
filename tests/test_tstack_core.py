@@ -139,6 +139,61 @@ def test_dev_clone_detection_matches_the_documented_cases(path, expected):
     assert paths.is_dev_clone(path) is expected
 
 
+# ------------------------------------------- where the runtime clone belongs
+
+
+def test_wsl_keeps_its_clone_on_the_linux_filesystem(monkeypatch, tmp_path):
+    """WSL used to share the Windows clone through /mnt/c. Measured on a real
+    machine, `git status` took 1634 ms there against 3 ms on ext4 -- so a WSL
+    install now uses the XDG data home like every other POSIX target.
+
+    Nothing pinned this before, which is exactly why the /mnt/c default survived
+    as long as it did: the whole location was invisible to the suite.
+    """
+    as_platform(monkeypatch, plat.WSL)
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    canon = paths.canonical_clone_dir()
+    assert canon == tmp_path / "terminal-stack"
+    assert "/mnt/" not in str(canon).replace(os.sep, "/")
+
+
+def test_wsl_and_native_linux_agree_on_the_canonical_location(monkeypatch, tmp_path):
+    """The point of the move: WSL is just another POSIX target now."""
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    as_platform(monkeypatch, plat.WSL)
+    wsl = paths.canonical_clone_dir()
+    as_platform(monkeypatch, plat.LINUX)
+    assert wsl == paths.canonical_clone_dir()
+
+
+def test_windows_still_uses_local_app_data(monkeypatch, tmp_path):
+    """Only WSL moved. The Windows install keeps owning the Windows side."""
+    as_platform(monkeypatch, plat.WINDOWS)
+    monkeypatch.setattr(plat, "local_app_data", lambda: tmp_path)
+    assert paths.canonical_clone_dir() == tmp_path / "terminal-stack" / "stack"
+
+
+def test_the_old_wsl_location_is_still_a_candidate(monkeypatch):
+    """A machine installed before the move must still find its own clone, or
+    the update path dead-ends on a host that was working yesterday."""
+    as_platform(monkeypatch, plat.WSL)
+    monkeypatch.delenv("TERMINAL_STACK_DIR", raising=False)
+    monkeypatch.setattr(
+        paths.Path, "is_dir", lambda self: str(self).replace(os.sep, "/") == "/mnt/c/Users"
+    )
+    monkeypatch.setattr(
+        paths.Path,
+        "glob",
+        lambda self, pat: (
+            [paths.Path("/mnt/c/Users/u/AppData/Local/terminal-stack/stack")]
+            if pat.endswith("AppData/Local/terminal-stack/stack")
+            else []
+        ),
+    )
+    found = [str(p).replace(os.sep, "/") for p in paths.clone_candidates()]
+    assert "/mnt/c/Users/u/AppData/Local/terminal-stack/stack" in found
+
+
 def test_the_pin_leads_the_candidate_list(monkeypatch, tmp_path):
     monkeypatch.setenv("TERMINAL_STACK_DIR", str(tmp_path / "pinned"))
     assert paths.clone_candidates()[0] == tmp_path / "pinned"

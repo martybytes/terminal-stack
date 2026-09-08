@@ -339,16 +339,20 @@ def _apply(out: Out, dry_run: bool) -> None:
 
 
 def _refresh_windows_mirror(out: Out) -> None:
-    """On WSL, re-derive the Windows config.json from [data] after a save.
+    """Re-derive the Windows config.json from [data] after a save.
 
-    scripts/sync-windows.ps1 and a pwsh-side `tstack update` render the Windows
-    files from that mirror, not from chezmoi [data]. A save that touches [data]
-    alone therefore holds only until the next Windows-side sync, which renders
-    the previous answer back over it. The shell save path (ts_save_config) has
-    always ended in ts_mirror_windows_config; this is the same call, so there
-    is still one writer for the mirror.
+    Retained for a Windows-side caller only. It used to run on WSL, so that a
+    pwsh sync -- which renders from the mirror, not from chezmoi [data] -- would
+    not put the previous answer back. A WSL install is now self-contained: it
+    owns its own settings and must not overwrite the Windows install's, which
+    keeps its own store and writes it from pwsh. Leaving this on WSL meant every
+    `tstack config` save reached across to a store another install owned.
+
+    See docs/decisions.md, "Why a WSL install stopped writing to the Windows side".
     """
-    if not plat.is_wsl():
+    if plat.is_wsl():
+        return
+    if not plat.is_windows_side():
         return
     try:
         src = paths.resolve_source_dir()

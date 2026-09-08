@@ -28,9 +28,14 @@ sourced at the *end* of `.zshrc`, so anything resolved earlier would miss it):
 1. `$WORKSPACE_DIR` from the environment
 2. the `export WORKSPACE_DIR=` line in `~/.zshrc.local` (`$env:WORKSPACE_DIR` in
    `profile.local.ps1`), which is what puts it in the environment for a new shell
-3. the first existing autodetect probe: `/mnt/c/DATA/Workspace`,
-   `~/Documents/Workspace`, `~/workspace`, `~/Workspace` — pwsh probes
-   `C:\DATA\Workspace`, `~\workspace`, `~\Documents\Workspace`
+3. the first existing autodetect probe: `~/Documents/Workspace`, `~/workspace`,
+   `~/Workspace` — pwsh probes `C:\DATA\Workspace`, `~\workspace`,
+   `~\Documents\Workspace`
+
+   **On WSL the Windows workspace is not probed.** `/mnt/c/DATA/Workspace` used to be
+   FIRST, so `ws` landed there over drvfs no matter what existed in `$HOME`. A WSL
+   install keeps its files on the Linux filesystem; set `WORKSPACE_DIR` in
+   `~/.zshrc.local` if you want the Windows one anyway.
 
 ### The local root
 

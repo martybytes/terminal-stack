@@ -72,11 +72,18 @@ def is_dev_clone(path: Path | str) -> bool:
 def canonical_clone_dir() -> Path | None:
     """The one location `tstack update` expects the runtime clone to be.
 
-    Windows and WSL share it via %LOCALAPPDATA%\\terminal-stack\\stack, which WSL
-    reaches through /mnt/c. Native Linux and macOS use the XDG data home. Pins
-    are only for non-canonical locations.
+    Windows uses %LOCALAPPDATA%\\terminal-stack\\stack. Every POSIX target --
+    including WSL -- uses the XDG data home. Pins are only for non-canonical
+    locations.
+
+    WSL used to share the Windows clone through /mnt/c, and the drvfs tax was
+    brutal: `git status` measured 1634 ms there against 3 ms on ext4, and
+    bootstrap/_config.sh records 229 seconds for 49 chezmoi spawns for the same
+    reason. A WSL install now keeps its files on the Linux filesystem and the
+    Windows install owns the Windows side. `state_dir()` already sent WSL to XDG;
+    this is the same split. See docs/decisions.md, "Runtime clone location".
     """
-    if plat.kind() in (plat.WINDOWS, plat.WSL):
+    if plat.kind() == plat.WINDOWS:
         base = plat.local_app_data()
         return base / "terminal-stack" / "stack" if base else None
     xdg = os.environ.get("XDG_DATA_HOME")
@@ -107,6 +114,13 @@ def clone_candidates() -> list[Path]:
     ]
 
     if plat.kind() == plat.WSL:
+        # The pre-2026-09 canonical location. Still a candidate, or every machine
+        # installed before the move stops resolving its own clone.
+        out += (
+            sorted(Path("/mnt/c/Users").glob("*/AppData/Local/terminal-stack/stack"))
+            if Path("/mnt/c/Users").is_dir()
+            else []
+        )
         out += (
             sorted(Path("/mnt/c/Users").glob("*/terminal-stack"))
             if Path("/mnt/c/Users").is_dir()

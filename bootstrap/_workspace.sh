@@ -131,8 +131,12 @@ ts_ws_own_owners() {
 ts_ws_root() {
     [ -n "${WORKSPACE_DIR:-}" ] && { printf '%s\n' "$WORKSPACE_DIR"; return 0; }
     local d
-    for d in /mnt/c/DATA/Workspace "$HOME/Documents/Workspace" \
-             "$HOME/workspace" "$HOME/Workspace"; do
+# /mnt/c/DATA/Workspace is deliberately NOT a candidate any more. It was probed
+# FIRST, so on WSL `ws` landed on the Windows workspace over drvfs no matter
+# what existed in $HOME -- the same tax the runtime clone move fixes. A WSL
+# install keeps its workspace on the Linux filesystem; set WORKSPACE_DIR in
+# ~/.zshrc.local to point at the Windows one deliberately.
+    for d in "$HOME/Documents/Workspace" "$HOME/workspace" "$HOME/Workspace"; do
         if [ -d "$d" ]; then { printf '%s\n' "$d"; return 0; }; fi
     done
     return 1

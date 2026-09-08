@@ -1,5 +1,20 @@
 #!/usr/bin/env bash
-# Sync from the chezmoi source tree to the Windows user profile:
+# Sync from the chezmoi source tree to the Windows user profile.
+#
+# THIS NO LONGER RUNS ON WSL. A WSL install is self-contained on the Linux
+# filesystem and never writes under /mnt/c; the Windows install owns the Windows
+# side and delivers it with scripts/sync-windows.ps1 (`tstack update` in pwsh).
+# Two clones writing the same destinations from different commits was the
+# problem: they differ by a byte, each backs the other up, and you get
+# .bak.YYYYMMDD.1/.2/.3 on every alternating apply -- with the two config stores
+# drifting underneath (see doctor's "config-divergence", and the 2026-08-21
+# incident where a pwsh sync deleted every TTS hook).
+#
+# What remains: the file is kept for Windows-side use and for the historical
+# record of the mapping below. See docs/decisions.md § "Why a WSL install stopped
+# writing to the Windows side".
+#
+# Mapping (Windows-side only now):
 #   $CHEZMOI_SOURCE_DIR/windows/**  → /mnt/c/Users/<windowsUsername>/
 #   $CHEZMOI_SOURCE_DIR/dot_codex/** → /mnt/c/Users/<windowsUsername>/.codex/
 #   $CHEZMOI_SOURCE_DIR/docs/kb/**  → /mnt/c/Users/<windowsUsername>/AppData/Local/terminal-stack/docs/kb/
@@ -30,9 +45,18 @@ windows_src="$stack_root/windows"
 codex_src="$stack_root/dot_codex"
 kb_src="$stack_root/docs/kb"
 
-# Non-WSL / no Windows mount available — no destination to sync to. Bail before
-# we try to resolve a Windows username we can't possibly find. Native Linux and
-# macOS land here.
+# A WSL install is self-contained: it owns its files on the Linux filesystem and
+# never writes to the Windows side. Say so once rather than silently, because
+# somebody who used to get their Windows profile provisioned from here needs to
+# know where it moved to.
+if [ -r /proc/version ] && grep -qi microsoft /proc/version 2>/dev/null; then
+  echo "sync-windows: skipped (WSL is self-contained; run 'tstack update' in PowerShell for the Windows side)"
+  exit 0
+fi
+
+# No Windows mount available — no destination to sync to. Bail before we try to
+# resolve a Windows username we can't possibly find. Native Linux and macOS land
+# here.
 if [ ! -d /mnt/c/Users ]; then
   exit 0
 fi

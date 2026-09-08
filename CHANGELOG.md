@@ -4,6 +4,74 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+### Changed
+
+- **A WSL install is now self-contained on the Linux filesystem (09/07/2026).** The WSL
+  installer proposed
+
+  ```
+  Where should the terminal-stack repo live? [/mnt/c/Users/<you>/AppData/Local/terminal-stack/stack]
+  ```
+
+  -- a Windows path reached over drvfs, shared with the Windows install. Measured on one
+  machine, two real clones of this repo:
+
+  | operation | `/mnt/c` (drvfs) | `~` (ext4) |
+  |---|---|---|
+  | `git status`, avg of 3 | **1634 ms** | **3 ms** |
+  | `find -type f` | 306 ms | 47 ms |
+
+  ~540x on the operation every git command, prompt and hook performs. The tax was already
+  on the record from the other side -- `bootstrap/_config.sh` notes 229 seconds for 49
+  chezmoi spawns *"because the source dir lives on /mnt/c"* -- and the default was actively
+  harmful on a machine that had done the right thing by hand: the installer offered to
+  *relocate* an existing Linux-side clone onto the mount.
+
+  WSL now uses `${XDG_DATA_HOME:-~/.local/share}/terminal-stack`, the same canonical path as
+  native Linux and macOS. The old location stays a legacy candidate in all three POSIX
+  resolvers, and `install-wsl.sh` scans it first and offers the move, so an existing install
+  migrates rather than dead-ending.
+
+- **WSL stopped writing to the Windows side (09/07/2026).** Once each side has its own
+  clone, both write the same destinations, and `scripts/sync-windows.ps1` is a full parallel
+  implementation of the mirror rather than a stub. Two writers at possibly different commits
+  means each backs the other's render up and overwrites it -- `.bak.YYYYMMDD.1/.2/.3` on
+  every alternating apply -- while the two config stores drift underneath, which is the exact
+  shape of the 2026-08-21 incident where a pwsh sync deleted every TTS hook and doctor still
+  reported "tts daemon healthy".
+
+  So `run_after_90-sync-windows.sh` no-ops on WSL (saying so, rather than silently, because
+  anyone who used to get their Windows profile provisioned from WSL needs to know it moved),
+  and both config-mirror writers stopped there too. Windows is delivered by
+  `scripts/sync-windows.ps1` / `tstack update` in PowerShell, which was already a complete
+  standalone path.
+
+  **Reads stay.** The WezTerm GUI and mux server really are Windows processes, WSL2 has no
+  audio device, and the theme lives in the Windows registry -- so mux interop, TTS playback,
+  theme `follow`, GUI-agent config and `windowsUsername` are all untouched. This is
+  self-contained, not isolated.
+
+- **`ws` no longer probes the Windows workspace on WSL (09/07/2026).**
+  `/mnt/c/DATA/Workspace` was the FIRST autodetect candidate in all four resolvers, so `ws`
+  landed on the Windows tree over drvfs regardless of what existed in `$HOME`. Set
+  `WORKSPACE_DIR` in `~/.zshrc.local` to point there deliberately.
+
+### Fixed
+
+- **Three doctor checks measured a side WSL no longer owns (09/07/2026).** They were gated on
+  `is_windows_side()`, which is true for Windows *and* WSL: `config-divergence` compared
+  against a mirror WSL no longer writes, the Claude TTS hook check read the Windows profile,
+  and `git-ssh-command` demanded `C:/Windows/System32/OpenSSH/ssh.exe` while measuring
+  **WSL's own** git -- a value that would be wrong there if it were set. All three are
+  Windows-only now. The two genuine reads (the agentmemory secret in `HKCU\Environment`, the
+  Windows-side TTS state) are unchanged.
+
+- **New `wsl-docker-shim` doctor note (09/07/2026).** Moving the clone to ext4 makes one
+  previously-unreachable guard reachable: on the docker `wsl-shim` path (Docker Desktop with
+  this distro's WSL integration OFF) the engine is a Windows process that cannot bind-mount
+  it, and the failure surfaces much later inside a container as tar reporting a missing file.
+  A note, not a failure, and `require_windows_visible`'s advice -- which told you to keep the
+  clone on a Windows drive -- now points at the WSL Integration checkbox instead.
 ### Fixed
 
 - **Every git command asked for the key passphrase while the agent held the keys

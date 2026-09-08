@@ -16,6 +16,9 @@ ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "bootstrap/agent-tools.json"
 
 
+NEWLINE = chr(10)
+
+
 def repo_file(rel: str) -> Path:
     """A repo path a test asserts about, which therefore MUST exist.
 
@@ -462,18 +465,73 @@ def test_the_wsl_sync_walk_reads_from_its_own_fd():
     assert "done < <(find" not in sh, "a walk reading from stdin came back"
 
 
-def test_a_posix_save_refreshes_the_windows_mirror():
-    """tstack config on WSL writes chezmoi [data]; sync-windows.ps1 reads
-    config.json. Without the refresh the next pwsh-side sync renders the
-    previous leader/theme back over the new one."""
-    py = (ROOT / "tstack/commands/config.py").read_text(encoding="utf-8")
+def test_a_save_refreshes_the_windows_mirror_but_never_from_wsl():
+    """A save must leave the Windows mirror current, or the next pwsh-side sync
+    renders the previous leader/theme back over the new one -- the mirror is what
+    sync-windows.ps1 reads, not chezmoi [data].
+
+    The ordering rule is unchanged. What changed is WHO may write it: a WSL
+    install is self-contained and must not reach across into a store the Windows
+    install owns, from a clone that may be at a different commit.
+    """
+    py = repo_file("tstack/commands/config.py").read_text(encoding="utf-8")
     assert "ts_mirror_windows_config" in py
     apply_body = py.split("def _apply(")[1].split("\ndef ")[0]
     assert "_refresh_windows_mirror(out)" in apply_body
     assert apply_body.index("chezmoi_init()") < apply_body.index("_refresh_windows_mirror"), (
         "the mirror is derived from the keys chezmoi init regenerates"
     )
+    mirror_fn = py.split("def _refresh_windows_mirror(")[1].split(NEWLINE + "def ")[0]
+    assert "if plat.is_wsl():" in mirror_fn, (
+        "a WSL save must not write the Windows install's config store"
+    )
 
+
+def test_the_windows_sync_hook_does_not_run_on_wsl():
+    """A WSL install owns its files on the Linux filesystem and writes nothing
+    under /mnt/c. Two clones writing the same destinations from different commits
+    is the failure this prevents: they differ by a byte, each backs the other up,
+    and you collect .bak.YYYYMMDD.1/.2/.3 on every alternating apply, with the two
+    config stores drifting underneath.
+
+    The guard has to come BEFORE the /mnt/c/Users existence check, which is true
+    on WSL and was therefore never an opt-out there.
+    """
+    sh = repo_file("run_after_90-sync-windows.sh").read_text(encoding="utf-8")
+    assert "grep -qi microsoft /proc/version" in sh
+    wsl_guard = sh.index("grep -qi microsoft /proc/version")
+    mount_guard = sh.index("if [ ! -d /mnt/c/Users ]")
+    assert wsl_guard < mount_guard, "the WSL guard must precede the mount check"
+    assert "exit 0" in sh[wsl_guard : wsl_guard + 400], (
+        "WSL must no-op, not fall through to the sync"
+    )
+
+
+def test_the_windows_workspace_is_not_a_posix_candidate():
+    """/mnt/c/DATA/Workspace was probed FIRST, so on WSL `ws` resolved to the
+    Windows workspace over drvfs no matter what existed in $HOME. All four
+    resolvers must agree it is gone, or `ws` and `wso` disagree about the root.
+
+    Only the workspace ROOT is forbidden. A deeper path naming a specific repo
+    (/mnt/c/DATA/Workspace/terminal-stack...) is a legacy CLONE candidate or a
+    doc-root probe -- a different job, and one a machine installed before the
+    move still needs.
+    """
+    for rel in (
+        "dot_zshrc",
+        "bootstrap/_workspace.sh",
+        "bootstrap/_common-posix.sh",
+        "tstack/workspace.py",
+    ):
+        body = repo_file(rel).read_text(encoding="utf-8")
+        offenders = [
+            ln
+            for ln in body.splitlines()
+            if "/mnt/c/DATA/Workspace" in ln
+            and "/mnt/c/DATA/Workspace/" not in ln
+            and not ln.lstrip().startswith("#")
+        ]
+        assert not offenders, f"{rel} still probes the Windows workspace: {offenders}"
 
 def test_updates_reconcile_only_enabled_tools():
     ps = (ROOT / "scripts/sync-windows.ps1").read_text(encoding="utf-8")
