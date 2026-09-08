@@ -4,6 +4,37 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+### Added
+
+- **The bootstrap now starts an ssh-agent on Linux and WSL (09/07/2026).** Found on a
+  fresh WSL Ubuntu 24.04 install: every `ssh` and every `git push` asked for a
+  passphrase, and `ssh-add -l` said `Could not open a connection to your
+  authentication agent`. Two things were wrong at once, and either alone is enough to
+  see nothing.
+
+  `ssh-agent.service` is `static` on Ubuntu -- no `[Install]` section, so there is
+  nothing for `systemctl --user enable` to write -- and is ordered
+  `Before=graphical-session-pre.target`, a target a login with no desktop never reaches.
+  Nothing pulled it in. And starting it by hand *also* did nothing while reporting
+  success: Debian and Ubuntu run the agent through `/usr/lib/openssh/agent-launch`,
+  which exits 0 without executing `ssh-agent` when `SSH_AUTH_SOCK` is already set in the
+  user manager -- which `gpg-agent-ssh.socket`, enabled by default, does.
+
+  `common_ssh_agent` does the `add-wants default.target` that the static unit cannot do
+  for itself, and, only if a start still leaves no socket, writes a user-scope override
+  that runs `ssh-agent` directly. It deliberately does **not** disable anyone's
+  `gpg-agent-ssh.socket`: `dot_zshrc` never overwrites a live `SSH_AUTH_SOCK`, so both
+  agents coexist and whichever a session inherits still wins. A live agent is never
+  restarted (that would drop every loaded key), and no systemd user manager -- a
+  container, or WSL without `systemd=true` -- is a no-op. `tests/test_ssh_agent_bootstrap.py`
+  pins all of it; `docs/decisions.md` has the full account.
+
+- **`dot_zshrc.local.example` documents a keychain-style `sshkeys` helper.** Starting the
+  agent and filling it are different questions: which keys a machine should hold, and
+  whether a passphrase prompt at first login is welcome, must not propagate through a
+  shared repo. The example adds every `IdentityFile` in `~/.ssh/config` the agent does
+  not already hold, once per boot, and skips by fingerprint so a re-run cannot re-prompt.
+
 ### Changed
 
 - **A WSL install is now self-contained on the Linux filesystem (09/07/2026).** The WSL

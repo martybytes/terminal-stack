@@ -84,21 +84,64 @@ WSL and a plain server have no graphical session, and Ubuntu's
 `ssh-agent.service` is `static` (nothing to `enable`) and ordered
 `Before=graphical-session-pre.target` — so nothing ever starts it and no socket
 is created. The block above then correctly does nothing: it recovers a socket,
-it does not conjure one.
+it does not conjure one. The symptom is a passphrase prompt on **every** ssh and
+every git push.
 
 ```bash
 ls -l "${XDG_RUNTIME_DIR}"/ssh-agent.socket "${XDG_RUNTIME_DIR}"/openssh_agent 2>/dev/null
 systemctl --user is-active ssh-agent.service
 ```
 
-If both are absent, start one for the session yourself:
+`linux-bootstrap.sh` and `wsl-bootstrap.sh` now fix this at install time
+(`common_ssh_agent`), so a machine installed after 09/07/2026 already has one.
+To repair an older machine by hand:
+
+```bash
+systemctl --user add-wants default.target ssh-agent.service   # the unit is static; this is the missing symlink
+systemctl --user start ssh-agent.service
+ls -l "${XDG_RUNTIME_DIR}/openssh_agent"
+```
+
+**If that reports `active` and still leaves no socket**, you have hit the second
+half of it. Debian and Ubuntu start the agent through
+`/usr/lib/openssh/agent-launch`, which exits 0 without running `ssh-agent` at all
+when `SSH_AUTH_SOCK` is already set in the user manager — and
+`gpg-agent-ssh.socket`, enabled by default, sets it:
+
+```bash
+systemctl --user show-environment | grep SSH_AUTH_SOCK   # a path under gnupg/ is the tell
+```
+
+Run the agent directly instead of disabling anyone's gpg socket:
+
+```bash
+mkdir -p ~/.config/systemd/user/ssh-agent.service.d
+cat > ~/.config/systemd/user/ssh-agent.service.d/10-terminal-stack.conf <<'CONF'
+[Service]
+ExecStart=
+ExecStartPre=-/bin/rm -f %t/openssh_agent
+ExecStart=/usr/bin/ssh-agent -D -a %t/openssh_agent
+CONF
+systemctl --user daemon-reload && systemctl --user restart ssh-agent.service
+```
+
+A WSL distro without `systemd=true` in `/etc/wsl.conf` has no user manager at
+all; there, start one per session yourself:
 
 ```bash
 eval "$(ssh-agent -s)" && ssh-add ~/.ssh/id_ed25519
 ```
 
-The stack deliberately ships no ssh-agent code on POSIX, so this stays a
-per-machine choice rather than something an apply turns on.
+**Filling** the agent stays a per-machine choice, in `~/.zshrc.local` — see
+`dot_zshrc.local.example` for a keychain-style `sshkeys` helper that adds every
+`IdentityFile` in `~/.ssh/config` the agent does not already hold, once per boot.
+`AddKeysToAgent yes` alone is enough on most machines: the first ssh to a host
+prompts, and nothing after it does.
+
+> A `~/.ssh/config` written on the Windows side is **CRLF**, and OpenSSH itself
+> tolerates the trailing `\r` — so it is invisible until some other tool reads
+> the file and every path in it silently stops existing. `file ~/.ssh/config`
+> tells you; `sed -i 's/\r$//' ~/.ssh/config` fixes it.
 
 ## The agent on Windows is a pipe, not a socket
 

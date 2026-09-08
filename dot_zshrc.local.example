@@ -40,6 +40,64 @@
 #
 # export LOCAL_WORKSPACE_DIR="$HOME/LocalWorkspace"
 
+# ── Keychain-style ssh key loading ────────────────────────────────────────────
+# The bootstrap STARTS an agent (`common_ssh_agent`) and ~/.zshrc finds its
+# socket; neither puts keys in it. On most machines nothing more is needed --
+# `AddKeysToAgent yes` in ~/.ssh/config means the first ssh to a host prompts
+# once and nothing after it does. Uncomment this to front-load that instead:
+# one prompt per key per boot, and `sshkeys` to do it on demand.
+#
+# The stamp under $XDG_RUNTIME_DIR is what makes declining the prompt survivable
+# -- the kernel clears that directory at logout, so it re-asks once per boot and
+# not once per pane.
+#
+# _ts_ssh_identities() {
+#   [[ -r "$HOME/.ssh/config" ]] || return 0
+#   local f
+#   awk 'tolower($1) == "identityfile" { print $2 }' "$HOME/.ssh/config" \
+#   | while IFS= read -r f; do
+#       # A ~/.ssh/config written on the Windows side is CRLF, and OpenSSH itself
+#       # tolerates the trailing \r -- so it is invisible until something like
+#       # this reads the file and every path silently stops existing.
+#       f="${f%$'\r'}"
+#       f="${f/#\~/$HOME}"
+#       [[ -f "$f" ]] && print -r -- "$f"
+#     done | sort -u
+# }
+#
+# # Add only what is missing. Comparing fingerprints matters: ssh-add on a key
+# # the agent already holds prompts for the passphrase again and changes nothing.
+# sshkeys() {
+#   if [[ ! -S "${SSH_AUTH_SOCK:-}" ]]; then
+#     print -u2 "sshkeys: no agent; systemctl --user status ssh-agent.service"
+#     return 1
+#   fi
+#   local loaded f fp
+#   local -a missing
+#   loaded="$(ssh-add -l 2>/dev/null)"
+#   for f in ${(f)"$(_ts_ssh_identities)"}; do
+#     fp="$(ssh-keygen -lf "$f.pub" 2>/dev/null | awk '{print $2}')"
+#     [[ -n "$fp" && "$loaded" == *"$fp"* ]] && continue
+#     missing+=("$f")
+#   done
+#   (( ${#missing} )) || { print "sshkeys: agent already holds every key"; return 0 }
+#   ssh-add "${missing[@]}"
+# }
+#
+# _ts_ssh_autoload() {
+#   [[ -o interactive && -t 0 ]] || return 0
+#   [[ -S "${SSH_AUTH_SOCK:-}" ]] || return 0
+#   # An inbound session's agent is the CLIENT's, forwarded. Loading this host's
+#   # keys into it would push them somewhere they were never meant to go.
+#   [[ -n "${SSH_CONNECTION:-}" ]] && return 0
+#   local stamp="${XDG_RUNTIME_DIR:-/tmp}/terminal-stack/ssh-keys-attempted"
+#   [[ -e "$stamp" ]] && return 0
+#   mkdir -p "${stamp:h}" 2>/dev/null || return 0
+#   : > "$stamp"
+#   sshkeys
+# }
+# _ts_ssh_autoload
+
 # Where `db` / `dbx` jump to. Only needed when Dropbox is somewhere the
 # autodetect misses — it already reads Dropbox's own info.json and probes
 # ~/Library/CloudStorage/Dropbox and ~/Dropbox.

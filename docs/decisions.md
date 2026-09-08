@@ -3658,7 +3658,7 @@ created — its `ConditionPathExists=/etc/X11/Xsession.options` and `use-ssh-age
 gates both pass; only the session is missing. Shipping a unit that spawns an agent
 on headless hosts is a behaviour change, and the Omarchy audit put it on the record
 that the stack contains no ssh-agent code. That decision deserves its own change,
-not a rider on a git fix.
+not a rider on a git fix — it was made on 09/07/2026, below.
 
 ## Why a WSL install stopped writing to the Windows side
 
@@ -3710,3 +3710,70 @@ Three doctor checks were narrowed from `is_windows_side()` (Windows **or** WSL) 
 only, because they measured files a WSL install no longer owns: `config-divergence`, the
 Claude TTS hook check, and `git-ssh-command` -- that last one was measuring *WSL's own*
 git and demanding a `C:/` path that would be wrong there if it were set.
+
+## Why the bootstrap starts an agent, and why it does not disable anyone else's
+
+The change the section above deferred, made 09/07/2026 on a fresh WSL Ubuntu
+24.04 install where every `ssh` and every `git push` asked for a passphrase and
+`ssh-add -l` answered `Could not open a connection to your authentication agent`.
+
+Two independent things were wrong, and fixing either alone changes nothing:
+
+1. **Nothing pulled the unit in.** `ssh-agent.service` is `static` on Ubuntu —
+   no `[Install]` section, so `systemctl --user enable` has nothing to write —
+   and is ordered `Before=graphical-session-pre.target`, which a login with no
+   desktop never reaches. `systemctl --user add-wants default.target
+   ssh-agent.service` writes the `.wants` symlink the unit cannot write for
+   itself, at a target that *is* reached.
+2. **Starting it by hand also did nothing, and said it had worked.** Debian and
+   Ubuntu run the agent through `/usr/lib/openssh/agent-launch`, whose first act
+   is `[ -z "$SSH_AUTH_SOCK" ]`. `gpg-agent-ssh.socket` is enabled by default and
+   sets exactly that variable in the user manager's environment, so the script
+   exits 0 without executing `ssh-agent`. `systemctl --user status` reports
+   `Started`, `Main PID … (code=exited, status=0/SUCCESS)`, and no socket exists.
+   Nothing anywhere says why.
+
+The obvious fix for (2) is `systemctl --user disable gpg-agent-ssh.socket`. It
+works, and it is **not ours to do**: a machine that genuinely keeps its ssh keys
+in gpg would lose them from every session, and an installer that silently
+switches which agent a person's keys live in has overstepped. Instead the
+bootstrap drops a user-scope override that runs `ssh-agent` directly, leaving
+`agent-launch`'s guard nothing to guard:
+
+```ini
+[Service]
+ExecStart=
+ExecStartPre=-/bin/rm -f %t/openssh_agent
+ExecStart=/usr/bin/ssh-agent -D -a %t/openssh_agent
+```
+
+Both agents then exist and neither is taken away, because `dot_zshrc` never
+overwrites a **live** `SSH_AUTH_SOCK` (§ "Why the agent probe names two
+sockets") — whichever socket a session actually inherits still wins. The
+override is written **only** when a start produced no socket, so Arch, which
+socket-activates the unit at its own `ssh-agent.socket` path, never gets one.
+
+Three further constraints, each pinned by `tests/test_ssh_agent_bootstrap.py`:
+
+- **A live agent is never restarted.** A restart drops every key already loaded,
+  which puts the person back to typing passphrases — the exact thing this step
+  removes. Re-running the bootstrap must be free.
+- **The two halves must name the same sockets.** The bootstrap creates one of
+  exactly the names `dot_zshrc` probes, in the same order. An agent bound
+  anywhere else is an agent no shell will ever find, and the failure is silent.
+- **No systemd user manager is a no-op, not an error.** A container has none, and
+  so does a WSL distro without `systemd=true` in `/etc/wsl.conf`; the parity
+  bootstrap container runs this code. WSL gets a one-line pointer at
+  `doc ssh-config` because a person is watching there; a container gets silence.
+
+It is an **install** step and not an apply step. It starts a process and edits
+the user manager's units, neither of which is what `chezmoi apply` is for, and
+`.chezmoiignore` keeps the whole of `bootstrap/**` out of the apply anyway. The
+statement in the Omarchy audit — that the stack ships no ssh-agent code — is
+therefore still true of everything an apply touches.
+
+Filling the agent is deliberately left to `~/.zshrc.local`, where
+`dot_zshrc.local.example` documents a keychain-style `sshkeys` helper. Which keys
+a machine should hold, and whether a passphrase prompt at first login is welcome
+at all, is exactly the kind of per-machine answer that must not propagate through
+a shared repo.
