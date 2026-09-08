@@ -82,6 +82,21 @@ EXIT_DIVERGENCES: dict[str, str] = {
         "As above. Recorded here rather than special-cased in the port: a caller that "
         "keys off the exit code should see one answer for one kind of mistake."
     ),
+    "config/memory-bad-arg": (
+        "`ts-config.sh` resolves the clone at the top of the file, before it looks at a "
+        "single argument, so in an empty sandbox a bad backend name never got as far as "
+        "being rejected -- the run died at `cannot locate the terminal-stack clone` and "
+        "exited 1. The port parses the command line first, so `memory nonsense` is a "
+        "usage error and exits 2 whether or not a clone exists, which is the same "
+        "correction config/bad-verb and config/theme-no-arg already record."
+    ),
+    "config/restore-bad-arg": (
+        "Same shape as the entry above, recorded in the same empty sandbox and for the "
+        "same reason: the shell exited on the missing clone and never reached the "
+        "on|off check at all. The port names the setting it rejected -- `weztermRestore "
+        "must be one of: on, off` -- and exits 2, because telling someone their argument "
+        "is wrong should not depend on having a clone to read it from."
+    ),
     "services/logs-no-stack": (
         "Same handoff, same cause: `logs` with no stack name exited 1 on WSL and 2 "
         "elsewhere. It is a usage error in both places and now says so in both places."

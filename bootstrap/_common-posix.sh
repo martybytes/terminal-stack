@@ -43,6 +43,25 @@ common_require_non_root() {
 
 _ts_is_wsl() { [ -r /proc/version ] && grep -qi microsoft /proc/version 2>/dev/null; }
 
+# A container is not the machine it is running on, and `_ts_is_wsl` cannot tell:
+# a container shares the host KERNEL, so on a WSL2 host /proc/version carries
+# "microsoft" inside it and every probe in this repo that reads that file --
+# _ts_is_wsl, the `_plat` case in _config.sh, tstack/platform.py's is_wsl -- says
+# wsl. Those three agree with each other, which is what matters, and they are not
+# touched here.
+#
+# `tests/parity/run.sh bootstrap` runs this file for real, in a container, so
+# anything addressed to a PERSON has to be able to stay quiet. The marker list is
+# a variable so the tests can drive both branches without being in a container.
+_ts_in_container() {
+    local m
+    # shellcheck disable=SC2086  # deliberate word splitting: this is a path LIST
+    for m in ${TS_CONTAINER_MARKERS-/.dockerenv /run/.containerenv}; do
+        [ -e "$m" ] && return 0
+    done
+    return 1
+}
+
 # The oh-my-zsh install itself, shared because both distro halves reach for it --
 # Omarchy is the only host that uses something else. Called through
 # common_zsh_base rather than directly, so which base a platform gets is a
@@ -186,6 +205,116 @@ common_git_include() {
     fi
 }
 
+# ── ssh-agent ────────────────────────────────────────────────────────────────
+# `dot_zshrc` RECOVERS SSH_AUTH_SOCK from $XDG_RUNTIME_DIR/ssh-agent.socket or
+# .../openssh_agent. It cannot conjure one, and on a fresh WSL or headless
+# server nothing ever creates one: Ubuntu's ssh-agent.service is `static` (no
+# [Install] section, so there is nothing to `enable`) and is ordered
+# `Before=graphical-session-pre.target`, a target a login with no desktop never
+# reaches. The symptom is a passphrase prompt on every single ssh and every git
+# push, while `ssh-add -l` says "Could not open a connection to your
+# authentication agent" — measured on a WSL Ubuntu 24.04 install, 09/07/2026.
+#
+# `add-wants default.target` is the fix: it writes the `.wants` symlink the unit
+# has no [Install] to write for itself, and `default.target` IS reached.
+#
+# Deliberately an INSTALL step and not an apply step. It starts a process and
+# edits the user manager's units, neither of which is what `chezmoi apply` is
+# for, and a machine that deliberately routes ssh through gpg-agent, 1Password
+# or a forwarded agent must keep doing so. Every branch below is idempotent or a
+# no-op, because `tstack update` re-runs nothing but the user re-runs this.
+
+# The two socket names `dot_zshrc` probes, in the same order and for the same
+# reason (the comment there). Prints the first that exists.
+_ts_ssh_agent_socket() {
+    local rt="${1:-${XDG_RUNTIME_DIR:-/run/user/$(id -u)}}" s
+    rt="${rt%/}"
+    for s in "$rt/ssh-agent.socket" "$rt/openssh_agent"; do
+        if [ -S "$s" ]; then printf '%s\n' "$s"; return 0; fi
+    done
+    return 1
+}
+
+# `systemctl start` returns as soon as ExecStart is spawned, so the socket does
+# not exist yet. Two seconds is many times what ssh-agent needs to bind, and a
+# machine that has not managed it by then has a real fault worth reporting.
+_ts_ssh_agent_wait() {
+    local rt="$1" i=0 s
+    while [ "$i" -lt 20 ]; do
+        if s="$(_ts_ssh_agent_socket "$rt")"; then printf '%s\n' "$s"; return 0; fi
+        sleep 0.1
+        i=$((i + 1))
+    done
+    return 1
+}
+
+# The drop-in for the Debian/Ubuntu guard below. Separate so the test can run it
+# against a fake unit directory without a systemd user manager anywhere near.
+_ts_ssh_agent_dropin() {
+    local dir="$HOME/.config/systemd/user/ssh-agent.service.d"
+    mkdir -p "$dir"
+    cat > "$dir/10-terminal-stack.conf" <<EOF
+# Written by terminal-stack's bootstrap ($(date +%Y-%m-%d)).
+#
+# Debian and Ubuntu start the agent through /usr/lib/openssh/agent-launch, which
+# exits 0 WITHOUT starting anything when SSH_AUTH_SOCK is already set in the user
+# manager's environment. gpg-agent-ssh.socket sets exactly that and is enabled by
+# default, so the unit reports "Started", leaves no socket behind, and nothing
+# says why. Running ssh-agent directly leaves that guard nothing to guard.
+#
+# gpg-agent-ssh.socket is deliberately NOT disabled: a session that really does
+# inherit its socket keeps it, because ~/.zshrc never overwrites a live
+# SSH_AUTH_SOCK. To go back to the packaged unit, delete this file and run
+# \`systemctl --user daemon-reload\`.
+[Service]
+ExecStart=
+ExecStartPre=-/bin/rm -f %t/openssh_agent
+ExecStart=$(command -v ssh-agent) -D -a %t/openssh_agent
+EOF
+}
+
+common_ssh_agent() {
+    local rt sock=""
+    rt="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+    rt="${rt%/}"
+
+    # Nothing to enable and no session to enable it in: a container, or a WSL
+    # distro without `systemd=true` in /etc/wsl.conf. Say so on WSL, where a
+    # person is watching and the manual fallback is worth naming; stay quiet in a
+    # container, which _ts_is_wsl alone cannot rule out (see _ts_in_container).
+    if ! command -v systemctl >/dev/null 2>&1 || [ ! -d "$rt/systemd" ]; then
+        if ! _ts_in_container && _ts_is_wsl; then
+            echo "$INFO No systemd user manager — ssh-agent not started (see: doc ssh-config)"
+        fi
+        return 0
+    fi
+    command -v ssh-agent >/dev/null 2>&1 || return 0
+    systemctl --user cat ssh-agent.service >/dev/null 2>&1 || return 0
+
+    # Already running (Arch socket-activates it, or this is a re-run): the
+    # add-wants below is still worth doing, since it is what survives a reboot.
+    systemctl --user add-wants default.target ssh-agent.service >/dev/null 2>&1 || true
+    if sock="$(_ts_ssh_agent_socket "$rt")"; then
+        echo "$INFO ssh-agent already running ($sock)"
+        return 0
+    fi
+
+    systemctl --user start ssh-agent.service >/dev/null 2>&1 || true
+    if ! sock="$(_ts_ssh_agent_wait "$rt")"; then
+        # Started, and no socket: the agent-launch guard. Override it.
+        _ts_ssh_agent_dropin
+        systemctl --user daemon-reload >/dev/null 2>&1 || true
+        systemctl --user restart ssh-agent.service >/dev/null 2>&1 || true
+        sock="$(_ts_ssh_agent_wait "$rt")" || sock=""
+    fi
+
+    if [ -n "$sock" ]; then
+        echo "$INFO ssh-agent running ($sock) — keys load on first use via AddKeysToAgent"
+    else
+        ts_note_failure "ssh-agent" "check: systemctl --user status ssh-agent.service"
+    fi
+}
+
 # Run all standard install steps. The wizard runs early (collects leader/theme/
 # app choices into TS_WIZ_*); the selected apps are then installed. Persisting the
 # choices into chezmoi [data] happens in the wrapper AFTER chezmoi.toml is written
@@ -228,6 +357,7 @@ common_install_all() {
     common_starship
     common_nerd_font_jetbrains
     common_git_include
+    common_ssh_agent
     common_workspace_config
     ts_report_installed_apps "$TS_WIZ_APPS"
     ts_report_failures

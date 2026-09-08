@@ -47,6 +47,29 @@ you in the `docker` group, so without that the parity run would be unavailable
 on one of the platforms it gates. It never prompts and never changes the
 machine's security posture.
 
+### On a WSL dev box the containers still say `wsl`
+
+Worth knowing before you trust a green run. A container shares the host
+**kernel**, so on a WSL2 host `/proc/version` carries `microsoft` *inside* every
+one of these containers, and each of the three probes that read it -- `_ts_is_wsl`
+(`bootstrap/_common-posix.sh`), the `_plat` case in `bootstrap/_config.sh`, and
+`tstack/platform.py`'s `is_wsl` -- reports `wsl` there. The point of this gate is
+that "WSL is not a stand-in for native Linux", and on the platform most of this
+is developed on, that is exactly what parity gives you.
+
+The three agree with each other, which is what keeps the readers consistent, so
+this is not a bug on its own. It is a bug the moment something *else* is
+conditioned on the machine axis when it should be conditioned on the distro:
+`tstack/apps.py`'s Omarchy mise veto carried a `machine == plat.LINUX` gate its
+awk twin did not have, and the mismatch was reachable **only** here -- red on
+every WSL dev box, green in CI, whose runners are native Linux
+(`docs/decisions.md` § "Why a container on a WSL2 host still says WSL").
+
+Two practical consequences. A failure you see here and CI does not may be this
+rather than your change -- check against a clean `origin/main` in the same
+container before chasing it. And anything a bootstrap prints *at a person* needs
+`_ts_in_container`, not `_ts_is_wsl`, or it lands in the `bootstrap` run's log.
+
 ### Arch and Omarchy
 
 `arch` is plain `archlinux:latest`: the case `bootstrap/_common-arch.sh` has to

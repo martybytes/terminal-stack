@@ -4,6 +4,81 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+### Added
+
+- **The bootstrap now starts an ssh-agent on Linux and WSL (09/07/2026).** Found on a
+  fresh WSL Ubuntu 24.04 install: every `ssh` and every `git push` asked for a
+  passphrase, and `ssh-add -l` said `Could not open a connection to your
+  authentication agent`. Two things were wrong at once, and either alone is enough to
+  see nothing.
+
+  `ssh-agent.service` is `static` on Ubuntu -- no `[Install]` section, so there is
+  nothing for `systemctl --user enable` to write -- and is ordered
+  `Before=graphical-session-pre.target`, a target a login with no desktop never reaches.
+  Nothing pulled it in. And starting it by hand *also* did nothing while reporting
+  success: Debian and Ubuntu run the agent through `/usr/lib/openssh/agent-launch`,
+  which exits 0 without executing `ssh-agent` when `SSH_AUTH_SOCK` is already set in the
+  user manager -- which `gpg-agent-ssh.socket`, enabled by default, does.
+
+  `common_ssh_agent` does the `add-wants default.target` that the static unit cannot do
+  for itself, and, only if a start still leaves no socket, writes a user-scope override
+  that runs `ssh-agent` directly. It deliberately does **not** disable anyone's
+  `gpg-agent-ssh.socket`: `dot_zshrc` never overwrites a live `SSH_AUTH_SOCK`, so both
+  agents coexist and whichever a session inherits still wins. A live agent is never
+  restarted (that would drop every loaded key), and no systemd user manager -- a
+  container, or WSL without `systemd=true` -- is a no-op. `tests/test_ssh_agent_bootstrap.py`
+  pins all of it; `docs/decisions.md` has the full account.
+
+- **`dot_zshrc.local.example` documents a keychain-style `sshkeys` helper.** Starting the
+  agent and filling it are different questions: which keys a machine should hold, and
+  whether a passphrase prompt at first login is welcome, must not propagate through a
+  shared repo. The example adds every `IdentityFile` in `~/.ssh/config` the agent does
+  not already hold, once per boot, and skips by fingerprint so a re-run cannot re-prompt.
+
+### Fixed
+
+- **A bootstrap hint meant for a person printed into the parity build log (09/07/2026).**
+  `common_ssh_agent`'s "no systemd user manager" pointer was gated on `_ts_is_wsl`, which
+  cannot rule out a container: a container shares the host kernel, so `/proc/version`
+  says `microsoft` inside one on a WSL2 host. `tests/parity/run.sh bootstrap` runs that
+  file for real, in a container, so the hint fired there. It is gated on
+  `_ts_in_container` now — `/.dockerenv` and `/run/.containerenv`, marker list
+  overridable so both branches are testable outside a container, and verified inside a
+  real one. Same root cause as the Omarchy entry below; `docs/decisions.md` § "Why a
+  container on a WSL2 host still says WSL" holds both, and `docs/verifying-changes.md`
+  § 0 warns anyone reading a parity result on a WSL box.
+
+- **The two app-catalog readers vetoed differently on Omarchy (09/07/2026).**
+  `bootstrap/_config.sh`'s awk filter drops `fnm`/`node`/`python` there keyed on the
+  **distro alone**; `tstack/apps.py` gated the same veto on `machine == plat.LINUX` as
+  well — an extra condition the twin it names does not have. Invisible on real hardware,
+  where an Omarchy box answers `linux`. Visible in exactly one place: a parity container
+  on a **WSL2 host**, which shares the host kernel, so `/proc/version` says `microsoft`
+  inside it and both readers resolve `wsl` — bash still vetoed the three runtimes and
+  Python no longer did. `tests/parity/run.sh omarchy` was red on every WSL dev box and
+  green in CI, whose runners are native Linux, so nothing could report it.
+
+  The veto is distro-only now, matching the awk filter exactly.
+  `test_the_mise_veto_agrees_between_bash_and_python` has always been named for two
+  readers and only ever read the bash one — its own docstring says *"They disagreed once
+  already, on the platform axis"* — so it now drives the Python side too, across
+  `linux`/`wsl`/`macos`, and compares the whole catalog at the kind both readers resolved
+  for themselves. It catches the regression on a plain WSL box, with no container.
+
+- **The WSL test leg could not go green (09/07/2026).** Four tests failed on WSL and
+  nowhere else. Two were the pwsh catalog-parity pair: `plat.find_pwsh()` reaches the
+  *Windows* pwsh through interop, and a WSL install keeps its checkout on the Linux
+  filesystem, so the reader arrives as `\\wsl.localhost\...` — a remote file the default
+  RemoteSigned policy refuses to load. pwsh still exits **0** for that, so both id lists
+  came back empty and the failure read `assert [] == ['atuin', ...]`, indistinguishable
+  from the catalog drift the file exists to catch. `-ExecutionPolicy Bypass` lets it load,
+  and an emptiness check now names the real cause; the tests run on WSL rather than
+  quietly not running. The other two were `config/{memory,restore}-bad-arg`, whose
+  `EXIT_DIVERGENCES` entries were never written when the fixtures were added —
+  `ts-config.sh` resolves the clone before parsing any argument, so an empty sandbox
+  exits 1 on the missing clone where the port exits 2 on the bad argument, exactly as
+  five sibling fixtures already record.
+
 ### Changed
 
 - **A WSL install is now self-contained on the Linux filesystem (09/07/2026).** The WSL
