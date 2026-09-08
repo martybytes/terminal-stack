@@ -52,7 +52,21 @@ def _bash(expr: str) -> list[str]:
     return got.stdout.split()
 
 
-def _pwsh(expr: str) -> list[str] | None:
+def _pwsh_run(script: str) -> subprocess.CompletedProcess | None:
+    """Dot-source the pwsh catalog reader and run `script`, or None with no pwsh.
+
+    `-ExecutionPolicy Bypass` is load-bearing on WSL and a no-op everywhere else.
+    The pwsh `find_pwsh` reaches from WSL is the WINDOWS one, through interop, and
+    a WSL install keeps its checkout on the Linux filesystem -- so the script
+    arrives as `\\\\wsl.localhost\\...`, which PowerShell treats as a remote file
+    and the default RemoteSigned policy refuses: "is not digitally signed".
+
+    That failure is worth naming because of how it presents. pwsh still exits
+    **0**: only the dot-source failed, so every id list comes back empty and the
+    test reads `assert [] == ['atuin', 'bat', ...]`, which looks exactly like the
+    catalog drift this file exists to catch. Hence the emptiness check below --
+    a reader that could not load says so, in its own words.
+    """
     pwsh = plat.find_pwsh()
     if not pwsh:
         return None
@@ -61,8 +75,10 @@ def _pwsh(expr: str) -> list[str] | None:
             pwsh,
             "-NoLogo",
             "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
             "-Command",
-            "$env:LOCALAPPDATA = [IO.Path]::GetTempPath(); . ./bootstrap/_config.ps1; " + expr,
+            "$env:LOCALAPPDATA = [IO.Path]::GetTempPath(); . ./bootstrap/_config.ps1; " + script,
         ],
         cwd=ROOT,
         capture_output=True,
@@ -71,7 +87,16 @@ def _pwsh(expr: str) -> list[str] | None:
         check=False,
         start_new_session=True,
     )
-    return got.stdout.split()
+    assert got.stdout.strip(), (
+        "the pwsh reader produced nothing, so bootstrap/_config.ps1 never loaded:\n"
+        + (got.stderr.strip() or "(nothing on stderr either)")
+    )
+    return got
+
+
+def _pwsh(expr: str) -> list[str] | None:
+    got = _pwsh_run(expr)
+    return None if got is None else got.stdout.split()
 
 
 # ------------------------------------------------------------------ the file
@@ -218,26 +243,11 @@ def test_powershell_and_python_agree_on_the_windows_view():
 
 @pytest.mark.pwsh
 def test_powershell_descriptions_come_from_the_file_too():
-    pwsh = plat.find_pwsh()
-    if not pwsh:
-        pytest.skip("pwsh is unavailable")
     wanted = [a for a in apps.catalog() if apps.installable(a.id, plat.WINDOWS)][:6]
     script = "; ".join(f'Get-TsAppDesc "{a.id}"' for a in wanted)
-    got = subprocess.run(
-        [
-            pwsh,
-            "-NoLogo",
-            "-NoProfile",
-            "-Command",
-            "$env:LOCALAPPDATA = [IO.Path]::GetTempPath(); . ./bootstrap/_config.ps1; " + script,
-        ],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        timeout=180,
-        check=False,
-        start_new_session=True,
-    )
+    got = _pwsh_run(script)
+    if got is None:
+        pytest.skip("pwsh is unavailable")
     lines = [ln.strip() for ln in got.stdout.splitlines() if ln.strip()]
     assert lines == [a.description for a in wanted]
 

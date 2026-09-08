@@ -35,6 +35,22 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
   shared repo. The example adds every `IdentityFile` in `~/.ssh/config` the agent does
   not already hold, once per boot, and skips by fingerprint so a re-run cannot re-prompt.
 
+### Fixed
+
+- **The WSL test leg could not go green (09/07/2026).** Four tests failed on WSL and
+  nowhere else. Two were the pwsh catalog-parity pair: `plat.find_pwsh()` reaches the
+  *Windows* pwsh through interop, and a WSL install keeps its checkout on the Linux
+  filesystem, so the reader arrives as `\\wsl.localhost\...` — a remote file the default
+  RemoteSigned policy refuses to load. pwsh still exits **0** for that, so both id lists
+  came back empty and the failure read `assert [] == ['atuin', ...]`, indistinguishable
+  from the catalog drift the file exists to catch. `-ExecutionPolicy Bypass` lets it load,
+  and an emptiness check now names the real cause; the tests run on WSL rather than
+  quietly not running. The other two were `config/{memory,restore}-bad-arg`, whose
+  `EXIT_DIVERGENCES` entries were never written when the fixtures were added —
+  `ts-config.sh` resolves the clone before parsing any argument, so an empty sandbox
+  exits 1 on the missing clone where the port exits 2 on the bad argument, exactly as
+  five sibling fixtures already record.
+
 ### Changed
 
 - **A WSL install is now self-contained on the Linux filesystem (09/07/2026).** The WSL
