@@ -418,6 +418,13 @@ def test_the_mise_veto_agrees_between_bash_and_python(monkeypatch):
         # themselves. Naming a kind here instead would compare Python on that one
         # against bash on this host, and the platform column would light up
         # (nvtop is `linux`, and a WSL host answers wsl) for no real reason.
+        #
+        # Not on Windows, where they cannot resolve the same kind by construction:
+        # _config.sh is not the reader there (pwsh is), and Git Bash running it
+        # anyway finds no /proc/version and answers `linux` while Python answers
+        # `windows`. The MISE_OWNED loop above is pure Python and still runs.
+        if plat.kind() == plat.WINDOWS:
+            return
         here = set(apps.ids(plat.kind()))
         assert here == offered, (
             "the two readers disagree on Omarchy:\n"

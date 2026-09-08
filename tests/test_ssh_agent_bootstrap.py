@@ -27,6 +27,7 @@ because the two branches are about what it CALLS and in which order.
 from __future__ import annotations
 
 import contextlib
+import os
 import re
 import socket
 import subprocess
@@ -44,7 +45,14 @@ from tests.shell_support import BASH  # noqa: E402
 POSIX_LIB = ROOT / "bootstrap/_common-posix.sh"
 ZSHRC = ROOT / "dot_zshrc"
 
-pytestmark = pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+# Git Bash exists on the Windows runner, so `BASH` alone is not enough of a gate:
+# every test here drives a systemd user manager and binds an AF_UNIX socket under
+# /tmp, none of which Windows has. `common_ssh_agent` is only ever called from
+# linux-bootstrap.sh and wsl-bootstrap.sh.
+pytestmark = [
+    pytest.mark.skipif(not BASH, reason="compatible bash is unavailable"),
+    pytest.mark.skipif(os.name == "nt", reason="a POSIX bootstrap step; no systemd, no /tmp"),
+]
 
 
 def _block() -> str:
