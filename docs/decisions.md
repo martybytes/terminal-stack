@@ -3777,3 +3777,48 @@ Filling the agent is deliberately left to `~/.zshrc.local`, where
 a machine should hold, and whether a passphrase prompt at first login is welcome
 at all, is exactly the kind of per-machine answer that must not propagate through
 a shared repo.
+
+## Why a container on a WSL2 host still says WSL
+
+A container shares the host **kernel**. On a WSL2 host that kernel is
+Microsoft's, so `/proc/version` carries `microsoft` *inside* every container, and
+all three probes in this repo that read that file report `wsl` there:
+`_ts_is_wsl` in `bootstrap/_common-posix.sh`, the `_plat` case in
+`bootstrap/_config.sh`, and `is_wsl()` in `tstack/platform.py`.
+
+They agree with each other, and that is the property that matters -- the three
+were deliberately written to match, and `_config.sh` says so in a comment. None
+of them is changed here. Reporting `linux` inside a container would be *more*
+accurate and is tempting, but it is a change to platform identity in three
+places at once, and the failure it would prevent is better prevented at the two
+sites that actually got it wrong.
+
+Because it got it wrong twice, in opposite directions, on the same day
+(09/07/2026).
+
+**Once by conditioning a distro rule on the machine axis.** `tstack/apps.py`
+vetoes `fnm`/`node`/`python` on Omarchy, because Omarchy owns those binaries
+through mise. The awk twin in `ts_apps_load` keys that on the distro alone; the
+Python side also required `machine == plat.LINUX`. A real Omarchy box answers
+`linux`, so the two agreed everywhere it could be observed -- except in an
+Omarchy parity container on a WSL host, where both readers say `wsl`, bash still
+vetoed and Python did not. `tests/parity/run.sh omarchy` was therefore **red on
+every WSL dev box and green in CI**, whose runners are native Linux, so no gate
+anywhere could report it. The veto is distro-only now, matching its twin
+exactly, and `test_the_mise_veto_agrees_between_bash_and_python` -- named for two
+readers and, until now, reading only one of them -- drives both across every
+`kind()`.
+
+**Once by addressing a person in a place with no person in it.**
+`common_ssh_agent` prints a pointer at `doc ssh-config` when there is no systemd
+user manager to enable the agent in, and gated that on `_ts_is_wsl` so it would
+not fire in a container. `tests/parity/run.sh bootstrap` runs that file for real,
+in a container, on this host -- and the hint duly printed into the build log. The
+gate is `_ts_in_container` now, which checks `/.dockerenv` and
+`/run/.containerenv` rather than asking what kernel it is standing on. Its marker
+list is a variable so both branches are testable without being in a container,
+and the test is confirmed in a real one.
+
+The rule the two share: **`kind()` answers "what sort of machine is this", and it
+is the wrong question for "which distro owns this binary" and for "is there a
+human reading this".** Reach for the distro or for the container markers instead.

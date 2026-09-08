@@ -37,6 +37,17 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **A bootstrap hint meant for a person printed into the parity build log (09/07/2026).**
+  `common_ssh_agent`'s "no systemd user manager" pointer was gated on `_ts_is_wsl`, which
+  cannot rule out a container: a container shares the host kernel, so `/proc/version`
+  says `microsoft` inside one on a WSL2 host. `tests/parity/run.sh bootstrap` runs that
+  file for real, in a container, so the hint fired there. It is gated on
+  `_ts_in_container` now — `/.dockerenv` and `/run/.containerenv`, marker list
+  overridable so both branches are testable outside a container, and verified inside a
+  real one. Same root cause as the Omarchy entry below; `docs/decisions.md` § "Why a
+  container on a WSL2 host still says WSL" holds both, and `docs/verifying-changes.md`
+  § 0 warns anyone reading a parity result on a WSL box.
+
 - **The two app-catalog readers vetoed differently on Omarchy (09/07/2026).**
   `bootstrap/_config.sh`'s awk filter drops `fnm`/`node`/`python` there keyed on the
   **distro alone**; `tstack/apps.py` gated the same veto on `machine == plat.LINUX` as

@@ -43,6 +43,25 @@ common_require_non_root() {
 
 _ts_is_wsl() { [ -r /proc/version ] && grep -qi microsoft /proc/version 2>/dev/null; }
 
+# A container is not the machine it is running on, and `_ts_is_wsl` cannot tell:
+# a container shares the host KERNEL, so on a WSL2 host /proc/version carries
+# "microsoft" inside it and every probe in this repo that reads that file --
+# _ts_is_wsl, the `_plat` case in _config.sh, tstack/platform.py's is_wsl -- says
+# wsl. Those three agree with each other, which is what matters, and they are not
+# touched here.
+#
+# `tests/parity/run.sh bootstrap` runs this file for real, in a container, so
+# anything addressed to a PERSON has to be able to stay quiet. The marker list is
+# a variable so the tests can drive both branches without being in a container.
+_ts_in_container() {
+    local m
+    # shellcheck disable=SC2086  # deliberate word splitting: this is a path LIST
+    for m in ${TS_CONTAINER_MARKERS-/.dockerenv /run/.containerenv}; do
+        [ -e "$m" ] && return 0
+    done
+    return 1
+}
+
 # The oh-my-zsh install itself, shared because both distro halves reach for it --
 # Omarchy is the only host that uses something else. Called through
 # common_zsh_base rather than directly, so which base a platform gets is a
@@ -261,10 +280,10 @@ common_ssh_agent() {
 
     # Nothing to enable and no session to enable it in: a container, or a WSL
     # distro without `systemd=true` in /etc/wsl.conf. Say so on WSL, where a
-    # person is watching and the manual fallback is worth naming; stay quiet in
-    # a container, where this would print on every parity run.
+    # person is watching and the manual fallback is worth naming; stay quiet in a
+    # container, which _ts_is_wsl alone cannot rule out (see _ts_in_container).
     if ! command -v systemctl >/dev/null 2>&1 || [ ! -d "$rt/systemd" ]; then
-        if _ts_is_wsl; then
+        if ! _ts_in_container && _ts_is_wsl; then
             echo "$INFO No systemd user manager — ssh-agent not started (see: doc ssh-config)"
         fi
         return 0

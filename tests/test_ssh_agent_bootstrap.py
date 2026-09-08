@@ -48,11 +48,19 @@ pytestmark = pytest.mark.skipif(not BASH, reason="compatible bash is unavailable
 
 
 def _block() -> str:
-    """The four functions, lifted whole. Extracting the region rather than each
-    function keeps the test honest about what ships together."""
+    """The ssh-agent region lifted whole, plus the one predicate it calls from
+    outside it.
+
+    Extracting the region rather than each function keeps the test honest about
+    what ships together. `_ts_in_container` is pulled in by name instead: it is a
+    statement about the machine and belongs beside `_ts_is_wsl`, so moving it
+    down here to make the extraction simpler would put it where it reads oddly.
+    """
     src = POSIX_LIB.read_text(encoding="utf-8")
+    helper = re.search(r"(?m)^_ts_in_container\(\) \{.*?^\}", src, re.S)
+    assert helper, "_ts_in_container moved or was renamed; repoint this anchor"
     start = src.index("# ── ssh-agent ")
-    return src[start : src.index("# Run all standard install steps.")]
+    return f"{helper.group(0)}\n{src[start : src.index('# Run all standard install steps.')]}"
 
 
 @contextlib.contextmanager
@@ -204,8 +212,27 @@ def test_without_a_systemd_user_manager_it_changes_nothing(tmp_path):
     assert out.strip() == "", "printed at a container"
 
     with _runtime() as rt:
-        out, _calls = _run(tmp_path, rt, systemd=False, env={"TS_WSL": "0"})
+        out, _calls = _run(
+            tmp_path, rt, systemd=False, env={"TS_WSL": "0", "TS_CONTAINER_MARKERS": ""}
+        )
     assert "doc ssh-config" in out, "left a WSL user with no systemd and no hint"
+
+
+def test_the_hint_for_a_wsl_user_does_not_follow_the_code_into_a_container(tmp_path):
+    """`_ts_is_wsl` reads /proc/version, and a container shares the host KERNEL --
+    so on a WSL2 host every container matches it. `tests/parity/run.sh bootstrap`
+    runs this file for real in exactly that shape, which is where the hint was
+    landing: addressed to a person, printed at a build log."""
+    with _runtime() as rt:
+        marker = tmp_path / "dockerenv"
+        marker.write_text("", encoding="utf-8")
+        out, _calls = _run(
+            tmp_path,
+            rt,
+            systemd=False,
+            env={"TS_WSL": "0", "TS_CONTAINER_MARKERS": str(marker)},
+        )
+    assert out.strip() == "", f"printed a person's hint into a container: {out!r}"
 
 
 def test_an_absent_unit_is_not_an_error(tmp_path):
