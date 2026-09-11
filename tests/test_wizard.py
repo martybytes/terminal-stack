@@ -544,6 +544,52 @@ def test_the_voice_follow_ups_only_appear_once_voice_is_on(monkeypatch):
     assert answers.cc_tts == "on" and answers.cc_tts_message == "hook"
 
 
+def test_the_tray_daemon_is_asked_wherever_there_is_a_windows_side(monkeypatch):
+    """The port asked this on WSL only.
+
+    A native Windows install therefore pinned ccTtsDaemon off without ever
+    showing the question, and windows-bootstrap installed the built EXE with
+    -NoStart -NoAutostart: the user answered "yes" to agent voice and got no
+    tray icon, no autostart, and nothing in the review to explain why.
+    """
+    from tstack import platform as tsplat
+
+    # Every other question pinned, so the scripted answer can only be consumed
+    # by the one under test.
+    for name, value in {
+        "TS_PROFILE": "full",
+        "TS_DEVELOPMENT": "no",
+        "TS_APPS": "none",
+        "TS_THEME": "dark",
+        "TS_LEADER": "ctrl-space",
+        "TS_TMUX": "ctrl-b",
+        "TS_STARSHIP_PRESET": "terminal-stack",
+        "TS_TERMINALS": "none",
+        "TS_WEZ_MUX": "off",
+        "TS_WEZ_RESTORE": "off",
+        "TS_ATUIN": "off",
+        "TS_HERDR": "off",
+        "TS_MEMORY_BACKEND": "none",
+        "TS_CAVEMAN": "off",
+        "TS_CC_TTS": "on",
+        "TS_CC_TTS_MESSAGE": "self",
+    }.items():
+        monkeypatch.setenv(name, value)
+
+    for kind in (tsplat.WSL, tsplat.WINDOWS):
+        monkeypatch.setattr(tsplat, "kind", lambda k=kind: k)
+        console = Console.scripted(["2"])
+        assert flow.collect(console).cc_tts_daemon == "on", f"{kind} has a tray"
+        assert any("tray daemon" in line for line in console.captured)
+
+    # macOS and native Linux cannot run it -- the daemon is a Windows EXE.
+    for kind in (tsplat.MACOS, tsplat.LINUX):
+        monkeypatch.setattr(tsplat, "kind", lambda k=kind: k)
+        console = Console.scripted([])
+        assert flow.collect(console).cc_tts_daemon == "off", f"{kind} has no tray"
+        assert not any("tray daemon" in line for line in console.captured)
+
+
 def test_the_cursor_mode_is_only_asked_when_headroom_is_on(monkeypatch):
     monkeypatch.setenv("TS_PROFILE", "full")
     monkeypatch.setenv("TS_DEVELOPMENT", "yes")

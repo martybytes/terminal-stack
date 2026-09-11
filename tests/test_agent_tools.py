@@ -785,6 +785,76 @@ exit 0
 """
 
 
+# [ordered]@{} is a System.Collections.Specialized.OrderedDictionary, which has
+# Contains() but NOT ContainsKey() -- unlike the OrderedHashtable that
+# ConvertFrom-Json -AsHashtable returns, which has both. The settings-splice
+# helpers read a config file if it exists and fall back to an [ordered] literal
+# if it does not, so a .ContainsKey() on that variable runs fine on every machine
+# that already has the file and throws on every machine that does not. That is
+# exactly a fresh install: ts-agentmemory.ps1 died on ~/.codex/hooks.json right
+# after writing the hook scripts, taking the rest of the sync with it.
+#
+# A blanket ban on ContainsKey would be wrong -- $PSBoundParameters is a
+# Dictionary[string,object], which has ContainsKey and no usable Contains. So the
+# gate is targeted: a variable that is EVER assigned an [ordered] literal may not
+# be asked ContainsKey.
+_PS_ORDERED_CONTAINSKEY_SCAN = r"""
+$bad = @()
+foreach ($f in (Get-ChildItem -Path . -Recurse -Include *.ps1,*.psm1 -File |
+                Where-Object { $_.FullName -notmatch '[\/]\.git[\/]' })) {
+    $errs = $null
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile(
+        $f.FullName, [ref]$null, [ref]$errs)
+    if ($errs -and $errs.Count) { $bad += "PARSE $($f.Name): $($errs[0].Message)"; continue }
+    # Any variable whose right-hand side mentions [ordered] anywhere -- including
+    # the `$x = if (...) { json } else { [ordered]@{} }` shape this gate exists for.
+    $ordered = @{}
+    foreach ($a in $ast.FindAll({ param($n)
+            $n -is [System.Management.Automation.Language.AssignmentStatementAst] }, $true)) {
+        if ($a.Left -isnot [System.Management.Automation.Language.VariableExpressionAst]) { continue }
+        $conv = $a.Right.FindAll({ param($n)
+            $n -is [System.Management.Automation.Language.ConvertExpressionAst] -and
+            $n.Type.TypeName.Name -match '^(ordered|OrderedDictionary)$' }, $true)
+        if ($conv.Count) { $ordered[$a.Left.VariablePath.UserPath.ToLower()] = $true }
+    }
+    if ($ordered.Count -eq 0) { continue }
+    foreach ($m in $ast.FindAll({ param($n)
+            $n -is [System.Management.Automation.Language.InvokeMemberExpressionAst] -and
+            "$($n.Member)" -eq 'ContainsKey' }, $true)) {
+        if ($m.Expression -isnot [System.Management.Automation.Language.VariableExpressionAst]) { continue }
+        $name = $m.Expression.VariablePath.UserPath
+        if ($ordered[$name.ToLower()]) {
+            $bad += ("{0}:{1} `${2}.ContainsKey() -- `${2} can hold an [ordered] literal, which has only Contains()" -f
+                $f.Name, $m.Extent.StartLineNumber, $name)
+        }
+    }
+}
+if ($bad) { $bad | ForEach-Object { Write-Output $_ }; exit 1 }
+exit 0
+"""
+
+
+@pytest.mark.skipif(not shutil.which("pwsh"), reason="PowerShell 7 is unavailable")
+def test_no_containskey_on_an_ordered_dictionary():
+    result = subprocess.run(
+        [
+            shutil.which("pwsh"),
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            _PS_ORDERED_CONTAINSKEY_SCAN,
+        ],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=300,
+        start_new_session=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 @pytest.mark.skipif(not shutil.which("pwsh"), reason="PowerShell 7 is unavailable")
 def test_no_pwsh_local_shadows_a_typed_parameter():
     result = subprocess.run(

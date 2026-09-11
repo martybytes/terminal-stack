@@ -117,7 +117,7 @@ function Test-AmCodexHookRegistrations([string]$Root, [string]$StableDir) {
         return
     }
     if ($cfg -isnot [System.Collections.IDictionary] -or
-        -not $cfg.ContainsKey('hooks') -or
+        -not $cfg.Contains('hooks') -or
         $cfg['hooks'] -isnot [System.Collections.IDictionary]) {
         Fail 'Codex hooks.json has no hooks object'
         return
@@ -318,10 +318,16 @@ function Invoke-AmCodex {
         PreCompact       = @{ script = 'pre-compact.mjs' }
         Stop             = @{ script = 'stop.mjs' }
     }
+    # Contains(), never ContainsKey(). The two arms of this `if` are different
+    # types: ConvertFrom-Json -AsHashtable gives an OrderedHashtable (a Hashtable,
+    # which has both), the literal gives an OrderedDictionary, which has only
+    # Contains. ContainsKey therefore worked on every machine that already had
+    # the file and threw on every machine that did not -- i.e. exactly the fresh
+    # install this code exists to serve.
     $cfg = if (Test-Path -LiteralPath $hooksPath -PathType Leaf) {
         Get-Content -LiteralPath $hooksPath -Raw | ConvertFrom-Json -AsHashtable
     } else { [ordered]@{ hooks = [ordered]@{} } }
-    if (-not $cfg.ContainsKey('hooks') -or $cfg['hooks'] -isnot [System.Collections.IDictionary]) { $cfg['hooks'] = [ordered]@{} }
+    if (-not $cfg.Contains('hooks') -or $cfg['hooks'] -isnot [System.Collections.IDictionary]) { $cfg['hooks'] = [ordered]@{} }
 
     $changed = @()
     foreach ($event in $desired.Keys) {
@@ -397,7 +403,7 @@ function Invoke-AmCursor {
     $mcp = if (Test-Path -LiteralPath $mcpPath -PathType Leaf) {
         Get-Content -LiteralPath $mcpPath -Raw | ConvertFrom-Json -AsHashtable
     } else { [ordered]@{ mcpServers = [ordered]@{} } }
-    if (-not $mcp.ContainsKey('mcpServers') -or $mcp['mcpServers'] -isnot [System.Collections.IDictionary]) { $mcp['mcpServers'] = [ordered]@{} }
+    if (-not $mcp.Contains('mcpServers') -or $mcp['mcpServers'] -isnot [System.Collections.IDictionary]) { $mcp['mcpServers'] = [ordered]@{} }
     $wantEntry = [ordered]@{
         command = 'npx'
         args    = @('-y', '@agentmemory/mcp')
@@ -437,8 +443,8 @@ function Invoke-AmCursor {
     $cfg = if (Test-Path -LiteralPath $hooksPath -PathType Leaf) {
         Get-Content -LiteralPath $hooksPath -Raw | ConvertFrom-Json -AsHashtable
     } else { [ordered]@{ version = 1; hooks = [ordered]@{} } }
-    if (-not $cfg.ContainsKey('version')) { $cfg['version'] = 1 }
-    if (-not $cfg.ContainsKey('hooks') -or $cfg['hooks'] -isnot [System.Collections.IDictionary]) { $cfg['hooks'] = [ordered]@{} }
+    if (-not $cfg.Contains('version')) { $cfg['version'] = 1 }
+    if (-not $cfg.Contains('hooks') -or $cfg['hooks'] -isnot [System.Collections.IDictionary]) { $cfg['hooks'] = [ordered]@{} }
 
     $changed = @()
     foreach ($event in $desired.Keys) {

@@ -37,6 +37,36 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **`ts-agentmemory.ps1` threw on every machine that did not already have the
+  file it was writing (09/11/2026).** `ContainsKey()` on a variable holding an
+  `[ordered]@{}` literal: `ConvertFrom-Json -AsHashtable` returns an
+  `OrderedHashtable`, which has both `Contains` and `ContainsKey`, but the
+  literal in the `else` arm is a `System.Collections.Specialized.OrderedDictionary`,
+  which has only `Contains`. So the settings-splice helpers worked on a machine
+  that had `~/.codex/hooks.json` and died on a machine that did not — a fresh
+  install, which is the case the code exists to serve. Observed on a Windows
+  bootstrap: Codex's six hook scripts were installed, the `hooks.json` that
+  registers them was never written, the whole Cursor section never ran, and the
+  same exception then killed `sync-windows.ps1` before its summary. Three of the
+  five call sites were the dangerous shape; all five now use `Contains`, and
+  `test_no_containskey_on_an_ordered_dictionary` walks every `.ps1` for a
+  variable that can hold an `[ordered]` literal being asked `ContainsKey`. The
+  gate is deliberately targeted rather than a blanket ban: `$PSBoundParameters`
+  is a `Dictionary[string,object]`, which has `ContainsKey` and no usable
+  `Contains`.
+
+- **A native Windows install never asked about the TTS tray daemon (09/11/2026).**
+  The wizard port gated the question on `plat.kind() == plat.WSL`, so on Windows
+  itself `ccTtsDaemon` stayed `off` without the question ever being shown;
+  `windows-bootstrap.ps1` then read that and installed the freshly built EXE with
+  `-NoStart -NoAutostart`. Answering "on" to agent voice therefore produced no
+  tray icon, no autostart and nothing in the review to explain it. The gate is
+  `plat.kind() in (plat.WSL, plat.WINDOWS)` now — both are machines with a
+  Windows side, which is what the comment already claimed — and the question
+  carries the `RECOMMENDATION:` block the port had dropped. Pinned by
+  `test_the_tray_daemon_is_asked_wherever_there_is_a_windows_side`. On a machine
+  already installed without it: `tstack config tts daemon on`.
+
 - **A bootstrap hint meant for a person printed into the parity build log (09/07/2026).**
   `common_ssh_agent`'s "no systemd user manager" pointer was gated on `_ts_is_wsl`, which
   cannot rule out a container: a container shares the host kernel, so `/proc/version`

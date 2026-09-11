@@ -337,8 +337,11 @@ def collect(console: Console, ask_terminals: bool = False) -> Answers:
                 "self",
             )
             # The tray daemon is a native Windows process, so only a machine
-            # with a Windows side can route through it.
-            if plat.kind() == plat.WSL and not bare:
+            # with a Windows side can route through it -- which means WSL *and*
+            # Windows itself. The port asked on WSL only, so a Windows install
+            # pinned this off without asking, then installed the built EXE with
+            # -NoStart -NoAutostart: voice on, and nothing in the tray.
+            if plat.kind() in (plat.WSL, plat.WINDOWS) and not bare:
                 cc_tts_daemon = (
                     _on_off(_env("TS_CC_TTS_DAEMON"))
                     if _env("TS_CC_TTS_DAEMON")
@@ -349,6 +352,13 @@ def collect(console: Console, ask_terminals: bool = False) -> Answers:
                             ("on", "Tray daemon", "installs now, autostarts at login"),
                         ],
                         "off",
+                        "  RECOMMENDATION: off. Direct playback needs nothing running, and is\n"
+                        "  what the hooks do on their own. The tray daemon queues and coalesces\n"
+                        "  announcements, gives each session its own voice, ducks music while\n"
+                        "  it speaks, and puts a mute icon in the tray - for one background\n"
+                        "  process started at login. Either way the console-free EXE is built\n"
+                        "  and Python is build-time only.\n"
+                        "  Reversible with `tstack config tts daemon on|off`.",
                     )
                 )
 
