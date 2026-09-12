@@ -9,6 +9,14 @@ PowerShell, `cmd.exe`, Python, `ffplay`, or `ffprobe` while speaking.
 daemon is off or unreachable, the same EXE launches a detached direct worker —
 never silence, and still no console window.
 
+**The install wizard asks for it**, once voice is on, on any machine with a
+Windows side — WSL and Windows alike. The default is off (direct playback needs
+nothing running), so a machine installed before 09/11/2026 — or one installed
+from a wizard that skipped the question, which every native-Windows install did
+until then — has voice working with no tray icon and no autostart. `tstack
+config tts daemon on` is the fix, and `tstack config tts daemon status` says
+which of the two is in force.
+
 **Combined Windows+WSL setup: run the `tstack config tts …` verbs from WSL.**
 pwsh `tstack config` saves only the Windows `config.json`, and the next WSL
 `chezmoi apply` re-renders that file from chezmoi `[data]` — silently

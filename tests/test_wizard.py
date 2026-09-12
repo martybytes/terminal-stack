@@ -531,6 +531,39 @@ def test_an_empty_catalog_says_so_rather_than_silently_offering_nothing(monkeypa
 # --------------------------------------------------------------- voice, agents
 
 
+def test_a_custom_chord_typed_as_a_symbol_is_stored_by_name():
+    r"""`ctrl-\` is the natural way to answer, and unstorable as typed.
+
+    chezmoi.toml is written `key = "<value>"` unescaped, so a backslash corrupts
+    it; .wezterm.lua emits `key = '<value>'`, where a backslash escapes the
+    closing quote and WezTerm dies at startup with `'}' expected near 'CTRL'`.
+    Windows hit the second -- its store is JSON, so the chord saved fine and only
+    the terminal broke, pointing at a line nobody wrote.
+    """
+    assert flow._chord(Console.scripted([]), "ctrl-\\") == "ctrl-backslash"
+    assert flow._chord(Console.scripted([]), "ctrl-\\") == "ctrl-backslash"
+    assert flow._chord(Console.scripted([]), "alt- ") == "alt-space"
+    # Already-safe answers are passed through untouched.
+    for chord in ("ctrl-x", "alt-space", "ctrl-backslash", "super-k"):
+        assert flow._chord(Console.scripted([]), chord) == chord
+
+
+def test_an_unstorable_chord_is_re_asked_not_silently_kept():
+    # A single quote closes the Lua string exactly as a backslash does, and has
+    # no phys: name to be spelled with -- so it is refused rather than mangled.
+    console = Console.scripted(["ctrl-a"])
+    assert flow._chord(console, "ctrl-'") == "ctrl-a"
+    assert any("quote" in line for line in console.captured)
+
+    # A double quote is what the store itself refuses; same treatment.
+    console = Console.scripted(["ctrl-b"])
+    assert flow._chord(console, 'ctrl-"') == "ctrl-b"
+
+    # Nobody there to re-ask, or an empty answer: the documented default.
+    assert flow._chord(Console.scripted([]), "ctrl-'") == "ctrl-space"
+    assert flow._chord(Console.scripted([]), "") == "ctrl-space"
+
+
 def test_the_voice_follow_ups_only_appear_once_voice_is_on(monkeypatch):
     monkeypatch.setenv("TS_PROFILE", "full")
     monkeypatch.setenv("TS_DEVELOPMENT", "no")
@@ -542,6 +575,52 @@ def test_the_voice_follow_ups_only_appear_once_voice_is_on(monkeypatch):
     monkeypatch.setenv("TS_CC_TTS_MESSAGE", "hook")
     answers = flow.collect(Console())
     assert answers.cc_tts == "on" and answers.cc_tts_message == "hook"
+
+
+def test_the_tray_daemon_is_asked_wherever_there_is_a_windows_side(monkeypatch):
+    """The port asked this on WSL only.
+
+    A native Windows install therefore pinned ccTtsDaemon off without ever
+    showing the question, and windows-bootstrap installed the built EXE with
+    -NoStart -NoAutostart: the user answered "yes" to agent voice and got no
+    tray icon, no autostart, and nothing in the review to explain why.
+    """
+    from tstack import platform as tsplat
+
+    # Every other question pinned, so the scripted answer can only be consumed
+    # by the one under test.
+    for name, value in {
+        "TS_PROFILE": "full",
+        "TS_DEVELOPMENT": "no",
+        "TS_APPS": "none",
+        "TS_THEME": "dark",
+        "TS_LEADER": "ctrl-space",
+        "TS_TMUX": "ctrl-b",
+        "TS_STARSHIP_PRESET": "terminal-stack",
+        "TS_TERMINALS": "none",
+        "TS_WEZ_MUX": "off",
+        "TS_WEZ_RESTORE": "off",
+        "TS_ATUIN": "off",
+        "TS_HERDR": "off",
+        "TS_MEMORY_BACKEND": "none",
+        "TS_CAVEMAN": "off",
+        "TS_CC_TTS": "on",
+        "TS_CC_TTS_MESSAGE": "self",
+    }.items():
+        monkeypatch.setenv(name, value)
+
+    for kind in (tsplat.WSL, tsplat.WINDOWS):
+        monkeypatch.setattr(tsplat, "kind", lambda k=kind: k)
+        console = Console.scripted(["2"])
+        assert flow.collect(console).cc_tts_daemon == "on", f"{kind} has a tray"
+        assert any("tray daemon" in line for line in console.captured)
+
+    # macOS and native Linux cannot run it -- the daemon is a Windows EXE.
+    for kind in (tsplat.MACOS, tsplat.LINUX):
+        monkeypatch.setattr(tsplat, "kind", lambda k=kind: k)
+        console = Console.scripted([])
+        assert flow.collect(console).cc_tts_daemon == "off", f"{kind} has no tray"
+        assert not any("tray daemon" in line for line in console.captured)
 
 
 def test_the_cursor_mode_is_only_asked_when_headroom_is_on(monkeypatch):

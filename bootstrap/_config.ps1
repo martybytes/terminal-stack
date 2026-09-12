@@ -278,10 +278,17 @@ function ConvertTo-TsLeader([string]$chord) {
         }
     }
     # Keys with no printable spelling are named, and named keys map to WezTerm
-    # phys: codes. Keep this switch identical to .chezmoi.toml.tmpl.
+    # phys: codes. Keep this switch identical to .chezmoi.toml.tmpl, except for
+    # the literal ' ' and '\' rows: those exist only here. chezmoi.toml is
+    # written unescaped, so a backslash can never reach the Go template -- the
+    # store refuses it first. config.json is JSON, so on Windows it survives the
+    # save and lands in `key = '\'`, which escapes the closing quote and kills
+    # .wezterm.lua at parse with `'}' expected near 'CTRL'`.
     $wkey = switch ($key.ToLower()) {
         'space'     { 'phys:Space' }
+        ' '         { 'phys:Space' }
         'backslash' { 'phys:Backslash' }
+        '\'         { 'phys:Backslash' }
         default     { $key }
     }
     return @{ key = $wkey; mods = ($mods -join '|') }
@@ -301,7 +308,14 @@ function ConvertTo-TsTmuxPrefix([string]$chord) {
             }
         }
     }
-    $k = if ($key.ToLower() -eq 'space') { 'Space' } else { $key }
+    # tmux spells these the other way round from WezTerm: it wants the literal
+    # character, so a stored `backslash` has to come back as `\` or tmux rejects
+    # the whole line with "unknown key". Keep identical to .chezmoi.toml.tmpl.
+    $k = switch ($key.ToLower()) {
+        'space'     { 'Space' }
+        'backslash' { '\' }
+        default     { $key }
+    }
     return "$pre$k"
 }
 

@@ -441,6 +441,57 @@ wizard path:
 pwsh -NoProfile -Command "Set-StrictMode -Version Latest; . .\bootstrap\_config.ps1; Get-TsConfig; Get-TsAppsForClass developer"
 ```
 
+## `[ordered]@{}` has `Contains`, not `ContainsKey`
+
+The settings-splice helpers all read a config file if it exists and fall back to a
+literal if it does not:
+
+```powershell
+$cfg = if (Test-Path -LiteralPath $hooksPath -PathType Leaf) {
+    Get-Content -LiteralPath $hooksPath -Raw | ConvertFrom-Json -AsHashtable
+} else { [ordered]@{ hooks = [ordered]@{} } }
+if (-not $cfg.ContainsKey('hooks')) { … }     # throws on the else arm only
+```
+
+The two arms are **different types**. `ConvertFrom-Json -AsHashtable` returns a
+`System.Management.Automation.OrderedHashtable`, which derives from `Hashtable` and has
+both `Contains` and `ContainsKey`. `[ordered]@{}` is a
+`System.Collections.Specialized.OrderedDictionary`, which implements the *non-generic*
+`IDictionary` and therefore has only `Contains`:
+
+```powershell
+([ordered]@{ a = 1 }).Contains('a')     # True
+([ordered]@{ a = 1 }).ContainsKey('a')  # Method invocation failed … does not contain
+                                        #   a method named 'ContainsKey'.
+('{"a":1}' | ConvertFrom-Json -AsHashtable).ContainsKey('a')   # True
+```
+
+So `ContainsKey` works on every machine that already has the file and throws on every
+machine that does not — a fresh install, which is exactly what this code is for. In
+`ts-agentmemory.ps1` it meant Codex's hook scripts were installed but the `hooks.json`
+that registers them never was, the entire Cursor section never ran, and the same
+exception then killed `sync-windows.ps1` before its summary line. The visible symptom
+was one line with no file and no context:
+
+```
+ts-agentmemory.ps1: Method invocation failed because
+[System.Collections.Specialized.OrderedDictionary] does not contain a method named 'ContainsKey'.
+```
+
+The bash twin cannot have this bug and is not a model for the fix: it does the same
+merge in Python, where the empty fallback and a parsed object are both `dict` and both
+answer `.get`. This is a PowerShell hazard specifically — two dictionary types that
+index identically, print identically, and satisfy `-is [System.Collections.IDictionary]`
+identically, while disagreeing about one method name.
+
+**Rule for this repo:** use `Contains` on any dictionary that might be an `[ordered]`
+literal — it is correct for a `Hashtable` too, so it is never the wrong choice there.
+`test_no_containskey_on_an_ordered_dictionary` (`tests/test_agent_tools.py`) parses
+every `.ps1` and flags `ContainsKey` on a variable that is anywhere assigned an
+`[ordered]` literal. It is not a blanket ban: `$PSBoundParameters` is a
+`Dictionary[string,object]`, whose `Contains` takes a `KeyValuePair`, so **that** one
+must keep using `ContainsKey`.
+
 ## `| Set-Content` silently no-ops when the pipeline is empty
 
 `Clear-TsSourceDirPin` (`bootstrap/_cleanup.ps1`) strips the `$env:TERMINAL_STACK_DIR`

@@ -2919,6 +2919,40 @@ a name is added to one and not the other. And `phys:` names a physical position
 on the US ANSI layout, so on another layout `ctrl-backslash` is whichever key sits
 where `\` does on a US board; `space` has always had the same property.
 
+*(Amended 2026-09-11. "The schema validator turns the two forbidden characters
+into a refusal" was true of one of the two stores. A Windows install saves
+`config.json`, which is JSON: a backslash is escapable, so `ctrl-\` saved
+cleanly, `ConvertTo-TsLeader` passed it through its `default` arm, and
+`sync-windows.ps1` wrote `key = '\'` into `~/.wezterm.lua`. The TOML failure this
+section calls "the one that bricks the machine" never happened; the Lua one it
+treats as secondary is precisely what did, and it takes the terminal with it:*
+
+```
+syntax error: [string "C:\Users\marty\.wezterm.lua"]:291: '}' expected near 'CTRL'
+```
+
+*Naming neither the chord, nor the wizard, nor the fact that a file the user
+never opened was generated from an answer they typed twenty minutes earlier.*
+
+*Three changes, all keeping the original decision rather than revisiting it.
+`tstack/wizard/flow.py` `_chord` spells a typed symbol by name before anything
+stores it — typing `\` is the natural way to answer "enter a chord", and the
+prompt's own example says `ctrl-backslash`, which is a hint, not a gate — and
+re-asks when the answer cannot be spelled at all (a single quote closes the Lua
+string exactly as a backslash does and has no `phys:` name). `ConvertTo-TsLeader`
+gains literal `'\'` and `' '` rows as the second line of defence for a chord set
+by hand on Windows, where no validator runs; the Go template deliberately does
+not, because a backslash cannot reach it — the store refuses it first.*
+
+*And the same audit found the mirror-image gap, unreported because nobody had
+picked that prefix: tmux wants the character where WezTerm wants the name, so
+`tstack config tmux ctrl-backslash` rendered `set -g prefix C-backslash` and tmux
+rejected the line as an unknown key. Both mappers now spell `backslash` back as
+`\`, and `.chezmoitemplates/tmux-core` single-quotes the prefix — a bare trailing
+backslash is a line continuation in `tmux.conf`, so `set -g prefix C-\` would
+have swallowed the `bind` line after it. Verified against real tmux:
+`prefix C-\`.)*
+
 ## Why the WSL sync walk reads its file list from fd 3
 
 `run_after_90-sync-windows.sh` walks `windows/` with `while read -d '' ... done < <(find ...)`.

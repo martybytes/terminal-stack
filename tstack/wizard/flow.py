@@ -17,7 +17,7 @@ from dataclasses import dataclass, field, replace
 
 from .. import apps as catalog
 from .. import platform as plat
-from .. import store
+from .. import schema, store
 from . import probes
 from .console import Console
 from .prompts import Option, choice, multi, text
@@ -245,10 +245,7 @@ def collect(console: Console, ask_terminals: bool = False) -> Answers:
             "ctrl-space",
         )
         if leader == "custom":
-            leader = (
-                text(console, "Enter chord (mod-key, e.g. ctrl-x, alt-space, ctrl-backslash): ")
-                or "ctrl-space"
-            )
+            leader = _chord(console, text(console, _CHORD_PROMPT))
 
     # ------------------------------------------------------------- terminals
     terminals: list[str] = []
@@ -337,8 +334,11 @@ def collect(console: Console, ask_terminals: bool = False) -> Answers:
                 "self",
             )
             # The tray daemon is a native Windows process, so only a machine
-            # with a Windows side can route through it.
-            if plat.kind() == plat.WSL and not bare:
+            # with a Windows side can route through it -- which means WSL *and*
+            # Windows itself. The port asked on WSL only, so a Windows install
+            # pinned this off without asking, then installed the built EXE with
+            # -NoStart -NoAutostart: voice on, and nothing in the tray.
+            if plat.kind() in (plat.WSL, plat.WINDOWS) and not bare:
                 cc_tts_daemon = (
                     _on_off(_env("TS_CC_TTS_DAEMON"))
                     if _env("TS_CC_TTS_DAEMON")
@@ -349,6 +349,13 @@ def collect(console: Console, ask_terminals: bool = False) -> Answers:
                             ("on", "Tray daemon", "installs now, autostarts at login"),
                         ],
                         "off",
+                        "  RECOMMENDATION: off. Direct playback needs nothing running, and is\n"
+                        "  what the hooks do on their own. The tray daemon queues and coalesces\n"
+                        "  announcements, gives each session its own voice, ducks music while\n"
+                        "  it speaks, and puts a mute icon in the tray - for one background\n"
+                        "  process started at login. Either way the console-free EXE is built\n"
+                        "  and Python is build-time only.\n"
+                        "  Reversible with `tstack config tts daemon on|off`.",
                     )
                 )
 
@@ -405,6 +412,52 @@ def collect_apps(console: Console) -> Answers:
     app_class = catalog.saved_class(store.get("apps", "").split())
     selected = _apps(ask, app_class)
     return Answers(app_class=app_class, apps=selected, asked=ask.count)
+
+
+_CHORD_PROMPT = "Enter chord (mod-key, e.g. ctrl-x, alt-space, ctrl-backslash): "
+
+# A key with no printable spelling is stored BY NAME, because neither sink can
+# carry the character itself. chezmoi.toml is written as `key = "<value>"` with
+# no escaping, so a backslash corrupts it and every later chezmoi command fails
+# to parse -- which is why schema.Setting.validate refuses one. And .wezterm.lua
+# emits `key = '<value>'`, where a backslash escapes the closing quote: the
+# config dies at startup with
+#
+#     [string "C:\Users\...\.wezterm.lua"]:291: '}' expected near 'CTRL'
+#
+# naming neither the chord nor this prompt. Windows hit exactly that -- its
+# store is JSON, so `ctrl-\` survived the save and only broke WezTerm.
+#
+# Typing the symbol is the natural way to answer "enter a chord", so take it and
+# spell it, rather than refusing an answer that is not wrong so much as
+# unstorable.
+_KEY_SPELLINGS = {"\\": "backslash", " ": "space"}
+
+
+def _spell(part: str) -> str:
+    """One chord segment, by name where it has one. `or " "` rather than
+    stripping the whole answer first: the key may BE a space, and
+    `"alt- ".strip()` loses it."""
+    stripped = part.strip()
+    return _KEY_SPELLINGS.get(stripped or " ", stripped)
+
+
+def _chord(console: Console, typed: str) -> str:
+    """A typed leader chord, spelled so that both sinks can carry it."""
+    for _ in range(3):
+        if not typed.strip():
+            break
+        chord = "-".join(_spell(p) for p in typed.split("-"))
+        why = schema.BY_KEY["leaderChord"].validate(chord)
+        if not why and "'" in chord:
+            # Not refused by the store, but it closes the Lua string just as a
+            # backslash does. There is no phys: name for it, so re-ask.
+            why = "leaderChord cannot contain a single quote"
+        if not why:
+            return chord
+        console.say(f"  {why}")
+        typed = text(console, _CHORD_PROMPT)
+    return "ctrl-space"
 
 
 def _saved_tmux() -> str:

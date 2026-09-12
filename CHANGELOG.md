@@ -6,6 +6,31 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Added
 
+- **`tstack ui` offers to install Textual instead of explaining how (09/11/2026).**
+  The message it printed was correct, probed per machine, and still a wall: you
+  asked for a dashboard and got a paragraph, a command to copy and a second run
+  of what you just ran. It asks now, and goes straight into the dashboard.
+
+  What it offers is probed on a different axis from that printed advice. The text
+  leads with `uv run --with` because that path needs nothing decided; the offer
+  leads with a real `pip install` because it is about to fix the problem
+  permanently — `uv run --with` resolves into a cache and leaves `import textual`
+  no more possible than before, so the next `tstack ui` would ask again. pacman
+  stays in the printed hint rather than going behind a sudo prompt nobody asked
+  for, `--user` is dropped inside a venv (where it is an error, not a
+  preference), and `--break-system-packages` is added only where PEP 668's marker
+  file actually exists.
+
+  A real install defaults to **no**; the uv fallback, which writes nothing
+  outside a cache, defaults to yes. The offer appears only where both stdin and
+  stderr are a terminal, so a hook, a cron line or `tstack ui | cat` still gets
+  the explanation and exit 1. `TS_UI_INSTALL=1` accepts unasked, `TS_UI_INSTALL=0`
+  never offers, and the child is always spawned with `0` so an install that
+  reports success while `import textual` still fails cannot loop. Deliberately
+  **not** `TS_ASSUME_YES`: that means "take every default", the default here is
+  no, and it is set for every parity container — reading it as consent would have
+  had an unattended `tstack ui` reach the network and write to site-packages in CI.
+
 - **The bootstrap now starts an ssh-agent on Linux and WSL (09/07/2026).** Found on a
   fresh WSL Ubuntu 24.04 install: every `ssh` and every `git push` asked for a
   passphrase, and `ssh-add -l` said `Could not open a connection to your
@@ -36,6 +61,62 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
   not already hold, once per boot, and skips by fingerprint so a re-run cannot re-prompt.
 
 ### Fixed
+
+- **A custom leader chord typed as `ctrl-\` stopped WezTerm from starting
+  (09/11/2026).** Keys with no printable spelling are stored by name for two
+  reasons written up on 09/02, and the schema validator enforces it — on the
+  store that has one. A Windows install saves `config.json`, which is JSON, so
+  the backslash survived the save, `ConvertTo-TsLeader` passed it through, and
+  `~/.wezterm.lua` got `key = '\'`, where the backslash escapes the closing
+  quote:
+
+  ```
+  syntax error: [string "C:\Users\...\.wezterm.lua"]:291: '}' expected near 'CTRL'
+  ```
+
+  The wizard now spells a typed symbol by name before anything stores it (`\` →
+  `backslash`, a literal space → `space`) and re-asks when the answer cannot be
+  spelled at all — a single quote closes the Lua string just as a backslash does
+  and has no `phys:` name. `ConvertTo-TsLeader` gains literal `\` and space rows
+  as a second line of defence for a chord set by hand on Windows; the Go template
+  does not need them, because the store refuses the character first.
+
+  The same audit found the mirror-image gap: tmux wants the character where
+  WezTerm wants the name, so `tstack config tmux ctrl-backslash` wrote `set -g
+  prefix C-backslash` and tmux rejected it as an unknown key. Both mappers spell
+  `backslash` back as `\` now, and `.chezmoitemplates/tmux-core` single-quotes
+  the prefix — a bare trailing backslash is a line continuation in `tmux.conf`,
+  so `set -g prefix C-\` would have swallowed the `bind` line after it.
+
+- **`ts-agentmemory.ps1` threw on every machine that did not already have the
+  file it was writing (09/11/2026).** `ContainsKey()` on a variable holding an
+  `[ordered]@{}` literal: `ConvertFrom-Json -AsHashtable` returns an
+  `OrderedHashtable`, which has both `Contains` and `ContainsKey`, but the
+  literal in the `else` arm is a `System.Collections.Specialized.OrderedDictionary`,
+  which has only `Contains`. So the settings-splice helpers worked on a machine
+  that had `~/.codex/hooks.json` and died on a machine that did not — a fresh
+  install, which is the case the code exists to serve. Observed on a Windows
+  bootstrap: Codex's six hook scripts were installed, the `hooks.json` that
+  registers them was never written, the whole Cursor section never ran, and the
+  same exception then killed `sync-windows.ps1` before its summary. Three of the
+  five call sites were the dangerous shape; all five now use `Contains`, and
+  `test_no_containskey_on_an_ordered_dictionary` walks every `.ps1` for a
+  variable that can hold an `[ordered]` literal being asked `ContainsKey`. The
+  gate is deliberately targeted rather than a blanket ban: `$PSBoundParameters`
+  is a `Dictionary[string,object]`, which has `ContainsKey` and no usable
+  `Contains`.
+
+- **A native Windows install never asked about the TTS tray daemon (09/11/2026).**
+  The wizard port gated the question on `plat.kind() == plat.WSL`, so on Windows
+  itself `ccTtsDaemon` stayed `off` without the question ever being shown;
+  `windows-bootstrap.ps1` then read that and installed the freshly built EXE with
+  `-NoStart -NoAutostart`. Answering "on" to agent voice therefore produced no
+  tray icon, no autostart and nothing in the review to explain it. The gate is
+  `plat.kind() in (plat.WSL, plat.WINDOWS)` now — both are machines with a
+  Windows side, which is what the comment already claimed — and the question
+  carries the `RECOMMENDATION:` block the port had dropped. Pinned by
+  `test_the_tray_daemon_is_asked_wherever_there_is_a_windows_side`. On a machine
+  already installed without it: `tstack config tts daemon on`.
 
 - **A bootstrap hint meant for a person printed into the parity build log (09/07/2026).**
   `common_ssh_agent`'s "no systemd user manager" pointer was gated on `_ts_is_wsl`, which

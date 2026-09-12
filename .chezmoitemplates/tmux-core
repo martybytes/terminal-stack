@@ -2,8 +2,12 @@
 # Prefix key: injected from the saved terminal-stack config (default C-b).
 # Change it with `tstack config tmux <chord>` (e.g. ctrl-a). Kept separate from the
 # WezTerm leader so the two layers don't collide.
-set -g prefix {{ $tp }}
-bind {{ $tp }} send-prefix
+{{- /* Single-quoted, because a prefix CAN be a backslash (chord ctrl-backslash,
+       which tmux spells C-\): a bare trailing backslash is a line continuation
+       here, so `set -g prefix C-\` would swallow the next line instead. Single
+       quotes suppress escape processing, and they are harmless around C-b. */ -}}
+set -g prefix '{{ $tp }}'
+bind '{{ $tp }}' send-prefix
 # NOTE: `unbind C-b` is deliberately NOT here. It belongs to the ~/.tmux.conf
 # wrapper only: on Omarchy C-b is kept as `prefix2` so both chords work, and
 # unbinding it there would undo half of that.
