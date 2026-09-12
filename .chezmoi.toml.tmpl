@@ -85,8 +85,12 @@
 {{-   else if eq $lm "shift" -}}{{- $tmodstr = print $tmodstr "S-" -}}
 {{-   end -}}
 {{- end -}}
+{{- /* tmux wants the literal character where WezTerm wants a phys: name, so a
+       stored `backslash` has to come back as `\` or tmux rejects the line with
+       "unknown key". Keep identical to ConvertTo-TsTmuxPrefix in _config.ps1. */ -}}
 {{- $tkeyout := $tkey -}}
-{{- if eq (lower $tkey) "space" -}}{{- $tkeyout = "Space" -}}{{- end -}}
+{{- if eq (lower $tkey) "space" -}}{{- $tkeyout = "Space" -}}
+{{- else if eq (lower $tkey) "backslash" -}}{{- $tkeyout = "\\" -}}{{- end -}}
 {{- $tmuxPrefixResolved := (print $tmodstr $tkeyout) -}}
 {{- $themeMode := "dark" -}}
 {{- if hasKey . "themeMode" -}}{{- $themeMode = .themeMode -}}{{- end -}}

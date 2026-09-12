@@ -37,6 +37,32 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **A custom leader chord typed as `ctrl-\` stopped WezTerm from starting
+  (09/11/2026).** Keys with no printable spelling are stored by name for two
+  reasons written up on 09/02, and the schema validator enforces it — on the
+  store that has one. A Windows install saves `config.json`, which is JSON, so
+  the backslash survived the save, `ConvertTo-TsLeader` passed it through, and
+  `~/.wezterm.lua` got `key = '\'`, where the backslash escapes the closing
+  quote:
+
+  ```
+  syntax error: [string "C:\Users\...\.wezterm.lua"]:291: '}' expected near 'CTRL'
+  ```
+
+  The wizard now spells a typed symbol by name before anything stores it (`\` →
+  `backslash`, a literal space → `space`) and re-asks when the answer cannot be
+  spelled at all — a single quote closes the Lua string just as a backslash does
+  and has no `phys:` name. `ConvertTo-TsLeader` gains literal `\` and space rows
+  as a second line of defence for a chord set by hand on Windows; the Go template
+  does not need them, because the store refuses the character first.
+
+  The same audit found the mirror-image gap: tmux wants the character where
+  WezTerm wants the name, so `tstack config tmux ctrl-backslash` wrote `set -g
+  prefix C-backslash` and tmux rejected it as an unknown key. Both mappers spell
+  `backslash` back as `\` now, and `.chezmoitemplates/tmux-core` single-quotes
+  the prefix — a bare trailing backslash is a line continuation in `tmux.conf`,
+  so `set -g prefix C-\` would have swallowed the `bind` line after it.
+
 - **`ts-agentmemory.ps1` threw on every machine that did not already have the
   file it was writing (09/11/2026).** `ContainsKey()` on a variable holding an
   `[ordered]@{}` literal: `ConvertFrom-Json -AsHashtable` returns an

@@ -531,6 +531,39 @@ def test_an_empty_catalog_says_so_rather_than_silently_offering_nothing(monkeypa
 # --------------------------------------------------------------- voice, agents
 
 
+def test_a_custom_chord_typed_as_a_symbol_is_stored_by_name():
+    r"""`ctrl-\` is the natural way to answer, and unstorable as typed.
+
+    chezmoi.toml is written `key = "<value>"` unescaped, so a backslash corrupts
+    it; .wezterm.lua emits `key = '<value>'`, where a backslash escapes the
+    closing quote and WezTerm dies at startup with `'}' expected near 'CTRL'`.
+    Windows hit the second -- its store is JSON, so the chord saved fine and only
+    the terminal broke, pointing at a line nobody wrote.
+    """
+    assert flow._chord(Console.scripted([]), "ctrl-\\") == "ctrl-backslash"
+    assert flow._chord(Console.scripted([]), "ctrl-\\") == "ctrl-backslash"
+    assert flow._chord(Console.scripted([]), "alt- ") == "alt-space"
+    # Already-safe answers are passed through untouched.
+    for chord in ("ctrl-x", "alt-space", "ctrl-backslash", "super-k"):
+        assert flow._chord(Console.scripted([]), chord) == chord
+
+
+def test_an_unstorable_chord_is_re_asked_not_silently_kept():
+    # A single quote closes the Lua string exactly as a backslash does, and has
+    # no phys: name to be spelled with -- so it is refused rather than mangled.
+    console = Console.scripted(["ctrl-a"])
+    assert flow._chord(console, "ctrl-'") == "ctrl-a"
+    assert any("quote" in line for line in console.captured)
+
+    # A double quote is what the store itself refuses; same treatment.
+    console = Console.scripted(["ctrl-b"])
+    assert flow._chord(console, 'ctrl-"') == "ctrl-b"
+
+    # Nobody there to re-ask, or an empty answer: the documented default.
+    assert flow._chord(Console.scripted([]), "ctrl-'") == "ctrl-space"
+    assert flow._chord(Console.scripted([]), "") == "ctrl-space"
+
+
 def test_the_voice_follow_ups_only_appear_once_voice_is_on(monkeypatch):
     monkeypatch.setenv("TS_PROFILE", "full")
     monkeypatch.setenv("TS_DEVELOPMENT", "no")

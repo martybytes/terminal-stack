@@ -626,6 +626,26 @@ def test_named_leader_keys_map_identically_in_both_chord_mappers():
         assert f"'{name}'" in ps and f"'{phys}'" in ps, name
 
 
+def test_the_tmux_mappers_spell_a_named_key_back_as_the_character():
+    r"""tmux is the mirror image of WezTerm: it wants `C-\`, not a phys: name.
+
+    The mapping table only ever had the WezTerm direction, so `tstack config tmux
+    ctrl-backslash` wrote `set -g prefix C-backslash` and tmux rejected the line
+    as an unknown key. Both twins hold the table; one without the row renders a
+    different prefix on Windows than on macOS/WSL.
+    """
+    toml = read_repo(".chezmoi.toml.tmpl")
+    ps = read_repo("bootstrap/_config.ps1")
+    assert '(lower $tkey) "backslash" -}}{{- $tkeyout = "\\\\"' in toml
+    assert "'backslash' { '\\' }" in ps
+
+    # A bare trailing backslash is a line continuation in tmux.conf, so the
+    # prefix has to be quoted or `set -g prefix C-\` eats the following line.
+    core = read_repo(".chezmoitemplates/tmux-core")
+    assert "set -g prefix '{{ $tp }}'" in core
+    assert "bind '{{ $tp }}' send-prefix" in core
+
+
 @pytest.mark.skipif(not shutil.which("pwsh"), reason="PowerShell 7 is unavailable")
 def test_pwsh_maps_ctrl_backslash_to_a_phys_key():
     helper = ROOT / "bootstrap/_config.ps1"
@@ -647,6 +667,40 @@ def test_pwsh_maps_ctrl_backslash_to_a_phys_key():
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "CTRL+phys:Backslash|CTRL+phys:Space|ALT+x"
+
+
+@pytest.mark.skipif(not shutil.which("pwsh"), reason="PowerShell 7 is unavailable")
+def test_pwsh_maps_a_literal_backslash_chord_the_same_as_the_name():
+    r"""`tstack config leader ctrl-\` on Windows used to reach .wezterm.lua raw.
+
+    config.json is JSON, so unlike chezmoi.toml it carries a backslash happily --
+    and the renderer then emitted `key = '\'`, whose backslash escapes the
+    closing quote. WezTerm died at startup with `'}' expected near 'CTRL'`,
+    pointing at a line the user never wrote. The wizard spells the key by name
+    now; this is the second line of defence for a chord set by hand.
+
+    tmux is checked here too because it needs the opposite translation.
+    """
+    helper = ROOT / "bootstrap/_config.ps1"
+    command = (
+        f". '{helper}'; "
+        "$b = ConvertTo-TsLeader 'ctrl-\\'; "
+        "$t = ConvertTo-TsTmuxPrefix 'ctrl-backslash'; "
+        "$s = ConvertTo-TsTmuxPrefix 'ctrl-space'; "
+        "$d = ConvertTo-TsTmuxPrefix 'ctrl-b'; "
+        'Write-Output "$($b.mods)+$($b.key)|$t|$s|$d"'
+    )
+    result = subprocess.run(
+        [shutil.which("pwsh"), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command],
+        text=True,
+        encoding="utf-8",
+        capture_output=True,
+        check=False,
+        timeout=300,
+        start_new_session=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "CTRL+phys:Backslash|C-\\|C-Space|C-b"
 
 
 @pytest.mark.skipif(not shutil.which("pwsh"), reason="PowerShell 7 is unavailable")
