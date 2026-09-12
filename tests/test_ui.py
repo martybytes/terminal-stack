@@ -12,6 +12,7 @@ writes the developer's real chezmoi.toml corrupts the machine it protects.
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -376,3 +377,185 @@ def test_the_no_install_path_is_offered_when_uv_is_present(monkeypatch):
 
     monkeypatch.setattr(ui.shutil, "which", lambda name: None)
     assert "uv run" not in "\n".join(ui._install_hint())
+
+
+# --- the offer -------------------------------------------------------------
+# Correct advice is still a wall: the reader asked for a dashboard and got a
+# paragraph and a command to copy. So the command offers to do it -- which means
+# it now runs pip on someone's machine, and every one of these tests is about
+# what it may not do without being asked.
+
+
+@pytest.fixture
+def _no_ambient_offer(monkeypatch):
+    """Neither state of the knob leaking in from the developer's shell. With
+    TS_UI_INSTALL=1 set, a test of the DECLINE path would reach the network."""
+    monkeypatch.delenv("TS_UI_INSTALL", raising=False)
+
+
+def test_the_offer_prefers_a_real_install_over_the_no_install_path(monkeypatch):
+    """The opposite order from the printed hint, deliberately.
+
+    The hint leads with `uv run --with` because it needs nothing decided. The
+    offer is about to fix the problem, and `uv run` resolves into a cache and
+    leaves `import textual` no more possible than before -- so the next
+    `tstack ui` would ask all over again.
+    """
+    from tstack.commands import ui
+
+    monkeypatch.setattr(ui.shutil, "which", lambda name: "/usr/bin/uv")
+    question, install, run = ui._plan()
+    assert install and install[-1] == "textual" and "pip" in install
+    assert "Install Textual" in question
+    assert run[-1] == "ui" and str(ui.ENTRY) in run
+
+    # Only when pip cannot do it does uv get the job.
+    monkeypatch.setattr(ui.importlib.util, "find_spec", lambda name: None)
+    question, install, run = ui._plan()
+    assert install is None, "uv run installs nothing, so there is nothing to run first"
+    assert run[:4] == ["/usr/bin/uv", "run", "--with", "textual"]
+    assert "installing nothing" in question
+
+    # Neither: back to printing the explanation.
+    monkeypatch.setattr(ui.shutil, "which", lambda name: None)
+    assert ui._plan() is None
+
+
+def test_a_venv_never_gets_the_user_flag(monkeypatch):
+    """`pip install --user` inside a virtualenv is an error, not a preference:
+    "User site-packages are not visible in this virtualenv"."""
+    from tstack.commands import ui
+
+    monkeypatch.setattr(ui.sys, "prefix", "/tmp/venv")
+    monkeypatch.setattr(ui.sys, "base_prefix", "/usr")
+    assert "--user" not in ui._pip_install()
+
+    monkeypatch.setattr(ui.sys, "prefix", "/usr")
+    assert "--user" in ui._pip_install()
+
+
+def test_the_offer_never_runs_anything_without_being_asked(monkeypatch, _no_ambient_offer):
+    """Every path that is not an explicit yes has to leave the machine alone."""
+    from tstack.commands import ui
+
+    ran: list[list[str]] = []
+    monkeypatch.setattr(ui, "_spawn", lambda argv: ran.append(argv) or 0)
+    monkeypatch.setattr(
+        ui, "_plan", lambda: ("Install Textual", ["pip", "install", "textual"], ["py", "ui"])
+    )
+
+    # No terminal to ask on -- the case that matters, because this is what a
+    # hook, a cron line and a piped run all look like.
+    monkeypatch.setattr(ui.sys.stdin, "isatty", lambda: False, raising=False)
+    assert ui.offer() is None
+    assert ran == []
+
+    # Declined.
+    monkeypatch.setattr(ui, "_confirm", lambda *a, **k: False)
+    assert ui.offer() is None
+    assert ran == []
+
+    # Switched off outright.
+    monkeypatch.setenv("TS_UI_INSTALL", "0")
+    monkeypatch.setattr(ui, "_confirm", lambda *a, **k: True)
+    assert ui.offer() is None
+    assert ran == []
+
+
+def test_ts_assume_yes_is_not_consent_to_install(monkeypatch, _no_ambient_offer):
+    """It means "take every default", and the default for a real install is no.
+
+    It is also set for every parity container (`tests/parity/run.sh` passes
+    -e TS_ASSUME_YES=1), so reading it as consent would have an unattended
+    `tstack ui` reach the network and write into site-packages in CI.
+    """
+    from tstack.commands import ui
+
+    ran: list[list[str]] = []
+    monkeypatch.setattr(ui, "_spawn", lambda argv: ran.append(argv) or 0)
+    monkeypatch.setattr(
+        ui, "_plan", lambda: ("Install Textual", ["pip", "install", "textual"], ["py", "ui"])
+    )
+    monkeypatch.setattr(ui.sys.stdin, "isatty", lambda: False, raising=False)
+    monkeypatch.setenv("TS_ASSUME_YES", "1")
+    assert ui.offer() is None
+    assert ran == []
+
+
+def test_yes_installs_then_opens_the_dashboard_and_the_child_cannot_re_offer(
+    monkeypatch, _no_ambient_offer
+):
+    from tstack.commands import ui
+
+    ran: list[list[str]] = []
+    monkeypatch.setattr(ui, "_spawn", lambda argv: ran.append(argv) or 0)
+    monkeypatch.setattr(
+        ui, "_plan", lambda: ("Install Textual", ["pip", "install", "textual"], ["py", "ui"])
+    )
+    monkeypatch.setenv("TS_UI_INSTALL", "1")
+    assert ui.offer() == 0
+    assert ran == [["pip", "install", "textual"], ["py", "ui"]], "install first, then the dashboard"
+
+
+def test_the_child_is_told_not_to_offer_again(monkeypatch):
+    """An install that reports success while `import textual` still fails would
+    otherwise have the child ask the same question, forever."""
+    from tstack.commands import ui
+
+    seen: dict = {}
+
+    def fake_call(argv, env=None):
+        seen["argv"], seen["env"] = argv, env
+        return 0
+
+    monkeypatch.setattr(ui.subprocess, "call", fake_call)
+    monkeypatch.setenv("TS_UI_INSTALL", "1")
+    assert ui._spawn(["py", "ui"]) == 0
+    assert seen["env"]["TS_UI_INSTALL"] == "0"
+    assert seen["env"]["PATH"] == os.environ["PATH"], "the rest of the environment is inherited"
+
+
+def test_a_child_that_cannot_be_run_is_reported_not_raised(monkeypatch, capsys):
+    from tstack.commands import ui
+
+    def boom(argv, env=None):
+        raise OSError("no such file")
+
+    monkeypatch.setattr(ui.subprocess, "call", boom)
+    assert ui._spawn(["nope", "ui"]) == 1
+    assert "could not run nope" in capsys.readouterr().err
+
+
+def test_a_failed_install_does_not_open_the_dashboard_and_falls_back_to_the_hint(
+    monkeypatch, capsys, _no_ambient_offer
+):
+    from tstack.commands import ui
+
+    ran: list[list[str]] = []
+    monkeypatch.setattr(ui, "_spawn", lambda argv: ran.append(argv) or 1)
+    monkeypatch.setattr(
+        ui, "_plan", lambda: ("Install Textual", ["pip", "install", "textual"], ["py", "ui"])
+    )
+    monkeypatch.setenv("TS_UI_INSTALL", "1")
+    assert ui.offer() is None, "None sends the caller back to the full explanation"
+    assert ran == [["pip", "install", "textual"]], "and the dashboard is never started"
+    assert "install failed" in capsys.readouterr().err
+
+
+def test_the_problem_is_named_once_not_twice(monkeypatch, capsys, _no_ambient_offer):
+    """The offer has to say what is wrong before it can ask about fixing it, so
+    the explanation printed after a decline must not repeat the same line."""
+    real_import = __import__
+
+    def no_textual(name, *args, **kwargs):
+        if name.startswith("textual") or name.endswith("ui.app"):
+            raise ImportError("No module named 'textual'")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.__import__", no_textual)
+    monkeypatch.setenv("TS_UI_INSTALL", "0")
+    code = ui_cmd.main([])
+    monkeypatch.undo()
+    assert code == 1
+    err = capsys.readouterr().err
+    assert err.count(ui_cmd.HEADER) == 1

@@ -6,6 +6,31 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Added
 
+- **`tstack ui` offers to install Textual instead of explaining how (09/11/2026).**
+  The message it printed was correct, probed per machine, and still a wall: you
+  asked for a dashboard and got a paragraph, a command to copy and a second run
+  of what you just ran. It asks now, and goes straight into the dashboard.
+
+  What it offers is probed on a different axis from that printed advice. The text
+  leads with `uv run --with` because that path needs nothing decided; the offer
+  leads with a real `pip install` because it is about to fix the problem
+  permanently — `uv run --with` resolves into a cache and leaves `import textual`
+  no more possible than before, so the next `tstack ui` would ask again. pacman
+  stays in the printed hint rather than going behind a sudo prompt nobody asked
+  for, `--user` is dropped inside a venv (where it is an error, not a
+  preference), and `--break-system-packages` is added only where PEP 668's marker
+  file actually exists.
+
+  A real install defaults to **no**; the uv fallback, which writes nothing
+  outside a cache, defaults to yes. The offer appears only where both stdin and
+  stderr are a terminal, so a hook, a cron line or `tstack ui | cat` still gets
+  the explanation and exit 1. `TS_UI_INSTALL=1` accepts unasked, `TS_UI_INSTALL=0`
+  never offers, and the child is always spawned with `0` so an install that
+  reports success while `import textual` still fails cannot loop. Deliberately
+  **not** `TS_ASSUME_YES`: that means "take every default", the default here is
+  no, and it is set for every parity container — reading it as consent would have
+  had an unattended `tstack ui` reach the network and write to site-packages in CI.
+
 - **The bootstrap now starts an ssh-agent on Linux and WSL (09/07/2026).** Found on a
   fresh WSL Ubuntu 24.04 install: every `ssh` and every `git push` asked for a
   passphrase, and `ssh-add -l` said `Could not open a connection to your

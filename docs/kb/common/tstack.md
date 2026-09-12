@@ -6,7 +6,7 @@ commands any more, and no aliases for them.
 | Command | What it does |
 |---|---|
 | `tstack config` | view and change saved settings (the table below) |
-| `tstack ui` | every setting in one screen; needs Textual |
+| `tstack ui` | every setting in one screen; offers to install Textual the first time |
 | `tstack doctor` | diagnose the install; `--quiet`, `--json`, `--repair` (see below) |
 | `tstack update` | pull the latest stack and re-apply |
 | `tstack rollback` | undo the last update |
@@ -144,12 +144,29 @@ A `*` before a value means it differs from the default. A setting chezmoi
 refused - writing one produces a value that survives until the next save.
 
 Writes go through the same setter the command line uses, so there is no second
-writer and no second set of validation rules. Nothing here starts a container or
-installs anything; it edits settings.
+writer and no second set of validation rules. Nothing inside the dashboard starts
+a container or installs anything; it edits settings.
 
 Textual is the one third-party library this program uses and only this command
-needs it, which is why it is not installed for you. Run `tstack ui` without it and
-it prints the way to get it on **that** machine; the short version:
+needs it, which is why it is not installed with the rest of the stack. Run
+`tstack ui` without it and it **offers to fetch it and open the dashboard**:
+
+```
+tstack ui: needs Textual, which is not installed.
+
+  Install Textual into your user site-packages and open the dashboard? [y/N]
+```
+
+A real install defaults to no and a `uv run --with` fallback (which writes
+nothing outside uv's cache) defaults to yes — the brackets tell you which you
+are being asked. The offer appears only where there is a terminal to answer on,
+so a hook, a cron line or `tstack ui | cat` still gets the explanation and exit
+1. `TS_UI_INSTALL=1` accepts unasked, `TS_UI_INSTALL=0` never offers. It is
+deliberately **not** `TS_ASSUME_YES`: that means "take every default", and the
+default here is no.
+
+Decline it, or run somewhere it cannot ask, and it prints the way to get Textual
+on **that** machine; the short version:
 
 ```sh
 uv run --with textual "$TERMINAL_STACK_DIR/tstack/main.py" ui   # no install at all
