@@ -49,6 +49,7 @@ SHELL_NAMES: tuple[tuple[str, str], ...] = (
     ("TS_WIZ_HEADROOM_CURSOR", "headroom_cursor"),
     ("TS_WIZ_CAVEMAN", "caveman"),
     ("TS_WIZ_AGENTMEMORY", "agentmemory"),
+    ("TS_WIZ_SERVICES", "services"),
     ("TS_WIZ_ASKED", "asked"),
 )
 
@@ -76,6 +77,7 @@ JSON_NAMES: tuple[tuple[str, str], ...] = (
     ("HeadroomCursor", "headroom_cursor"),
     ("Caveman", "caveman"),
     ("Agentmemory", "agentmemory"),
+    ("Services", "services"),
     ("Asked", "asked"),
 )
 
