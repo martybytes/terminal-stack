@@ -1308,9 +1308,11 @@ function Set-TerminalStackConfig {
         Save-TsConfig -LeaderChord $w.Leader -ThemeMode $w.Theme -TmuxPrefix $tmux -Apps @($w.Apps) -CcTts $ccTts `
             -WeztermMux $w.WezMux -WeztermRestore $w.WezRestore `
             -HeadroomEnabled $w.Headroom -HeadroomCursorMode $w.HeadroomCursor `
-            -CavemanEnabled $w.Caveman -AgentmemoryEnabled $w.Agentmemory `
-            -MemoryBackend $w.MemoryBackend | Out-Null
-        Set-TsMemoryComposeFile $w.MemoryBackend
+            -CavemanEnabled $w.Caveman | Out-Null
+        # The memory pair goes through its ONE writer, which also rewrites
+        # headroom's COMPOSE_FILE. This used to hand-roll the three calls, which
+        # is how windows-bootstrap.ps1 came to do two of them and miss the third.
+        Set-TsMemoryBackend $w.MemoryBackend
         Export-CcTtsJson
         # NOT $w.Workspace: the workspace root is not a wizard question and the
         # JSON does not carry it, so that read was $null and this persisted an

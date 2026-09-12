@@ -245,12 +245,58 @@ def test_bootstrap_seeds_env_files_and_leaves_an_existing_one_alone(tree, calls,
     (tree / "bootstrap" / "agent-tools.json").write_text("{}", encoding="utf-8")
     svc = build(tree, "bootstrap")
     services.cmd_bootstrap(svc)
-    assert (root / "headroom" / ".env").read_text(
+    # Everything the example carried is carried over. Not byte-equality: headroom
+    # also gets its COMPOSE_FILE derived from the backend on the way in, the same
+    # way kokoro gets its GPU profile, so the seeded file is a superset.
+    assert "HEADROOM_PROXY_TOKEN=changeme" in (root / "headroom" / ".env").read_text(
         encoding="utf-8"
-    ) == "HEADROOM_PROXY_TOKEN=changeme\n"
+    )
 
     capsys.readouterr()
     services.cmd_bootstrap(svc)
+    assert "left untouched" in capsys.readouterr().out
+
+
+def test_bootstrap_derives_headroom_compose_file_from_the_saved_backend(
+    tree, calls, store_off, capsys
+):
+    """The same rule kokoro has, for the same reason.
+
+    .env.example ships the plain compose file, so a machine that answered
+    `headroom` was seeded WITHOUT the overlay -- and the overlay's `command:` is
+    what passes `--memory`, which has no environment variable and is the entire
+    feature. Four containers reporting healthy, two of them holding nothing.
+    """
+    root = stacks.stack_root(tree)
+    (root / "headroom" / ".env.example").write_text(
+        "COMPOSE_PATH_SEPARATOR=:\nCOMPOSE_FILE=docker-compose.yml\n", encoding="utf-8"
+    )
+    (tree / "bootstrap").mkdir()
+    (tree / "bootstrap" / "agent-tools.json").write_text("{}", encoding="utf-8")
+
+    store_off["memoryBackend"] = "headroom"
+    services.cmd_bootstrap(build(tree, "bootstrap"))
+    assert stacks.compose_files(root / "headroom") == [
+        "docker-compose.yml",
+        "docker-compose.memory.yml",
+    ]
+
+
+def test_bootstrap_leaves_a_compose_file_it_did_not_create_alone(tree, calls, store_off, capsys):
+    """A hand-edited COMPOSE_FILE is somebody trying to do something, and quietly
+    undoing it is worse than saying the two disagree -- which is why both shells
+    WARN about that drift rather than correcting it. Fresh files only, exactly as
+    seed_kokoro_profile is."""
+    root = stacks.stack_root(tree)
+    (root / "headroom" / ".env.example").write_text("COMPOSE_FILE=docker-compose.yml\n", "utf-8")
+    chosen = "COMPOSE_FILE=docker-compose.yml:my-own.yml\n"
+    (root / "headroom" / ".env").write_text(chosen, encoding="utf-8")
+    (tree / "bootstrap").mkdir()
+    (tree / "bootstrap" / "agent-tools.json").write_text("{}", encoding="utf-8")
+
+    store_off["memoryBackend"] = "headroom"
+    services.cmd_bootstrap(build(tree, "bootstrap"))
+    assert (root / "headroom" / ".env").read_text(encoding="utf-8") == chosen
     assert "left untouched" in capsys.readouterr().out
 
 
@@ -283,8 +329,9 @@ def test_bootstrap_seeds_the_env_files_with_no_engine_at_all(tree, calls, monkey
     assert not svc.engine_ok, "the premise: no engine here"
     services.cmd_bootstrap(svc)
 
-    body = (root / "headroom" / ".env").read_text(encoding="utf-8")
-    token = body.split("HEADROOM_PROXY_TOKEN=", 1)[1].strip()
+    # Read it back the way compose does, rather than by slicing the file: the
+    # seeded headroom .env also carries the derived COMPOSE_FILE lines now.
+    token = stacks.env_value(root / "headroom" / ".env", "HEADROOM_PROXY_TOKEN") or ""
     assert token != "changeme", "the placeholder is not a token"
     # rand_hex(n) is n hex CHARACTERS, not n bytes -- the length the bash twin
     # produces, which is what the two have to agree on.

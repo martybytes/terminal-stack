@@ -530,6 +530,79 @@ def seed_kokoro_profile(env_file: Path) -> tuple[bool, str]:
     return (True, f"kokoro profile {profile} - {reason}")
 
 
+# ------------------------------------------------------- headroom memory overlay
+
+
+def memory_compose_spec(backend: str) -> str:
+    """PURE. The COMPOSE_FILE value a memory backend implies.
+
+    Twin of ts_memory_compose_spec (bash) and Get-TsMemoryComposeSpec (pwsh).
+    """
+    if backend == "headroom":
+        return "docker-compose.yml:docker-compose.memory.yml"
+    return "docker-compose.yml"
+
+
+def write_memory_compose_file(env_file: Path, backend: str) -> tuple[bool, str]:
+    """Derive headroom's COMPOSE_FILE from the backend. (ok, message).
+
+    The overlay's `command:` is what carries `--memory`, and that flag has no
+    environment variable: it IS the feature. Writing memoryBackend without writing
+    this leaves a proxy that looks wired and engages memory not at all -- a bug
+    that has now shipped in three separate writers.
+
+    Twin of ts_memory_write_compose_file's awk, whose END block is the part a
+    plain replace does not give you: a MISSING key is APPENDED rather than
+    ignored, because .env.example is not guaranteed to carry one, and
+    COMPOSE_PATH_SEPARATOR is appended when absent but never rewritten when
+    present -- the awk prints an existing one straight through.
+
+    Unlike both shell twins, a missing FILE is reported. Theirs return 0 on it,
+    which is exactly how this stayed hidden: on a fresh machine no .env exists
+    yet, so every platform silently wrote nothing and reported success.
+    """
+    spec = memory_compose_spec(backend)
+    if not env_file.is_file():
+        return (False, f"{env_file} does not exist - run: tstack services bootstrap")
+
+    replaced = replace_in_file(env_file, r"^COMPOSE_FILE=.*$", f"COMPOSE_FILE={spec}")
+    if not replaced and not append_env_line(env_file, f"COMPOSE_FILE={spec}"):
+        return (False, f"{env_file}: could not set COMPOSE_FILE - check it by hand")
+    if env_value(env_file, "COMPOSE_PATH_SEPARATOR") is None:
+        # Only when absent. An existing separator is somebody's choice, and the
+        # spec above is written with ':' -- so a machine that had set ';' would
+        # get its overlay parsed as one impossible filename.
+        append_env_line(env_file, "COMPOSE_PATH_SEPARATOR=:")
+    return (True, f"headroom COMPOSE_FILE={spec}")
+
+
+def append_env_line(path: Path, line: str) -> bool:
+    """Add one KEY=value, matching the file's own line endings and final newline.
+
+    newline="" throughout, for the reason replace_in_file documents at length: a
+    .env that a Windows side also writes must not be half-converted by universal
+    newline translation.
+    """
+    crlf = "\r\n"
+    lf = "\n"
+    try:
+        with path.open("r", encoding="utf-8", newline="") as handle:
+            before = handle.read()
+    except OSError:
+        return False
+    uniform_crlf = crlf in before and before.count(lf) == before.count(crlf)
+    ending = crlf if uniform_crlf else lf
+    # A file not ending in a newline would otherwise get this key glued onto its
+    # last line, which compose reads as one impossibly-named variable.
+    prefix = "" if (not before or before.endswith((lf, "\r"))) else ending
+    try:
+        with path.open("a", encoding="utf-8", newline="") as handle:
+            handle.write(f"{prefix}{line}{ending}")
+    except OSError:
+        return False
+    return True
+
+
 # ---------------------------------------------------------------------- backup
 
 

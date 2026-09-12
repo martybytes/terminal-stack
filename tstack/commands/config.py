@@ -37,11 +37,11 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 import sys
+from pathlib import Path
 
-from .. import paths, schema, store
+from .. import engine, paths, schema, stacks, store
 from .. import platform as plat
 
 HELP = """tstack config - view and change saved settings.
@@ -576,17 +576,50 @@ def set_memory(backend: str, out: Out, dry_run: bool) -> int:
         agents_cmd.main(["agentmemory", "off"])
         out.say("  AgentMemory hooks removed from Claude/Codex/Cursor.")
 
+    from . import services as services_cmd
+
+    # Seed before touching anything that reads a .env. `restart` is down+up, and
+    # `up` on an unseeded headroom does not even reach compose: both its secrets
+    # are `:?`-required, so it dies at `compose config` complaining about a
+    # VARIABLE rather than about the missing file. bootstrap needs no engine and
+    # no network, is idempotent by design, and never rotates a value somebody set.
+    services_cmd.main(["bootstrap"])
+
+    # The overlay's `command:` carries `--memory`, which has no environment
+    # variable and is the entire Headroom-memory feature. Writing the key without
+    # this is a proxy that looks wired and remembers nothing -- and it has to come
+    # AFTER bootstrap, because the writer needs a file to write to. That ordering
+    # is the whole bug: both shell twins return 0 when the .env is absent, which
+    # on a fresh machine it always is, so every platform silently wrote nothing
+    # and reported success.
+    env_file = stacks.stack_dir(paths.resolve_source_dir() or Path(), "headroom") / ".env"
+    ok, message = stacks.write_memory_compose_file(env_file, backend)
+    if ok:
+        out.say(f"  {message}")
+    else:
+        # Loud, because the silence is the bug. Both shell twins report success
+        # here and Headroom then remembers nothing, with every container healthy.
+        out.bad(message)
+
     # Restart rather than print the command: the setting and the running state
     # must not disagree, and a headroom still running the old compose file is
     # exactly the silent mismatch this setting exists to remove.
-    if shutil.which("docker"):
+    #
+    # engine.is_up, never `shutil.which("docker")`. That check is wrong in BOTH
+    # directions and engine.py's docstring calls it "true and useless": Docker
+    # Desktop's WSL stub is on PATH and exits 1 for every command, while a WSL
+    # box reaching the engine through interop has no Linux `docker` at all and
+    # works perfectly -- and used to be told "no docker on PATH" and skipped.
+    kind = engine.docker_kind()
+    if engine.is_up(kind):
         out.say("  restarting headroom so the change takes effect...")
-        from . import services as services_cmd
-
         if services_cmd.main(["restart", "headroom"]) != 0:
             out.bad("headroom restart failed - run: tstack services restart headroom")
     else:
-        out.say("  no docker on PATH; apply it later with: tstack services restart headroom")
+        out.say("  the container engine is not reachable, so headroom was not restarted.")
+        for line in engine.engine_advice(engine.os_name(), kind):
+            out.say(f"    {line}")
+        out.say("  apply it later with: tstack services restart headroom")
     return 0
 
 
