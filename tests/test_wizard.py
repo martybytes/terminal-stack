@@ -623,6 +623,147 @@ def test_the_tray_daemon_is_asked_wherever_there_is_a_windows_side(monkeypatch):
         assert not any("tray daemon" in line for line in console.captured)
 
 
+# --------------------------------------------------------------- the services
+# This question is the only one in the wizard that pulls gigabytes and starts
+# long-lived processes, so most of these are about when it must NOT fire.
+
+
+def _full_run(monkeypatch, **over):
+    """Every other question pinned, so a scripted answer can only be consumed by
+    the one under test."""
+    pinned = {
+        "TS_PROFILE": "full",
+        "TS_DEVELOPMENT": "yes",
+        "TS_APPS": "none",
+        "TS_THEME": "dark",
+        "TS_LEADER": "ctrl-space",
+        "TS_TMUX": "ctrl-b",
+        "TS_STARSHIP_PRESET": "terminal-stack",
+        "TS_TERMINALS": "none",
+        "TS_WEZ_MUX": "off",
+        "TS_WEZ_RESTORE": "off",
+        "TS_ATUIN": "off",
+        "TS_HERDR": "off",
+        "TS_CC_TTS": "off",
+        "TS_CAVEMAN": "off",
+        "TS_HEADROOM_CURSOR": "mcp",
+        "TS_MEMORY_BACKEND": "agentmemory",
+        "TS_STACK_DOCKER_PROBE": "native",
+        "TS_STACK_ENGINE_UP": "1",
+    }
+    pinned.update(over)
+    for name, value in pinned.items():
+        monkeypatch.setenv(name, value)
+
+
+def test_starting_the_services_defaults_to_no(monkeypatch):
+    """1-2 GB and twenty minutes is not something to take by pressing Enter."""
+    _full_run(monkeypatch)
+    console = Console.scripted([""])
+    assert flow.collect(console).services == "off"
+    assert any("Start the local services" in line for line in console.captured)
+
+
+def test_the_services_answer_is_off_with_nobody_to_ask(monkeypatch):
+    """The single most important test here.
+
+    `prompts.choice` takes the default when the console is not interactive, so
+    the default IS what a CI box and a parity container get. This is what stands
+    between `tests/parity/run.sh bootstrap` and a multi-gigabyte pull.
+    """
+    _full_run(monkeypatch)
+    assert flow.collect(Console()).services == "off"
+
+
+def test_assume_yes_is_not_consent_to_pull_images(monkeypatch):
+    """TS_ASSUME_YES means "take every default", and the default here is off.
+
+    It is also passed to every parity container by tests/parity/run.sh, so
+    reading it as consent would have an unattended install reach the network and
+    start containers in CI. Same rule, and the same reason, as the Textual
+    install offer in tstack/commands/ui.py.
+    """
+    _full_run(monkeypatch)
+    monkeypatch.setenv("TS_ASSUME_YES", "1")
+    assert flow.collect(Console()).services == "off"
+
+
+def test_ts_services_skips_the_question(monkeypatch):
+    _full_run(monkeypatch, TS_SERVICES="on")
+    console = Console.scripted([])
+    answers = flow.collect(console)
+    assert answers.services == "on"
+    assert not any("Start the local services" in line for line in console.captured)
+
+
+def test_the_services_question_is_skipped_when_no_stack_is_enabled(monkeypatch):
+    """"Neither" turns off both the proxy and the memory, so there is nothing to
+    start and nothing to ask about."""
+    _full_run(monkeypatch, TS_MEMORY_BACKEND="off")
+    console = Console.scripted([])
+    answers = flow.collect(console)
+    assert answers.headroom == "off" and answers.agentmemory == "off"
+    assert answers.services == "off"
+    assert not any("Start the local services" in line for line in console.captured)
+
+
+def test_compression_only_is_still_asked(monkeypatch):
+    """The gate is "is any stack enabled", NOT "was a backend chosen".
+
+    "Headroom compresses only" is backend `none` with headroomEnabled=on, and
+    there is a real container to start -- gating on the backend would leave a
+    compression-only user's proxy permanently down.
+    """
+    _full_run(monkeypatch, TS_MEMORY_BACKEND="none")
+    console = Console.scripted(["2"])
+    answers = flow.collect(console)
+    assert answers.memory_backend == "none" and answers.headroom == "on"
+    assert answers.services == "on", "there is a proxy to start"
+
+
+def test_a_headless_host_is_never_asked_about_the_services(monkeypatch):
+    _full_run(monkeypatch)
+    monkeypatch.setenv("TS_HEADLESS_RESOLVED", "1")
+    console = Console.scripted([])
+    assert flow.collect(console).services == "off"
+    assert not any("Start the local services" in line for line in console.captured)
+
+
+def test_the_services_question_reports_the_engine_it_probed(monkeypatch):
+    """Probed, not guessed -- but note the deviation this one makes on purpose:
+    the probe changes the REPORT and never the DEFAULT. A healthy engine does not
+    make a 1-2 GB download cheaper."""
+    from tstack import engine
+
+    _full_run(monkeypatch, TS_STACK_DOCKER_PROBE=engine.ABSENT)
+    monkeypatch.delenv("TS_STACK_ENGINE_UP", raising=False)
+    console = Console.scripted([""])
+    assert flow.collect(console).services == "off"
+    assert any("no container engine found" in line for line in console.captured)
+
+    # And when it IS healthy, the default is still off.
+    _full_run(monkeypatch)
+    console = Console.scripted([""])
+    assert flow.collect(console).services == "off"
+    assert any("docker: reachable" in line for line in console.captured)
+
+
+def test_a_denied_engine_is_reported_through_the_one_advice_function(monkeypatch):
+    """Omarchy declines the docker group deliberately, so the wizard must not
+    tell an Omarchy user to `usermod`. Routing through engine_advice rather than
+    growing a second copy is what makes that true here for free."""
+    from tstack import engine
+    from tstack import platform as tsplat
+
+    _full_run(monkeypatch, TS_STACK_DOCKER_PROBE=engine.DENIED)
+    monkeypatch.setattr(tsplat, "is_omarchy", lambda: True)
+    console = Console.scripted([""])
+    flow.collect(console)
+    rendered = "\n".join(console.captured)
+    assert "omarchy-setup-security-sudoless-docker" in rendered
+    assert "usermod" not in rendered
+
+
 def test_the_cursor_mode_is_only_asked_when_headroom_is_on(monkeypatch):
     monkeypatch.setenv("TS_PROFILE", "full")
     monkeypatch.setenv("TS_DEVELOPMENT", "yes")

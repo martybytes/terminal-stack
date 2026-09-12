@@ -52,6 +52,28 @@ def agentmemory() -> tuple[bool, str]:
     )
 
 
+def container_engine() -> tuple[bool, list[str]]:
+    """Is there a usable container engine here, and what to do if not.
+
+    `tstack.engine` wholesale, deliberately. `docker_kind()` carries
+    TS_STACK_DOCKER_PROBE, which is how this is testable with no Docker anywhere,
+    and `engine_advice()` is already PURE and already string-for-string with the
+    bash twin. A second opinion about Docker inside the wizard would be a second
+    thing to get wrong -- and the check a reader reaches for first,
+    `shutil.which("docker")`, is the one engine.py's docstring calls "true and
+    useless".
+
+    A few seconds, not the default thirty: this runs in front of somebody waiting
+    at a prompt, and a wedged engine should not look like a hung installer.
+    """
+    from .. import engine as eng
+
+    kind = eng.docker_kind(timeout=5)
+    if kind not in (eng.ABSENT, eng.DENIED) and eng.is_up(kind, timeout=5):
+        return (True, [f"    docker: reachable ({kind})"])
+    return (False, ["    " + line for line in eng.engine_advice(eng.os_name(), kind)])
+
+
 def headroom() -> tuple[bool, str]:
     # /readyz IS a readiness endpoint, so the strict form is the right one here.
     try:

@@ -54,6 +54,7 @@ class Answers:
     headroom_cursor: str = "mcp"
     caveman: str = "off"
     agentmemory: str = "off"
+    services: str = "off"
     asked: int = 0
 
 
@@ -373,6 +374,9 @@ def collect(console: Console, ask_terminals: bool = False) -> Answers:
             "mcp",
         )
 
+    # -------------------------------------------------------------- services
+    services = _services(ask, profile, bare, headroom, agentmemory)
+
     return Answers(
         profile=profile,
         development=development,
@@ -395,6 +399,7 @@ def collect(console: Console, ask_terminals: bool = False) -> Answers:
         headroom_cursor=headroom_cursor,
         caveman=caveman,
         agentmemory=agentmemory,
+        services=services,
         asked=ask.count,
     )
 
@@ -765,6 +770,61 @@ def _agents(ask: Asker, profile: str, development: str, bare: bool) -> tuple[str
     return (memory, headroom, agentmemory, _on_off(caveman))
 
 
+def _services(ask: Asker, profile: str, bare: bool, headroom: str, agentmemory: str) -> str:
+    """Whether the install STARTS the containers the answers above just chose.
+
+    Every other question here records an intent. This is the only one that pulls
+    gigabytes and starts long-lived processes, which is why it is its own
+    question and why it defaults to off.
+
+    What is NOT behind it: `tstack services bootstrap`. That needs no engine, no
+    network and no consent -- it writes the .env files and generates
+    HEADROOM_PROXY_TOKEN, without which headroom's compose does not even parse.
+    The installers run it either way, and that alone is what fixes a machine
+    whose agent wiring reported "proxy token unavailable" on every step.
+
+    The gate is "is any stack enabled", NOT "was a backend chosen". The third
+    memory answer -- Headroom compresses only -- is backend `none` with
+    headroomEnabled=on, and there is a real container to start; gating on the
+    backend would leave a compression-only user's proxy permanently down.
+
+    Two deliberate deviations from the house style, both worth stating:
+
+      * The probe changes the REPORT, never the DEFAULT. Elsewhere here a
+        reachable service moves the recommendation; a healthy engine does not
+        make a 1-2 GB download cheaper.
+      * TS_ASSUME_YES is NOT read. It means "take every default", the default is
+        off, and tests/parity/run.sh passes it to every container -- so reading
+        it as consent would have an unattended install pull images in CI. Same
+        rule and the same reason as tstack/commands/ui.py's install offer.
+    """
+    if _env("TS_SERVICES"):
+        return _on_off(_env("TS_SERVICES"))
+    if profile != PROFILE_FULL or bare:
+        return "off"
+    if headroom != "on" and agentmemory != "on":
+        # "Neither" enabled no stack at all. There is nothing to bring up.
+        return "off"
+    _up, report = probes.container_engine()
+    return ask.choose(
+        "Start the local services now?",
+        [
+            ("off", "no", "set them up now, start them when you want"),
+            ("on", "yes", "pull the images and bring the stacks up"),
+        ],
+        "off",
+        "  RECOMMENDATION: no, unless you have the bandwidth and twenty minutes.\n"
+        "  The .env files, the generated secrets and the named volumes are written\n"
+        "  either way - that half needs no engine and no network, and it is what\n"
+        "  makes this machine configured rather than half-configured.\n"
+        "  Only the IMAGES are in question: 1-2 GB, and about 940 MB more if you\n"
+        "  chose Headroom's memory, which adds Qdrant and Neo4j.\n"
+        "  The container engine here, probed just now:\n" + "\n".join(report) + "\n"
+        "  Either way: `tstack services up` starts them later, and\n"
+        "  `tstack services doctor` says what is missing.",
+    )
+
+
 def review(console: Console, answers: Answers) -> None:
     """Print every answer before anything is written or installed.
 
@@ -802,6 +862,7 @@ def review(console: Console, answers: Answers) -> None:
     console.say(f"    Headroom         {answers.headroom} (Cursor: {answers.headroom_cursor})")
     console.say(f"    Caveman          {answers.caveman}")
     console.say(f"    Memory backend   {answers.memory_backend}")
+    console.say(f"    Start services   {answers.services}")
 
 
 def confirm(console: Console, answers: Answers, assume_yes: bool) -> Answers | None:
