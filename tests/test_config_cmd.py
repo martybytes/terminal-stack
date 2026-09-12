@@ -20,8 +20,8 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from tstack import engine, schema, stacks, store  # noqa: E402
 from tstack import platform as plat  # noqa: E402
-from tstack import schema, store  # noqa: E402
 from tstack.commands import config  # noqa: E402
 
 
@@ -312,7 +312,39 @@ def test_no_verb_opens_the_menu_rather_than_printing_show(monkeypatch):
     assert seen[0][-1].endswith("ts-config.sh"), seen[0]
 
 
-def test_switching_the_memory_backend_moves_the_wiring_and_restarts_headroom(monkeypatch):
+@pytest.fixture
+def memory_clone(monkeypatch, tmp_path):
+    """A throwaway clone with a headroom .env, and both callees recorded.
+
+    Never ROOT. `set_memory` writes headroom's COMPOSE_FILE now, and pointing a
+    test at the real tree would have it edit the developer's own `.env` -- the
+    hazard `docs/verifying-changes.md` § 4 exists for, one directory over.
+    """
+    from tstack.commands import agents as agents_cmd
+    from tstack.commands import services as services_cmd
+
+    env = tmp_path / "services" / "stacks" / "headroom" / ".env"
+    env.parent.mkdir(parents=True)
+    env.write_text("COMPOSE_PATH_SEPARATOR=:\nCOMPOSE_FILE=docker-compose.yml\n", encoding="utf-8")
+    monkeypatch.setattr(config.paths, "resolve_source_dir", lambda: tmp_path)
+    monkeypatch.setattr(config.store, "set", lambda k, v: None)
+
+    calls: dict[str, list] = {"agents": [], "services": []}
+    monkeypatch.setattr(agents_cmd, "main", lambda argv: (calls["agents"].append(argv), 0)[1])
+    monkeypatch.setattr(services_cmd, "main", lambda argv: (calls["services"].append(argv), 0)[1])
+    calls["env"] = env  # type: ignore[assignment]
+    return calls
+
+
+def _backend(monkeypatch, value):
+    monkeypatch.setattr(
+        config.store, "get", lambda k, d=None: value if k == "memoryBackend" else (d or "")
+    )
+
+
+def test_switching_the_memory_backend_moves_the_wiring_and_restarts_headroom(
+    monkeypatch, memory_clone
+):
     """Two things the shell did that the port had dropped.
 
     The agent WIRING is what actually captures, so it moves with the setting --
@@ -321,50 +353,151 @@ def test_switching_the_memory_backend_moves_the_wiring_and_restarts_headroom(mon
     headroom still running the old compose file is exactly the silent mismatch
     this setting exists to remove.
     """
-    agent_calls: list[list[str]] = []
-    service_calls: list[list[str]] = []
-    monkeypatch.setattr(
-        config.store, "get", lambda k, d=None: "agentmemory" if k == "memoryBackend" else (d or "")
-    )
-    monkeypatch.setattr(config.store, "set", lambda k, v: None)
-    monkeypatch.setattr(config.shutil, "which", lambda name: "/usr/bin/docker")
-    # Every write verb resolves the clone first; the suite runs with a
-    # throwaway HOME where the installed one is not found.
-    monkeypatch.setattr(config.paths, "resolve_source_dir", lambda: ROOT)
-
-    from tstack.commands import agents as agents_cmd
-    from tstack.commands import services as services_cmd
-
-    monkeypatch.setattr(agents_cmd, "main", lambda argv: (agent_calls.append(argv), 0)[1])
-    monkeypatch.setattr(services_cmd, "main", lambda argv: (service_calls.append(argv), 0)[1])
+    _backend(monkeypatch, "agentmemory")
+    monkeypatch.setenv("TS_STACK_DOCKER_PROBE", engine.NATIVE)
+    monkeypatch.setenv("TS_STACK_ENGINE_UP", "1")
 
     assert config.main(["memory", "headroom"]) == 0
-    assert agent_calls == [["agentmemory", "off"]], "leaving agentmemory unwires it"
-    assert service_calls == [["restart", "headroom"]]
+    assert memory_clone["agents"] == [["agentmemory", "off"]], "leaving agentmemory unwires it"
+    assert memory_clone["services"] == [["bootstrap"], ["restart", "headroom"]]
 
-    agent_calls.clear()
-    service_calls.clear()
-    monkeypatch.setattr(
-        config.store, "get", lambda k, d=None: "none" if k == "memoryBackend" else (d or "")
-    )
+    memory_clone["agents"].clear()
+    memory_clone["services"].clear()
+    _backend(monkeypatch, "none")
     assert config.main(["memory", "agentmemory"]) == 0
-    assert agent_calls == [["agentmemory", "on"]], "choosing it wires it"
+    assert memory_clone["agents"] == [["agentmemory", "on"]], "choosing it wires it"
 
 
-def test_a_missing_docker_says_what_to_run_later_rather_than_failing(monkeypatch):
-    """The setting is still saved. A machine with no engine is not a broken one."""
-    monkeypatch.setattr(
-        config.store, "get", lambda k, d=None: "none" if k == "memoryBackend" else (d or "")
-    )
-    monkeypatch.setattr(config.store, "set", lambda k, v: None)
-    monkeypatch.setattr(config.shutil, "which", lambda name: None)
-    # Every write verb resolves the clone first; the suite runs with a
-    # throwaway HOME where the installed one is not found.
-    monkeypatch.setattr(config.paths, "resolve_source_dir", lambda: ROOT)
-    from tstack.commands import agents as agents_cmd
+def test_the_backend_is_seeded_before_it_is_restarted(monkeypatch, memory_clone):
+    """Order, not membership. Asserting only that bootstrap is *called* would
+    pass with it bolted on after the restart, which fixes nothing.
 
-    monkeypatch.setattr(agents_cmd, "main", lambda argv: 0)
+    `restart` is down+up, and `up` on an unseeded headroom never reaches compose:
+    both its secrets are `:?`-required, so it dies at `compose config` about a
+    VARIABLE rather than about the missing file. That is the error the reported
+    install printed, twice.
+    """
+    _backend(monkeypatch, "none")
+    monkeypatch.setenv("TS_STACK_DOCKER_PROBE", engine.NATIVE)
+    monkeypatch.setenv("TS_STACK_ENGINE_UP", "1")
     assert config.main(["memory", "headroom"]) == 0
+    verbs = [c[0] for c in memory_clone["services"]]
+    assert verbs.index("bootstrap") < verbs.index("restart")
+
+
+def test_the_compose_file_round_trips_through_the_consumer(monkeypatch, memory_clone):
+    """The overlay's `command:` carries `--memory`, which has no environment
+    variable and is the entire feature. Asserted through `stacks.compose_files`,
+    because that is what `Compose` and `check_files` actually read."""
+    env = memory_clone["env"]
+    monkeypatch.setenv("TS_STACK_DOCKER_PROBE", engine.ABSENT)
+
+    _backend(monkeypatch, "none")
+    assert config.main(["memory", "headroom"]) == 0
+    assert stacks.compose_files(env.parent) == [
+        "docker-compose.yml",
+        "docker-compose.memory.yml",
+    ]
+
+    _backend(monkeypatch, "headroom")
+    assert config.main(["memory", "agentmemory"]) == 0
+    assert stacks.compose_files(env.parent) == ["docker-compose.yml"]
+
+
+def test_a_missing_compose_file_key_is_appended_not_ignored(monkeypatch, memory_clone):
+    """The awk twin's END block: .env.example is not guaranteed to carry either
+    key, and a silent no-op there is the bug in a different costume."""
+    env = memory_clone["env"]
+    env.write_text("HEADROOM_PORT=8787\n", encoding="utf-8")
+    _backend(monkeypatch, "none")
+    monkeypatch.setenv("TS_STACK_DOCKER_PROBE", engine.ABSENT)
+
+    assert config.main(["memory", "headroom"]) == 0
+    body = env.read_text(encoding="utf-8")
+    assert "COMPOSE_FILE=docker-compose.yml:docker-compose.memory.yml" in body
+    assert "COMPOSE_PATH_SEPARATOR=:" in body
+    assert body.startswith("HEADROOM_PORT=8787\n"), "and it appends rather than rewriting"
+
+
+def test_a_crlf_env_file_is_not_half_converted(monkeypatch, memory_clone):
+    """A .env a Windows side also writes must not come back half LF, which is
+    what universal newline translation does to exactly the line being edited."""
+    env = memory_clone["env"]
+    env.write_bytes(b"HEADROOM_PORT=8787\r\nCOMPOSE_FILE=docker-compose.yml\r\n")
+    _backend(monkeypatch, "none")
+    monkeypatch.setenv("TS_STACK_DOCKER_PROBE", engine.ABSENT)
+
+    assert config.main(["memory", "headroom"]) == 0
+    raw = env.read_bytes()
+    assert b"\r\n" in raw
+    assert raw.count(b"\n") == raw.count(b"\r\n"), "every line ending survived"
+
+
+def test_an_existing_separator_is_never_rewritten(monkeypatch, memory_clone):
+    """The awk prints one straight through. A machine that chose ';' would
+    otherwise get its overlay parsed as one impossible filename."""
+    env = memory_clone["env"]
+    env.write_text("COMPOSE_PATH_SEPARATOR=;\nCOMPOSE_FILE=docker-compose.yml\n", encoding="utf-8")
+    _backend(monkeypatch, "none")
+    monkeypatch.setenv("TS_STACK_DOCKER_PROBE", engine.ABSENT)
+
+    assert config.main(["memory", "headroom"]) == 0
+    assert "COMPOSE_PATH_SEPARATOR=;" in env.read_text(encoding="utf-8")
+    assert env.read_text(encoding="utf-8").count("COMPOSE_PATH_SEPARATOR=") == 1
+
+
+def test_the_engine_probe_decides_the_restart_not_which_docker(monkeypatch, memory_clone, capsys):
+    """`shutil.which("docker")` is wrong in BOTH directions, which is why
+    engine.py's docstring calls it "true and useless".
+
+    The false positive is Docker Desktop's WSL stub: on PATH, exits 1 for every
+    command, and prints its complaint on STDOUT. The false NEGATIVE is worse and
+    was undocumented -- a WSL box reaching the engine through interop has no
+    Linux `docker` at all and `tstack services` works perfectly, while this told
+    the user "no docker on PATH" and skipped the restart.
+    """
+    _backend(monkeypatch, "none")
+    monkeypatch.setenv("TS_STACK_DOCKER_PROBE", engine.WSL_SHIM)
+    monkeypatch.delenv("TS_STACK_ENGINE_UP", raising=False)
+
+    assert config.main(["memory", "headroom"]) == 0
+    assert ["restart", "headroom"] not in memory_clone["services"]
+    out = capsys.readouterr().out
+    assert "WSL Integration" in out, "it routes through engine_advice, not its own copy"
+    # The file edit is NEVER gated on the engine: it is a file edit.
+    assert "docker-compose.memory.yml" in memory_clone["env"].read_text(encoding="utf-8")
+
+
+def test_a_missing_docker_says_what_to_run_later_rather_than_failing(
+    monkeypatch, memory_clone, capsys
+):
+    """The setting is still saved. A machine with no engine is not a broken one."""
+    _backend(monkeypatch, "none")
+    monkeypatch.setenv("TS_STACK_DOCKER_PROBE", engine.ABSENT)
+
+    assert config.main(["memory", "headroom"]) == 0
+    out = capsys.readouterr().out
+    assert "no container engine found" in out
+    assert "tstack services restart headroom" in out
+    assert ["restart", "headroom"] not in memory_clone["services"]
+
+
+def test_a_denied_engine_is_told_about_the_distro_s_own_door(monkeypatch, memory_clone, capsys):
+    """Omarchy declines the docker group on purpose -- membership is equivalent
+    to passwordless root -- so this must never tell an Omarchy user to `usermod`.
+    Routing through engine_advice is what makes that true here for free."""
+    _backend(monkeypatch, "none")
+    monkeypatch.setenv("TS_STACK_DOCKER_PROBE", engine.DENIED)
+
+    monkeypatch.setattr(plat, "is_omarchy", lambda: True)
+    assert config.main(["memory", "headroom"]) == 0
+    out = capsys.readouterr().out
+    assert "omarchy-setup-security-sudoless-docker" in out
+    assert "usermod" not in out
+
+    monkeypatch.setattr(plat, "is_omarchy", lambda: False)
+    assert config.main(["memory", "headroom"]) == 0
+    assert "usermod -aG docker" in capsys.readouterr().out
 
 
 def test_config_wizard_saves_where_bare_wizard_only_asks(monkeypatch):

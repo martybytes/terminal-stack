@@ -520,6 +520,17 @@ def _seed_env(svc: Services, directory: Path) -> None:
     if directory.name == "kokoro":
         ok, message = stacks.seed_kokoro_profile(target)
         (svc.out.info if ok else svc.out.warn)(message)
+    # headroom's COMPOSE_FILE is to memoryBackend exactly what kokoro's is to the
+    # GPU probe: a derived value whose shipped default is right for only one
+    # answer. .env.example carries the plain file, so a machine that chose
+    # `headroom` used to be seeded WITHOUT the overlay -- and the overlay's
+    # `command:` is what passes `--memory`, which has no environment variable and
+    # is the entire feature. Same fresh-file-only rule as kokoro: a pre-existing
+    # .env is somebody's, and `tstack config memory` is the explicit correction.
+    if directory.name == "headroom":
+        backend = store.get("memoryBackend", "agentmemory")
+        ok, message = stacks.write_memory_compose_file(target, backend)
+        (svc.out.info if ok else svc.out.warn)(message)
 
 
 def _generated_secrets(source: Path) -> list[dict]:

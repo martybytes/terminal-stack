@@ -249,16 +249,27 @@ memory_set() {
         echo "  AgentMemory hooks removed from Claude/Codex/Cursor."
     fi
 
+    # Seed before anything reads a .env. `restart` is down+up, and `up` on an
+    # unseeded headroom never reaches compose: both its secrets are :?-required,
+    # so it dies at `compose config` about a VARIABLE rather than about the file
+    # that is missing. bootstrap needs no engine, no network, and never rotates
+    # a value somebody set.
+    run_py services bootstrap || \
+        echo "  $WARN services bootstrap failed — retry: tstack services bootstrap" >&2
+
     # Restart rather than print the command: the setting and the running state
     # must not disagree, and a headroom that is still running the old compose
     # file is exactly the silent mismatch this whole change exists to remove.
-    if command -v docker >/dev/null 2>&1; then
-        echo "  restarting headroom so the change takes effect..."
-        run_py services restart headroom || \
-            echo "  $WARN headroom restart failed — run: tstack services restart headroom" >&2
-    else
-        echo "  no docker on PATH; apply it later with: tstack services restart headroom"
-    fi
+    #
+    # No `command -v docker` guard. That check is wrong in both directions --
+    # Docker Desktop's WSL stub is on PATH and exits 1 for everything, while a
+    # WSL box reaching the engine through interop has no Linux `docker` at all
+    # and works fine -- and a second engine probe here is a second thing to get
+    # wrong. `tstack services` already refuses on the NEEDS_ENGINE path and
+    # prints engine_advice, from the one implementation of both.
+    echo "  restarting headroom so the change takes effect..."
+    run_py services restart headroom || \
+        echo "  $WARN headroom not restarted — apply it later: tstack services restart headroom" >&2
 }
 
 agents_show() {
