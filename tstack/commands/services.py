@@ -454,6 +454,22 @@ def cmd_bootstrap(svc: Services) -> None:
     # means compose will not create them. This is where every memory you have ever
     # saved lives, so an existing one is never touched. Read out of the compose
     # files themselves rather than listed here.
+    #
+    # This is the one section that needs the engine, and `bootstrap` deliberately
+    # is not in NEEDS_ENGINE -- seeding the .env files and generating the secrets
+    # is the whole point of being able to run it on a machine with no Docker. So
+    # skip rather than try: `volume_exists` fails, the legacy check fails with it,
+    # and the create then fails too, which used to spend two red `bad()` lines
+    # per volume telling a user their engine is down in the least useful words
+    # available. `skip()` does not count as an issue, because an absent engine is
+    # not a broken machine -- and the installer now runs this on every install,
+    # so a machine that has not got Docker yet is an ordinary case, not an error.
+    if out.apply and not svc.engine_ok:
+        out.skip("the engine is unreachable, so the external volumes were not created")
+        out.note("run:  tstack services bootstrap     again once the engine is up")
+        out.note("      nothing else here needs it - the .env files above are done")
+        _bootstrap_next(out)
+        return
     for volume in _external_volumes(svc.source) or ["ts-agentmemory-data"]:
         if not out.apply:
             out.step(f"docker volume create {volume} (if absent)")
@@ -474,6 +490,10 @@ def cmd_bootstrap(svc: Services) -> None:
         if rc != 0:
             out.bad(f"docker volume create failed for {volume}")
 
+    _bootstrap_next(out)
+
+
+def _bootstrap_next(out: Out) -> None:
     out.section("next")
     out.note("tstack services up        start the stacks your settings enable")
     out.note("tstack services doctor    check the engine, the .env files and the ports")
