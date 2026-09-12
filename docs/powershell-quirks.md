@@ -478,6 +478,12 @@ ts-agentmemory.ps1: Method invocation failed because
 [System.Collections.Specialized.OrderedDictionary] does not contain a method named 'ContainsKey'.
 ```
 
+The bash twin cannot have this bug and is not a model for the fix: it does the same
+merge in Python, where the empty fallback and a parsed object are both `dict` and both
+answer `.get`. This is a PowerShell hazard specifically — two dictionary types that
+index identically, print identically, and satisfy `-is [System.Collections.IDictionary]`
+identically, while disagreeing about one method name.
+
 **Rule for this repo:** use `Contains` on any dictionary that might be an `[ordered]`
 literal — it is correct for a `Hashtable` too, so it is never the wrong choice there.
 `test_no_containskey_on_an_ordered_dictionary` (`tests/test_agent_tools.py`) parses

@@ -7,7 +7,7 @@ keep on **remote servers** — locally, WezTerm panes cover the same ground.
 
 | Setting | Effect |
 |---|---|
-| prefix | configurable: `tstack config tmux <chord>`, default `C-b` — kept separate from the WezTerm leader so the two layers never collide |
+| prefix | configurable: `tstack config tmux <chord>`, default `C-b` — kept separate from the WezTerm leader so the two layers never collide. A key with no printable spelling is named: `ctrl-backslash`, which tmux renders back as `C-\` |
 | `mouse on` | click panes, drag borders, wheel-scroll |
 | `base-index 1` / `pane-base-index 1` | windows and panes count from 1, matching the number row |
 | `renumber-windows on` | closing window 2 of 4 leaves 1-3, not 1,3,4 |
