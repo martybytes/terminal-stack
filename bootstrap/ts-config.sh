@@ -140,6 +140,11 @@ run_wizard() {
     # The pwsh $runWizard has always installed the chosen emulator; this side
     # never did, so a `tstack config wizard` that picked WezTerm silently did nothing.
     install_terminals "${TS_WIZ_TERMINALS:-}" || ts_note_failure "terminal emulator" "retry: tstack config wezterm install <channel>"
+    # The services half, exactly as the three bootstraps do it. Without this line
+    # a `tstack config wizard` re-run asks the question and throws the answer
+    # away -- the same bug the ts_memory_apply line above was added to fix, and
+    # the reason this path counts as a wizard call site rather than a shortcut.
+    ts_services_apply_wizard "${SRC:-}"
     ts_report_installed_apps "${TS_WIZ_APPS:-}"
     ts_report_failures
     finish
