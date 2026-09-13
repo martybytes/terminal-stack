@@ -257,6 +257,86 @@ def test_bootstrap_seeds_env_files_and_leaves_an_existing_one_alone(tree, calls,
     assert "left untouched" in capsys.readouterr().out
 
 
+def _publishing(root: Path, stack: str, project: str, host_port: str, token: str = "") -> None:
+    """Give a fixture stack a pinned project name and one published port."""
+    (root / stack / "docker-compose.yml").write_text(
+        f"name: {project}\nservices:\n  x:\n    ports:\n"
+        f'      - "127.0.0.1:{token or host_port}:9999"\n',
+        encoding="utf-8",
+    )
+
+
+def test_up_refuses_a_stack_whose_port_a_foreign_container_holds(tree, calls, store_off, capsys):
+    """compose's own error for this names the PORT and not what has it.
+
+    An ordinary machine runs its own things: a postgres on 5433, a standalone
+    kokoro on 8880. Starting a stack into one of those fails with "port is
+    already allocated" and leaves the reader to find the culprit by hand.
+    """
+    root = stacks.stack_root(tree)
+    _publishing(root, "headroom", "ts-headroom", "8787")
+    store_off["headroomEnabled"] = "on"
+    calls["answers"]["ps --format"] = (0, "my-own-proxy\t0.0.0.0:8787->8787/tcp\n")
+
+    svc = build(tree, "up")
+    svc.stacks = ["headroom"]
+    services.cmd_up(svc)
+
+    out = capsys.readouterr().out
+    assert "port 8787 is already held by 'my-own-proxy'" in out
+    assert not calls["compose"], "and nothing was started"
+    assert svc.out.issues == 1
+
+
+def test_up_is_not_refused_by_this_stacks_own_running_containers(tree, calls, store_off, capsys):
+    """`up` on a stack that is already up is a no-op, and must stay one.
+
+    Our own containers hold their ports too, so the prefix test against the
+    pinned compose project name is what separates "already running" from
+    "something else is in the way".
+    """
+    root = stacks.stack_root(tree)
+    _publishing(root, "headroom", "ts-headroom", "8787")
+    store_off["headroomEnabled"] = "on"
+    calls["answers"]["ps --format"] = (0, "ts-headroom-proxy\t127.0.0.1:8787->8787/tcp\n")
+
+    svc = build(tree, "up")
+    svc.stacks = ["headroom"]
+    services.cmd_up(svc)
+
+    assert calls["compose"], "its own container must not block it"
+    assert svc.out.issues == 0
+
+
+def test_a_published_port_is_read_from_the_env_not_guessed(tree):
+    """`127.0.0.1:${KOKORO_PORT:-8880}:8880` -- the .env wins, then the `:-`
+    fallback, exactly as compose interpolates it. Read from the FILES, so this
+    works with the engine down and before anything is created, which is the whole
+    point of asking before starting."""
+    root = stacks.stack_root(tree)
+    _publishing(root, "headroom", "ts-headroom", "", token="${HEADROOM_PORT:-8787}")
+    assert stacks.published_ports(root / "headroom") == ["8787"]
+
+    (root / "headroom" / ".env").write_text("HEADROOM_PORT=9999\n", encoding="utf-8")
+    assert stacks.published_ports(root / "headroom") == ["9999"]
+    assert stacks.project_name(root / "headroom") == "ts-headroom"
+
+
+def test_a_contiguous_port_range_still_finds_its_holder(tree, calls, store_off, capsys):
+    """Docker collapses contiguous ports into `3112-3113->3112-3113/tcp`, so a
+    literal `:3113->` match finds nothing -- the same trap port_publication
+    already documents."""
+    root = stacks.stack_root(tree)
+    _publishing(root, "agentmemory", "ts-agentmemory", "3113")
+    store_off["agentmemoryEnabled"] = "on"
+    calls["answers"]["ps --format"] = (0, "someone-else\t127.0.0.1:3112-3113->3112-3113/tcp\n")
+
+    svc = build(tree, "up")
+    svc.stacks = ["agentmemory"]
+    services.cmd_up(svc)
+    assert "port 3113 is already held by 'someone-else'" in capsys.readouterr().out
+
+
 def test_bootstrap_derives_headroom_compose_file_from_the_saved_backend(
     tree, calls, store_off, capsys
 ):
