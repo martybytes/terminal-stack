@@ -98,6 +98,14 @@ TS_PERSIST_HOOK=_ts_persist_wizard
 # cancellation from a genuine failure.
 common_install_all || { _rc=$?; [ "$_rc" = 3 ] && exit 3; exit "$_rc"; }
 
+# The SERVICES half. `services bootstrap` runs whatever was answered -- it needs
+# no engine and no network -- and `services up` only when the wizard said so.
+# BEFORE the agent wiring, because that wiring probes the proxy and reads the
+# headroom .env this step is what creates.
+if [ -f "${TOML:-}" ]; then
+    ts_services_apply_wizard "$SOURCE_DIR"
+fi
+
 # The agent WIRING half: needs the claude/codex CLIs, so unlike the settings it
 # has to wait until after the app install.
 if [ -f "${TOML:-}" ]; then

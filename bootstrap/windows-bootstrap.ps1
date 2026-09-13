@@ -219,6 +219,13 @@ if (-not $WhatIfPreference) {
     $agentsEntry = Join-Path $SourceDir 'tstack\main.py'
     $agentsPython = $pythonExe
     if ($agentsPython -and (Test-Path -LiteralPath $agentsEntry)) {
+        # The SERVICES half, BEFORE the agent wiring. `bootstrap` needs no engine
+        # and no network: it seeds services\stacks\*\.env and generates
+        # HEADROOM_PROXY_TOKEN, without which headroom's compose does not parse
+        # and every `agents headroom` step below reports "proxy token
+        # unavailable". `up` pulls gigabytes, so it runs only when asked.
+        Invoke-TsServicesWizard -SourceDir $SourceDir -Services $wizard.Services `
+            -Python $agentsPython -Entry $agentsEntry
         if ($wizard.Headroom -eq 'on') { & $agentsPython $agentsEntry agents headroom on $wizard.HeadroomCursor | Out-Host }
         if ($wizard.Caveman -eq 'on') { & $agentsPython $agentsEntry agents caveman on | Out-Host }
         if ($wizard.Agentmemory -eq 'on') { & $agentsPython $agentsEntry agents agentmemory on | Out-Host }

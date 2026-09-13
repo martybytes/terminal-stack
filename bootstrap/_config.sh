@@ -1194,6 +1194,60 @@ ts_agents_apply_wizard() {
     [ "${TS_WIZ_AGENTMEMORY:-off}" = on ] && "$@" agentmemory on || [ "${TS_WIZ_AGENTMEMORY:-off}" != on ] || echo "$WARN AgentMemory setup failed; retry: tstack config agents agentmemory repair" >&2
 }
 
+# The SERVICES half of the wizard's answers. Two steps, and they are NOT the
+# same decision:
+#
+#   bootstrap  ALWAYS. It needs no engine, no network and no consent: it seeds
+#              every services/stacks/*/.env from its tracked example, generates
+#              HEADROOM_PROXY_TOKEN and NEO4J_PASSWORD, and derives headroom's
+#              COMPOSE_FILE from the backend. Without it a full install leaves
+#              memoryBackend=agentmemory next to no .env at all, headroom's
+#              compose does not parse ("required variable HEADROOM_PROXY_TOKEN is
+#              missing a value"), and Headroom.token() reads a file that is not
+#              there -- which every agent-wiring step then reports as "proxy
+#              token unavailable".
+#   up         ONLY on TS_WIZ_SERVICES=on. It pulls 1-2 GB and starts long-lived
+#              processes. THAT is what the wizard asks about.
+#
+# It must run BEFORE ts_agents_apply_wizard: the agent wiring probes the proxy,
+# and a proxy whose token now exists turns a warning into a success.
+#
+# Neither step may abort the install. The product of a bootstrap is
+# configuration, and an optional step that dies takes every answered question
+# with it -- see the ORDERING comment in _common-posix.sh. So both end in
+# ts_note_failure and the run reports them at the end.
+#
+# No engine probe here on purpose. `tstack services` already refuses on the
+# NEEDS_ENGINE path and prints engine_advice from the one implementation of
+# both; a `command -v docker` guard in this file would be a second opinion that
+# is wrong in both directions (Docker Desktop's WSL stub is on PATH and exits 1
+# for everything; a WSL box on interop has no Linux docker and works fine).
+ts_services_apply_wizard() {
+    local src="${1:-}" root entry python
+    root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd -P)" || return 0
+    entry="$root/tstack/main.py"
+    [ -f "$entry" ] || return 0
+    [ -d "$root/services/stacks" ] || return 0
+    python="$(ts_python)" || return 0
+    # Pinned from the bootstrap's own SOURCE_DIR: chezmoi.toml was written
+    # moments ago and resolve_source_dir would usually find it, but a clone at a
+    # non-candidate path -- the parity container's whole premise -- would not.
+    TERMINAL_STACK_DIR="${src:-$root}" export TERMINAL_STACK_DIR
+
+    "$python" "$entry" services bootstrap \
+        || ts_note_failure "service .env files" "retry: tstack services bootstrap"
+
+    if [ "${TS_WIZ_SERVICES:-off}" != on ]; then
+        echo "$INFO Services are set up but not started."
+        echo "    Start them when you want them:  tstack services up"
+        echo "    See what is missing:            tstack services doctor"
+        return 0
+    fi
+    "$python" "$entry" services up \
+        || ts_note_failure "docker services" "retry: tstack services up"
+    return 0
+}
+
 # ── WezTerm multiplexer domain ──────────────────────────────────────────────────
 # "on"  → .wezterm.lua sets unix_domains = {{ name = 'main' }} + default_domain,
 #         so panes live in wezterm-mux-server and survive a GUI crash.

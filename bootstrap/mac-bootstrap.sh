@@ -189,9 +189,14 @@ else
     echo "$INFO Login shell already zsh"
 fi
 
-# 6. Agent wiring. The SETTINGS were already saved before any install ran (§2e);
-# this is the half that shells out to `tstack agents`, which needs the claude/codex
-# CLIs to exist — so it has to stay after the app install, unlike the settings.
+# 6. Services, then agent wiring. The SETTINGS were already saved before any
+# install ran (§2e); both halves here shell out to `tstack`, which needs the app
+# install behind it. Services first: the agent wiring probes the proxy and reads
+# the headroom .env that `services bootstrap` is what creates.
+if [ -f "$TOML" ]; then
+    ts_services_apply_wizard "$SOURCE_DIR"
+fi
+
 if [ -f "$TOML" ]; then
     ts_agents_apply_wizard "$SOURCE_DIR"
 fi

@@ -1318,6 +1318,13 @@ function Set-TerminalStackConfig {
         # JSON does not carry it, so that read was $null and this persisted an
         # empty WORKSPACE_DIR. Same fix as windows-bootstrap.ps1.
         Save-TsWorkspaceOverride (Read-TsWorkspaceDir)
+        # The services half, exactly as the four bootstraps do it. Without this a
+        # `tstack config wizard` re-run asks the question and throws the answer
+        # away -- the same bug Set-TsMemoryBackend above was added to fix.
+        $wizPython = Get-TstackPython
+        if ($wizPython) {
+            Invoke-TsServicesWizard -SourceDir $src -Services $w.Services -Python $wizPython
+        }
         Invoke-TsSync $src
         Show-TsInstalledApps @($w.Apps)
         Write-Host '==> done.'
