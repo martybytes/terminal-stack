@@ -581,6 +581,7 @@ ts_brew_install_apps() {
     ts_install_node_lts "$apps" || ts_note_failure "Node LTS" "retry: tstack config apps node"
     ts_install_ai_clis "$apps"  || ts_note_failure "agent CLIs" "retry: tstack config apps claude,codex,…"
     ts_install_herdrs "$apps"   || ts_note_failure "herdr" "retry: tstack config apps herdr"
+    ts_install_dockers "$apps"  || ts_note_failure "docker" "retry: brew install --cask docker"
     return 0
 }
 
@@ -707,6 +708,95 @@ ts_install_herdrs() {
     local id
     for id in $1; do
         ts_app_is_herdr "$id" && ts_install_herdr
+    done
+    return 0
+}
+
+# docker is in the catalog but is not a package on any platform this stack
+# targets, so it is route-listed for exactly the reason herdr is: the GROUP says
+# what a tool IS, the ROUTE says how it arrives. Do NOT move it into `ai` to get
+# a non-package install -- that hands it to ts_install_ai_cli, which has no
+# branch for an engine.
+#
+# It lives here rather than in a distro half because the route branches on
+# pacman-or-curl, and tests/test_distro.py bans each half from speaking the
+# other's package manager. One implementation, the way herdr and the AI CLIs
+# already are.
+ts_app_is_docker() {
+    case "$1" in docker) return 0 ;; *) return 1 ;; esac
+}
+
+ts_install_docker() {
+    if command -v docker >/dev/null 2>&1; then
+        echo "==> docker: already present ($(command -v docker))"
+        return 0
+    fi
+    # A container never installs an engine, whatever it was ticked.
+    if _ts_in_container 2>/dev/null; then
+        echo "==> docker: skipped inside a container"
+        return 0
+    fi
+    # On WSL the engine is a WINDOWS process reached through Docker Desktop's
+    # integration. Installing a second one inside the distro is the mess
+    # engine_advice's wsl-shim branch exists to talk people out of, so say the
+    # same thing rather than creating it.
+    if _ts_is_wsl 2>/dev/null; then
+        echo "==> docker on WSL comes from the Windows side, not from here:"
+        echo "    Docker Desktop -> Settings -> Resources -> WSL Integration -> enable this distro"
+        return 0
+    fi
+    case "$(uname -s 2>/dev/null)" in
+        Darwin)
+            # `brew install docker` is the CLI ONLY: it would leave docker_kind()
+            # answering `native` with no engine behind it, the worst of the four
+            # states. The cask is the engine.
+            #
+            # And a hand-placed Docker.app is not ours to replace. `--cask
+            # --adopt` on an existing bundle is what deleted a real Zed install
+            # -- see ts_install_apps.
+            if [ -d "${TS_DOCKER_APP:-/Applications/Docker.app}" ]; then
+                echo "==> docker: already at ${TS_DOCKER_APP:-/Applications/Docker.app}; leaving it alone."
+                return 0
+            fi
+            brew install --cask docker \
+                || ts_note_failure "docker" "retry: brew install --cask docker"
+            return 0
+            ;;
+    esac
+    # Linux. Deliberately NOT apt by name: Debian ships a package called `docker`
+    # that is a system-tray applet, and the engine is docker-ce from a
+    # third-party repo. get.docker.com resolves that per distro -- except on
+    # Arch, which refuses it and packages the engine properly.
+    if ts_is_arch 2>/dev/null; then
+        sudo pacman -S --needed --noconfirm docker docker-compose \
+            || ts_note_failure "docker" "retry: see \`doc docker\`"
+    else
+        curl -fsSL https://get.docker.com | sh \
+            || ts_note_failure "docker" "retry: see \`doc docker\`"
+    fi
+    sudo systemctl enable --now docker.service >/dev/null 2>&1 || true
+    # THE GROUP. Omarchy declines it on purpose -- membership is equivalent to
+    # passwordless root, because anything in it can `docker run -v /:/host` --
+    # and ships omarchy-setup-security-sudoless-docker as the opt-in, behind its
+    # own warning. This stack has no business quietly talking someone out of a
+    # decision their distro made deliberately, so it names that distro's own
+    # door instead. Same rule engine_advice's DENIED branch already follows.
+    if ts_is_omarchy 2>/dev/null; then
+        echo "==> docker: NOT adding you to the docker group - Omarchy declines it on purpose."
+        echo "    sudo docker ...                          (per command, no escalation)"
+        echo "    omarchy-setup-security-sudoless-docker   (Setup > Security, behind its warning)"
+    else
+        sudo usermod -aG docker "$USER" || true
+        echo "!! docker: log OUT and back in before docker works for this user."
+        echo "   (a new shell in the same session does not pick the group up)"
+    fi
+    return 0
+}
+
+ts_install_dockers() {
+    local id
+    for id in $1; do
+        ts_app_is_docker "$id" && ts_install_docker
     done
     return 0
 }

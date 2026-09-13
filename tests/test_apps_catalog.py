@@ -284,6 +284,22 @@ def test_the_catalog_reader_survives_a_missing_file(monkeypatch, tmp_path):
     assert apps.saved_class(["eza"]) == apps.DEVELOPER
 
 
+def test_docker_is_offered_but_never_pre_ticked():
+    """A reboot and a set of licence terms must never arrive by default.
+
+    Class `none` is the whole safety property here, and it is load-bearing in one
+    place a reader will not think of: `tests/parity/bootstrap-check.sh` runs with
+    TS_APPS=recommended, so a row in `both` or `sys` would attempt an engine
+    install inside a container on every CI run.
+    """
+    row = apps.by_id("docker")
+    assert row is not None, "the container engine the service stacks need"
+    assert row.classes == "none"
+    assert row.platforms == "all"
+    assert "docker" not in apps.recommended()
+    assert "docker" not in apps.sysadmin()
+
+
 def test_the_json_read_model_stays_serialisable():
     """The dashboard and any future --json consumer read this."""
     payload = [

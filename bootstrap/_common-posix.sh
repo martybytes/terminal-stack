@@ -351,6 +351,9 @@ common_install_all() {
         "$TS_PERSIST_HOOK"
     fi
     common_install_selected_apps "$TS_WIZ_APPS" || ts_note_failure "optional apps" "retry: tstack config apps"
+    # docker is in the catalog but comes from no package manager on any target
+    # here, so it is route-listed like herdr rather than mapped by a distro half.
+    ts_install_dockers "$TS_WIZ_APPS" || ts_note_failure "docker" 'retry: see `doc docker`'
     common_install_terminals "${TS_WIZ_TERMINALS:-}" || ts_note_failure "terminal emulator" "retry: tstack config wezterm install <channel>"
     common_zsh_base
     common_login_shell_zsh

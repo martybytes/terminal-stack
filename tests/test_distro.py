@@ -267,6 +267,7 @@ def test_every_installable_catalog_id_has_an_arch_package():
         f"for i in {' '.join(ids)}; do\n"
         '  ts_app_is_ai "$i" && continue\n'
         '  ts_app_is_herdr "$i" && continue\n'
+        '  ts_app_is_docker "$i" && continue\n'
         '  ts_arch_pkg "$i" >/dev/null 2>&1 || echo "$i"\n'
         "done\n"
     )
@@ -566,3 +567,57 @@ def test_the_parity_runner_covers_arch_and_omarchy():
     assert "arch-bootstrap" not in default and "omarchy-bootstrap" not in default
     for f in ("Dockerfile.arch", "Dockerfile.arch-bootstrap"):
         assert (ROOT / "tests/parity" / f).is_file(), f"missing tests/parity/{f}"
+
+
+def test_the_docker_route_never_joins_the_group_on_omarchy():
+    """Omarchy declines the docker group ON PURPOSE.
+
+    Its install/config/docker.sh records why -- membership is equivalent to
+    passwordless root, since anything in the group can `docker run -v /:/host` --
+    and it ships omarchy-setup-security-sudoless-docker as the opt-in, behind a
+    warning. `engine_advice` already refuses to say `usermod` there; a route that
+    installs the engine must refuse it too, or the stack quietly undoes a
+    decision the distro made deliberately.
+    """
+    body = (ROOT / "bootstrap/_config.sh").read_text(encoding="utf-8")
+    fn = re.search(r"^ts_install_docker\(\) \{.*?^\}", body, re.S | re.M)
+    assert fn, "ts_install_docker is gone; repoint this test"
+
+    def run(distro_id: str) -> str:
+        script = (
+            'command() { return 1; }\n'
+            '_ts_in_container() { return 1; }\n'
+            '_ts_is_wsl() { return 1; }\n'
+            'uname() { echo Linux; }\n'
+            'curl() { return 0; }\n'
+            'ts_note_failure() { :; }\n'
+            f'ts_is_arch() {{ [ "{distro_id}" = arch ] || [ "{distro_id}" = omarchy ]; }}\n'
+            f'ts_is_omarchy() {{ [ "{distro_id}" = omarchy ]; }}\n'
+            'sudo() { echo "SUDO: $*"; }\n'
+            f"{fn.group(0)}\n"
+            "ts_install_docker\n"
+        )
+        return subprocess.run(
+            [BASH, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+            start_new_session=True,
+        ).stdout
+
+    omarchy = run("omarchy")
+    assert "usermod" not in omarchy, "the route joined the docker group on Omarchy"
+    assert "omarchy-setup-security-sudoless-docker" in omarchy, "and it said nothing instead"
+
+    plain = run("arch")
+    assert "usermod -aG docker" in plain, "plain Arch stopped getting the group"
+
+
+def test_neither_distro_half_defines_the_docker_route():
+    """One implementation, in _config.sh. The route branches on pacman-or-curl,
+    and test_each_distro_half_speaks_only_its_own_package_manager bans each half
+    from naming the other's -- so a copy in either would have to be forked."""
+    for lib in (ARCH_LIB, DEBIAN_LIB):
+        body = lib.read_text(encoding="utf-8")
+        assert "ts_install_docker" not in body, f"{lib.name} grew its own docker route"

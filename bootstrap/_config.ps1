@@ -34,6 +34,7 @@ $script:TsWingetIds = @{
     bottom     = 'Clement.bottom'
     gping      = 'orf.gping'
     rclone     = 'Rclone.Rclone'
+    docker     = 'Docker.DockerDesktop'
     fnm        = 'Schniz.fnm'
     node       = 'OpenJS.NodeJS'
     python     = 'Python.Python.3.13'
