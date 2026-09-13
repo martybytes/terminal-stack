@@ -320,6 +320,7 @@ def test_the_shim_check_is_silent_off_wsl(monkeypatch):
     doctor.check_wsl_docker_shim(report, Path("C:/x"))
     assert report.results == []
 
+
 def test_the_config_stores_are_not_compared_on_wsl(monkeypatch, tmp_path):
     """A WSL install owns only its own settings now. Comparing them against a
     store the Windows install writes reported a divergence on every key the two
@@ -332,6 +333,7 @@ def test_the_config_stores_are_not_compared_on_wsl(monkeypatch, tmp_path):
     report = Report()
     doctor.check_config_stores(report)
     assert report.results == []
+
 
 def test_git_ssh_command_is_windows_only(monkeypatch):
     """A C:/ path in core.sshCommand would break git on every POSIX target, so
@@ -400,7 +402,6 @@ def test_git_ssh_command_pointing_at_windows_openssh_is_ok(monkeypatch, tmp_path
 
 
 # ------------------------------------------------------------ agentmemory/tts
-
 
 
 def test_agentmemory_wiring_is_silent_when_the_backend_is_off(monkeypatch, tmp_path):
@@ -696,3 +697,102 @@ def test_the_winget_symlink_check_runs_in_collect():
     import inspect
 
     assert "check_winget_symlinks(report)" in inspect.getsource(doctor.collect)
+
+
+# ----------------------------------------------------- agentmemory: one server
+
+
+def _split_brain(monkeypatch, tmp_path, hooks_url: str, mcp_url: str):
+    """A HOME whose two agentmemory clients point where the test says."""
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True, exist_ok=True)
+    (home / ".claude" / "settings.json").write_text(
+        json.dumps({"env": {"AGENTMEMORY_URL": hooks_url}}) if hooks_url else "{}",
+        encoding="utf-8",
+    )
+    (home / ".claude.json").write_text(
+        json.dumps({"mcpServers": {"agentmemory": {"env": {"AGENTMEMORY_URL": mcp_url}}}})
+        if mcp_url
+        else "{}",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
+    monkeypatch.setattr(store, "get", lambda k, d=None: "on")
+    report = Report()
+    doctor.check_agentmemory_one_server(report)
+    return report
+
+
+def test_capture_and_recall_pointing_at_different_servers_is_reported(monkeypatch, tmp_path):
+    """Found on a real machine, and invisible by construction.
+
+    The hooks posted to localhost:3111 -- this stack writes that, hardcoded --
+    while the MCP entry pointed at a remote host over Tailscale. Nothing was
+    listening locally, so automatic capture had been doing nothing: every vendor
+    hook is `fetch(...).catch(() => {})` then `exit(0)`. Manual recall worked
+    perfectly against the remote box, so "agentmemory is broken" and "agentmemory
+    answers when I use it" were both true at once.
+    """
+    report = _split_brain(
+        monkeypatch,
+        tmp_path,
+        "http://localhost:3111/_agent/claude",
+        "http://100.94.21.96:3111",
+    )
+    assert statuses(report)["agentmemory-one-server"] == checks.FAIL
+    assert "localhost:3111" in report.results[0].message
+    assert "100.94.21.96:3111" in report.results[0].message
+
+
+def test_the_two_clients_agreeing_is_ok_however_localhost_is_spelled(monkeypatch, tmp_path):
+    """127.0.0.1 and localhost are the same server, and the hook URL carries a
+    /_agent/<agent> tag the MCP one does not -- so the comparison is host:port,
+    not the string."""
+    report = _split_brain(
+        monkeypatch,
+        tmp_path,
+        "http://localhost:3111/_agent/claude",
+        "http://127.0.0.1:3111",
+    )
+    assert statuses(report)["agentmemory-one-server"] == checks.OK
+
+
+def test_the_one_server_check_is_silent_when_there_is_nothing_to_compare(monkeypatch, tmp_path):
+    """No MCP entry, or no hook env, is not a disagreement. And a machine with
+    agentmemory off is not asked at all."""
+    assert _split_brain(monkeypatch, tmp_path, "http://localhost:3111", "").results == []
+    assert _split_brain(monkeypatch, tmp_path, "", "http://localhost:3111").results == []
+
+    monkeypatch.setattr(store, "get", lambda k, d=None: "off")
+    report = Report()
+    doctor.check_agentmemory_one_server(report)
+    assert report.results == []
+
+
+def test_the_one_server_check_never_writes_claude_s_own_state(monkeypatch, tmp_path):
+    """~/.claude.json is Claude Code's file. The point is to NOTICE a
+    disagreement; a doctor that silently reconciled it would be the second writer
+    this repo keeps getting bitten by."""
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True)
+    (home / ".claude" / "settings.json").write_text(
+        json.dumps({"env": {"AGENTMEMORY_URL": "http://localhost:3111"}}), encoding="utf-8"
+    )
+    claude = home / ".claude.json"
+    claude.write_text(
+        json.dumps(
+            {"mcpServers": {"agentmemory": {"env": {"AGENTMEMORY_URL": "http://far:3111"}}}}
+        ),
+        encoding="utf-8",
+    )
+    before = claude.read_bytes()
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
+    monkeypatch.setattr(store, "get", lambda k, d=None: "on")
+    doctor.check_agentmemory_one_server(Report())
+    assert claude.read_bytes() == before
+
+
+def test_the_one_server_check_runs_in_collect():
+    import inspect
+
+    assert "check_agentmemory_one_server(report)" in inspect.getsource(doctor.collect)

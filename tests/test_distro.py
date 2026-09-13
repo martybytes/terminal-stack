@@ -585,12 +585,12 @@ def test_the_docker_route_never_joins_the_group_on_omarchy():
 
     def run(distro_id: str) -> str:
         script = (
-            'command() { return 1; }\n'
-            '_ts_in_container() { return 1; }\n'
-            '_ts_is_wsl() { return 1; }\n'
-            'uname() { echo Linux; }\n'
-            'curl() { return 0; }\n'
-            'ts_note_failure() { :; }\n'
+            "command() { return 1; }\n"
+            "_ts_in_container() { return 1; }\n"
+            "_ts_is_wsl() { return 1; }\n"
+            "uname() { echo Linux; }\n"
+            "curl() { return 0; }\n"
+            "ts_note_failure() { :; }\n"
             f'ts_is_arch() {{ [ "{distro_id}" = arch ] || [ "{distro_id}" = omarchy ]; }}\n'
             f'ts_is_omarchy() {{ [ "{distro_id}" = omarchy ]; }}\n'
             'sudo() { echo "SUDO: $*"; }\n'
