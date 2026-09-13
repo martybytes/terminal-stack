@@ -3,6 +3,8 @@
 Server-admin runbook. If your user is in the `docker` group none of these need
 sudo (`sudo usermod -aG docker $USER`, then log back in).
 
+> The stack can install the engine for you: `docker` is a row in the app catalog (`tstack config apps`), offered but never pre-ticked. On Arch it uses pacman; everywhere else `get.docker.com`, deliberately not apt by name, because Debian ships a package called `docker` that is a system-tray applet. **On Omarchy it does not join you to the `docker` group** — that distro declines it on purpose, and `omarchy-setup-security-sudoless-docker` is its own opt-in.
+
 ## Containers
 | Command | What it does |
 |---|---|
