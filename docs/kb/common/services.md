@@ -29,7 +29,7 @@ Everything binds `127.0.0.1` only — none of these services authenticate.
 |---|---|
 | `tstack services` | one line per stack: state, health, published ports |
 | `tstack services bootstrap` | first run here: `.env` files, generated secrets, volumes |
-| `tstack services up [<stack>]` | start (only the stacks your settings enable) |
+| `tstack services up [<stack>]` | start (only the stacks your settings enable). Refuses a stack whose port a container outside this stack already holds, and names it |
 | `tstack services up <stack> --build` | …rebuilding its image first — for the two stacks built from this repo's own source |
 | `tstack services down [<stack>]` | stop. Every volume is kept |
 | `tstack services restart [<stack>]` | down then up, so a changed `.env` is picked up |
@@ -39,6 +39,25 @@ Everything binds `127.0.0.1` only — none of these services authenticate.
 | `tstack services test` | take it all down, bring it back up, prove the chain works |
 | `tstack services backup` | cold tar of every data volume, with a manifest |
 | `tstack services --dry-run <verb>` | print the exact docker argv and change nothing |
+
+## What the install already did
+
+Every installer runs **`tstack services bootstrap`** for you, on every platform
+and without asking: it needs no engine and no network, and it is what seeds each
+`.env`, generates `HEADROOM_PROXY_TOKEN` and `NEO4J_PASSWORD`, and derives
+headroom's `COMPOSE_FILE` from your memory backend. Before that existed, a full
+install left `memoryBackend` saved next to no `.env` at all, headroom's compose
+would not parse, and every agent-wiring step reported *"proxy token
+unavailable"*.
+
+It runs **`tstack services up`** only if you answered yes to *"Start the local
+services now?"*, which defaults to no because it pulls 1-2 GB. `TS_SERVICES=on`
+answers it unattended.
+
+**On a machine with no engine**, `bootstrap` still does all of the above and
+skips only the named volumes — re-run it once Docker is installed, or the first
+`up` fails on an `external: true` volume that was never created. `docker` itself
+is an offered-but-unticked row in `tstack config apps`.
 
 ## Which stacks take part
 

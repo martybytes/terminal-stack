@@ -169,7 +169,7 @@ cd $env:LOCALAPPDATA\terminal-stack\stack
 .\bootstrap\windows-bootstrap.ps1
 ```
 
-It runs the wizard (leader key / theme / terminal emulator / mux / apps / TTS + optional tray daemon / workspace — see **Install wizard** above; set `$env:TS_PROFILE`/`TS_DEVELOPMENT`/`TS_STARSHIP_PRESET`/`TS_LEADER`/`TS_THEME`/`TS_TERMINALS`/`TS_WEZ_MUX`/`TS_WEZ_RESTORE`/`TS_APPS`/`TS_CC_TTS`/`TS_CC_TTS_DAEMON` to skip prompts), shows the review, and only then installs:
+It runs the wizard (leader key / theme / terminal emulator / mux / apps / TTS + optional tray daemon / workspace — see **Install wizard** above; set `$env:TS_PROFILE`/`TS_DEVELOPMENT`/`TS_STARSHIP_PRESET`/`TS_LEADER`/`TS_THEME`/`TS_TERMINALS`/`TS_WEZ_MUX`/`TS_WEZ_RESTORE`/`TS_APPS`/`TS_CC_TTS`/`TS_CC_TTS_DAEMON`/`TS_SERVICES` to skip prompts), shows the review, and only then installs:
 - **Always:** JetBrainsMono Nerd Font (`DEVCOM.JetBrainsMonoNerdFont`), Starship (`Starship.Starship`), chezmoi (`twpayne.chezmoi`)
 - **WezTerm, if you ticked it:** `wez.wezterm.nightly` or `wez.wezterm`, whichever channel you picked. Switching channel uninstalls the other package first — they install to the same place. Ghostty is not offered on Windows — this stack configures it on macOS only
 - **Selected apps** (recommended set by default): eza, fzf, bat, delta, ripgrep, zoxide, glow, micro, neovim, gh, ghq, lazygit, prettymark; optionally `zed` (one winget install)
@@ -407,6 +407,15 @@ hook trust, and the security trade-off of `--yolo`.
 The memory, prompt-compression and voice features are a client talking to a
 server on `127.0.0.1`. Those servers ship in this repo under `services/`.
 
+> **The scripted install already does step 2**, on every platform and without
+> asking: it needs no engine and no network, and it is what writes the `.env`
+> files and generates `HEADROOM_PROXY_TOKEN`. It does **step 5** only if you
+> answered yes to *"Start the local services now?"*, which defaults to no
+> because it pulls 1-2 GB. So this section is now the manual route, the repair
+> route, and what to run after installing an engine later. `docker` is also an
+> offered-but-unticked row in the app catalog (`tstack config apps`), which
+> installs the engine the same way it installs anything else.
+
 **1. A container engine.** Windows: `winget install --id Docker.DockerDesktop
 --exact`, then enable WSL Integration for your distro (Settings → Resources) —
 without it `docker` still exists inside WSL as Docker Desktop's stub, which exits
@@ -477,13 +486,22 @@ Caveman is still its own question. Scripted answers:
 TS_MEMORY_BACKEND=agentmemory|headroom|none
 TS_HEADROOM_CURSOR=mcp|byok|off
 TS_CAVEMAN=on|off
+TS_SERVICES=on|off
 ```
+
+`TS_SERVICES` answers the follow-up question — *"Start the local services
+now?"* — asked whenever any stack is enabled. It gates **only** the image pull:
+`tstack services bootstrap` runs either way, because it needs no engine and no
+network and is what makes the `.env` files and the generated tokens exist. It
+defaults to **off**, and `TS_ASSUME_YES` is deliberately not read as consent to
+it: that variable means "take every default", and it is passed to every parity
+container.
 
 `TS_HEADROOM` and `TS_AGENTMEMORY` still work and are reconciled through the same
 table, so an older unattended install cannot land on a combination the menu does
 not offer.
 
-Phase 6a started the containers; this phase points the agents at them.
+Phase 6a set the containers up; this phase points the agents at them.
 **`tstack config agents` never manages Docker lifecycle — `tstack services` is the only
 thing that starts, stops, or recreates containers**, and a test enforces that.
 Headroom expects the model proxy on `127.0.0.1:8787` and dashboard on `8788`.

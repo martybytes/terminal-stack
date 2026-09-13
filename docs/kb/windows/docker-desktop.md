@@ -9,6 +9,8 @@ Desktop with the WSL 2 backend.
 winget install --id Docker.DockerDesktop --exact
 ```
 
+> The stack can install it for you: `docker` is a row in the app catalog (`tstack config apps`), offered but never pre-ticked, because an engine install means a reboot and licence terms.
+
 Then start it once from the Start menu and let it finish initialising. The stack
 never starts it for you: launching a multi-gigabyte GUI application because you
 typed `tstack services status` is not acceptable. `tstack services up --start-engine` does it

@@ -2,6 +2,8 @@
 
 The four local services need a container engine. Two reasonable choices.
 
+> The stack can install Docker Desktop for you: `docker` is a row in the app catalog (`tstack config apps`), offered but never pre-ticked. It installs the **cask**, never `brew install docker` — that is the CLI alone, which would leave `docker` on PATH with no engine behind it — and it never replaces a Docker.app you placed yourself.
+
 ## Docker Desktop
 
 ```sh

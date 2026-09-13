@@ -3856,3 +3856,128 @@ and the test is confirmed in a real one.
 The rule the two share: **`kind()` answers "what sort of machine is this", and it
 is the wrong question for "which distro owns this binary" and for "is there a
 human reading this".** Reach for the distro or for the container markers instead.
+
+## Why the install bootstraps the services but asks before starting them
+
+A full install used to save `memoryBackend=agentmemory`, wire the agent hooks
+into Claude, Codex and Cursor, and leave **no containers, no images and no `.env`
+files at all**. Nothing in any installer had ever run `tstack services bootstrap`
+or `tstack services up`. Both are documented — as `INSTALL.md` Phase 6a, in the
+*manual* install, a section the scripted path never mentioned.
+
+Measured on the machine that reported it:
+
+```
+tstack services doctor          → 9 issues; every stack "not created"
+tstack services config headroom → required variable HEADROOM_PROXY_TOKEN is missing a value
+```
+
+That second line is the whole of the error the install log had printed twice,
+*"Headroom proxy authentication failed (proxy token unavailable)"*.
+`Headroom.token()` reads `services/stacks/headroom/.env`, and only `bootstrap`
+ever creates it. The agent wiring was reporting, accurately, that a file did not
+exist — and nothing in the install was going to create it.
+
+THE SPLIT THAT MAKES THIS SAFE
+
+The two verbs are not the same decision, and conflating them would have forced a
+bad choice either way:
+
+- **`bootstrap` is free.** It is deliberately not in `NEEDS_ENGINE`, needs no
+  network, is idempotent step by step, and never rotates a value somebody set. It
+  seeds every `.env` from its tracked example, generates `HEADROOM_PROXY_TOKEN`
+  and `NEO4J_PASSWORD`, and derives headroom's `COMPOSE_FILE`. It costs nothing
+  and it is the entire fix for the reported bug — so it runs unconditionally.
+- **`up` is not.** It pulls 1–2 GB, more with Headroom's memory overlay, and
+  starts long-lived processes. That is the question.
+
+So `bootstrap` is unconditional and `up` is a wizard answer defaulting to **off**.
+Had they been one step, we would have had to choose between leaving the reported
+bug unfixed and pulling gigabytes at everyone who ever runs an installer.
+
+WHY THE DEFAULT STAYS NO EVEN WITH A HEALTHY ENGINE
+
+Every other wizard toggle is *probed, not guessed*, and a reachable service moves
+the recommendation. This question deviates, on purpose: the probe changes the
+**report** and never the **default**, because a healthy engine does not make the
+download smaller. The engine state is still printed — through
+`engine.engine_advice()`, never a second opinion — so the answer is informed.
+
+WHY `TS_ASSUME_YES` IS NOT CONSENT
+
+It means "take every default", and the default here is off, so reading it as yes
+would invert it. It is also passed to every container by `tests/parity/run.sh`,
+which would have made an unattended install reach the network and start
+containers in CI. The same rule, for the same reason, as `tstack/commands/ui.py`'s
+Textual offer. `TS_SERVICES=on|off` is the knob, and the parity runner now passes
+`off` explicitly so the gate *states* the rule instead of relying on two
+unrelated variables.
+
+WHY IT RUNS BEFORE THE AGENT WIRING, AND WHY IT CANNOT ABORT
+
+Before, because `tstack agents headroom` calls `Headroom.token()`, which reads
+the file `bootstrap` creates. Run the wiring first and it reports a missing token
+that is about to exist.
+
+Warn-and-continue, because `bootstrap/_config.sh` already says every optional
+install ends in `|| ts_note_failure`, and `_common-posix.sh` records the incident:
+an optional install that aborted under `set -e` threw away ten answered
+questions. A multi-gigabyte pull over a bad link is the likeliest step in the
+whole install to die, and the product of an installer is configuration.
+
+SIX CALL SITES, NOT FOUR
+
+The wizard-answer path exists in the three bash bootstraps, `windows-bootstrap.ps1`,
+`ts-config.sh::run_wizard` and `$runWizard` in the PowerShell profile. The last
+two are the `tstack config wizard` / `reconfigure` re-runs, and shipping four of
+six would have left a re-run silently on the old behaviour — which is precisely
+the bug the `ts_memory_apply` line in `run_wizard` was itself added to fix.
+`tests/test_install_services.py` pins all six.
+
+ONE THING IT HAD TO FIX FIRST
+
+`bootstrap`'s volume section did touch docker, and with the engine down it tried
+anyway: `volume_exists` fails, the legacy check fails with it, and `docker volume
+create` fails too — two red `bad()` lines per volume, each counted as an issue,
+telling a user their engine was down in the least useful words available. That
+was invisible while nothing called `bootstrap` during an install and was about to
+print at every engine-less machine. It skips now, names what is left undone, and
+does not count it: an absent engine is not a broken machine.
+
+## Why `docker` is a catalog row with class `none`
+
+The service stacks need an engine and no installer had ever mentioned one. It is
+a row now — one line, three readers — but two things about it are deliberate.
+
+**Class `none`**, so it is offered and never pre-ticked. An engine install means
+a reboot and licence terms, and neither may arrive by default. That is also
+load-bearing somewhere less obvious: `tests/parity/bootstrap-check.sh` runs with
+`TS_APPS=recommended`, so a row in `both` or `sys` would attempt an engine
+install inside a container on every CI run.
+
+**Route-listed, not group-routed**, via `ts_app_is_docker` — the pattern
+`apps.conf`'s own header describes for `herdr`: the GROUP says what a tool is,
+the ROUTE says how it arrives. It has to be a single implementation in
+`_config.sh` because the route branches pacman-or-curl, and
+`tests/test_distro.py` bans each distro half from naming the other's package
+manager.
+
+Each platform's route is a trap avoided rather than a preference:
+
+| platform | route | why not the obvious thing |
+|---|---|---|
+| Windows | winget `Docker.DockerDesktop` | — (verified with `winget show --exact`) |
+| macOS | `brew install --cask docker` | `brew install docker` is the CLI **only**, which would leave `docker_kind()` answering `native` with no engine behind it: the worst of the four states. And it never replaces a hand-placed `Docker.app` — the `--cask --adopt` rule that once deleted a real Zed install |
+| Debian/Ubuntu | `get.docker.com` | **not** apt by name: Debian ships a package called `docker` that is a system-tray applet, and the engine is `docker-ce` from a third-party repo |
+| Arch | `pacman -S docker docker-compose` | `get.docker.com` refuses to run on Arch |
+| WSL | nothing | the engine is a **Windows** process; the answer is Docker Desktop's WSL Integration, which is what `engine_advice`'s `wsl-shim` branch already says |
+| container | nothing | whatever was ticked |
+
+And on **Omarchy it does not join the `docker` group.** That distro declines it
+on purpose — membership is equivalent to passwordless root, since anything in the
+group can `docker run -v /:/host` — and ships
+`omarchy-setup-security-sudoless-docker` as the opt-in behind its own warning.
+`engine_advice`'s DENIED branch already refuses to say `usermod` there; a route
+that *installs* the engine has to refuse it too, or the stack quietly undoes a
+decision the distro made deliberately. A test drives the function under both
+distro ids.

@@ -146,7 +146,7 @@ for name in "${wanted[@]}"; do
         # save, chezmoi apply -- rather than about spending ten minutes pulling
         # thirty packages; the recommended set is still resolved and asserted on
         # inside bootstrap-check.sh, which is where the interesting bug lives.
-        if "${DOCKER[@]}" run --rm -v "$root:/repo:ro"                 -e TS_ASSUME_YES=1 -e TS_HEADLESS_RESOLVED=1                 -e TS_PROFILE=shell -e TS_DEVELOPMENT=no -e TS_APPS=none                 -e TS_THEME=dark -e TS_LEADER=ctrl-space -e TS_TMUX=ctrl-b                 -e TS_ATUIN=off -e TS_CC_TTS=off -e TS_MEMORY_BACKEND=none                 -e TS_HEADROOM=off -e TS_CAVEMAN=off -e TS_AGENTMEMORY=off                 "$image" bash /repo/tests/parity/bootstrap-check.sh; then
+        if "${DOCKER[@]}" run --rm -v "$root:/repo:ro"                 -e TS_ASSUME_YES=1 -e TS_HEADLESS_RESOLVED=1                 -e TS_PROFILE=shell -e TS_DEVELOPMENT=no -e TS_APPS=none                 -e TS_THEME=dark -e TS_LEADER=ctrl-space -e TS_TMUX=ctrl-b                 -e TS_ATUIN=off -e TS_CC_TTS=off -e TS_MEMORY_BACKEND=none                 -e TS_HEADROOM=off -e TS_CAVEMAN=off -e TS_AGENTMEMORY=off -e TS_SERVICES=off                 "$image" bash /repo/tests/parity/bootstrap-check.sh; then
             echo "    $name OK"
         else
             echo "    $name FAILED"

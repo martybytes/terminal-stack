@@ -6,6 +6,52 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Added
 
+- **The install now sets the Docker services up, and offers to start them
+  (09/12/2026).** A full install saved `memoryBackend=agentmemory`, wired the
+  agent hooks, and left **no containers and no `.env` files at all** — nothing in
+  any installer had ever run `tstack services bootstrap` or `tstack services up`.
+  Those were Phase 6a of `INSTALL.md`, a manual section the scripted install
+  never mentioned. On the reporting machine `tstack services doctor` found nine
+  issues, every stack "not created", and headroom's compose would not even parse:
+  `required variable HEADROOM_PROXY_TOKEN is missing a value`. That is the root
+  of the line the install log printed twice — *"Headroom proxy authentication
+  failed (proxy token unavailable)"* — because `Headroom.token()` reads a file
+  only `bootstrap` creates.
+
+  The split is that **`bootstrap` is free and `up` is not**. `bootstrap` is not in
+  `NEEDS_ENGINE`, needs no network, is idempotent, and never rotates a value
+  somebody set — so every installer now runs it unconditionally, on all six
+  wizard call sites, **before** the agent wiring, since that wiring reads the
+  `.env` it creates. `up` pulls 1–2 GB, so it is a new wizard question that
+  defaults to **no**. `TS_SERVICES=on|off` answers it unattended;
+  `TS_ASSUME_YES` deliberately does **not**, because it means "take every
+  default" and is passed to every parity container.
+
+- **`docker` is an app-catalog row (09/12/2026).** Offered, never pre-ticked —
+  an engine install means a reboot and licence terms. Route-listed like `herdr`:
+  winget on Windows, the brew **cask** on macOS (never `brew install docker`,
+  which is the CLI alone and would leave `docker_kind()` answering `native` with
+  nothing behind it), `get.docker.com` on Linux rather than apt by name (Debian's
+  `docker` package is a system-tray applet), pacman on Arch, and nothing at all
+  on WSL or inside a container. **On Omarchy it does not join the `docker`
+  group**: that distro declines it deliberately, and the route names
+  `omarchy-setup-security-sudoless-docker` instead.
+
+- **`tstack services up` names the container holding a port it needs
+  (09/12/2026).** compose's own error names the port and not what has it. Ports
+  are read from the selected compose files — resolving `${KOKORO_PORT:-8880}`
+  against the stack's `.env` — so it works with the engine down; "foreign" is
+  decided by the pinned compose project name, so a stack that is already running
+  is never refused by itself.
+
+- **`tstack doctor` reports capture and recall pointing at different servers
+  (09/12/2026).** The hooks read `~/.claude/settings.json`, which this stack
+  writes as `localhost:3111`; the MCP tools read `~/.claude.json`, which it does
+  not write. Point one at a remote host and capture goes to a store recall never
+  reads — and since every vendor hook is `fetch(...).catch(() => {})` then
+  `exit(0)`, the symptom is "agentmemory is not working here" and "agentmemory
+  answers when I ask it" being true at once. Found exactly that way.
+
 - **`tstack ui` offers to install Textual instead of explaining how (09/11/2026).**
   The message it printed was correct, probed per machine, and still a wall: you
   asked for a dashboard and got a paragraph, a command to copy and a second run
@@ -61,6 +107,43 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
   not already hold, once per boot, and skips by fingerprint so a re-run cannot re-prompt.
 
 ### Fixed
+
+- **The memory backend was saved without the `COMPOSE_FILE` it implies, on every
+  platform (09/12/2026).** The overlay's `command:` carries `--memory`, which has
+  no environment variable and is the entire Headroom-memory feature. The Python
+  `set_memory` never wrote the key at all; both shell twins *look* like they do,
+  and `return 0` when the `.env` is absent — which on a fresh machine it always
+  is. So all four platforms saved `memoryBackend=headroom` and ran a proxy that
+  remembered nothing, reporting healthy. All three writers write both now,
+  `services bootstrap` derives it when it seeds a fresh `.env` (never an existing
+  one — a hand-edited `COMPOSE_FILE` is somebody doing something), and the new
+  writer *reports* a missing file instead of returning success.
+
+- **`set_memory` restarted headroom without seeding it first (09/12/2026).**
+  Restarting a stack whose `.env` does not exist cannot succeed, and the remedy
+  it printed fails the same way. It bootstraps first.
+
+- **`set_memory` gated the restart on `shutil.which("docker")` (09/12/2026).**
+  The check `tstack/engine.py`'s own docstring calls "true and useless", and it
+  is wrong in both directions: Docker Desktop's WSL stub is on PATH and exits 1
+  for every command, while a WSL box reaching the engine through interop has no
+  Linux `docker` at all and works perfectly — and was told "no docker on PATH"
+  and skipped. It uses `engine.is_up()` and prints `engine_advice()`, so the
+  Omarchy branch comes along for free. Same fix in the bash twin.
+
+- **`windows-bootstrap.ps1` splatted `MemoryBackend` into `Save-TsConfig`
+  (09/12/2026).** That writes keys and nothing else; only `Set-TsMemoryBackend`
+  also writes the compose file. The profile's `$runWizard` hand-rolled the same
+  three calls, which is how the bootstrap came to do two and miss the third. Both
+  go through the one writer.
+
+- **`tstack services bootstrap` reported failures on a machine with no engine
+  (09/12/2026).** It is deliberately not in `NEEDS_ENGINE` — seeding `.env` files
+  and generating secrets is the point of being able to run it without Docker —
+  but the volume section did not know that, and spent two red lines per volume
+  saying the engine was down. It skips and says what is left to do, and does not
+  count it as an issue. Invisible until now, and about to print at everyone: the
+  installer runs this on every machine.
 
 - **A custom leader chord typed as `ctrl-\` stopped WezTerm from starting
   (09/11/2026).** Keys with no printable spelling are stored by name for two

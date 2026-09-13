@@ -61,6 +61,13 @@ server-side record is evidence, because the hook always exits 0.
   GPU generation, ports, secrets — goes in `.env`. Editing tracked YAML to make
   one computer work is the bug.
 - **Pin versions.** No `:latest`. Comment non-obvious pins.
+- **A stack declares itself by filename; there is no registry.** `ts-after` names
+  the stacks this one must start after (and stop before) — `agent007memory` joins
+  the network `agentmemory` creates, and lexically sorts before it. `ts-envfiles`
+  names extra `--env-file` paths, applied *before* the stack's own `.env` so the
+  stack wins. **`ts-envfiles` is an interpolation source and never an `env_file:`
+  key** — the key would hand the container someone else's secrets, which is
+  exactly what it looks like it is for.
 - **Everything this tree creates is named `ts-`.** Projects (`name:` in the base
   compose file), containers, networks and locally built images. `docker ps` on a
   developer's machine also lists their work stacks; the prefix is what separates
