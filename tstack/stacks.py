@@ -530,6 +530,65 @@ def seed_kokoro_profile(env_file: Path) -> tuple[bool, str]:
     return (True, f"kokoro profile {profile} - {reason}")
 
 
+# ------------------------------------------------------------- published ports
+
+
+def project_name(directory: Path) -> str:
+    """The compose project, from the `name:` key every stack here pins.
+
+    Pinned in the file rather than taken from the directory, which is why it can
+    be read without an engine -- and why `docker ps` names are a reliable prefix
+    match for "this stack's own containers".
+    """
+    for name in compose_files(directory):
+        path = directory / name
+        if not path.is_file():
+            continue
+        for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            if raw.startswith("name:"):
+                return raw.split(":", 1)[1].strip().strip("'\"")
+    return directory.name
+
+
+# The host half is either a literal or a whole ${...}, which may itself contain a
+# colon (`${KOKORO_PORT:-8880}`) -- so it cannot be "anything but a colon".
+_PUBLISHED = re.compile(r"127\.0\.0\.1:(\$\{[^}]+\}|\d+):\d+")
+
+
+def published_ports(directory: Path) -> list[str]:
+    """The HOST ports this stack's selected compose files publish.
+
+    Read from the files rather than from `docker compose config`, so it works
+    with the engine down and before anything is created -- which is the whole
+    point, since the caller is deciding whether starting is safe.
+
+    `${KOKORO_PORT:-8880}` is resolved against the stack's own .env, default
+    first from the file and then from the `:-` fallback, exactly as compose
+    interpolates it.
+    """
+    out: list[str] = []
+    for name in compose_files(directory):
+        path = directory / name
+        if not path.is_file():
+            continue
+        for match in _PUBLISHED.finditer(path.read_text(encoding="utf-8", errors="replace")):
+            port = _resolve_port(directory, match.group(1))
+            if port and port.isdigit() and port not in out:
+                out.append(port)
+    return out
+
+
+def _resolve_port(directory: Path, token: str) -> str:
+    token = token.strip()
+    if token.isdigit():
+        return token
+    match = re.fullmatch(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}", token)
+    if not match:
+        return ""
+    value = env_value(directory / ".env", match.group(1))
+    return (value or match.group(2) or "").strip()
+
+
 # ------------------------------------------------------- headroom memory overlay
 
 
