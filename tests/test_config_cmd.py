@@ -50,6 +50,27 @@ def _throwaway_home(monkeypatch, tmp_path):
     store.clear_cache()
 
 
+@pytest.fixture(autouse=True)
+def _no_real_docker(monkeypatch):
+    """`tstack config memory` calls into `tstack services`, which runs DOCKER.
+
+    Autouse and module-wide, because one test forgetting it is not a failed
+    assertion -- it is `docker compose up` against the developer's real machine.
+    That is not hypothetical: `test_memory_is_the_only_writer_of_the_derived_key`
+    pointed `resolve_source_dir` at ROOT, and once set_memory learned to bootstrap
+    and restart, a plain `pytest` started Qdrant and Neo4j and wrote the live
+    clone's headroom/.env. It surfaced in `scripts/preflight.sh`, whose test-merge
+    worktree left containers labelled with a path under /tmp.
+
+    A test that means to assert about the calls overrides this with its own
+    recorder; nothing may reach the real thing by omission. Same rule, same
+    reason, as the throwaway HOME above.
+    """
+    from tstack.commands import services as services_cmd
+
+    monkeypatch.setattr(services_cmd, "main", lambda argv: 0)
+
+
 # ------------------------------------------------------------- argv before clone
 
 
@@ -205,8 +226,10 @@ def test_a_derived_key_is_refused(monkeypatch, capsys):
     assert "derived" in capsys.readouterr().err
 
 
-def test_memory_is_the_only_writer_of_the_derived_key(monkeypatch):
-    monkeypatch.setattr(config.paths, "resolve_source_dir", lambda: ROOT)
+def test_memory_is_the_only_writer_of_the_derived_key(monkeypatch, tmp_path):
+    # tmp_path, never ROOT: set_memory writes headroom's .env now, and aiming a
+    # test at the real tree edits the developer's own clone.
+    monkeypatch.setattr(config.paths, "resolve_source_dir", lambda: tmp_path)
     assert config.main(["memory", "headroom"]) == 0
     body = toml_text()
     assert 'memoryBackend = "headroom"' in body
