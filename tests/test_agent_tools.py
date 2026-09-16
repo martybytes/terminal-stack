@@ -2764,12 +2764,22 @@ def test_windows_has_a_synthesis_floor_too():
 
 
 def _llm_env(tmp_path, monkeypatch, body: str | None):
-    """A throwaway stack root. TS_STACK_ROOT is what stacks.stack_root honours."""
+    """A throwaway stack root. TS_STACK_ROOT is what stacks.stack_root honours.
+
+    `suggest` dials the four local runtime ports on the REAL host, so the branch
+    it takes depends on whether the developer happens to be running Ollama --
+    which is how this suite started failing on a machine where nothing had
+    changed. Stub the probe to the empty answer here; the two tests that want a
+    runtime found set their own afterwards and win.
+    """
+    from tstack.commands import agents
+
     root = tmp_path / "stacks" / "agentmemory"
     root.mkdir(parents=True)
     if body is not None:
         (root / ".env").write_text(body, encoding="utf-8")
     monkeypatch.setenv("TS_STACK_ROOT", str(tmp_path / "stacks"))
+    monkeypatch.setattr(agents, "local_llm_models", lambda port, **k: None)
     return root
 
 
