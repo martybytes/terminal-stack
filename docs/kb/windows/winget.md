@@ -15,8 +15,10 @@ because upstream's newest stable is `20240203`
 first — they install to the same place. `tstack config wezterm` shows your build and
 its date, the newest on each channel, and what changed in between; nothing
 upgrades on its own. Note nightly's manifest is republished more often than its
-hash is refreshed, so `Installer hash does not match` is a routine outcome — the
-failure is reported rather than hidden. Ghostty is not offered on Windows: this stack configures it on macOS only,
+hash is refreshed, so `Installer hash does not match` is a routine outcome. When
+it happens the stack installs upstream's `WezTerm-nightly-setup.exe` from GitHub
+instead, checked against upstream's `.sha256`, and a switch that still fails
+reinstalls the channel it removed. Only a failure of both is reported. Ghostty is not offered on Windows: this stack configures it on macOS only,
 so there is no winget id for it here. Every
 package that failed is reprinted at the end of the run with the command to retry
 it, so a failure can't scroll past unnoticed.

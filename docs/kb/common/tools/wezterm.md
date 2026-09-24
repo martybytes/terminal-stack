@@ -21,7 +21,7 @@ demand. No path installs, upgrades or switches without a yes.
 | `tstack config wezterm` | your build + date, newest on each channel, what changed since |
 | `tstack wezterm` | the same, as a standalone command |
 | `tstack config wezterm changes` | the full upstream changelog since your build, paged |
-| `tstack config wezterm install nightly` | switch channel — removes the other package first |
+| `tstack config wezterm install nightly` | switch channel; removes the other package first, reinstalls it if the switch fails |
 | `tstack config wezterm install stable` | the other direction |
 | `tstack config wezterm upgrade` | refresh the channel you are on; never switches |
 | `wezterm --version` | the raw build string |
@@ -67,7 +67,15 @@ its version is still shown, and install/upgrade leave it alone.
 
 Switching removes the other channel first — both casks own
 `/Applications/WezTerm.app`, both apt packages own `/usr/bin/wezterm`, so they
-cannot coexist.
+cannot coexist. If the new channel then fails to install, the removed one is
+reinstalled, so a failed switch never leaves you without WezTerm.
+
+On Windows, winget's nightly usually fails with `Installer hash does not match`
+(its manifest pins a hash the rolling download has outgrown). The stack then
+installs upstream's `WezTerm-nightly-setup.exe` from the GitHub nightly release,
+checked against the `.sha256` beside it. Such an install is not winget's, so the
+channel of anything in `Program Files\WezTerm` is read from its own version:
+the `20240203-110809-5046fc22` tag is stable, anything else is nightly.
 
 ## Installing it in the first place
 

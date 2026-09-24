@@ -1330,7 +1330,8 @@ still shown, and install/upgrade leave it alone rather than fighting over it.
 `/Applications/WezTerm.app` and on Debian both packages own `/usr/bin/wezterm`, so the second
 install simply refuses. The removal is conditional on actually switching — a machine that
 declines WezTerm entirely keeps whatever it already had, which the earlier stable-only
-version got wrong by purging nightly unconditionally.
+version got wrong by purging nightly unconditionally. And a switch whose new channel then fails
+to install reinstalls the one it removed (see the paragraph on remove-after-verify above).
 
 Every network call fails **open and silent**, with a hard timeout: a report that degrades to
 "installed version and date" is fine, one that blocks an install or errors a shell is not.
@@ -1599,7 +1600,9 @@ port, and `bootstrap/agent-tools.json`, the one file where a port, URL, image ta
 written down. Neither side reaches into the other by path.
 
 At the command level the same line is `tstack services` versus `tstack agents`. **`tstack services` is the only thing
-in this repo that starts, stops or builds a container; `tstack agents` may only probe one.** That is not
+in this repo that starts, stops or builds a container; `tstack agents` may only probe one** (or, for
+`headroom on` at a terminal, ask and hand off to `tstack services`; see "Why `agents headroom on`
+offers to start Docker"). That is not
 a style preference — `test_no_project_scope_or_docker_mutation_in_lifecycle_adapters` asserts the
 strings `docker compose`, `docker rm` and `restart: unless-stopped` appear nowhere in
 `tstack/commands/agents.py`, as case-insensitive matches over the whole file, **so even a comment

@@ -20,28 +20,19 @@ secrets to exist before it will start at all**; see the gotcha below.
 
 ## Quick start
 
-Bootstrap seeds `headroom/.env` from `.env.example`, then you fill in the two
-secrets and start the stack.
-
-| | |
-|---|---|
-| macOS / Linux | `../bootstrap.sh --apply` |
-| Windows | `..\bootstrap.ps1 -Apply` |
-
-Generate the two secrets and put them in `headroom/.env` (identical on both
-platforms if you have OpenSSL; otherwise use any 32-byte hex string):
-
 ```sh
-openssl rand -hex 32     # -> HEADROOM_PROXY_TOKEN
-openssl rand -hex 32     # -> NEO4J_PASSWORD
+tstack services bootstrap        # seeds headroom/.env and generates both secrets
+tstack services up headroom
 ```
 
-Then bring it up:
+`bootstrap` copies `.env.example` to `.env` and generates `HEADROOM_PROXY_TOKEN`
+and `NEO4J_PASSWORD` on this machine (32 random bytes each, printed only as a
+fingerprint). It never overwrites a value you set, so re-running it is safe.
 
-| | |
-|---|---|
-| macOS / Linux | `../stack.sh --stack headroom --up --apply` |
-| Windows | `..\stack.ps1 -Stack headroom -Up -Apply` |
+If you picked Headroom in the install wizard you may not need either command:
+when Headroom is not answering, `tstack agents headroom on` offers to start
+Docker, run the bootstrap on a machine that never had it, and bring the stack
+up, asking before each step. It never installs Docker.
 
 First start pulls roughly 2 GB across the three images and Neo4j takes ~45
 seconds to accept connections; the healthchecks account for that.
@@ -181,9 +172,8 @@ identity on macOS/Linux Docker. `dashboard-gateway`'s request to
 `headroom-proxy` is *container-to-container*, over the explicit bridge
 subnet above — ordinary Docker bridge networking, not the host NAT hop that
 differs by platform, so it behaves the same everywhere regardless of which
-machine the stack runs on. No script in this repo (`stack.sh`/`stack.ps1`,
-`bootstrap.sh`/`bootstrap.ps1`) references headroom's ports or service
-names — they discover stacks by finding `docker-compose.yml`, generically —
+machine the stack runs on. `tstack services` does not reference headroom's ports or service
+names — it discovers stacks by finding `docker-compose.yml`, generically —
 so none needed a platform-specific change for this.
 
 **Both secrets must exist before the first start.** `agentmemory` generates its
