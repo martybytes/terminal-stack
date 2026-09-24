@@ -461,13 +461,32 @@ def show_changes() -> int:
 # ------------------------------------------------------- install / switch
 
 
+def _restore(argv: list[str], other: str) -> None:
+    """Put back the channel a failed switch removed.
+
+    The two channels cannot coexist, so a switch has to remove one before the
+    other installs. When the new one then fails, the machine would otherwise be
+    left with no WezTerm at all -- which is what a stale winget nightly hash did
+    to a Windows box. Reinstalling what was there is the only safe outcome.
+    """
+    print(f"{INFO} WezTerm: putting {other} back")
+    back = _run(argv, timeout=1800)
+    if not back or back.returncode != 0:
+        print(f"{WARN} could not reinstall {other} either; install WezTerm by hand.")
+
+
 def _brew_install(want: str, other: str, label: str) -> None:
     got = _run(["brew", "list", "--cask", other], timeout=60)
+    # Whether a channel was removed to make room: if the wanted one then fails
+    # to install, that one goes back rather than leaving no terminal at all.
+    swapped = False
     if got and got.returncode == 0:
         print(f"{INFO} WezTerm: removing the {other} cask (switching channel)")
         removed = _run(["brew", "uninstall", "--cask", "--force", other], timeout=600)
         if not removed or removed.returncode != 0:
             print(f"{WARN} could not remove {other}; remove it by hand.")
+        else:
+            swapped = True
     got = _run(["brew", "list", "--cask", want], timeout=60)
     if got and got.returncode == 0:
         print(f"{INFO} WezTerm ({label}): installed; checking for an upgrade")
@@ -479,6 +498,8 @@ def _brew_install(want: str, other: str, label: str) -> None:
         added = _run(["brew", "install", "--cask", want], timeout=1800)
         if not added or added.returncode != 0:
             print(f"{WARN} WezTerm install failed; install it by hand later.")
+            if swapped:
+                _restore(["brew", "install", "--cask", other], other)
 
 
 def _apt_install(want: str, other: str) -> None:
@@ -509,17 +530,22 @@ def _apt_install(want: str, other: str) -> None:
         proc.capture(["sudo", "tee", str(listing)], stdin=line + "\n", timeout=60)
     _run(["sudo", "apt-get", "update", "-qq"], timeout=600)
     got = _run(["dpkg", "-s", other], timeout=30)
+    swapped = False
     if got and got.returncode == 0:
         print(f"{INFO} WezTerm: removing {other} (switching channel)")
         removed = _run(["sudo", "apt-get", "purge", "-y", other], timeout=600)
         if not removed or removed.returncode != 0:
             print(f"{WARN} could not remove {other}; remove it by hand.")
+        else:
+            swapped = True
     done = _run(["sudo", "apt-get", "install", "-y", want], timeout=1800)
     if done and done.returncode == 0:
         version = installed()
         print(f"{INFO} WezTerm: {version[0] if version else 'installed'}")
     else:
         print(f"{WARN} WezTerm: apt install failed; see https://wezterm.org/install/linux.html")
+        if swapped:
+            _restore(["sudo", "apt-get", "install", "-y", other], other)
 
 
 def _pacman_install(want: str) -> None:

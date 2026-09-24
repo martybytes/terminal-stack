@@ -274,7 +274,14 @@ def collect(console: Console, ask_terminals: bool = False) -> Answers:
 
     # ----------------------------------------------------------------- atuin
     # Asked even when headless: unlike the WezTerm questions this is a shell
-    # binding, and a headless server has a shell.
+    # binding, and a headless server has a shell. Asked on Windows too, where
+    # atuin cannot run (no pwsh target, no Windows package): the saved answer
+    # is what the WSL side renders, so it says so rather than implying pwsh.
+    atuin_where = (
+        "\n  On Windows this affects your WSL shells only; PowerShell keeps PSReadLine."
+        if plat.kind() == plat.WINDOWS
+        else ""
+    )
     atuin = (
         _on_off(_env("TS_ATUIN"))
         if _env("TS_ATUIN")
@@ -285,7 +292,7 @@ def collect(console: Console, ask_terminals: bool = False) -> Answers:
             "  RECOMMENDATION: on. Ctrl+R searches every shell's history from one\n"
             "  database, with the directory and exit status of each command.\n"
             "  Ctrl+T, Alt+C and Up-arrow are untouched. Nothing syncs anywhere.\n"
-            "  Reversible with `tstack config atuin off`.",
+            "  Reversible with `tstack config atuin off`." + atuin_where,
         )
     )
 

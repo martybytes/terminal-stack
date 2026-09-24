@@ -27,6 +27,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from pathlib import Path
 
 from .. import engine, paths, stacks, store
@@ -1229,7 +1230,7 @@ def main(argv: list[str]) -> int:
             print(f"tstack services: {reason}", file=sys.stderr)
             return 1
 
-    if args.start_engine and not svc.engine_ok and svc.kind == engine.NATIVE:
+    if args.start_engine and not svc.engine_ok and svc.kind in (engine.NATIVE, engine.WSL_SHIM):
         _start_engine(svc)
 
     if args.cmd in NEEDS_ENGINE and not svc.engine_ok and not args.dry_run:
@@ -1259,21 +1260,149 @@ def main(argv: list[str]) -> int:
     return 0
 
 
+def docker_desktop_exe(kind: str) -> str | None:
+    """Docker Desktop's launcher, as a path this process can run, or None.
+
+    On WSL the engine is a Windows process reached through interop, so its
+    launcher is the Windows one under /mnt/c, never a Linux service.
+    """
+    if kind == engine.WSL_SHIM:
+        candidate = Path("/mnt/c/Program Files/Docker/Docker/Docker Desktop.exe")
+    else:
+        root = os.environ.get("PROGRAMFILES") or r"C:\Program Files"
+        candidate = Path(root) / "Docker" / "Docker" / "Docker Desktop.exe"
+    return str(candidate) if candidate.is_file() else None
+
+
+def launch_engine(kind: str, dry_run: bool = False) -> str | None:
+    """Ask the engine to start, without waiting.
+
+    Returns what it launched, for the caller to report, or None when there is
+    nothing to launch (Docker Desktop not installed where it always lives).
+    """
+    system = engine.os_name()
+    if kind == engine.WSL_SHIM or system == engine.WINDOWS:
+        exe = docker_desktop_exe(kind)
+        if not exe:
+            return None
+        if not dry_run:
+            # Detached: Docker Desktop is a GUI that outlives this process.
+            subprocess.Popen(
+                [exe],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        return f"start {exe}"
+    if system == engine.DARWIN:
+        if not dry_run:
+            subprocess.run(["open", "-a", "Docker"], check=False, start_new_session=True)
+        return "open -a Docker"
+    if not dry_run:
+        subprocess.run(
+            ["sudo", "systemctl", "start", "docker"], check=False, start_new_session=True
+        )
+    return "systemctl start docker"
+
+
+def wait_for(ready: Callable[[], bool], seconds: int, dots: bool = False) -> bool:
+    """Poll ready() every 2 s for up to `seconds`, optionally printing a dot each time."""
+    for _ in range(max(1, seconds // 2)):
+        if ready():
+            if dots:
+                print(flush=True)
+            return True
+        if dots:
+            print(".", end="", flush=True)
+        time.sleep(2)
+    ok = bool(ready())
+    if dots:
+        print(flush=True)
+    return ok
+
+
 def _start_engine(svc: Services) -> None:
     """Launch the engine and wait. Cold starts are slow; 60s produces false failures."""
-    system = engine.os_name()
-    if system == engine.DARWIN:
-        svc.out.step("open -a Docker")
-        if not svc.args.dry_run:
-            subprocess.run(["open", "-a", "Docker"], check=False, start_new_session=True)
-    elif system == engine.LINUX:
-        svc.out.step("systemctl start docker")
-        if not svc.args.dry_run:
-            subprocess.run(
-                ["sudo", "systemctl", "start", "docker"], check=False, start_new_session=True
-            )
-    for _ in range(90):
-        if engine.is_up(svc.kind):
-            svc.engine_ok = True
-            return
-        time.sleep(2)
+    launched = launch_engine(svc.kind, svc.args.dry_run)
+    if launched:
+        svc.out.step(launched)
+    if wait_for(lambda: engine.is_up(svc.kind), 180):
+        svc.engine_ok = True
+
+
+# ------------------------------------------------------------ offer to start
+
+
+def _yes(ask: Callable[[str], str | None], prompt: str) -> bool:
+    """Default-yes consent. None (nobody at the terminal) is never a yes."""
+    answer = ask(prompt)
+    if answer is None:
+        return False
+    return answer.strip().lower() in ("", "y", "yes")
+
+
+def offer_start(
+    source: Path,
+    name: str,
+    label: str,
+    ready: Callable[[], bool],
+    ask: Callable[[str], str | None],
+    say: Callable[[str], None] = print,
+    engine_wait: int = 120,
+    ready_wait: int = 60,
+) -> bool:
+    """Get one stack answering, asking before each step. True when `ready()` is.
+
+    For an installer that has just been told to wire an agent to a service that
+    is not running. Every step asks first; nothing here installs Docker. The two
+    cases differ only in whether the stack's .env exists yet:
+
+      - a fresh machine has never run `tstack services bootstrap`, the one thing
+        that seeds .env and generates the stack's secrets, so it is offered
+        before `up`;
+      - an existing install only needs `up`.
+
+    `ask(prompt)` returns the answer, or None when there is nobody to ask, which
+    declines every step.
+    """
+    if ready():
+        return True
+    say(f"  {label} is not running.")
+    kind = engine.docker_kind()
+    if kind in (engine.ABSENT, engine.DENIED):
+        for line in engine.engine_advice(engine.os_name(), kind):
+            say(f"  {line}")
+        return False
+    if not engine.is_up(kind):
+        if not _yes(ask, "  Docker is not running. Start it now? [Y/n] "):
+            return False
+        launched = launch_engine(kind)
+        if not launched:
+            for line in engine.engine_advice(engine.os_name(), kind):
+                say(f"  {line}")
+            return False
+        say(f"  {launched}; waiting up to {engine_wait // 60} minutes for it to answer")
+        if not wait_for(lambda: engine.is_up(kind), engine_wait, dots=True):
+            say("  Docker did not answer in time.")
+            return False
+    directory = stacks.stack_root(source) / name
+    if not (directory / "docker-compose.yml").is_file():
+        say(f"  This clone has no {name} stack (services/stacks/{name}).")
+        return False
+    if not stacks.env_seeded(directory):
+        if not _yes(
+            ask,
+            f"  {label} is not set up yet. Create its config and secrets, then start it? [Y/n] ",
+        ):
+            return False
+        if main(["bootstrap"]) != 0:
+            say("  tstack services bootstrap failed (see above).")
+            return False
+    elif not _yes(ask, f"  Start {label}? [Y/n] "):
+        return False
+    if main(["up", name]) != 0:
+        say(f"  tstack services up {name} failed (see above).")
+        return False
+    say(f"  waiting for {label} to answer")
+    return wait_for(ready, ready_wait, dots=True)

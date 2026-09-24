@@ -179,15 +179,30 @@ function Get-TsAppBin([string]$id) {
         'bottom'  { 'btm' }
         'python'  { 'python3' }
         'cursor-agent' { 'cursor-agent' }
-        # The Windows port is a different program with a different name: winget's
-        # aristocratos.btop4win installs btop4win.exe, never btop.exe. Probing for
-        # `btop` therefore never found it, so Get-TsAppsPending offered it on every
-        # single tstack update and winget answered "No available upgrade found" every
-        # time. Deliberately NOT mirrored into ts_app_bin in bootstrap/_config.sh —
-        # apt and brew both install it as plain `btop`.
-        'btop'    { 'btop4win' }
         default   { $id }
     }
+}
+
+# Other names the same app can answer to on PATH, tried after Get-TsAppBin.
+# btop: winget's aristocratos.btop4win ships btop4win.exe, and its WinGet\Links
+# shim is named `btop.exe`. Probing only `btop4win` (the shim's target, which is
+# not on PATH) reported a fresh install as NOT FOUND and kept it pending on
+# every tstack update; `btop4win` stays as the fallback for a package-dir PATH.
+$script:TsAppBinAlternates = @{
+    btop = @('btop4win')
+}
+
+# The command an app id resolves to, or $null: its binary name first, then any
+# alternates. Application only, so a same-named profile function (claude, pm)
+# is never what gets probed.
+function Get-TsAppCommand([string]$id) {
+    $names = @(Get-TsAppBin $id)
+    if ($script:TsAppBinAlternates.ContainsKey($id)) { $names += $script:TsAppBinAlternates[$id] }
+    foreach ($n in $names) {
+        $c = Get-Command $n -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($c) { return $c }
+    }
+    return $null
 }
 
 # Apps whose winget install doesn't register a PATH binary — GUI apps that only
@@ -199,7 +214,7 @@ $script:TsAppFixedPaths = @{
 }
 
 function Test-TsAppInstalled([string]$id) {
-    if (Get-Command (Get-TsAppBin $id) -ErrorAction SilentlyContinue) { return $true }
+    if (Get-TsAppCommand $id) { return $true }
     if ($script:TsAppFixedPaths.ContainsKey($id)) { return (Test-Path $script:TsAppFixedPaths[$id]) }
     return $false
 }
@@ -719,15 +734,43 @@ function Format-TsWezDate([string]$Ymd) {
     return $Ymd
 }
 
-# stable | nightly | unknown | none — from winget, never stored. "unknown" means
-# wezterm is on PATH but winget does not own it: report it, never replace it.
+# Every stable release upstream has cut that winget can install. A build whose
+# version is not one of these is a nightly. Add a tag here when upstream cuts a
+# new stable, or a winget stable install of it reads as nightly.
+$script:TsWezStableTags = @('20240203-110809-5046fc22')
+
+# Where both channels' Inno installers put WezTerm: winget's and upstream's
+# GitHub setup.exe alike.
+function Get-TsWezInstallDir { Join-Path $env:ProgramFiles 'WezTerm' }
+
+# stable | nightly | unknown | none: detected, never stored. "unknown" means
+# wezterm is on PATH but neither winget nor upstream's installer put it there:
+# report it, never replace it.
+#
+# A nightly installed by the GitHub fallback (Install-TsWezNightlyFromGitHub)
+# is not a winget install, and winget may still attribute it to the stable id
+# through the shared Add/Remove Programs entry. So anything in the installer's
+# directory is classified by its own version string, which cannot be wrong.
 function Get-TsWezChannel {
+    $winget = ''
     if (Get-Command winget -ErrorAction SilentlyContinue) {
         $n = & winget list --id 'wez.wezterm.nightly' --exact 2>&1
-        if ($LASTEXITCODE -eq 0 -and ($n -match 'wez\.wezterm\.nightly')) { return 'nightly' }
-        $st = & winget list --id 'wez.wezterm' --exact 2>&1
-        if ($LASTEXITCODE -eq 0 -and ($st -match 'wez\.wezterm')) { return 'stable' }
+        if ($LASTEXITCODE -eq 0 -and ($n -match 'wez\.wezterm\.nightly')) { $winget = 'nightly' }
+        else {
+            $st = & winget list --id 'wez.wezterm' --exact 2>&1
+            if ($LASTEXITCODE -eq 0 -and ($st -match 'wez\.wezterm')) { $winget = 'stable' }
+        }
     }
+    $exe = Join-Path (Get-TsWezInstallDir) 'wezterm.exe'
+    if (Test-Path -LiteralPath $exe) {
+        $raw = try { & $exe --version 2>$null } catch { '' }
+        $parts = Get-TsWezVersionParts "$raw"
+        if ($parts) {
+            if ($script:TsWezStableTags -contains $parts.Version) { return 'stable' }
+            return 'nightly'
+        }
+    }
+    if ($winget) { return $winget }
     if (Get-Command wezterm -CommandType Application -ErrorAction SilentlyContinue) { return 'unknown' }
     return 'none'
 }
@@ -868,28 +911,122 @@ function Get-TsWezUpdateAvailable {
     }
 }
 
-# Install/switch channel. Switching means removing the other package first: the
-# two winget packages both install WezTerm to the same place.
+function Get-TsWezWingetId([string]$Channel) {
+    if ($Channel -eq 'nightly') { return 'wez.wezterm.nightly' }
+    return 'wez.wezterm'
+}
+
+# One winget install, through the bootstrap's Install-WingetPackage when it is
+# in scope (so a failure lands in the end-of-run report), otherwise directly.
+# $true when the package is installed afterwards.
+function Invoke-TsWezWinget([string]$Id, [string]$Because) {
+    if (Get-Command Install-WingetPackage -ErrorAction SilentlyContinue) {
+        # Install-WingetPackage echoes winget's last lines into its own output,
+        # so its verdict is the LAST element; [bool] of the whole array is
+        # always $true and would hide every failure.
+        return [bool](@(Install-WingetPackage -Id $Id -Because $Because)[-1])
+    }
+    Write-Host "==> winget install $Id"
+    $out = & winget install --id $Id --exact --silent --accept-source-agreements --accept-package-agreements 2>&1
+    $out | Select-Object -Last 2 | Out-Host
+    # -1978335189 = APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE (already at latest)
+    return ($LASTEXITCODE -eq 0 -or $LASTEXITCODE -eq -1978335189)
+}
+
+# Nightly straight from upstream's rolling GitHub release. winget's nightly
+# manifest points at that same moving URL but pins a hash from whenever it was
+# last refreshed, so `Installer hash does not match` is its routine outcome,
+# not an exotic one. Upstream publishes a .sha256 beside each build, and that
+# is what this checks instead. TS_WEZ_NIGHTLY_BASE overrides the release URL
+# (tests, mirrors). $true when the installer ran and exited 0.
+function Install-TsWezNightlyFromGitHub {
+    $base = if ($env:TS_WEZ_NIGHTLY_BASE) { $env:TS_WEZ_NIGHTLY_BASE.TrimEnd('/') }
+            else { "https://github.com/$($script:TsWezRepo)/releases/download/nightly" }
+    $name = 'WezTerm-nightly-setup.exe'
+    $dir = Join-Path ([IO.Path]::GetTempPath()) "terminal-stack-wezterm-$([guid]::NewGuid().ToString('N'))"
+    $setup = Join-Path $dir $name
+    Write-Host "==> WezTerm nightly: installing upstream's $name from GitHub instead"
+    try {
+        New-Item -ItemType Directory -Force -Path $dir | Out-Null
+        # winget's manifest lists this as a dependency; the bare installer does not
+        # pull it in. Already-installed is the common case and costs a second.
+        & winget install --id 'Microsoft.VCRedist.2015+.x64' --exact --silent `
+            --accept-source-agreements --accept-package-agreements 2>&1 | Out-Null
+        Invoke-WebRequest -Uri "$base/$name" -OutFile $setup -UseBasicParsing -TimeoutSec 300
+        $sums = (Invoke-WebRequest -Uri "$base/$name.sha256" -UseBasicParsing -TimeoutSec 30).Content
+        if ($sums -is [byte[]]) { $sums = [Text.Encoding]::UTF8.GetString($sums) }
+        $expected = if ("$sums" -match '\b([0-9a-fA-F]{64})\b') { $Matches[1].ToLowerInvariant() } else { '' }
+        $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $setup).Hash.ToLowerInvariant()
+        if (-not $expected -or $expected -ne $actual) {
+            Write-Warning "WezTerm nightly: downloaded installer does not match upstream's .sha256; not running it."
+            return $false
+        }
+        $p = Start-Process -FilePath $setup -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-' `
+            -Wait -PassThru
+        if ($p.ExitCode -ne 0) {
+            Write-Warning "WezTerm nightly: installer exited $($p.ExitCode)."
+            return $false
+        }
+        # The winget attempt that sent us here recorded a failure; it is not one now.
+        $script:TsFailedPackages = @($script:TsFailedPackages | Where-Object { $_ -and $_.Id -ne 'wez.wezterm.nightly' })
+        Write-Host '==> WezTerm nightly: installed from GitHub'
+        return $true
+    } catch {
+        Write-Warning "WezTerm nightly: GitHub install failed: $($_.Exception.Message)"
+        return $false
+    } finally {
+        Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+# Install (or upgrade) one channel: winget first, and for nightly upstream's own
+# installer when winget cannot. $true when that channel is installed afterwards.
+function Install-TsWezChannel([string]$Channel) {
+    $ok = Invoke-TsWezWinget (Get-TsWezWingetId $Channel) "terminal emulator ($Channel)"
+    if (-not $ok -and $Channel -eq 'nightly') { $ok = Install-TsWezNightlyFromGitHub }
+    return $ok
+}
+
+# Remove one channel: winget when it owns it, otherwise the Inno uninstaller
+# the GitHub installer left behind. $true when it is gone.
+function Remove-TsWezChannel([string]$Channel) {
+    $id = Get-TsWezWingetId $Channel
+    Write-Host "==> WezTerm: removing $Channel (switching channel)"
+    & winget uninstall --id $id --exact --silent 2>&1 | Select-Object -Last 2 | Out-Host
+    if ($LASTEXITCODE -eq 0) { return $true }
+    $unins = Join-Path (Get-TsWezInstallDir) 'unins000.exe'
+    if (Test-Path -LiteralPath $unins) {
+        $p = Start-Process -FilePath $unins -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait -PassThru
+        if ($p.ExitCode -eq 0) { return $true }
+    }
+    Write-Warning "WezTerm: could not remove $Channel; remove it by hand."
+    return $false
+}
+
+# Install/switch channel. Switching means removing the other one first: both
+# channels install WezTerm to the same place. The removal is only half of a
+# switch, so when the new channel then fails to install, the removed one is put
+# back. A stale nightly hash once left a machine with no terminal at all.
 function Install-TsWezterm([string]$Channel) {
     if ($Channel -notin 'stable', 'nightly') { Write-Warning 'Install-TsWezterm: expected stable|nightly'; return }
-    if ((Get-TsWezChannel) -eq 'unknown') {
+    $current = Get-TsWezChannel
+    if ($current -eq 'unknown') {
         Write-Host '==> WezTerm: installed outside winget; leaving it alone.'
         return
     }
     if (-not (Get-Command winget -ErrorAction SilentlyContinue)) { Write-Warning 'winget not available.'; return }
-    $want  = if ($Channel -eq 'nightly') { 'wez.wezterm.nightly' } else { 'wez.wezterm' }
-    $other = if ($Channel -eq 'nightly') { 'wez.wezterm' } else { 'wez.wezterm.nightly' }
-    $o = & winget list --id $other --exact 2>&1
-    if ($LASTEXITCODE -eq 0 -and ($o -match [regex]::Escape($other))) {
-        Write-Host "==> WezTerm: removing $other (switching channel)"
-        & winget uninstall --id $other --exact --silent 2>&1 | Select-Object -Last 2
+    $swapped = $false
+    if (($current -in @('stable', 'nightly')) -and $current -ne $Channel) {
+        $swapped = Remove-TsWezChannel $current
     }
-    if (Get-Command Install-WingetPackage -ErrorAction SilentlyContinue) {
-        Install-WingetPackage -Id $want -Because "terminal emulator ($Channel)" | Out-Null
-    } else {
-        Write-Host "==> winget install $want"
-        & winget install --id $want --exact --silent --accept-source-agreements --accept-package-agreements 2>&1 |
-            Select-Object -Last 2
+    if (Install-TsWezChannel $Channel) { return }
+    if ($swapped) {
+        Write-Host "==> WezTerm: $Channel did not install; putting $current back"
+        if (Install-TsWezChannel $current) {
+            Write-Host "==> WezTerm: $current restored. Retry later: tstack config wezterm install $Channel"
+        } else {
+            Write-Warning "WezTerm: could not reinstall $current either; install WezTerm by hand."
+        }
     }
 }
 
@@ -1334,20 +1471,37 @@ function Install-TsHerdr {
 # Print what each selected app resolved to, so an installer that failed quietly
 # is visible rather than assumed.
 # Twin of ts_report_installed_apps in bootstrap/_config.sh.
+# The first non-blank line of `<exe> --version` (then `-V`), colour codes
+# stripped, or ''. Runs the resolved EXECUTABLE: calling the bare name would hit
+# a profile function of the same name first (the `claude` wrapper probes
+# Headroom and can throw), and under the bootstrap's ErrorActionPreference=Stop
+# any stderr from it aborted the probe, so the summary printed a path instead.
+function Get-TsAppVersionLine([string]$Exe) {
+    foreach ($flag in '--version', '-V') {
+        $line = & {
+            $ErrorActionPreference = 'Continue'
+            try { & $Exe $flag 2>$null } catch {}
+        } | ForEach-Object { ("$_" -replace '\e\[[0-9;]*m', '').Trim() } | Where-Object { $_ } | Select-Object -First 1
+        if ($line) { return "$line" }
+    }
+    return ''
+}
+
 function Show-TsInstalledApps([string[]]$Apps) {
     if (-not $Apps -or $Apps.Count -eq 0) { return }
     Write-Host ''
     Write-Host '==> Installed tools:'
     foreach ($id in $Apps) {
-        $bin = Get-TsAppBin $id
-        $cmd = Get-Command $bin -CommandType Application -ErrorAction SilentlyContinue
+        $cmd = Get-TsAppCommand $id
         if ($cmd) {
-            $ver = ''
-            try { $ver = (& $bin --version 2>$null | Select-Object -First 1) } catch {}
+            $ver = Get-TsAppVersionLine $cmd.Source
             if (-not $ver) { $ver = $cmd.Source }
-            Write-Host ("    {0,-14} {1}" -f $id, ("$ver" -replace '\e\[[0-9;]*m', '').Substring(0, [Math]::Min(40, "$ver".Length)))
+            Write-Host ("    {0,-14} {1}" -f $id, $ver.Substring(0, [Math]::Min(40, $ver.Length)))
         } elseif ($script:TsAppFixedPaths.ContainsKey($id) -and (Test-Path $script:TsAppFixedPaths[$id])) {
             Write-Host ("    {0,-14} {1}" -f $id, $script:TsAppFixedPaths[$id])
+        } elseif (-not (Test-TsAppInstallable $id)) {
+            # Twin of the bash summary: a tool this platform cannot install is not missing.
+            Write-Host ("    {0,-14} {1}" -f $id, 'not available on this platform')
         } else {
             Write-Host ("    {0,-14} {1}" -f $id, 'NOT FOUND on PATH')
         }

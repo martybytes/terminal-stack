@@ -232,6 +232,8 @@ def find_agent(name: str) -> str | None:
 
 # ------------------------------------------------------------------ headroom
 
+TOKEN_UNAVAILABLE = "proxy token unavailable; set HEADROOM_PROXY_TOKEN or HEADROOM_ENV_FILE"
+
 
 class Headroom:
     def __init__(self, source: Path, out: Out, cursor_mode: str) -> None:
@@ -275,7 +277,7 @@ class Headroom:
         """
         token = self.token()
         if not token:
-            return (False, "proxy token unavailable; set HEADROOM_PROXY_TOKEN or HEADROOM_ENV_FILE")
+            return (False, TOKEN_UNAVAILABLE)
         proxy = str(dig(self.body, "headroom.proxyUrl"))
         for attempt in (1, 2):
             request = urllib.request.Request(
@@ -292,6 +294,33 @@ class Headroom:
                 if attempt == 2:
                     return (False, "unreachable")
         return (False, "unreachable")
+
+    def offer_start(self) -> bool:
+        """At a terminal, offer to start Docker and the headroom stack.
+
+        Only for `on`, the installer's path: `repair` runs from every sync and
+        must never stop to ask. Nobody at the terminal declines every step.
+        """
+        from ..wizard import probes
+        from ..wizard.console import Console
+        from . import services
+
+        if probes.headroom()[0]:
+            return True
+        console = Console.open()
+        try:
+            if not console.interactive:
+                return False
+            return services.offer_start(
+                self.source,
+                "headroom",
+                "Headroom",
+                lambda: probes.headroom()[0],
+                console.ask,
+                console.say,
+            )
+        finally:
+            console.close()
 
     # -- the MCP server -----------------------------------------------------
 
@@ -485,7 +514,19 @@ class Headroom:
         if action == "status":
             return 0 if self.status() else 1
         if action in ("on", "repair"):
+            if action == "on":
+                self.offer_start()
             ok, why = self.probe_auth()
+            if not ok and why in ("unreachable", TOKEN_UNAVAILABLE):
+                # Not running (or never set up) is a state, not a fault: one
+                # line with the way forward, rather than "authentication failed"
+                # on every install and every sync of a machine whose Docker is
+                # simply off.
+                self.out.info(
+                    "Headroom not running; wiring skipped. Start it later: "
+                    "tstack services up headroom && tstack agents headroom on"
+                )
+                return 1
             if not ok:
                 tail = (
                     "leaving direct mode unchanged"
@@ -607,6 +648,17 @@ class Caveman:
         self.source = source
         self.out = out
         self.body = manifest(source)
+
+    def pinned(self) -> str:
+        return str(dig(self.body, "agentmemory.version") or "")
+
+    def codex_cached(self) -> bool:
+        """Is the pinned plugin version already in Codex's plugin cache?"""
+        version = self.pinned()
+        if not version:
+            return False
+        cache = codex_home() / "plugins" / "cache" / "agentmemory" / "agentmemory" / version
+        return cache.is_dir()
 
     def install(self) -> None:
         claude = find_agent("claude")
@@ -769,6 +821,17 @@ class AgentMemory:
         script = self.source / "bootstrap" / "ts-agentmemory.sh"
         return ["bash", str(script)] if script.is_file() else None
 
+    def pinned(self) -> str:
+        return str(dig(self.body, "agentmemory.version") or "")
+
+    def codex_cached(self) -> bool:
+        """Is the pinned plugin version already in Codex's plugin cache?"""
+        version = self.pinned()
+        if not version:
+            return False
+        cache = codex_home() / "plugins" / "cache" / "agentmemory" / "agentmemory" / version
+        return cache.is_dir()
+
     def install(self) -> None:
         claude = find_agent("claude")
         if claude:
@@ -780,7 +843,14 @@ class AgentMemory:
             ):
                 _run([claude, *argv], timeout=600)
         codex = find_agent("codex")
-        if codex:
+        if codex and self.codex_cached():
+            # `codex plugin add` is not a no-op the way `claude plugin install`
+            # is: it deletes and rebuilds the plugin cache from the vendor files,
+            # undoing the hook edits below and running unpatched hooks until the
+            # adapter re-applies them. So the pinned version, once present, is
+            # left alone; a version bump still reinstalls.
+            self.out.info(f"Codex agentmemory plugin {self.pinned()} already installed")
+        elif codex:
             _run(
                 [
                     codex,

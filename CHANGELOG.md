@@ -4,6 +4,42 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+### Fixed
+
+- **A failed WezTerm channel switch no longer leaves the machine without WezTerm
+  (09/24/2026).** On a stable box where the wizard's default picked nightly, the
+  Windows install uninstalled stable, winget then failed nightly on a stale hash,
+  and nothing was put back. Every installer (winget, brew, apt) now reinstalls
+  the channel it removed when the new one fails. On Windows, nightly also falls
+  back to upstream's own `WezTerm-nightly-setup.exe`, checked against the
+  `.sha256` upstream publishes, since winget's nightly manifest pins a hash its
+  rolling URL has outgrown. Channel detection reads the version of anything in
+  `Program Files\WezTerm`, so a nightly installed that way reads as nightly.
+- **Headroom not running is now a question, not an authentication failure
+  (09/24/2026).** No installer ever created Headroom's `.env`, so picking
+  Headroom on a fresh machine always ended with `!! proxy token unavailable`,
+  twice. `tstack agents headroom on` now offers, at a terminal, to start Docker
+  (waiting up to two minutes), to run `tstack services bootstrap` when the stack
+  was never set up, and to bring it up. It never installs Docker. The sync's
+  `repair` never asks and prints one quiet line instead.
+- **`agentmemory on` no longer re-patches Codex on every run (09/24/2026).**
+  `codex plugin add` rebuilds the plugin cache from vendor files, so running it
+  unconditionally reverted the hook edits the adapter had just applied. It now
+  runs only when the pinned version is missing.
+- **btop reads as installed on Windows (09/24/2026).** winget's PATH shim for
+  btop4win is `btop.exe`, and the probe looked only for `btop4win`, so a fresh
+  install showed NOT FOUND and stayed pending forever. Both names are tried now.
+- **atuin is no longer offered as a Windows tool (09/24/2026).** It has no
+  Windows package, so "install everything" counted a tool it could not install.
+  It is `posix` in `apps.conf`. The wizard question stays on Windows, marked as
+  affecting WSL shells only, and the summary says "not available on this
+  platform" instead of NOT FOUND.
+- **The Windows tool summary prints versions, not paths (09/24/2026).** It ran
+  the bare name, which hit the profile's `claude` function, and any stderr from
+  it under the bootstrap's `Stop` preference dropped the probe to a path. It
+  runs the resolved executable now, then falls back to `-V`. A `Substring`
+  that could throw on short colored output is gone too.
+
 ### Added
 
 - **`tstack ui` offers to install Textual instead of explaining how (09/11/2026).**

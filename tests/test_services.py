@@ -1035,3 +1035,94 @@ def test_replace_in_file_tells_matched_apart_from_changed(tmp_path):
     assert stacks.replace_in_file(f, "^KEY=.*$", "KEY=already-right") is True
     assert f.read_text(encoding="utf-8") == "KEY=already-right\n"
     assert stacks.replace_in_file(f, "^MISSING=.*$", "MISSING=x") is False
+
+
+# ------------------------------------------------------------ offer to start
+
+
+@pytest.fixture
+def offer(tree, monkeypatch):
+    """offer_start with the engine, the service verbs and the clock stubbed."""
+    state = {"kind": engine.NATIVE, "up": False, "ready": False, "main": [], "launched": []}
+    monkeypatch.setattr(engine, "docker_kind", lambda: state["kind"])
+    monkeypatch.setattr(engine, "is_up", lambda kind=None: state["up"])
+    monkeypatch.setattr(services.time, "sleep", lambda seconds: None)
+
+    def launch(kind, dry_run=False):
+        state["launched"].append(kind)
+        state["up"] = True
+        return "start Docker Desktop"
+
+    def fake_main(argv):
+        state["main"].append(argv)
+        if argv[0] == "up":
+            state["ready"] = True
+        return 0
+
+    monkeypatch.setattr(services, "launch_engine", launch)
+    monkeypatch.setattr(services, "main", fake_main)
+    said: list[str] = []
+
+    def run(answers):
+        replies = iter(answers)
+        return services.offer_start(
+            tree,
+            "headroom",
+            "Headroom",
+            lambda: state["ready"],
+            lambda prompt: next(replies, None),
+            said.append,
+        )
+
+    state["run"] = run
+    state["said"] = said
+    return state
+
+
+def test_offer_does_nothing_when_the_stack_already_answers(offer):
+    offer["ready"] = True
+    assert offer["run"]([]) is True
+    assert offer["said"] == [] and offer["main"] == []
+
+
+def test_offer_never_installs_docker_it_only_says_how(offer):
+    offer["kind"] = engine.ABSENT
+    assert offer["run"](["y"]) is False
+    assert any("Docker" in line or "engine" in line for line in offer["said"])
+    assert offer["launched"] == [] and offer["main"] == []
+
+
+def test_offer_declined_docker_start_changes_nothing(offer):
+    assert offer["run"](["n"]) is False
+    assert offer["launched"] == [] and offer["main"] == []
+
+
+def test_offer_on_a_fresh_machine_bootstraps_before_up(offer, tree):
+    """No .env yet: the token that headroom needs does not exist until bootstrap."""
+    (tree / "services/stacks/headroom/.env.example").write_text("X=1\n", encoding="utf-8")
+    assert offer["run"](["", ""]) is True
+    assert offer["launched"] == [engine.NATIVE]
+    assert offer["main"] == [["bootstrap"], ["up", "headroom"]]
+
+
+def test_offer_on_an_existing_install_only_starts_it(offer, tree):
+    stack = tree / "services/stacks/headroom"
+    (stack / ".env.example").write_text("X=1\n", encoding="utf-8")
+    (stack / ".env").write_text("X=1\n", encoding="utf-8")
+    offer["up"] = True
+    assert offer["run"](["y"]) is True
+    assert offer["launched"] == []
+    assert offer["main"] == [["up", "headroom"]]
+
+
+def test_offer_with_nobody_at_the_terminal_declines(offer):
+    assert offer["run"]([]) is False
+    assert offer["main"] == []
+
+
+def test_docker_desktop_on_wsl_is_the_windows_launcher(monkeypatch):
+    seen = []
+    monkeypatch.setattr(services.Path, "is_file", lambda self: seen.append(str(self)) or True)
+    exe = services.docker_desktop_exe(engine.WSL_SHIM)
+    # Compared as POSIX: the suite also runs on Windows, where Path uses "\\".
+    assert exe and exe.replace("\\", "/").startswith("/mnt/c/Program Files/Docker/")

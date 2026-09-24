@@ -373,6 +373,47 @@ def test_brew_install_removes_the_other_cask_first(monkeypatch, capsys):
     assert removed < added, flat
 
 
+def test_brew_install_puts_the_old_cask_back_when_the_new_one_fails(monkeypatch, capsys):
+    """A switch that fails must not leave the machine with no WezTerm at all."""
+    calls = []
+
+    def fake_run(argv, timeout=30):
+        calls.append(argv)
+
+        class Got:
+            returncode = (
+                0
+                if argv[:4] == ["brew", "list", "--cask", "wezterm"]
+                or argv[:2] == ["brew", "uninstall"]
+                or argv == ["brew", "install", "--cask", "wezterm"]
+                else 1
+            )
+
+        return Got()
+
+    monkeypatch.setattr(wezterm, "_run", fake_run)
+    wezterm._brew_install("wezterm@nightly", "wezterm", "nightly")
+    flat = [" ".join(c) for c in calls]
+    assert flat[-1] == "brew install --cask wezterm", flat
+    assert "putting wezterm back" in capsys.readouterr().out
+
+
+def test_brew_install_restores_nothing_when_nothing_was_removed(monkeypatch):
+    calls = []
+
+    def fake_run(argv, timeout=30):
+        calls.append(argv)
+
+        class Got:
+            returncode = 1
+
+        return Got()
+
+    monkeypatch.setattr(wezterm, "_run", fake_run)
+    wezterm._brew_install("wezterm@nightly", "wezterm", "nightly")
+    assert ["brew", "install", "--cask", "wezterm"] not in calls
+
+
 def test_brew_install_upgrades_what_is_already_there(monkeypatch, capsys):
     class Got:
         returncode = 0

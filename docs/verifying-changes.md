@@ -697,10 +697,11 @@ ssh <host>                      # backspace and Delete must both work
 ghostty +ssh-cache              # the host should now be listed
 ```
 
-And check the id's **binary name**, which is a separate claim: winget's
-`aristocratos.btop4win` installs `btop4win.exe`, so probing for `btop` reported
-it missing forever even though it was installed. `Get-TsAppBin` must name what
-actually lands on PATH — confirm with `Get-Command` after a real install, and
+And check the id's **binary name**, which is a separate claim, and check it
+against the WinGet Links shim, not the package folder: `aristocratos.btop4win`
+ships `btop4win.exe`, yet the shim on PATH is `btop.exe`. Probing the wrong one
+of those reported btop missing forever, once in each direction.
+`Get-TsAppBin` (plus `$TsAppBinAlternates`) must name what actually lands on PATH — confirm with `Get-Command` after a real install, and
 confirm `Get-TsAppsPending` then stops listing it.
 
 ## 5. What you cannot verify from a dev clone
