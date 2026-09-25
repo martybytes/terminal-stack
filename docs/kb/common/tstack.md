@@ -257,7 +257,7 @@ Run it bare for an interactive menu; `tstack config show` just prints the state.
 | `tstack config restore <on\|off>` | reopen the last WezTerm session at startup (default off) |
 | `tstack config wezterm` | your build + date, newest per channel, count of what changed since |
 | `tstack config wezterm changes` | the full upstream changelog since your build, paged |
-| `tstack config wezterm install <stable\|nightly>` | switch channel — removes the other package first |
+| `tstack config wezterm install <stable\|nightly>` | switch channel; removes the other package first, reinstalls it if the switch fails |
 | `tstack config wezterm upgrade` | refresh the channel you are on; never switches |
 | `tstack config memory [status]` | which memory backend runs, and whether the derived state agrees |
 | `tstack config memory <agentmemory\|headroom\|none>` | switch it; restarts headroom so the setting and the running state cannot disagree |

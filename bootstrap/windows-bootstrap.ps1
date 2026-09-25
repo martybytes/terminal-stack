@@ -41,15 +41,12 @@ function Install-WingetPackage {
     return $false
 }
 
-# Stable only. Nightly's winget manifest is republished more often than its hash
-# is refreshed, so `Installer hash does not match` was a routine outcome rather
-# than an exotic one — and the trade-off (upstream stable is old) is written up in
-# docs/decisions.md § "Why WezTerm is stable-only, and why the emulator is still a
-# choice". Nothing here installs nightly; a nightly a previous bootstrap left is
-# removed FIRST and unconditionally, whether or not WezTerm was selected this run.
-# Install-TsTerminals now lives in bootstrap/_config.ps1 (dot-sourced above) so
+# Install-TsTerminals lives in bootstrap/_config.ps1 (dot-sourced above) so
 # `tstack config wizard` can call it too; it uses Install-WingetPackage when that is
-# in scope, so this script keeps its end-of-run failure report.
+# in scope, so this script keeps its end-of-run failure report. Nightly's winget
+# manifest pins a hash its moving URL outgrows, so a failed winget nightly falls
+# back to upstream's GitHub installer, and a failed channel switch puts the
+# removed channel back: docs/decisions.md § "Why the WezTerm channel is a question".
 
 function Test-WingetAvailable {
     try {

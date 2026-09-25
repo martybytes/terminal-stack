@@ -91,7 +91,7 @@ Every question works the same way: the default is **marked with `>` and captione
   Toggle a number, [a]ll, [n]one, Enter to continue, [s]kip:
   ```
 
-  **Nothing is automatic.** Nothing installs unless you tick it, and neither channel ever upgrades on its own — `tstack update` reports and offers, `tstack config wezterm` changes it on demand. Ticking both WezTerm rows installs nightly and says so: the two packages install to the same place, so they cannot coexist, and switching channel removes the other first.
+  **Nothing is automatic.** Nothing installs unless you tick it, and neither channel ever upgrades on its own — `tstack update` reports and offers, `tstack config wezterm` changes it on demand. Ticking both WezTerm rows installs nightly and says so: the two packages install to the same place, so they cannot coexist, and switching channel removes the other first. If the new channel then fails to install, the removed one is put back, so a failed switch never leaves you without a terminal. On Windows, winget's nightly manifest usually fails its hash check (it pins a hash its rolling URL has outgrown), so nightly falls back to upstream's own `WezTerm-nightly-setup.exe` from the GitHub nightly release, checked against the `.sha256` upstream publishes beside it.
 
   Skip the prompt with `TS_TERMINALS=wezterm-nightly,ghostty` / `TS_TERMINALS=wezterm-stable` / `TS_TERMINALS=none`; `TS_WEZTERM=nightly|stable|skip` still maps across. Change it later with **`tstack config wezterm install <stable|nightly>`**, which removes the other channel for you; `tstack config wezterm` (or `tstack wezterm`) shows your build, both channels' newest, and what changed in between. Rationale in `docs/decisions.md` § "Why the WezTerm channel is a question, and why it is not a saved setting".
 - **WezTerm multiplexer** — whether panes are hosted by `wezterm-mux-server` instead of the GUI, so a GUI crash leaves every pane alive and relaunching WezTerm reattaches. Defaults to **off**: the mux server loads its own copy of `.wezterm.lua`, so config changes then need `tstack mux restart` (which kills every pane), and mux panes can't render the per-pane Claude tint. Skipped on headless servers (no GUI to host). Change it any time with `tstack mux on|off`. Skip with `TS_WEZ_MUX=on|off`.
@@ -171,7 +171,7 @@ cd $env:LOCALAPPDATA\terminal-stack\stack
 
 It runs the wizard (leader key / theme / terminal emulator / mux / apps / TTS + optional tray daemon / workspace — see **Install wizard** above; set `$env:TS_PROFILE`/`TS_DEVELOPMENT`/`TS_STARSHIP_PRESET`/`TS_LEADER`/`TS_THEME`/`TS_TERMINALS`/`TS_WEZ_MUX`/`TS_WEZ_RESTORE`/`TS_APPS`/`TS_CC_TTS`/`TS_CC_TTS_DAEMON` to skip prompts), shows the review, and only then installs:
 - **Always:** JetBrainsMono Nerd Font (`DEVCOM.JetBrainsMonoNerdFont`), Starship (`Starship.Starship`), chezmoi (`twpayne.chezmoi`)
-- **WezTerm, if you ticked it:** `wez.wezterm.nightly` or `wez.wezterm`, whichever channel you picked. Switching channel uninstalls the other package first — they install to the same place. Ghostty is not offered on Windows — this stack configures it on macOS only
+- **WezTerm, if you ticked it:** `wez.wezterm.nightly` or `wez.wezterm`, whichever channel you picked. Switching channel uninstalls the other package first — they install to the same place — and reinstalls it if the new channel fails. A failed winget nightly (usually a stale manifest hash) falls back to upstream's GitHub installer. Ghostty is not offered on Windows — this stack configures it on macOS only
 - **Selected apps** (recommended set by default): eza, fzf, bat, delta, ripgrep, zoxide, glow, micro, neovim, gh, ghq, lazygit, prettymark; optionally `zed` (one winget install)
 
 It saves your choices to `%LOCALAPPDATA%\terminal-stack\config.json`. Any package that failed is **listed again at the end with the command to retry it**, so a failure can't scroll past unnoticed. Pass `-WhatIf` to preview without installing. UAC prompts on machine-scope installs; approve each.
@@ -421,6 +421,13 @@ group change does not affect the shell that ran it. Full notes:
 ```sh
 tstack services bootstrap
 ```
+
+If you picked Headroom in the wizard, you may not need to type this: when Headroom
+is not answering, the installer says so and offers each step in turn. It starts
+Docker if it is installed but not running (and waits up to two minutes), runs this
+bootstrap if the stack has no `.env` yet, then brings Headroom up and wires the
+agents. Declining any step, or running without a terminal, skips it and prints the
+command for later. It never installs Docker itself.
 
 Seeds every `services/stacks/*/.env` from its tracked `.env.example`, **generates**
 Headroom's `HEADROOM_PROXY_TOKEN` and `NEO4J_PASSWORD` (both are `:?`-required, so

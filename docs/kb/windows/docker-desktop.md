@@ -10,9 +10,11 @@ winget install --id Docker.DockerDesktop --exact
 ```
 
 Then start it once from the Start menu and let it finish initialising. The stack
-never starts it for you: launching a multi-gigabyte GUI application because you
+never starts it without asking: launching a multi-gigabyte GUI application because you
 typed `tstack services status` is not acceptable. `tstack services up --start-engine` does it
-when you ask.
+when you ask, on Windows and from WSL alike, and `tstack agents headroom on` (what
+the installer runs when you pick Headroom) asks first and waits up to two minutes
+for it. Neither ever installs Docker Desktop.
 
 ## WSL integration — the setting that causes "docker is broken in WSL"
 

@@ -1280,6 +1280,24 @@ newer exists on the channel you are already on, and `tstack config wezterm` chan
 No path installs, upgrades or switches without a yes. Non-interactive runs print the command
 instead of running it.
 
+**A switch removes the old channel only because it has to, and puts it back if the new one
+fails.** The two channels cannot be installed side by side, so the removal has to come first.
+On Windows it used to be unconditional: on a stable machine where Enter picked nightly, winget
+uninstalled stable, then failed the nightly install on a hash mismatch, and the machine was
+left with no WezTerm at all. Every installer (winget, brew, apt) now remembers what it
+removed and reinstalls it when the new channel does not install.
+
+**On Windows, nightly falls back to upstream's own installer.** winget's `wez.wezterm.nightly`
+manifest points at the rolling `releases/download/nightly/WezTerm-nightly-setup.exe` but pins
+the SHA-256 from whenever someone last refreshed it (April, as of this writing), so
+`Installer hash does not match` is the normal result, not a fluke. When winget fails,
+`Install-TsWezNightlyFromGitHub` downloads that same file, checks it against the `.sha256`
+upstream publishes next to it, and runs it silently. An install from there is not owned by
+winget, and winget may still attribute it to the stable id through the shared Add/Remove
+Programs entry. So `Get-TsWezChannel` classifies anything in `Program Files\WezTerm` by its
+own `wezterm --version`: a tag in `$TsWezStableTags` means stable, anything else means
+nightly. When upstream cuts a new stable, that list needs the new tag.
+
 **The prompt shows facts, not just a default.** A choice between "stable" and "nightly" is
 meaningless without knowing that stable is from 2024 and nightly was rebuilt this morning, so
 the intro carries the installed build and its date, the newest build on each channel, and a
@@ -1312,7 +1330,8 @@ still shown, and install/upgrade leave it alone rather than fighting over it.
 `/Applications/WezTerm.app` and on Debian both packages own `/usr/bin/wezterm`, so the second
 install simply refuses. The removal is conditional on actually switching — a machine that
 declines WezTerm entirely keeps whatever it already had, which the earlier stable-only
-version got wrong by purging nightly unconditionally.
+version got wrong by purging nightly unconditionally. And a switch whose new channel then fails
+to install reinstalls the one it removed (see the paragraph on remove-after-verify above).
 
 Every network call fails **open and silent**, with a hard timeout: a report that degrades to
 "installed version and date" is fine, one that blocks an install or errors a shell is not.
@@ -1581,7 +1600,9 @@ port, and `bootstrap/agent-tools.json`, the one file where a port, URL, image ta
 written down. Neither side reaches into the other by path.
 
 At the command level the same line is `tstack services` versus `tstack agents`. **`tstack services` is the only thing
-in this repo that starts, stops or builds a container; `tstack agents` may only probe one.** That is not
+in this repo that starts, stops or builds a container; `tstack agents` may only probe one** (or, for
+`headroom on` at a terminal, ask and hand off to `tstack services`; see "Why `agents headroom on`
+offers to start Docker"). That is not
 a style preference — `test_no_project_scope_or_docker_mutation_in_lifecycle_adapters` asserts the
 strings `docker compose`, `docker rm` and `restart: unless-stopped` appear nowhere in
 `tstack/commands/agents.py`, as case-insensitive matches over the whole file, **so even a comment
@@ -1606,6 +1627,15 @@ Previously the fix was re-running an installer nobody remembered. Now both sync 
 `ts-agentmemory.ps1 -Check` and only `-Apply` when something is missing, so `tstack update` and
 `chezmoi apply` restore it. `tstack doctor` reports the same condition for when you want to know
 rather than have it fixed.
+
+**`agentmemory on` does not reinstall a Codex plugin that is already at the pin.** Unlike
+`claude plugin install`, which does nothing when the plugin is already there, `codex plugin add`
+deletes the whole plugin cache and rebuilds it from the vendor files. Running it on every `on`
+undid every edit the adapter had just made, so every install printed `[DO]` for all six Codex
+scripts, and the unpatched vendor hooks ran until the adapter caught up. It now runs only when
+`plugins/cache/agentmemory/agentmemory/<version>` is missing, so a version bump still installs.
+Anything else that refreshes the cache (a Codex update, or Claude Code refreshing its
+marketplace at startup) still reverts the edits, and the sync still repairs them.
 
 **The duplicate is suppressed client-side, before the request.** Codex loads two hook
 registrations — `~/.codex/hooks.json` for Desktop and the plugin's own `hooks.codex.json` for the
@@ -2308,6 +2338,40 @@ fallback behavior remain one TTS implementation. `PermissionRequest` stays out:
 approval speech is separate product behavior and previously produced weak,
 duplicated tool-name announcements.
 
+## Why `agents headroom on` offers to start Docker and the stack, but never installs Docker
+
+A fresh Windows install with Headroom picked printed `!! Headroom proxy authentication failed
+(proxy token unavailable ...)` twice: once from the bootstrap's `agents headroom on`, then
+again from the sync's `repair`. The message was accurate and useless. "Token unavailable" means
+`services/stacks/headroom/.env` does not exist, and **no installer ever ran `tstack services
+bootstrap`**, the only thing that creates it. So on a fresh machine, choosing Headroom was
+guaranteed to fail, and it was reported as an authentication problem.
+
+`on` now checks `/readyz` first, and at a terminal it offers the missing steps one at a time,
+"at a terminal" meaning stdin and stderr are both a terminal and `CI` is unset. Opening the
+console is not enough: a GitHub Windows runner has one, and the suite waited six hours on the
+first prompt. The steps,
+each a default-yes question:
+
+1. **Docker missing:** print the install command the engine advice already has, then stop.
+   Installing Docker Desktop is a multi-gigabyte, reboot-prone decision, and not one an agent
+   toggle gets to make.
+2. **Docker installed but stopped:** start it (on Windows and WSL, `Docker Desktop.exe`,
+   detached; `_start_engine` had no Windows branch until now), then wait up to two minutes with
+   dots. A cold start is usually 30 to 90 s.
+3. **No `.env` (a fresh machine):** run `tstack services bootstrap`, which seeds the file and
+   generates the token. **`.env` present (an existing install):** skip straight to step 4.
+4. `tstack services up headroom`, then wait up to 60 s for `/readyz`.
+
+This does not break the rule that `tstack services` is the only thing that starts a container.
+`agents.py` still contains no container command. It hands the whole job to
+`services.offer_start`, which calls `services.main`, and only after a yes.
+
+`repair` never asks, because it runs on every sync. Declined, unattended, "unreachable" and
+"token unavailable" all produce the same single info line, `Headroom not running; wiring
+skipped`, with the command for later. An actual HTTP answer (401, 500) is still reported as an
+authentication failure, because it is one.
+
 ## Why Headroom MCP uses Docker stdio instead of port 8788
 
 Port `8788` belongs to nginx and serves the Headroom dashboard. It never exposed
@@ -2888,7 +2952,10 @@ were carried as ids that do not resolve), so Windows routes them through
 the winget pass and before the agent CLIs, in **both** `Install-TsApps` and
 `windows-bootstrap.ps1`'s own loop.
 
-**Binary names can differ from the id** (`btop` becomes `btop4win` on Windows),
+**Binary names can differ from the id**, and can differ from the executable
+inside the package: winget's btop4win ships `btop4win.exe`, but its PATH shim is
+`btop.exe`, so probing only `btop4win` reported a fresh install as missing
+(`$TsAppBinAlternates` now tries both),
 and a new winget id is verified with `winget show --id <id> --exact` before it is
 written down. An id that always fails is worse than an honest "not available on
 this platform".

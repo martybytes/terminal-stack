@@ -20,6 +20,17 @@ Port `8788` is only the dashboard gateway. It has no `/mcp` route; pointing
 Codex there returns nginx `404` during `initialize`. Claude can hide the same
 failure, so a quiet Claude startup is not proof that HTTP MCP works.
 
+## When it is not running
+
+`tstack agents headroom on` (what the installer runs) checks `/readyz` first. If
+Headroom is not answering and you are at a terminal (stdin and stderr both a
+terminal, and `CI` unset), it offers each step and waits
+for a yes: start Docker when it is installed but stopped (up to two minutes),
+`tstack services bootstrap` when the stack has no `.env` yet (that is what creates
+`HEADROOM_PROXY_TOKEN`), then `tstack services up headroom`. It never installs
+Docker. `repair`, which every sync runs, never asks. Declined or unattended, both
+print one line, `Headroom not running; wiring skipped`, and the command for later.
+
 `tstack config agents headroom on|repair` instead registers this stdio command:
 
 ```sh

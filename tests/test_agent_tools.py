@@ -216,6 +216,8 @@ def test_headroom_enable_requires_authenticated_proxy(monkeypatch, capsys):
 
     out = agents.Out()
     headroom = agents.Headroom(ROOT, out, "mcp")
+    # `on` first offers to start a stopped Headroom; that is not what this tests.
+    monkeypatch.setattr(headroom, "offer_start", lambda: False)
     monkeypatch.setattr(headroom, "probe_auth", lambda: (False, "HTTP 401"))
     registered = []
     monkeypatch.setattr(headroom, "register", lambda add: registered.append(add))
@@ -1316,10 +1318,11 @@ def test_wezterm_channel_switch_removes_the_other_one_both_ways(monkeypatch):
     assert calls == []
 
     ps = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
-    assert (
-        "$other = if ($Channel -eq 'nightly') { 'wez.wezterm' } else { 'wez.wezterm.nightly' }"
-        in ps
-    )
+    # pwsh removes whichever channel is detected, only when it differs from the
+    # one asked for, and puts it back when the new one then fails to install.
+    assert "($current -in @('stable', 'nightly')) -and $current -ne $Channel" in ps
+    assert "$swapped = Remove-TsWezChannel $current" in ps
+    assert "if (Install-TsWezChannel $current)" in ps
     # The removal must be conditional on switching, never unconditional: a machine
     # that declines WezTerm entirely must keep whatever it already had.
     sh = (ROOT / "bootstrap/_wezterm.sh").read_text(encoding="utf-8")

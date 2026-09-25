@@ -150,7 +150,7 @@ Also reachable as `tstack config wezterm …`, and `t` in the `tstack config` me
 |---|---|
 | `tstack wezterm` / `status` | your build + date, newest on each channel, a count of what changed since |
 | `tstack wezterm changes` | the full upstream changelog since your build, paged through glow |
-| `tstack wezterm install <stable\|nightly>` | switch channel — removes the other package first |
+| `tstack wezterm install <stable\|nightly>` | switch channel; removes the other package first, reinstalls it if the switch fails |
 | `tstack wezterm upgrade` | refresh the channel you are on; never switches |
 | `tstack wezterm -h` | help (works even when the clone or chezmoi is broken) |
 

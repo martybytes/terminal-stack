@@ -35,7 +35,10 @@ container; `tstack agents` may only probe one. That is not a style preference â€
 `restart: unless-stopped` appear nowhere in `tstack/commands/agents.py`, as a
 case-insensitive match over the whole file, **so even a comment naming the
 compose command fails it**. When a probe fails, `tstack agents` prints the verb
-(`tstack services up playwright`), never the command.
+(`tstack services up playwright`), never the command. The one hand-off:
+`tstack agents headroom on`, at a terminal, may call `services.offer_start`,
+which asks before each step and then runs `tstack services` verbs in-process.
+`agents.py` still names no container command.
 
 Every docker argv in the repo is built in one place, `tstack/stacks.py`'s
 `Compose.argv`, and a test asserts no second file builds one. That choke point is

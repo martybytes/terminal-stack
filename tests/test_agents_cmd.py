@@ -275,6 +275,30 @@ def test_a_missing_adapter_is_skipped_rather_than_crashed(monkeypatch, tmp_path,
     assert "plugin enabled" in capsys.readouterr().out
 
 
+def _codex_install_calls(monkeypatch, tmp_path, cached: bool) -> list[list[str]]:
+    memory = agents.AgentMemory(ROOT, agents.Out())
+    monkeypatch.setattr(memory, "adapter", lambda: None)
+    monkeypatch.setattr(agents, "find_agent", lambda name: "codex" if name == "codex" else None)
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+    if cached:
+        (tmp_path / "plugins/cache/agentmemory/agentmemory" / memory.pinned()).mkdir(parents=True)
+    calls: list[list[str]] = []
+    monkeypatch.setattr(agents, "_run", lambda argv, timeout=0: calls.append(argv))
+    memory.install()
+    return calls
+
+
+def test_codex_plugin_is_not_reinstalled_when_the_pinned_version_is_cached(monkeypatch, tmp_path):
+    """`codex plugin add` rebuilds the cache from vendor files, undoing the hook
+    edits, so a second `agentmemory on` re-patched every script every run."""
+    assert _codex_install_calls(monkeypatch, tmp_path, cached=True) == []
+
+
+def test_codex_plugin_is_installed_when_the_pinned_version_is_missing(monkeypatch, tmp_path):
+    calls = _codex_install_calls(monkeypatch, tmp_path, cached=False)
+    assert [c[1:3] for c in calls] == [["plugin", "marketplace"], ["plugin", "add"]]
+
+
 # ------------------------------------------------------------------ backups
 
 
@@ -344,8 +368,10 @@ def test_caveman_install_pins_the_manifest_version(monkeypatch, capsys):
     assert "2.2.0" in capsys.readouterr().out
 
 
-def test_agentmemory_install_wires_both_vendors_then_the_hooks(monkeypatch, capsys):
+def test_agentmemory_install_wires_both_vendors_then_the_hooks(monkeypatch, capsys, tmp_path):
     ran = []
+    # An empty Codex home: the real one may already hold the pinned plugin.
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
     monkeypatch.setattr(agents, "find_agent", lambda name: f"/usr/bin/{name}")
     monkeypatch.setattr(agents, "_run", lambda argv, timeout=60, stdin=None: ran.append(argv))
 
@@ -437,3 +463,45 @@ def test_open_url_uses_this_platforms_opener(monkeypatch):
 
 def test_a_probe_of_a_dead_port_is_false():
     assert agents.tcp_answers("127.0.0.1", 9, timeout=0.2) is False
+
+
+@pytest.mark.parametrize("action", ["on", "repair"])
+def test_headroom_not_running_is_one_quiet_line_not_an_auth_failure(monkeypatch, capsys, action):
+    """A machine whose Docker is off is not a broken one: every install and every
+    sync used to print "authentication failed" for it."""
+    headroom = agents.Headroom(ROOT, agents.Out(), "mcp")
+    monkeypatch.setattr(headroom, "offer_start", lambda: False)
+    monkeypatch.setattr(headroom, "probe_auth", lambda: (False, agents.TOKEN_UNAVAILABLE))
+    assert headroom.run(action) == 1
+    out = capsys.readouterr().out
+    assert "Headroom not running; wiring skipped" in out
+    assert "authentication failed" not in out
+
+
+@pytest.mark.parametrize("ci, tty", [("", False), ("true", True)])
+def test_headroom_offer_never_opens_a_console_without_a_person(monkeypatch, ci, tty):
+    """A GitHub Windows runner has a console, so CONIN$ opened and the whole
+    suite waited six hours on "Start Docker now?". Neither a non-terminal stdin
+    nor CI may get as far as opening one."""
+    from tstack.wizard import console, probes
+
+    monkeypatch.setattr(probes, "headroom", lambda: (False, ""))
+    monkeypatch.setattr(console.Console, "open", lambda: pytest.fail("console opened"))
+    monkeypatch.setenv("CI", ci)
+    monkeypatch.setattr(agents, "_isatty", lambda stream: tty)
+    assert agents.Headroom(ROOT, agents.Out(), "mcp").offer_start() is False
+
+
+def test_headroom_repair_never_offers_to_start_anything(monkeypatch):
+    headroom = agents.Headroom(ROOT, agents.Out(), "mcp")
+    monkeypatch.setattr(headroom, "offer_start", lambda: pytest.fail("repair must not prompt"))
+    monkeypatch.setattr(headroom, "probe_auth", lambda: (False, "unreachable"))
+    assert headroom.run("repair") == 1
+
+
+def test_a_real_auth_answer_is_still_reported_as_a_failure(monkeypatch, capsys):
+    headroom = agents.Headroom(ROOT, agents.Out(), "mcp")
+    monkeypatch.setattr(headroom, "offer_start", lambda: True)
+    monkeypatch.setattr(headroom, "probe_auth", lambda: (False, "HTTP 401"))
+    assert headroom.run("on") == 1
+    assert "authentication failed (HTTP 401)" in capsys.readouterr().out

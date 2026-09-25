@@ -18,7 +18,10 @@ ceiling, and every shell shares one database. Replaces `Ctrl+R`.
 - **zsh only.** `atuin init` supports zsh, bash, fish, nu and xonsh — there is
   **no PowerShell target**, and no winget package. On a Windows machine atuin
   lives in WSL. It is deliberately absent from the winget table rather than
-  present and always failing.
+  present and always failing, and `apps.conf` marks it `posix`, so the Windows
+  tool picker never offers it. The wizard still asks the atuin question on
+  Windows, labelled as affecting your WSL shells only, because the saved answer
+  is what the WSL side renders.
 
 ## Keys
 
