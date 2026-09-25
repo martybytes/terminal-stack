@@ -115,7 +115,7 @@ The original value was `'RESIZE'`, which draws only a resizable border — no OS
 
 ## Why `LEADER o` to detach a tab instead of dragging it out?
 
-WezTerm has no native mouse "tear-off": you cannot drag a tab off the bar to spawn a new window (long-standing limitation — see GH discussion #4080 and issue #549). The supported equivalent is the Lua `pane:move_to_new_window()`, which we bind to `LEADER o` (the leader — default `Ctrl+Space`, configurable via `tstack config leader` — then `o`) via `wezterm.action_callback`, plus `Ctrl+Shift+O` for access without the leader. `o` was the obvious free letter among the leader bindings at the time and is mnemonic for "out". For ad-hoc use without a keybinding, the CLI does the same thing: `wezterm cli move-pane-to-new-tab --new-window`. Bound in both WezTerm configs.
+WezTerm has no native mouse "tear-off": you cannot drag a tab off the bar to spawn a new window (long-standing limitation — see GH discussion #4080 and issue #549). The supported equivalent is the Lua `pane:move_to_new_window()`, which we bind to `LEADER o` (the leader — default `Ctrl+\`, configurable via `tstack config leader` — then `o`) via `wezterm.action_callback`, plus `Ctrl+Shift+O` for access without the leader. `o` was the obvious free letter among the leader bindings at the time and is mnemonic for "out". For ad-hoc use without a keybinding, the CLI does the same thing: `wezterm cli move-pane-to-new-tab --new-window`. Bound in both WezTerm configs.
 
 ## Why local-only chezmoi git (no remote yet)?
 
@@ -2959,6 +2959,31 @@ inside the package: winget's btop4win ships `btop4win.exe`, but its PATH shim is
 and a new winget id is verified with `winget show --id <id> --exact` before it is
 written down. An id that always fails is worse than an honest "not available on
 this platform".
+
+## Why the default leader is `Ctrl+\`, not `Ctrl+Space`
+
+`Ctrl+Space` was the default from the start and was contested everywhere the
+stack runs. macOS binds it to "Select the previous input source", so a fresh Mac
+install had a dead leader until the user found a System Settings toggle (the
+INSTALL step existed only to undo our own default). PSReadLine binds it to
+`MenuComplete`, which the leader silently took from every pwsh pane. And on
+Omarchy both tmux (`prefix C-Space`) and herdr ship it as their prefix, so a
+WezTerm leader on the same chord ate the inner program's prefix outright.
+
+`Ctrl+\` was checked against the same list: no macOS or Windows system
+shortcut, no WezTerm default assignment, nothing in the stack's zsh, pwsh, tmux,
+herdr or pane-nav bindings. What it does claim is small and reachable by pressing
+the leader twice: the tty's SIGQUIT (`0x1C`), nano's Replace (also `Alt+R`),
+Emacs' `toggle-input-method`, and nvim's terminal-mode escape `Ctrl+\ Ctrl+N`,
+which is the one a user would notice. The leader-twice binding used to send a
+hard-coded `Ctrl+Space`, so it now sends the leader chord itself, mapping the
+`phys:` name back to the character `SendKey` wants.
+
+Only the default moved. Every installer saves `leaderChord` explicitly, so an
+existing machine keeps what it has; changing someone's leader under them on the
+next `tstack update` would break muscle memory without being asked. The
+`phys:Backslash` layout caveat below applies: on a non-US layout it is whichever
+key sits where `\` does on ANSI.
 
 ## Why leader keys with no printable spelling are stored by name
 

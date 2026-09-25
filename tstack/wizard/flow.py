@@ -37,7 +37,7 @@ class Answers:
     development: str = "yes"
     app_class: str = catalog.DEVELOPER
     starship: str = "terminal-stack"
-    leader: str = "ctrl-space"
+    leader: str = "ctrl-backslash"
     theme: str = "dark"
     tmux: str = "ctrl-b"
     terminals: list[str] = field(default_factory=list)
@@ -231,18 +231,19 @@ def collect(console: Console, ask_terminals: bool = False) -> Answers:
     if _env("TS_LEADER"):
         leader = _env("TS_LEADER")
     elif bare:
-        leader = "ctrl-space"
+        leader = "ctrl-backslash"
     else:
         leader = ask.choose(
             "Leader key (WezTerm) - prefix for pane / tab / workspace commands:",
             [
-                ("ctrl-space", "Ctrl+Space", ""),
+                ("ctrl-backslash", "Ctrl+\\", "clashes with nothing"),
+                ("ctrl-space", "Ctrl+Space", "macOS and PSReadLine claim it"),
                 ("ctrl-a", "Ctrl+A", "tmux muscle memory"),
                 ("ctrl-b", "Ctrl+B", "tmux default"),
                 ("alt-space", "Alt+Space", ""),
                 ("custom", "custom chord", ""),
             ],
-            "ctrl-space",
+            "ctrl-backslash",
         )
         if leader == "custom":
             leader = _chord(console, text(console, _CHORD_PROMPT))
@@ -464,7 +465,7 @@ def _chord(console: Console, typed: str) -> str:
             return chord
         console.say(f"  {why}")
         typed = text(console, _CHORD_PROMPT)
-    return "ctrl-space"
+    return "ctrl-backslash"
 
 
 def _saved_tmux() -> str:

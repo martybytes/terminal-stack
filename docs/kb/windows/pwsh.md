@@ -58,12 +58,12 @@ prints the reason and the one elevated command that fixes it
 `winget-symlinks`, and `doc windows/winget` has the detail.
 
 ## Recommended WezTerm model (one OS window)
-Use WezTerm **workspaces** (`Ctrl+Space w` picker, `Ctrl+Space n` to create) as the
+Use WezTerm **workspaces** (`Ctrl+\ w` picker, `Ctrl+\ n` to create) as the
 unit of "what I'm working on". Inside a workspace use **panes** (`F1`–`F4` /
-`Ctrl+Space 1`–`4` focus-or-split by direction, `F5`/`F6` jump/swap via PaneSelect,
-`Ctrl+Space h`/`v` to split, leader+arrows for move/resize modes, `z` zoom) for
+`Ctrl+\ 1`–`4` focus-or-split by direction, `F5`/`F6` jump/swap via PaneSelect,
+`Ctrl+\ h`/`v` to split, leader+arrows for move/resize modes, `z` zoom) for
 things you watch simultaneously. Need a remote shell
-beside your work? `Ctrl+Space H`/`V` opens a domain picker (SSH/WSL) and splits it in.
+beside your work? `Ctrl+\ H`/`V` opens a domain picker (SSH/WSL) and splits it in.
 Tabs are cheap full-screen flips within a workspace — `Alt+1`…`9` to jump. This
 replaces needing multiple top-level WezTerm windows. Full keys: `doc wezterm/panes`,
 `doc wezterm/tabs`, `doc wezterm/workspace`.
@@ -72,4 +72,4 @@ replaces needing multiple top-level WezTerm windows. Full keys: `doc wezterm/pan
 
 WezTerm loads from `%USERPROFILE%`, not the clone. After editing `windows/.wezterm.lua.tmpl`
 or `windows/.wezterm/pane_nav.lua`, run `scripts\sync-windows.ps1 -SourceDir <clone>`,
-then **`Ctrl+Space` `r`** for `pane_nav.lua` changes. Full loop: `doc wezterm/dev-config`.
+then **`Ctrl+\` `r`** for `pane_nav.lua` changes. Full loop: `doc wezterm/dev-config`.

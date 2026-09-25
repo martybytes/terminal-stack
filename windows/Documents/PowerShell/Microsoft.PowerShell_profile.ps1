@@ -1275,7 +1275,7 @@ function Set-TerminalStackConfig {
     # Get-TsProp rather than dot access, for the strictness reason above: a config.json
     # written before a key existed makes every one of these a terminating error.
     $c = Get-TsConfig
-    $leader = Get-TsProp $c leaderChord 'ctrl-space'
+    $leader = Get-TsProp $c leaderChord 'ctrl-backslash'
     $theme  = Get-TsProp $c themeMode   'dark'
     $tmux   = Get-TsProp $c tmuxPrefix  'ctrl-b'
     $apps   = @(Get-TsProp $c apps @())
@@ -1331,6 +1331,7 @@ function Set-TerminalStackConfig {
     $menuLeader = {
         Read-TsChoice -Title 'Leader key (WezTerm) - prefix for pane / tab / workspace commands:' `
             -Default $leader -Options @(
+                @{ Key = 'ctrl-backslash'; Label = 'Ctrl+\'; Note = 'clashes with nothing' },
                 @{ Key = 'ctrl-space'; Label = 'Ctrl+Space' },
                 @{ Key = 'ctrl-a';     Label = 'Ctrl+A'; Note = 'tmux muscle memory' },
                 @{ Key = 'ctrl-b';     Label = 'Ctrl+B'; Note = 'tmux default' },

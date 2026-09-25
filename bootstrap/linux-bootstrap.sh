@@ -60,7 +60,7 @@ _ts_persist_wizard() {
     # leaderKey/leaderMods/resolvedTheme via `chezmoi init`). Requires chezmoi.toml.
     if [ -f "$TOML" ]; then
         # shellcheck disable=SC2086
-        ts_save_config "${TS_WIZ_LEADER:-ctrl-space}" "${TS_WIZ_THEME:-dark}" "${TS_WIZ_TMUX:-ctrl-b}" ${TS_WIZ_APPS:-}
+        ts_save_config "${TS_WIZ_LEADER:-ctrl-backslash}" "${TS_WIZ_THEME:-dark}" "${TS_WIZ_TMUX:-ctrl-b}" ${TS_WIZ_APPS:-}
         ts_agents_save_config "${TS_WIZ_HEADROOM:-off}" "${TS_WIZ_HEADROOM_CURSOR:-mcp}" "${TS_WIZ_CAVEMAN:-off}" "${TS_WIZ_AGENTMEMORY:-off}"
         # The memory answer itself. Stored through ts_memory_apply, not through
         # ts_agents_save_config, because that helper writes only independent toggles

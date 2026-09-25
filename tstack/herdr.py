@@ -584,7 +584,7 @@ def collisions() -> list[tuple[str, str]]:
     found = []
     for key, default, program in (
         ("tmuxPrefix", "ctrl-b", "tmux"),
-        ("leaderChord", "ctrl-space", "wezterm"),
+        ("leaderChord", "ctrl-backslash", "wezterm"),
     ):
         if shutil.which(program) is None:
             continue

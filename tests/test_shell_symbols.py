@@ -210,7 +210,7 @@ def test_the_config_helper_loads_where_there_is_no_windows_side():
         start_new_session=True,
     )
     assert got.returncode == 0, got.stdout + got.stderr
-    assert "ctrl-space" in got.stdout
+    assert "ctrl-backslash" in got.stdout
 
 
 @pytest.mark.skipif(not shutil.which("pwsh"), reason="PowerShell 7 is unavailable")

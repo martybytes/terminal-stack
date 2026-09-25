@@ -272,7 +272,7 @@ def test_headless_never_asks_about_a_gui_it_does_not_have(monkeypatch):
     answers = flow.collect(Console())
     assert answers.profile == "shell", "the only profile whose questions still mean something"
     assert answers.wez_mux == "off" and answers.wez_restore == "off"
-    assert answers.leader == "ctrl-space"
+    assert answers.leader == "ctrl-backslash"
 
 
 def test_the_tmux_prefix_is_never_reset_by_a_re_run(monkeypatch):
@@ -560,8 +560,8 @@ def test_an_unstorable_chord_is_re_asked_not_silently_kept():
     assert flow._chord(console, 'ctrl-"') == "ctrl-b"
 
     # Nobody there to re-ask, or an empty answer: the documented default.
-    assert flow._chord(Console.scripted([]), "ctrl-'") == "ctrl-space"
-    assert flow._chord(Console.scripted([]), "") == "ctrl-space"
+    assert flow._chord(Console.scripted([]), "ctrl-'") == "ctrl-backslash"
+    assert flow._chord(Console.scripted([]), "") == "ctrl-backslash"
 
 
 def test_the_voice_follow_ups_only_appear_once_voice_is_on(monkeypatch):

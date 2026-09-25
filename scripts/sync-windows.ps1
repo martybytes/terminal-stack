@@ -146,7 +146,7 @@ $ccTtsInputHooks = if ($ccTtsEnabled) {
 } else { '' }
 $tok = @{
     '__WIN_USER__'               = $WinUser
-    '__LEADER_KEY__'             = if ($tsCfg.leaderKey)          { $tsCfg.leaderKey }          else { 'phys:Space' }
+    '__LEADER_KEY__'             = if ($tsCfg.leaderKey)          { $tsCfg.leaderKey }          else { 'phys:Backslash' }
     '__LEADER_MODS__'            = if ($tsCfg.leaderMods)         { $tsCfg.leaderMods }         else { 'CTRL' }
     '__THEME_MODE__'             = if ($tsCfg.themeMode)          { $tsCfg.themeMode }          else { 'dark' }
     '__THEME_RESOLVED__'         = if ($tsCfg.resolvedTheme)      { $tsCfg.resolvedTheme }      else { 'dark' }

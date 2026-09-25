@@ -43,7 +43,7 @@ Then sync with:
 **Reload in WezTerm:**
 
 - Changes to `.wezterm.lua` — WezTerm usually auto-reloads when the deployed file changes on disk.
-- Changes to `pane_nav.lua` — press **`Ctrl+Space` `r`** (`ReloadConfiguration`). Lua modules are not always picked up without an explicit reload.
+- Changes to `pane_nav.lua` — press **`Ctrl+\` `r`** (`ReloadConfiguration`). Lua modules are not always picked up without an explicit reload.
 
 You do not need to quit and relaunch WezTerm — with one caveat, and only if you turned the multiplexer domain on (`tstack mux on`; it is off by default). With the mux on, panes are hosted in `wezterm-mux-server` and the mux server loads its **own** copy of `.wezterm.lua`: a GUI reload does not update the config the mux uses for spawning panes. Both sync scripts print a reminder when a WezTerm file changed and the mux is on; nothing restarts it automatically, because that would kill every live pane. When convenient (closes all panes!): `tstack mux restart`. `tstack mux status` shows the setting, the rendered setting, and the live server.
 
@@ -56,7 +56,7 @@ previous session at every launch. We drive its two save engines directly and
 register the handler ourselves only when `tstack config restore` is on — see
 `docs/decisions.md` § "Why the startup session restore is opt-in".
 
-The `Ctrl+Space` `p` project picker (`sessionizer.wezterm`) and session save/restore (`resurrect.wezterm`) are WezTerm plugins loaded from **pinned forks under `github.com/martybytes`**, so an upstream archival or breaking change can't take the stack down. `wezterm.plugin.require` clones each fork at the **first GUI start** — that one start needs network access; afterwards the clone is cached in WezTerm's plugin directory. Each load is pcall-guarded: if either fails, only its keybindings are lost. (The tab bar and status bar are **not** plugins — they are hand-rolled in the config itself; `tabline.wez` was dropped, see `docs/decisions.md` § "Why the tab bar is fancy and fully hand-rolled".)
+The `Ctrl+\` `p` project picker (`sessionizer.wezterm`) and session save/restore (`resurrect.wezterm`) are WezTerm plugins loaded from **pinned forks under `github.com/martybytes`**, so an upstream archival or breaking change can't take the stack down. `wezterm.plugin.require` clones each fork at the **first GUI start** — that one start needs network access; afterwards the clone is cached in WezTerm's plugin directory. Each load is pcall-guarded: if either fails, only its keybindings are lost. (The tab bar and status bar are **not** plugins — they are hand-rolled in the config itself; `tabline.wez` was dropped, see `docs/decisions.md` § "Why the tab bar is fancy and fully hand-rolled".)
 
 To update a plugin, pull upstream into the fork deliberately, then either run `wezterm.plugin.update_all()` from the debug overlay (**`Ctrl+Shift+L`**) or delete the plugin cache directory and restart WezTerm.
 
@@ -65,7 +65,7 @@ To update a plugin, pull upstream into the fork deliberately, then either run `w
 Full tables: **`doc wezterm/dev-config`**. Summary:
 
 - **Synced and enough for pwsh WezTerm testing:** `.wezterm.lua`, `pane_nav.lua`, `$PROFILE` (`cc*` tab titles), `.claude` hooks/settings (tab tint), Starship in pwsh panes, and `docs/kb` (for `doc`/`wzr` only).
-- **After sync:** `Ctrl+Space` `r` (required for `pane_nav.lua`); new pwsh tab for `$PROFILE`/Starship; restart Claude Code for hook changes.
+- **After sync:** `Ctrl+\` `r` (required for `pane_nav.lua`); new pwsh tab for `$PROFILE`/Starship; restart Claude Code for hook changes.
 - **Not synced:** WSL zsh panes (`chezmoi apply` from WSL); WezTerm/font winget packages; wizard tokens unless `tstack config` / `config.json` was refreshed before sync.
 
 ### Auto-sync on save (optional)
@@ -99,7 +99,7 @@ finally { Unregister-Event -SourceIdentifier $job.Name -ErrorAction SilentlyCont
 A save can raise several `Changed` events, so the sync may run two or three
 times in a row. It is idempotent, so that is noise rather than a problem.
 
-Still use **`Ctrl+Space` `r`** after `pane_nav.lua` edits.
+Still use **`Ctrl+\` `r`** after `pane_nav.lua` edits.
 
 ### Symlink `pane_nav.lua` (optional)
 
@@ -114,7 +114,7 @@ New-Item -ItemType SymbolicLink `
   -Target (Join-Path $clone 'windows\.wezterm\pane_nav.lua')
 ```
 
-Edits in the clone are visible at WezTerm's module path immediately; **`Ctrl+Space` `r`** to reload. A full `sync-windows.ps1` run replaces the symlink with a regular copy if it thinks the file differs — re-create the link if that happens.
+Edits in the clone are visible at WezTerm's module path immediately; **`Ctrl+\` `r`** to reload. A full `sync-windows.ps1` run replaces the symlink with a regular copy if it thinks the file differs — re-create the link if that happens.
 
 ## WSL / combined Windows + WSL
 
@@ -141,7 +141,7 @@ Or apply everything:
 chezmoi apply -v
 ```
 
-Reload: auto-reload for `~/.wezterm.lua` when it changes; **`Ctrl+Space` `r`** for `pane_nav.lua`.
+Reload: auto-reload for `~/.wezterm.lua` when it changes; **`Ctrl+\` `r`** for `pane_nav.lua`.
 
 ## What not to do
 

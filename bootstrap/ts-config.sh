@@ -7,7 +7,7 @@
 # Usage:
 #   tstack config                 interactive menu
 #   tstack config show            print the current config
-#   tstack config leader <chord>  e.g. ctrl-space, ctrl-a, alt-x
+#   tstack config leader <chord>  e.g. ctrl-backslash, ctrl-space, ctrl-a, alt-x
 #   tstack config theme  <mode>   dark | light | follow
 #   tstack config tmux   <chord>  tmux prefix, e.g. ctrl-a
 #   tstack config apps [recommended|all|none|id,id,...]   (no arg → interactive picker)
@@ -86,11 +86,11 @@ install_apps() {
 # shellcheck disable=SC2046
 set_leader() { ts_save_config "$1" "$(cur themeMode dark)" "$(cur tmuxPrefix ctrl-b)" $(curapps); finish; }
 # shellcheck disable=SC2046
-set_theme()  { ts_save_config "$(cur leaderChord ctrl-space)" "$1" "$(cur tmuxPrefix ctrl-b)" $(curapps); finish; }
+set_theme()  { ts_save_config "$(cur leaderChord ctrl-backslash)" "$1" "$(cur tmuxPrefix ctrl-b)" $(curapps); finish; }
 # shellcheck disable=SC2046
-set_tmux()   { ts_save_config "$(cur leaderChord ctrl-space)" "$(cur themeMode dark)" "$1" $(curapps); finish; }
+set_tmux()   { ts_save_config "$(cur leaderChord ctrl-backslash)" "$(cur themeMode dark)" "$1" $(curapps); finish; }
 # shellcheck disable=SC2086
-set_apps()   { ts_save_config "$(cur leaderChord ctrl-space)" "$(cur themeMode dark)" "$(cur tmuxPrefix ctrl-b)" $1; install_apps "$1"; ts_report_installed_apps "$1"; finish; }
+set_apps()   { ts_save_config "$(cur leaderChord ctrl-backslash)" "$(cur themeMode dark)" "$(cur tmuxPrefix ctrl-b)" $1; install_apps "$1"; ts_report_installed_apps "$1"; finish; }
 
 # Install the chosen terminal emulator(s) for this platform. Never uninstalls,
 # except the other WezTerm channel when switching (they cannot coexist).
@@ -123,7 +123,7 @@ run_wizard() {
 
     # Save BEFORE installing. An install that fails must never cost the user the
     # answers they just gave — the same ordering the bootstraps now use.
-    ts_save_config "${TS_WIZ_LEADER:-ctrl-space}" "${TS_WIZ_THEME:-dark}" "${TS_WIZ_TMUX:-ctrl-b}" ${TS_WIZ_APPS:-}
+    ts_save_config "${TS_WIZ_LEADER:-ctrl-backslash}" "${TS_WIZ_THEME:-dark}" "${TS_WIZ_TMUX:-ctrl-b}" ${TS_WIZ_APPS:-}
     ts_agents_save_config "${TS_WIZ_HEADROOM:-off}" "${TS_WIZ_HEADROOM_CURSOR:-mcp}" "${TS_WIZ_CAVEMAN:-off}" "${TS_WIZ_AGENTMEMORY:-off}"
     # The memory answer itself. Stored through ts_memory_apply, not through
     # ts_agents_save_config, because that helper writes only independent toggles
@@ -349,7 +349,7 @@ agents_menu() {
 
 show() {
     echo "terminal-stack config:"
-    echo "  leader     : $(cur leaderChord ctrl-space)   (WezTerm: $(cur leaderMods CTRL)+$(cur leaderKey phys:Space))"
+    echo "  leader     : $(cur leaderChord ctrl-backslash)   (WezTerm: $(cur leaderMods CTRL)+$(cur leaderKey phys:Backslash))"
     echo "  theme      : $(cur themeMode dark)   (baked palette: $(cur resolvedTheme dark))"
     echo "  tmux       : $(cur tmuxPrefix ctrl-b)   (prefix: $(cur tmuxPrefixResolved C-b))"
     echo "  apps       : $(curapps)"
@@ -376,9 +376,10 @@ show() {
 # whatever is currently SAVED: a menu's default is the value you already have,
 # not the value a fresh install would pick.
 menu_leader() {
-    ts_prompt_choice "$(cur leaderChord ctrl-space)" \
+    ts_prompt_choice "$(cur leaderChord ctrl-backslash)" \
         'Leader key (WezTerm) - prefix for pane / tab / workspace commands:' '' \
-        'ctrl-space|Ctrl+Space' 'ctrl-a|Ctrl+A|tmux muscle memory' \
+        'ctrl-backslash|Ctrl+\|clashes with nothing' 'ctrl-space|Ctrl+Space' \
+        'ctrl-a|Ctrl+A|tmux muscle memory' \
         'ctrl-b|Ctrl+B|tmux default' 'alt-space|Alt+Space'
 }
 

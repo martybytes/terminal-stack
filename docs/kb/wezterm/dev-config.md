@@ -55,7 +55,7 @@ Then:
 | What changed | How to pick it up |
 |---|---|
 | `.wezterm.lua` | Usually auto-reloads when the deployed file changes |
-| `pane_nav.lua` | **`Ctrl+Space` `r`** (`ReloadConfiguration`) |
+| `pane_nav.lua` | **`Ctrl+\` `r`** (`ReloadConfiguration`) |
 
 No need to quit WezTerm — but see the mux-server caveat below if you turned
 the mux on (`tstack mux`).
@@ -78,7 +78,7 @@ panes!): `tstack mux restart`.
 The resurrect block deliberately avoids `resurrect.setup()` — it hard-wires a
 `gui-startup` session restore with no opt-out. Do not "simplify" it back.
 
-`sessionizer.wezterm` (`Ctrl+Space` `p`) and `resurrect.wezterm` (save/restore)
+`sessionizer.wezterm` (`Ctrl+\` `p`) and `resurrect.wezterm` (save/restore)
 load from **pinned forks under `github.com/martybytes`** — upstream archival or a
 breaking change can't take the stack down. `wezterm.plugin.require` clones each
 fork at the **first GUI start** (needs network once; cached in WezTerm's plugin
@@ -116,8 +116,8 @@ WezTerm loads only `.wezterm.lua` and `require 'pane_nav'` — both are under
 
 | What you changed | Do this |
 |---|---|
-| `.wezterm.lua` | Usually auto-reloads; else **`Ctrl+Space` `r`** |
-| `pane_nav.lua` | **`Ctrl+Space` `r`** (required) |
+| `.wezterm.lua` | Usually auto-reloads; else **`Ctrl+\` `r`** |
+| `pane_nav.lua` | **`Ctrl+\` `r`** (required) |
 | `$PROFILE` or Starship | **New pwsh tab** or `. $PROFILE` |
 | Claude hooks / settings | **Restart Claude Code** in that pane |
 
@@ -136,7 +136,7 @@ WezTerm loads only `.wezterm.lua` and `require 'pane_nav'` — both are under
 & C:\path\to\terminal-stack\scripts\sync-windows.ps1 -SourceDir C:\path\to\terminal-stack
 ```
 
-In WezTerm: **`Ctrl+Space` `r`** → new pwsh tab if you touched `$PROFILE` → run
+In WezTerm: **`Ctrl+\` `r`** → new pwsh tab if you touched `$PROFILE` → run
 `cc` in a project dir to exercise tab titles / Claude tint hooks.
 
 ### WSL panes in the same window
@@ -163,7 +163,7 @@ Use this when you are also changing WSL-side chezmoi targets in one session.
 chezmoi apply -v ~/.wezterm.lua ~/.wezterm/pane_nav.lua
 ```
 
-Reload: auto for `~/.wezterm.lua`; **`Ctrl+Space` `r`** for `pane_nav.lua`.
+Reload: auto for `~/.wezterm.lua`; **`Ctrl+\` `r`** for `pane_nav.lua`.
 
 ## Optional shortcuts
 
@@ -180,7 +180,7 @@ Write-Host "Watching $src — Ctrl+C to stop"
 while ($true) { Start-Sleep 60 }
 ```
 
-Still **`Ctrl+Space` `r`** after `pane_nav.lua` edits.
+Still **`Ctrl+\` `r`** after `pane_nav.lua` edits.
 
 **Symlink `pane_nav.lua`** — iterate on the grid module without re-syncing each
 save (symlinks may need Developer Mode / elevated shell on Windows):

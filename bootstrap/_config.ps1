@@ -276,7 +276,7 @@ function Get-TsAppDesc([string]$id) {
 
 # ── chord / theme mapping ────────────────────────────────────────────────────────
 function ConvertTo-TsLeader([string]$chord) {
-    if (-not $chord) { $chord = 'ctrl-space' }
+    if (-not $chord) { $chord = 'ctrl-backslash' }
     $parts = $chord.Split('-')
     $key = $parts[-1]
     $mods = @()
@@ -399,7 +399,7 @@ function Get-TsConfig {
         try { return (Get-Content $p -Raw | ConvertFrom-Json) } catch {}
     }
     return [pscustomobject]@{
-        leaderChord = 'ctrl-space'; themeMode = 'dark'; tmuxPrefix = 'ctrl-b'
+        leaderChord = 'ctrl-backslash'; themeMode = 'dark'; tmuxPrefix = 'ctrl-b'
         weztermMux = 'off'; weztermRestore = 'off'; ghosttyConfig = 'on'; apps = @()
         headroomEnabled = 'off'; headroomCursorMode = 'mcp'
         cavemanEnabled = 'off'; agentmemoryEnabled = 'off'
@@ -463,7 +463,7 @@ function Get-TsWeztermRestore {
 
 function Save-TsConfig {
     param(
-        [string]$LeaderChord = 'ctrl-space',
+        [string]$LeaderChord = 'ctrl-backslash',
         [string]$ThemeMode   = 'dark',
         [string]$TmuxPrefix  = 'ctrl-b',
         [string[]]$Apps      = @(),

@@ -4,6 +4,17 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+### Changed
+
+- **The default WezTerm leader is now `Ctrl+\` (09/25/2026).** `Ctrl+Space`
+  is claimed by macOS (input-source switch), PSReadLine (`MenuComplete`) and
+  Omarchy's tmux and herdr prefix, so on every platform something either ate
+  it or fought it. Nothing the stack installs binds `Ctrl+\`. Only fresh
+  installs and machines that never saved a leader change; an existing choice is
+  kept, and `tstack config leader ctrl-backslash` switches one. Leader twice now
+  sends whatever the leader is (it used to always send `Ctrl+Space`), so
+  nvim's `Ctrl+\ Ctrl+N` and SIGQUIT stay reachable.
+
 ### Fixed
 
 - **The Alt+L launcher no longer lists an `SSHMUX:` twin for every ssh host

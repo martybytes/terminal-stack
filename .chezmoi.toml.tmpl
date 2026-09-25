@@ -15,7 +15,7 @@
   the user's saved answers. Without that, regenerating would silently drop
   sourceDir (chezmoi falls back to ~/.local/share/chezmoi), windowsUsername
   (sync hook falls back to cmd.exe interop) and every config choice (back to
-  Ctrl+Space / dark). Existing [data] values are in scope when chezmoi executes
+  Ctrl+\ / dark). Existing [data] values are in scope when chezmoi executes
   this template. TOML: top-level keys must precede the [data] section.
 
   This template also DERIVES the concrete leader/prefix bindings from the saved
@@ -53,7 +53,7 @@
 {{-   $distroLike = lower (index .chezmoi.osRelease "idLike" | default "") -}}
 {{- end -}}
 {{- /* ---- leader chord -> WezTerm key/mods ---- */ -}}
-{{- $chord := "ctrl-space" -}}
+{{- $chord := "ctrl-backslash" -}}
 {{- if hasKey . "leaderChord" -}}{{- $chord = .leaderChord -}}{{- end -}}
 {{- $cp := splitList "-" $chord -}}
 {{- $ckey := last $cp -}}
