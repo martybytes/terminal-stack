@@ -18,9 +18,15 @@ local config = wezterm.config_builder()
 
 -- On macOS the default program is the login shell (zsh) — no default_prog needed.
 
-config.ssh_domains = wezterm.default_ssh_domains()
-for _, dom in ipairs(config.ssh_domains) do
-  dom.assume_shell = 'Posix'
+-- default_ssh_domains() yields SSH:<host> and SSHMUX:<host> per ssh_config
+-- Host. SSHMUX needs wezterm on the remote; keep only the plain SSH: ones so
+-- the Alt+L launcher isn't doubled up with entries nobody uses.
+config.ssh_domains = {}
+for _, dom in ipairs(wezterm.default_ssh_domains()) do
+  if dom.multiplexing == 'None' then
+    dom.assume_shell = 'Posix'
+    table.insert(config.ssh_domains, dom)
+  end
 end
 
 -- No SSH_AUTH_SOCK handling here, unlike windows/.wezterm.lua.tmpl. That twin

@@ -393,6 +393,18 @@ def _no_ambient_offer(monkeypatch):
     monkeypatch.delenv("TS_UI_INSTALL", raising=False)
 
 
+def _pip_importable(monkeypatch, ui):
+    """Pretend pip is importable. The gate may run the suite under `uvx pytest`,
+    whose environment ships no pip, and these tests are about what the plan does
+    WITH pip, not whether the runner happens to have it."""
+    real = ui.importlib.util.find_spec
+    monkeypatch.setattr(
+        ui.importlib.util,
+        "find_spec",
+        lambda name, *a: object() if name == "pip" else real(name, *a),
+    )
+
+
 def test_the_offer_prefers_a_real_install_over_the_no_install_path(monkeypatch):
     """The opposite order from the printed hint, deliberately.
 
@@ -403,6 +415,7 @@ def test_the_offer_prefers_a_real_install_over_the_no_install_path(monkeypatch):
     """
     from tstack.commands import ui
 
+    _pip_importable(monkeypatch, ui)
     monkeypatch.setattr(ui.shutil, "which", lambda name: "/usr/bin/uv")
     question, install, run = ui._plan()
     assert install and install[-1] == "textual" and "pip" in install
@@ -426,6 +439,7 @@ def test_a_venv_never_gets_the_user_flag(monkeypatch):
     "User site-packages are not visible in this virtualenv"."""
     from tstack.commands import ui
 
+    _pip_importable(monkeypatch, ui)
     monkeypatch.setattr(ui.sys, "prefix", "/tmp/venv")
     monkeypatch.setattr(ui.sys, "base_prefix", "/usr")
     assert "--user" not in ui._pip_install()

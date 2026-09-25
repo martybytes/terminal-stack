@@ -26,9 +26,15 @@ config.launch_menu = {
   { label = 'WSL zsh (plain)',      args = { 'wsl.exe', '--cd', '~', '-e', 'zsh', '-df' } },
 }
 
-config.ssh_domains = wezterm.default_ssh_domains()
-for _, dom in ipairs(config.ssh_domains) do
-  dom.assume_shell = 'Posix'
+-- default_ssh_domains() yields SSH:<host> and SSHMUX:<host> per ssh_config
+-- Host. SSHMUX needs wezterm on the remote; keep only the plain SSH: ones so
+-- the Alt+L launcher isn't doubled up with entries nobody uses.
+config.ssh_domains = {}
+for _, dom in ipairs(wezterm.default_ssh_domains()) do
+  if dom.multiplexing == 'None' then
+    dom.assume_shell = 'Posix'
+    table.insert(config.ssh_domains, dom)
+  end
 end
 
 -- Windows OpenSSH talks to its agent over the named pipe \\.\pipe\openssh-ssh-agent,
