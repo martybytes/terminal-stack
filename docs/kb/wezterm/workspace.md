@@ -6,7 +6,7 @@ timeout); `Ctrl+\` `Esc` cancels.
 ## Launcher
 | Key | Action |
 |---|---|
-| `Alt+L` | open launcher — fuzzy list of tabs, domains, workspaces, and commands (arrow keys to navigate) |
+| `Alt+L` | open launcher — fuzzy list of tabs, domains, workspaces, and commands (arrow keys to navigate). Each `Host` in `~/.ssh/config` appears once, as `SSH:<host>`; the `SSHMUX:` twins (which need wezterm on the remote) are left out |
 
 ## Workspaces
 Persistent named sessions; each has its own windows and tabs.
