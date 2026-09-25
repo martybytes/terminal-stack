@@ -23,7 +23,8 @@ failure, so a quiet Claude startup is not proof that HTTP MCP works.
 ## When it is not running
 
 `tstack agents headroom on` (what the installer runs) checks `/readyz` first. If
-Headroom is not answering and you are at a terminal, it offers each step and waits
+Headroom is not answering and you are at a terminal (stdin and stderr both a
+terminal, and `CI` unset), it offers each step and waits
 for a yes: start Docker when it is installed but stopped (up to two minutes),
 `tstack services bootstrap` when the stack has no `.env` yet (that is what creates
 `HEADROOM_PROXY_TOKEN`), then `tstack services up headroom`. It never installs

@@ -235,6 +235,15 @@ def find_agent(name: str) -> str | None:
 TOKEN_UNAVAILABLE = "proxy token unavailable; set HEADROOM_PROXY_TOKEN or HEADROOM_ENV_FILE"
 
 
+def _isatty(stream: object) -> bool:
+    """A stream that is a terminal. A replaced or closed one (pytest's capture,
+    a detached handle) is not, rather than an exception."""
+    try:
+        return bool(stream is not None and stream.isatty())  # type: ignore[attr-defined]
+    except (AttributeError, OSError, ValueError):
+        return False
+
+
 class Headroom:
     def __init__(self, source: Path, out: Out, cursor_mode: str) -> None:
         self.source = source
@@ -307,6 +316,13 @@ class Headroom:
 
         if probes.headroom()[0]:
             return True
+        # Opening the console is not enough evidence that someone is there: a
+        # GitHub Windows runner HAS a console, CONIN$ opens, and the suite sat
+        # on this prompt for six hours. Same test `tstack ui` uses for its
+        # offer: stdin and stderr both a terminal (stdout is not asked, the
+        # bootstrap pipes it to Out-Host), and never under CI.
+        if os.environ.get("CI") or not (_isatty(sys.stdin) and _isatty(sys.stderr)):
+            return False
         console = Console.open()
         try:
             if not console.interactive:

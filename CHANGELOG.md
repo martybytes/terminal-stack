@@ -21,7 +21,10 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
   twice. `tstack agents headroom on` now offers, at a terminal, to start Docker
   (waiting up to two minutes), to run `tstack services bootstrap` when the stack
   was never set up, and to bring it up. It never installs Docker. The sync's
-  `repair` never asks and prints one quiet line instead.
+  `repair` never asks and prints one quiet line instead. The offer needs stdin
+  and stderr to be a terminal and `CI` unset, since a Windows CI runner has a
+  console and once waited six hours on it; CI's pytest jobs now time out at 30
+  minutes.
 - **`agentmemory on` no longer re-patches Codex on every run (09/24/2026).**
   `codex plugin add` rebuilds the plugin cache from vendor files, so running it
   unconditionally reverted the hook edits the adapter had just applied. It now

@@ -44,6 +44,9 @@ jobs:
   suite:
     name: pytest (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    # A hung test fails in half an hour, not GitHub's six-hour default. A normal
+    # run is 2 to 5 minutes; a prompt waiting on a runner's console once took all six.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -108,6 +111,9 @@ jobs:
   wsl:
     name: pytest (wsl)
     runs-on: windows-latest
+    # A hung test fails in half an hour, not GitHub's six-hour default. A normal
+    # run is 2 to 5 minutes; a prompt waiting on a runner's console once took all six.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: Vampire/setup-wsl@v3

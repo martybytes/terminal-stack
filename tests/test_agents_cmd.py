@@ -478,6 +478,20 @@ def test_headroom_not_running_is_one_quiet_line_not_an_auth_failure(monkeypatch,
     assert "authentication failed" not in out
 
 
+@pytest.mark.parametrize("ci, tty", [("", False), ("true", True)])
+def test_headroom_offer_never_opens_a_console_without_a_person(monkeypatch, ci, tty):
+    """A GitHub Windows runner has a console, so CONIN$ opened and the whole
+    suite waited six hours on "Start Docker now?". Neither a non-terminal stdin
+    nor CI may get as far as opening one."""
+    from tstack.wizard import console, probes
+
+    monkeypatch.setattr(probes, "headroom", lambda: (False, ""))
+    monkeypatch.setattr(console.Console, "open", lambda: pytest.fail("console opened"))
+    monkeypatch.setenv("CI", ci)
+    monkeypatch.setattr(agents, "_isatty", lambda stream: tty)
+    assert agents.Headroom(ROOT, agents.Out(), "mcp").offer_start() is False
+
+
 def test_headroom_repair_never_offers_to_start_anything(monkeypatch):
     headroom = agents.Headroom(ROOT, agents.Out(), "mcp")
     monkeypatch.setattr(headroom, "offer_start", lambda: pytest.fail("repair must not prompt"))

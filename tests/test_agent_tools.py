@@ -216,6 +216,8 @@ def test_headroom_enable_requires_authenticated_proxy(monkeypatch, capsys):
 
     out = agents.Out()
     headroom = agents.Headroom(ROOT, out, "mcp")
+    # `on` first offers to start a stopped Headroom; that is not what this tests.
+    monkeypatch.setattr(headroom, "offer_start", lambda: False)
     monkeypatch.setattr(headroom, "probe_auth", lambda: (False, "HTTP 401"))
     registered = []
     monkeypatch.setattr(headroom, "register", lambda add: registered.append(add))

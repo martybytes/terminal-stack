@@ -2348,6 +2348,9 @@ bootstrap`**, the only thing that creates it. So on a fresh machine, choosing He
 guaranteed to fail, and it was reported as an authentication problem.
 
 `on` now checks `/readyz` first, and at a terminal it offers the missing steps one at a time,
+"at a terminal" meaning stdin and stderr are both a terminal and `CI` is unset. Opening the
+console is not enough: a GitHub Windows runner has one, and the suite waited six hours on the
+first prompt. The steps,
 each a default-yes question:
 
 1. **Docker missing:** print the install command the engine advice already has, then stop.
