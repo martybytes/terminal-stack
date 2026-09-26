@@ -370,10 +370,65 @@ def cmd_up(svc: Services) -> None:
             )
             raise SystemExit(1)
     warn_unseeded(svc)
+    holders = {} if svc.args.dry_run else _port_holders(svc)
     for name in svc.selected():
         svc.out.section(name)
+        clash = _port_clash(svc, name, holders)
+        if clash:
+            port, who = clash
+            svc.out.bad(f"{name}: port {port} is already held by '{who}'")
+            svc.out.note("that container is not part of this stack. Either stop it, or")
+            svc.out.note(f"move this stack's port in services/stacks/{name}/.env")
+            continue
         if not svc.compose.ok(name, _up_argv(svc)):
             svc.out.bad(f"up failed for {name}")
+
+
+def _port_holders(svc: Services) -> dict[str, str]:
+    """host port -> the container publishing it, across the whole engine.
+
+    Every container, not just ours: the point is to find the foreign one. A
+    machine running its own postgres on 5433 or its own kokoro on 8880 is
+    ordinary, and compose's own error for it ("port is already allocated") names
+    the port and not what has it.
+    """
+    out: dict[str, str] = {}
+    _, blob = stacks.docker(svc.kind, ["ps", "--format", "{{.Names}}\t{{.Ports}}"])
+    for line in blob.splitlines():
+        name, _, ports = line.partition("\t")
+        if not name or "->" not in ports:
+            continue
+        for chunk in ports.replace(",", "\n").splitlines():
+            piece = chunk.strip()
+            if "->" not in piece or ":" not in piece:
+                continue
+            span = piece.partition(":")[2].split("->")[0]
+            low, _, high = span.partition("-")
+            high = high or low
+            if not (low.isdigit() and high.isdigit()):
+                continue
+            for port in range(int(low), int(high) + 1):
+                out.setdefault(str(port), name.strip())
+    return out
+
+
+def _port_clash(svc: Services, name: str, holders: dict[str, str]) -> tuple[str, str] | None:
+    """The first published port of `name` that a FOREIGN container already holds.
+
+    Foreign means "not this stack's own project". Our own running containers hold
+    their ports too, and `up` on a running stack is a no-op that must not be
+    refused -- so the prefix test is what separates "already up" from "something
+    else is in the way".
+    """
+    if not holders:
+        return None
+    directory = svc.dir(name)
+    project = stacks.project_name(directory)
+    for port in stacks.published_ports(directory):
+        who = holders.get(port)
+        if who and not who.startswith(project):
+            return (port, who)
+    return None
 
 
 def _up_argv(svc: Services) -> list[str]:
@@ -455,6 +510,22 @@ def cmd_bootstrap(svc: Services) -> None:
     # means compose will not create them. This is where every memory you have ever
     # saved lives, so an existing one is never touched. Read out of the compose
     # files themselves rather than listed here.
+    #
+    # This is the one section that needs the engine, and `bootstrap` deliberately
+    # is not in NEEDS_ENGINE -- seeding the .env files and generating the secrets
+    # is the whole point of being able to run it on a machine with no Docker. So
+    # skip rather than try: `volume_exists` fails, the legacy check fails with it,
+    # and the create then fails too, which used to spend two red `bad()` lines
+    # per volume telling a user their engine is down in the least useful words
+    # available. `skip()` does not count as an issue, because an absent engine is
+    # not a broken machine -- and the installer now runs this on every install,
+    # so a machine that has not got Docker yet is an ordinary case, not an error.
+    if out.apply and not svc.engine_ok:
+        out.skip("the engine is unreachable, so the external volumes were not created")
+        out.note("run:  tstack services bootstrap     again once the engine is up")
+        out.note("      nothing else here needs it - the .env files above are done")
+        _bootstrap_next(out)
+        return
     for volume in _external_volumes(svc.source) or ["ts-agentmemory-data"]:
         if not out.apply:
             out.step(f"docker volume create {volume} (if absent)")
@@ -475,6 +546,10 @@ def cmd_bootstrap(svc: Services) -> None:
         if rc != 0:
             out.bad(f"docker volume create failed for {volume}")
 
+    _bootstrap_next(out)
+
+
+def _bootstrap_next(out: Out) -> None:
     out.section("next")
     out.note("tstack services up        start the stacks your settings enable")
     out.note("tstack services doctor    check the engine, the .env files and the ports")
@@ -500,6 +575,17 @@ def _seed_env(svc: Services, directory: Path) -> None:
     # knowledge, applied to the file compose actually reads.
     if directory.name == "kokoro":
         ok, message = stacks.seed_kokoro_profile(target)
+        (svc.out.info if ok else svc.out.warn)(message)
+    # headroom's COMPOSE_FILE is to memoryBackend exactly what kokoro's is to the
+    # GPU probe: a derived value whose shipped default is right for only one
+    # answer. .env.example carries the plain file, so a machine that chose
+    # `headroom` used to be seeded WITHOUT the overlay -- and the overlay's
+    # `command:` is what passes `--memory`, which has no environment variable and
+    # is the entire feature. Same fresh-file-only rule as kokoro: a pre-existing
+    # .env is somebody's, and `tstack config memory` is the explicit correction.
+    if directory.name == "headroom":
+        backend = store.get("memoryBackend", "agentmemory")
+        ok, message = stacks.write_memory_compose_file(target, backend)
         (svc.out.info if ok else svc.out.warn)(message)
 
 

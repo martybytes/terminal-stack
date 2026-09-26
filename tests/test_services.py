@@ -13,6 +13,7 @@ before anything is torn down, and a secret is never printed.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -244,13 +245,205 @@ def test_bootstrap_seeds_env_files_and_leaves_an_existing_one_alone(tree, calls,
     (tree / "bootstrap" / "agent-tools.json").write_text("{}", encoding="utf-8")
     svc = build(tree, "bootstrap")
     services.cmd_bootstrap(svc)
-    assert (root / "headroom" / ".env").read_text(
+    # Everything the example carried is carried over. Not byte-equality: headroom
+    # also gets its COMPOSE_FILE derived from the backend on the way in, the same
+    # way kokoro gets its GPU profile, so the seeded file is a superset.
+    assert "HEADROOM_PROXY_TOKEN=changeme" in (root / "headroom" / ".env").read_text(
         encoding="utf-8"
-    ) == "HEADROOM_PROXY_TOKEN=changeme\n"
+    )
 
     capsys.readouterr()
     services.cmd_bootstrap(svc)
     assert "left untouched" in capsys.readouterr().out
+
+
+def _publishing(root: Path, stack: str, project: str, host_port: str, token: str = "") -> None:
+    """Give a fixture stack a pinned project name and one published port."""
+    (root / stack / "docker-compose.yml").write_text(
+        f"name: {project}\nservices:\n  x:\n    ports:\n"
+        f'      - "127.0.0.1:{token or host_port}:9999"\n',
+        encoding="utf-8",
+    )
+
+
+def test_up_refuses_a_stack_whose_port_a_foreign_container_holds(tree, calls, store_off, capsys):
+    """compose's own error for this names the PORT and not what has it.
+
+    An ordinary machine runs its own things: a postgres on 5433, a standalone
+    kokoro on 8880. Starting a stack into one of those fails with "port is
+    already allocated" and leaves the reader to find the culprit by hand.
+    """
+    root = stacks.stack_root(tree)
+    _publishing(root, "headroom", "ts-headroom", "8787")
+    store_off["headroomEnabled"] = "on"
+    calls["answers"]["ps --format"] = (0, "my-own-proxy\t0.0.0.0:8787->8787/tcp\n")
+
+    svc = build(tree, "up")
+    svc.stacks = ["headroom"]
+    services.cmd_up(svc)
+
+    out = capsys.readouterr().out
+    assert "port 8787 is already held by 'my-own-proxy'" in out
+    assert not calls["compose"], "and nothing was started"
+    assert svc.out.issues == 1
+
+
+def test_up_is_not_refused_by_this_stacks_own_running_containers(tree, calls, store_off, capsys):
+    """`up` on a stack that is already up is a no-op, and must stay one.
+
+    Our own containers hold their ports too, so the prefix test against the
+    pinned compose project name is what separates "already running" from
+    "something else is in the way".
+    """
+    root = stacks.stack_root(tree)
+    _publishing(root, "headroom", "ts-headroom", "8787")
+    store_off["headroomEnabled"] = "on"
+    calls["answers"]["ps --format"] = (0, "ts-headroom-proxy\t127.0.0.1:8787->8787/tcp\n")
+
+    svc = build(tree, "up")
+    svc.stacks = ["headroom"]
+    services.cmd_up(svc)
+
+    assert calls["compose"], "its own container must not block it"
+    assert svc.out.issues == 0
+
+
+def test_a_published_port_is_read_from_the_env_not_guessed(tree):
+    """`127.0.0.1:${KOKORO_PORT:-8880}:8880` -- the .env wins, then the `:-`
+    fallback, exactly as compose interpolates it. Read from the FILES, so this
+    works with the engine down and before anything is created, which is the whole
+    point of asking before starting."""
+    root = stacks.stack_root(tree)
+    _publishing(root, "headroom", "ts-headroom", "", token="${HEADROOM_PORT:-8787}")
+    assert stacks.published_ports(root / "headroom") == ["8787"]
+
+    (root / "headroom" / ".env").write_text("HEADROOM_PORT=9999\n", encoding="utf-8")
+    assert stacks.published_ports(root / "headroom") == ["9999"]
+    assert stacks.project_name(root / "headroom") == "ts-headroom"
+
+
+def test_a_contiguous_port_range_still_finds_its_holder(tree, calls, store_off, capsys):
+    """Docker collapses contiguous ports into `3112-3113->3112-3113/tcp`, so a
+    literal `:3113->` match finds nothing -- the same trap port_publication
+    already documents."""
+    root = stacks.stack_root(tree)
+    _publishing(root, "agentmemory", "ts-agentmemory", "3113")
+    store_off["agentmemoryEnabled"] = "on"
+    calls["answers"]["ps --format"] = (0, "someone-else\t127.0.0.1:3112-3113->3112-3113/tcp\n")
+
+    svc = build(tree, "up")
+    svc.stacks = ["agentmemory"]
+    services.cmd_up(svc)
+    assert "port 3113 is already held by 'someone-else'" in capsys.readouterr().out
+
+
+def test_bootstrap_derives_headroom_compose_file_from_the_saved_backend(
+    tree, calls, store_off, capsys
+):
+    """The same rule kokoro has, for the same reason.
+
+    .env.example ships the plain compose file, so a machine that answered
+    `headroom` was seeded WITHOUT the overlay -- and the overlay's `command:` is
+    what passes `--memory`, which has no environment variable and is the entire
+    feature. Four containers reporting healthy, two of them holding nothing.
+    """
+    root = stacks.stack_root(tree)
+    (root / "headroom" / ".env.example").write_text(
+        "COMPOSE_PATH_SEPARATOR=:\nCOMPOSE_FILE=docker-compose.yml\n", encoding="utf-8"
+    )
+    (tree / "bootstrap").mkdir()
+    (tree / "bootstrap" / "agent-tools.json").write_text("{}", encoding="utf-8")
+
+    store_off["memoryBackend"] = "headroom"
+    services.cmd_bootstrap(build(tree, "bootstrap"))
+    assert stacks.compose_files(root / "headroom") == [
+        "docker-compose.yml",
+        "docker-compose.memory.yml",
+    ]
+
+
+def test_bootstrap_leaves_a_compose_file_it_did_not_create_alone(tree, calls, store_off, capsys):
+    """A hand-edited COMPOSE_FILE is somebody trying to do something, and quietly
+    undoing it is worse than saying the two disagree -- which is why both shells
+    WARN about that drift rather than correcting it. Fresh files only, exactly as
+    seed_kokoro_profile is."""
+    root = stacks.stack_root(tree)
+    (root / "headroom" / ".env.example").write_text("COMPOSE_FILE=docker-compose.yml\n", "utf-8")
+    chosen = "COMPOSE_FILE=docker-compose.yml:my-own.yml\n"
+    (root / "headroom" / ".env").write_text(chosen, encoding="utf-8")
+    (tree / "bootstrap").mkdir()
+    (tree / "bootstrap" / "agent-tools.json").write_text("{}", encoding="utf-8")
+
+    store_off["memoryBackend"] = "headroom"
+    services.cmd_bootstrap(build(tree, "bootstrap"))
+    assert (root / "headroom" / ".env").read_text(encoding="utf-8") == chosen
+    assert "left untouched" in capsys.readouterr().out
+
+
+def test_bootstrap_seeds_the_env_files_with_no_engine_at_all(tree, calls, monkeypatch, capsys):
+    """The whole reason `bootstrap` is not in NEEDS_ENGINE.
+
+    This is the reported bug in one test. A full install left every
+    `services/stacks/*/.env` missing, so headroom's compose would not even parse
+    -- `required variable HEADROOM_PROXY_TOKEN is missing a value` -- and
+    `Headroom.token()` read a file that was not there, which every agent-wiring
+    step then reported as "proxy token unavailable". None of that needed Docker
+    to fix, which is why the installer can run this unconditionally.
+    """
+    monkeypatch.setenv("TS_STACK_DOCKER_PROBE", engine.ABSENT)
+    root = stacks.stack_root(tree)
+    (tree / "bootstrap").mkdir()
+    (tree / "bootstrap" / "agent-tools.json").write_text(
+        json.dumps(
+            {
+                "headroom": {
+                    "generatedSecrets": [
+                        {"key": "HEADROOM_PROXY_TOKEN", "placeholder": "changeme", "bytes": 32}
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    svc = build(tree, "bootstrap")
+    assert not svc.engine_ok, "the premise: no engine here"
+    services.cmd_bootstrap(svc)
+
+    # Read it back the way compose does, rather than by slicing the file: the
+    # seeded headroom .env also carries the derived COMPOSE_FILE lines now.
+    token = stacks.env_value(root / "headroom" / ".env", "HEADROOM_PROXY_TOKEN") or ""
+    assert token != "changeme", "the placeholder is not a token"
+    # rand_hex(n) is n hex CHARACTERS, not n bytes -- the length the bash twin
+    # produces, which is what the two have to agree on.
+    assert len(token) == 32 and re.fullmatch(r"[0-9a-f]{32}", token), token
+    assert svc.out.issues == 0, "an absent engine is not a broken machine"
+
+
+def test_bootstrap_with_no_engine_skips_the_volumes_rather_than_failing(
+    tree, calls, monkeypatch, capsys
+):
+    """It used to try anyway, and spend two red lines per volume saying so.
+
+    `volume_exists` fails with the engine down, the legacy check fails with it,
+    and `docker volume create` then fails too -- so the old code reported "docker
+    volume create failed" for a step that could never have worked. Invisible
+    while nothing called `bootstrap` during an install; two red lines on every
+    engine-less install the moment one did.
+    """
+    monkeypatch.setenv("TS_STACK_DOCKER_PROBE", engine.ABSENT)
+    (tree / "bootstrap").mkdir()
+    (tree / "bootstrap" / "agent-tools.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(services, "_external_volumes", lambda source: ["ts-agentmemory-data"])
+    svc = build(tree, "bootstrap")
+    services.cmd_bootstrap(svc)
+
+    out = capsys.readouterr().out
+    assert not any("volume create" in " ".join(a) for a in calls["docker"])
+    assert "external volumes were not created" in out
+    assert "tstack services bootstrap" in out, "and it says how to finish the job"
+    assert "failed" not in out.lower()
+    assert svc.out.issues == 0
+    assert "tstack services up" in out, "the closing hints still print on this path"
 
 
 def test_bootstrap_never_creates_an_empty_replacement_for_a_legacy_volume(
@@ -266,6 +459,9 @@ def test_bootstrap_never_creates_an_empty_replacement_for_a_legacy_volume(
         lambda source: ["ts-agentmemory-data"],
     )
     monkeypatch.setattr(stacks, "volume_exists", lambda kind, name: name == "agentmemory_iii-data")
+    # The rule under test is about a REACHABLE engine: with none, the volume
+    # section is skipped wholesale and there is no creation to refuse.
+    monkeypatch.setenv("TS_STACK_ENGINE_UP", "1")
     svc = build(tree, "bootstrap")
     services.cmd_bootstrap(svc)
     out = capsys.readouterr().out

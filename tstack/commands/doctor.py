@@ -646,6 +646,76 @@ def _agentmemory_recovered_secret(src: Path | None) -> str:
     return ""
 
 
+def _claude_mcp_agentmemory_url() -> str:
+    """AGENTMEMORY_URL from Claude Code's own user-scope MCP entry, or "".
+
+    ~/.claude.json is Claude Code's state file, not ours. It is READ here and
+    never written by this check: the whole point is to notice a disagreement, and
+    a doctor that silently reconciled it would be the second writer this repo
+    keeps getting bitten by.
+    """
+    path = Path.home() / ".claude.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    server = (data.get("mcpServers") or {}).get("agentmemory") or {}
+    return str((server.get("env") or {}).get("AGENTMEMORY_URL") or "")
+
+
+def _url_host(url: str) -> str:
+    """host:port, so localhost:3111 and 127.0.0.1:3111/_agent/claude compare."""
+    rest = url.split("://", 1)[-1].split("/", 1)[0]
+    host, _, port = rest.partition(":")
+    if host in ("localhost", "127.0.0.1", "::1", "[::1]"):
+        host = "localhost"
+    return f"{host}:{port}" if port else host
+
+
+def check_agentmemory_one_server(report: Report) -> None:
+    """The hooks and the MCP tools must be talking to the SAME server.
+
+    Found on a real machine: the hooks posted to localhost:3111 (this stack
+    writes that, hardcoded) while the MCP entry pointed at a remote host over
+    Tailscale. Nothing was listening locally, so automatic capture had been doing
+    nothing for an unknown length of time -- every vendor hook is
+    `fetch(...).catch(() => {})` then `exit(0)`, so it fails silently by
+    construction -- while manual recall worked perfectly against the remote box.
+    "agentmemory is broken" and "agentmemory answers when I use it" were both
+    true, which is why nobody could pin it down.
+
+    Two stores split across two hosts is the same failure `memoryBackend` exists
+    to make unrepresentable between two products, so it gets the same treatment:
+    reported, never silently reconciled.
+    """
+    if store.normalise(store.get("agentmemoryEnabled", "off")) != "true":
+        return
+    mcp = _claude_mcp_agentmemory_url()
+    if not mcp:
+        return
+    settings = Path.home() / ".claude" / "settings.json"
+    try:
+        hooks = str(
+            (json.loads(settings.read_text(encoding="utf-8")).get("env") or {}).get(
+                "AGENTMEMORY_URL"
+            )
+            or ""
+        )
+    except (OSError, ValueError):
+        return
+    if not hooks:
+        return
+    if _url_host(hooks) == _url_host(mcp):
+        report.ok("agentmemory-one-server", f"capture and recall agree ({_url_host(mcp)})")
+        return
+    report.fail(
+        "agentmemory-one-server",
+        f"capture posts to {_url_host(hooks)} but the MCP tools read {_url_host(mcp)} "
+        "- two stores, and only one of them is being written",
+        "point the agentmemory entry in ~/.claude.json at the one you want to keep",
+    )
+
+
 def check_agentmemory_secret(report: Report, src: Path | None) -> None:
     """A stale secret 401s every request, and both capture and retrieval swallow
     it -- so a whole session's observations vanish with nothing in any log.
@@ -966,6 +1036,7 @@ def collect() -> Report:
     check_herdr(report)
     check_tts(report)
     check_agentmemory_wiring(report, src)
+    check_agentmemory_one_server(report)
     check_agentmemory_secret(report, src)
     check_smb(report)
     check_clone_location(report, src)

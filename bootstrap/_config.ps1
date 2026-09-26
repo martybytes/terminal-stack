@@ -34,6 +34,7 @@ $script:TsWingetIds = @{
     bottom     = 'Clement.bottom'
     gping      = 'orf.gping'
     rclone     = 'Rclone.Rclone'
+    docker     = 'Docker.DockerDesktop'
     fnm        = 'Schniz.fnm'
     node       = 'OpenJS.NodeJS'
     python     = 'Python.Python.3.13'
@@ -613,6 +614,53 @@ function Set-TsMemoryBackend([ValidateSet('agentmemory','headroom','none')][stri
     if ($Backend -eq 'agentmemory') { Save-TsConfig -AgentmemoryEnabled 'on'  | Out-Null }
     else                            { Save-TsConfig -AgentmemoryEnabled 'off' | Out-Null }
     Set-TsMemoryComposeFile $Backend
+}
+
+# The SERVICES half of the wizard's answers. Twin of ts_services_apply_wizard in
+# bootstrap/_config.sh -- keep the two steps and their consent rules identical.
+#
+#   bootstrap  ALWAYS. No engine, no network, no consent. It seeds every
+#              services\stacks\*\.env, generates HEADROOM_PROXY_TOKEN and
+#              NEO4J_PASSWORD, and derives headroom's COMPOSE_FILE. Without it a
+#              full install leaves memoryBackend saved next to no .env at all,
+#              headroom's compose does not parse, and Headroom.token() reads a
+#              file that is not there -- which is what "proxy token unavailable"
+#              on every agent step actually means.
+#   up         ONLY when the wizard said so. It pulls 1-2 GB.
+#
+# Neither may abort the install: an optional step that dies takes the answered
+# questions with it, which is the discipline every Install-WingetPackage here
+# already follows.
+function Invoke-TsServicesWizard {
+    [CmdletBinding()]
+    # $Python is passed in, never resolved here: Get-TstackPython lives in the
+    # profile, which this file is also sourced WITHOUT (windows-bootstrap.ps1
+    # dot-sources it long before any profile exists). Both callers already hold
+    # an interpreter they have checked.
+    param(
+        [Parameter(Mandatory)][string]$SourceDir,
+        [string]$Services = 'off',
+        [string]$Python,
+        [string]$Entry
+    )
+    if (-not $Entry) { $Entry = Join-Path $SourceDir 'tstack\main.py' }
+    if (-not $Python -or -not (Test-Path -LiteralPath $Entry)) { return }
+    if (-not (Test-Path -LiteralPath (Join-Path $SourceDir 'services\stacks'))) { return }
+
+    & $Python $Entry services bootstrap | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning 'service .env files were not written; retry: tstack services bootstrap'
+    }
+    if ($Services -ne 'on') {
+        Write-Host '==> Services are set up but not started.'
+        Write-Host '    Start them when you want them:  tstack services up'
+        Write-Host '    See what is missing:            tstack services doctor'
+        return
+    }
+    & $Python $Entry services up | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning 'the docker services did not all start; retry: tstack services up'
+    }
 }
 
 # ── Wizard prompts ──────────────────────────────────────────────────────────────

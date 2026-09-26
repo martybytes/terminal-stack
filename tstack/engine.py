@@ -62,11 +62,16 @@ def _run(argv: list[str], timeout: int = 30) -> subprocess.CompletedProcess | No
     return proc.capture(argv, timeout=timeout)
 
 
-def docker_kind() -> str:
+def docker_kind(timeout: int = 30) -> str:
     """native | wsl-shim | absent | denied.
 
     TS_STACK_DOCKER_PROBE overrides the whole probe, which is how every test in
     this subsystem runs without an engine.
+
+    `timeout` exists for the one caller that runs in front of a person waiting at
+    a prompt. The default is right for a command someone typed; the wizard passes
+    a few seconds, because this can spend two subprocess waits and is_up a third,
+    and a wedged engine should not look like a hung installer.
     """
     probe = os.environ.get("TS_STACK_DOCKER_PROBE")
     if probe:
@@ -86,12 +91,12 @@ def docker_kind() -> str:
 
     # Belt and braces: the stub prints its complaint to STDOUT, so redirecting
     # stderr alone does not catch it.
-    version = _run([binary, "version"])
+    version = _run([binary, "version"], timeout=timeout)
     blob = ((version.stdout if version else "") + (version.stderr if version else "")).lower()
     if "could not be found in this wsl" in blob:
         return WSL_SHIM
 
-    info = _run([binary, "info"])
+    info = _run([binary, "info"], timeout=timeout)
     if info and info.returncode == 0:
         return NATIVE
     blob = ((info.stdout if info else "") + (info.stderr if info else "")).lower()
@@ -105,16 +110,16 @@ def binary_for(kind: str) -> str:
     return "docker.exe" if kind == WSL_SHIM else "docker"
 
 
-def is_up(kind: str | None = None) -> bool:
+def is_up(kind: str | None = None, timeout: int = 30) -> bool:
     """Engine reachable. Both native and the WSL interop path count."""
-    kind = docker_kind() if kind is None else kind
+    kind = docker_kind(timeout=timeout) if kind is None else kind
     if kind in (ABSENT, DENIED):
         return False
     if os.environ.get("TS_STACK_DOCKER_PROBE"):
         # Under an injected probe there is no engine to ask; the probe value is
         # the whole answer, and tests set TS_STACK_ENGINE_UP when they want one.
         return os.environ.get("TS_STACK_ENGINE_UP", "0") == "1"
-    out = _run([binary_for(kind), "info"])
+    out = _run([binary_for(kind), "info"], timeout=timeout)
     return bool(out and out.returncode == 0)
 
 

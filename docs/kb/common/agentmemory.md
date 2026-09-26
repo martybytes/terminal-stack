@@ -68,6 +68,18 @@ Two failures worth knowing about, because both were silent:
   every request from that session fails — silently, because `/observe` swallows
   errors and retrieval discards non-2xx. That cost 56 consecutive captures once.
   The injected wrapper now re-reads the authoritative value on a 401 and retries.
+- **The hooks and the MCP tools can point at different servers.** The hooks get
+  their URL from `~/.claude/settings.json`, which this stack writes as
+  `http://localhost:3111/_agent/<agent>`. The MCP tools get theirs from
+  `mcpServers.agentmemory` in `~/.claude.json`, which the stack does not write.
+  Point one at a remote host and capture goes to a store that recall never reads
+  — and because capture fails silently, the symptom is "agentmemory is not
+  working here" and "agentmemory answers when I ask it" being true at the same
+  time. `tstack doctor` compares the two now and says so.
+
+  ```sh
+  tstack doctor --quiet | grep agentmemory-one-server
+  ```
 
 ## Where the secret comes from
 
