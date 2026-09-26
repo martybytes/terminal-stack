@@ -13,10 +13,10 @@ The number matches the tab.
 | Key | Action |
 |---|---|
 | `Ctrl+Tab` / `Ctrl+Shift+Tab` | next / previous tab |
-| `Ctrl+Space` `t` | **repeatable tab mode** — then `←`/`→` (or `j`/`k`, `n`/`p`) cycle tabs; `Esc` exits |
+| `Ctrl+\` `t` | **repeatable tab mode** — then `←`/`→` (or `j`/`k`, `n`/`p`) cycle tabs; `Esc` exits |
 
 ## Font size (repeatable)
-`Ctrl+Space` `f` enters a font-size mode: `↑`/`↓` (or `k`/`j`) grow/shrink, `0` resets, `Esc` exits.
+`Ctrl+\` `f` enters a font-size mode: `↑`/`↓` (or `k`/`j`) grow/shrink, `0` resets, `Esc` exits.
 
 ## Appearance
 The bar is the taller **fancy** bar, fully hand-drawn. The **active tab is a solid
@@ -35,5 +35,5 @@ tab with unseen output gets an accent dot.
 Quiet by default: the left side is empty until the leader is pending or a repeat
 mode is live (then a coloured badge names it). The right side always shows the
 **Claude fleet** (working/done/error counts across every pane), the workspace name
-when it isn't `default` — never a date or clock. **`Ctrl+Space` `s`** adds `user@host │ path`
+when it isn't `default` — never a date or clock. **`Ctrl+\` `s`** adds `user@host │ path`
 for the active pane. See `doc wezterm/workspace`.

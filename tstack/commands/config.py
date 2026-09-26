@@ -203,7 +203,7 @@ def _wezterm_cell() -> str:
 
 def show(out: Out) -> int:
     """The prose form. Row labels and the column are byte-for-byte contract."""
-    data_leader = store.get("leaderChord", "ctrl-space")
+    data_leader = store.get("leaderChord", "ctrl-backslash")
     out.say("terminal-stack config:")
     out.say(
         _row(

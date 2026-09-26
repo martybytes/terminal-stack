@@ -115,7 +115,7 @@ The original value was `'RESIZE'`, which draws only a resizable border — no OS
 
 ## Why `LEADER o` to detach a tab instead of dragging it out?
 
-WezTerm has no native mouse "tear-off": you cannot drag a tab off the bar to spawn a new window (long-standing limitation — see GH discussion #4080 and issue #549). The supported equivalent is the Lua `pane:move_to_new_window()`, which we bind to `LEADER o` (the leader — default `Ctrl+Space`, configurable via `tstack config leader` — then `o`) via `wezterm.action_callback`, plus `Ctrl+Shift+O` for access without the leader. `o` was the obvious free letter among the leader bindings at the time and is mnemonic for "out". For ad-hoc use without a keybinding, the CLI does the same thing: `wezterm cli move-pane-to-new-tab --new-window`. Bound in both WezTerm configs.
+WezTerm has no native mouse "tear-off": you cannot drag a tab off the bar to spawn a new window (long-standing limitation — see GH discussion #4080 and issue #549). The supported equivalent is the Lua `pane:move_to_new_window()`, which we bind to `LEADER o` (the leader — default `Ctrl+\`, configurable via `tstack config leader` — then `o`) via `wezterm.action_callback`, plus `Ctrl+Shift+O` for access without the leader. `o` was the obvious free letter among the leader bindings at the time and is mnemonic for "out". For ad-hoc use without a keybinding, the CLI does the same thing: `wezterm cli move-pane-to-new-tab --new-window`. Bound in both WezTerm configs.
 
 ## Why local-only chezmoi git (no remote yet)?
 
@@ -707,7 +707,7 @@ Native-Linux hosts in this stack are headless (reached over ssh/PuTTY) and run n
 
 Trade-off: like the single-sourced `starship.toml`, nothing automatic keeps `dot_wezterm.lua` and `windows/.wezterm.lua` visually in sync — a shared change has to be made in both. `dot_wezterm.lua`'s header comment says so.
 
-One macOS-only caveat lives *outside* the config. macOS reserves both the `Ctrl+Space` leader (the system *Input Sources → "Select the previous input source"* shortcut) and the bare `F1`–`F6` pane keys (hardware media keys), intercepting them before WezTerm sees the keystroke — so out of the box every `Ctrl+Space …` binding and the F-key pane bindings look dead, and the `Ctrl+Space 1`–`6` fallback (which routes through the same leader) dies with them. We keep the bindings byte-identical to the Windows side rather than picking Mac-specific keys — cross-platform muscle memory wins — and push the resolution to two System Settings toggles (enable standard function keys; free the `Ctrl+Space` input-source shortcut), documented in `INSTALL.md` § macOS and the darwin block of the command reference.
+One macOS-only caveat lives *outside* the config. macOS reserves both the `Ctrl+Space` leader (the system *Input Sources → "Select the previous input source"* shortcut) and the bare `F1`–`F6` pane keys (hardware media keys), intercepting them before WezTerm sees the keystroke — so out of the box every `Ctrl+Space …` binding and the F-key pane bindings look dead, and the `Ctrl+Space 1`–`6` fallback (which routes through the same leader) dies with them. We keep the bindings byte-identical to the Windows side rather than picking Mac-specific keys — cross-platform muscle memory wins — and push the resolution to two System Settings toggles (enable standard function keys; free the `Ctrl+Space` input-source shortcut), documented in `INSTALL.md` § macOS and the darwin block of the command reference. *(Amended 2026-09-25: the default leader is now `Ctrl+\`, which macOS does not claim, so the input-source toggle is needed only by a user who picks `Ctrl+Space`. See "Why the default leader is `Ctrl+\`".)*
 
 ## Why `doc` replaced the command-reference render pipeline
 
@@ -719,7 +719,7 @@ Trade-off: the browser/Obsidian `.html` export is gone. It was the weakest-justi
 
 ## Why "kill workspace" shells out to `wezterm cli` (and rename doesn't)
 
-`Ctrl+Space X` ("delete this workspace" = close all its panes) can't be done in pure Lua: `CloseCurrentTab`/`CloseCurrentPane` act only on the GUI's *active* pane, and the mux API exposes no tab/workspace close (wezterm/wezterm discussion #5907). The binding therefore collects every pane id in the target workspace from the mux, switches the GUI to another workspace first (so closing the last window doesn't quit WezTerm), then kills the collected panes with `wezterm cli kill-pane --pane-id <id>` via `wezterm.run_child_process`. The binary name is held in a `WEZTERM_CLI` local in both configs — currently `'wezterm'` on both sides (the GUI process resolves it from its own PATH, so no `.exe` suffix is needed on Windows). It refuses to run when the current workspace is the only one. `rename`, by contrast, is a clean one-liner (`wezterm.mux.rename_workspace`).
+`Leader X` ("delete this workspace" = close all its panes) can't be done in pure Lua: `CloseCurrentTab`/`CloseCurrentPane` act only on the GUI's *active* pane, and the mux API exposes no tab/workspace close (wezterm/wezterm discussion #5907). The binding therefore collects every pane id in the target workspace from the mux, switches the GUI to another workspace first (so closing the last window doesn't quit WezTerm), then kills the collected panes with `wezterm cli kill-pane --pane-id <id>` via `wezterm.run_child_process`. The binary name is held in a `WEZTERM_CLI` local in both configs — currently `'wezterm'` on both sides (the GUI process resolves it from its own PATH, so no `.exe` suffix is needed on Windows). It refuses to run when the current workspace is the only one. `rename`, by contrast, is a clean one-liner (`wezterm.mux.rename_workspace`).
 
 ## Why config lives in chezmoi `[data]` + a Windows JSON mirror
 
@@ -2959,6 +2959,31 @@ inside the package: winget's btop4win ships `btop4win.exe`, but its PATH shim is
 and a new winget id is verified with `winget show --id <id> --exact` before it is
 written down. An id that always fails is worse than an honest "not available on
 this platform".
+
+## Why the default leader is `Ctrl+\`, not `Ctrl+Space`
+
+`Ctrl+Space` was the default from the start and was contested everywhere the
+stack runs. macOS binds it to "Select the previous input source", so a fresh Mac
+install had a dead leader until the user found a System Settings toggle (the
+INSTALL step existed only to undo our own default). PSReadLine binds it to
+`MenuComplete`, which the leader silently took from every pwsh pane. And on
+Omarchy both tmux (`prefix C-Space`) and herdr ship it as their prefix, so a
+WezTerm leader on the same chord ate the inner program's prefix outright.
+
+`Ctrl+\` was checked against the same list: no macOS or Windows system
+shortcut, no WezTerm default assignment, nothing in the stack's zsh, pwsh, tmux,
+herdr or pane-nav bindings. What it does claim is small and reachable by pressing
+the leader twice: the tty's SIGQUIT (`0x1C`), nano's Replace (also `Alt+R`),
+Emacs' `toggle-input-method`, and nvim's terminal-mode escape `Ctrl+\ Ctrl+N`,
+which is the one a user would notice. The leader-twice binding used to send a
+hard-coded `Ctrl+Space`, so it now sends the leader chord itself, mapping the
+`phys:` name back to the character `SendKey` wants.
+
+Only the default moved. Every installer saves `leaderChord` explicitly, so an
+existing machine keeps what it has; changing someone's leader under them on the
+next `tstack update` would break muscle memory without being asked. The
+`phys:Backslash` layout caveat below applies: on a non-US layout it is whichever
+key sits where `\` does on ANSI.
 
 ## Why leader keys with no printable spelling are stored by name
 

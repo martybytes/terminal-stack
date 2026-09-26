@@ -114,7 +114,7 @@ cfg() {  # cfg <data-key> <default>
   fi
   [ -n "$v" ] && echo "$v" || echo "$2"
 }
-LEADER_KEY="$(cfg leaderKey 'phys:Space')"
+LEADER_KEY="$(cfg leaderKey 'phys:Backslash')"
 LEADER_MODS="$(cfg leaderMods 'CTRL')"
 THEME_MODE="$(cfg themeMode 'dark')"
 THEME_RESOLVED="$(cfg resolvedTheme 'dark')"

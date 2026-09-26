@@ -105,8 +105,8 @@ the WSL step, which is where the apply happens.
 curl -fsSL https://raw.githubusercontent.com/martybytes/terminal-stack/main/install-mac.sh | bash
 ```
 
-Two System Settings toggles free `Ctrl+Space` and the F-row before the
-keybindings work;
+One System Settings toggle frees the F-row before the pane keys work
+(two if you pick `Ctrl+Space` as the leader);
 [INSTALL.md § Reopen WezTerm](INSTALL.md#4-reopen-wezterm) walks through them.
 </details>
 
@@ -280,7 +280,7 @@ Other subcommands, each with `-h`:
 
 - **WezTerm** (nightly or stable, your pick) with a taller hand-drawn tab bar on Windows, WSL and macOS: the active tab is a solid accent block, each tab carries an index, an icon and a deliberately short title. Desktop Linux installs WezTerm but keeps its stock config. **Ghostty** is the macOS alternative — installed, with a managed `~/.config/ghostty/config` that also carries the `ssh-terminfo`/`ssh-env` shell-integration features, without which backspace and Delete break over ssh. macOS only: on Linux the installer points you at ghostty.org rather than installing it, and there is no Windows target.
 - **`F1`–`F4` are directions** — focus the pane that way, or split one into existence if none is there. `F5` jumps via a labelled overlay, `F6` swaps.
-- **A no-timeout leader** (`Ctrl+Space` by default) drives splits and arrow-key repeatable modes for move, resize, rotate, tab-switch and font-size, each with an on-screen badge that auto-exits when idle. `Ctrl+Space p` fuzzy-picks a project from the `wso` tree (needs `fd`); `Ctrl+Space S`/`L` save and restore a session.
+- **A no-timeout leader** (`Ctrl+\` by default) drives splits and arrow-key repeatable modes for move, resize, rotate, tab-switch and font-size, each with an on-screen badge that auto-exits when idle. `Ctrl+\ p` fuzzy-picks a project from the `wso` tree (needs `fd`); `Ctrl+\ S`/`L` save and restore a session.
 - **Starship prompt** on both zsh and PowerShell, with the palette baked to your theme.
 - **tmux** configured for Claude Code passthrough, extended keys and mouse mode.
 </details>

@@ -4,8 +4,23 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+### Changed
+
+- **The default WezTerm leader is now `Ctrl+\` (09/25/2026).** `Ctrl+Space`
+  is claimed by macOS (input-source switch), PSReadLine (`MenuComplete`) and
+  Omarchy's tmux and herdr prefix, so on every platform something either ate
+  it or fought it. Nothing the stack installs binds `Ctrl+\`. Only fresh
+  installs and machines that never saved a leader change; an existing choice is
+  kept, and `tstack config leader ctrl-backslash` switches one. Leader twice now
+  sends whatever the leader is (it used to always send `Ctrl+Space`), so
+  nvim's `Ctrl+\ Ctrl+N` and SIGQUIT stay reachable.
+
 ### Fixed
 
+- **The Alt+L launcher no longer lists an `SSHMUX:` twin for every ssh host
+  (09/25/2026).** `wezterm.default_ssh_domains()` makes an `SSH:` and an
+  `SSHMUX:` domain per `~/.ssh/config` host; the second needs wezterm on the
+  remote and was never used. Both GUI configs now keep only the `SSH:` ones.
 - **A failed WezTerm channel switch no longer leaves the machine without WezTerm
   (09/24/2026).** On a stable box where the wizard's default picked nightly, the
   Windows install uninstalled stable, winget then failed nightly on a stale hash,

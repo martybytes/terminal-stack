@@ -18,9 +18,15 @@ local config = wezterm.config_builder()
 
 -- On macOS the default program is the login shell (zsh) — no default_prog needed.
 
-config.ssh_domains = wezterm.default_ssh_domains()
-for _, dom in ipairs(config.ssh_domains) do
-  dom.assume_shell = 'Posix'
+-- default_ssh_domains() yields SSH:<host> and SSHMUX:<host> per ssh_config
+-- Host. SSHMUX needs wezterm on the remote; keep only the plain SSH: ones so
+-- the Alt+L launcher isn't doubled up with entries nobody uses.
+config.ssh_domains = {}
+for _, dom in ipairs(wezterm.default_ssh_domains()) do
+  if dom.multiplexing == 'None' then
+    dom.assume_shell = 'Posix'
+    table.insert(config.ssh_domains, dom)
+  end
 end
 
 -- No SSH_AUTH_SOCK handling here, unlike windows/.wezterm.lua.tmpl. That twin
@@ -279,11 +285,15 @@ wezterm.on('open-uri', function(window, pane, uri)
   return false
 end)
 
--- Leader key: injected from the saved config (default Ctrl+Space).
--- phys:Space matches the physical key (kept identical to the Windows side).
+-- Leader key: injected from the saved config (default Ctrl+\, which nothing
+-- else claims; Ctrl+Space is macOS's input-source switch). phys: names match
+-- the physical key (kept identical to the Windows side).
 -- ~24h timeout = effectively no timeout: the leader waits for input. The peach
 -- cursor + ⌨ LEADER badge show it's pending; <leader> then Esc cancels.
-config.leader = { key = '{{ if hasKey . "leaderKey" }}{{ .leaderKey }}{{ else }}phys:Space{{ end }}', mods = '{{ if hasKey . "leaderMods" }}{{ .leaderMods }}{{ else }}CTRL{{ end }}', timeout_milliseconds = 86400000 }
+config.leader = { key = '{{ if hasKey . "leaderKey" }}{{ .leaderKey }}{{ else }}phys:Backslash{{ end }}', mods = '{{ if hasKey . "leaderMods" }}{{ .leaderMods }}{{ else }}CTRL{{ end }}', timeout_milliseconds = 86400000 }
+
+-- SendKey wants the character, not the phys: name the leader is matched by.
+local LEADER_SEND = { ['phys:Space'] = ' ', ['phys:Backslash'] = '\\' }
 
 -- Fuzzy-pick a domain (Alt+L style) and split it into the current pane.
 -- direction is a wezterm SplitPane direction ('Right' or 'Down').
@@ -417,7 +427,10 @@ config.keys = {
   { key = 't', mods = 'LEADER', action = act.ActivateKeyTable { name = 'tab_mode', one_shot = false, until_unknown = true, timeout_milliseconds = 1500 } },
   { key = 'f', mods = 'LEADER', action = act.ActivateKeyTable { name = 'font_mode', one_shot = false, until_unknown = true, timeout_milliseconds = 1500 } },
   { key = 'z', mods = 'LEADER', action = act.TogglePaneZoomState },
-  { key = 'phys:Space', mods = 'LEADER|CTRL', action = act.SendKey { key = ' ', mods = 'CTRL' } },
+  -- Leader twice sends the leader chord itself to the app, whatever it is:
+  -- the escape hatch for nvim's Ctrl+\ Ctrl+N, SIGQUIT, or a nested herdr/tmux.
+  { key = config.leader.key, mods = 'LEADER|' .. config.leader.mods,
+    action = act.SendKey { key = LEADER_SEND[config.leader.key] or config.leader.key, mods = config.leader.mods } },
   { key = 'r', mods = 'LEADER', action = act.ReloadConfiguration },
   -- Tab selection: Alt+1..9 (number matches tab); Ctrl+Tab / Ctrl+Shift+Tab cycle.
   -- (Leader+1..6 mirror F1..F6; see pane_nav.lua.)

@@ -74,7 +74,7 @@ Every question works the same way: the default is **marked with `>` and captione
   The presets are not vendored: `starship preset <name>` runs at apply time, so
   they stay Starship's rather than freezing at whatever upstream shipped the day
   they were copied. Both sync paths render it on the Windows side too.
-- **Leader key** (WezTerm) — `Ctrl+Space` (default), `Ctrl+A`, `Ctrl+B`, `Alt+Space`, or a custom `mod-key` chord (e.g. `ctrl-x`). Keys with no printable spelling are stored by name, so `Ctrl+\` is `ctrl-backslash` — type it either way and the wizard spells it for you, because as a literal `\` it cannot survive the settings store or the generated `.wezterm.lua`. Skip with `TS_LEADER=ctrl-a`.
+- **Leader key** (WezTerm) — `Ctrl+\` (default: no OS, shell or app the stack installs claims it), `Ctrl+Space` (the old default; macOS and PSReadLine both want it), `Ctrl+A`, `Ctrl+B`, `Alt+Space`, or a custom `mod-key` chord (e.g. `ctrl-x`). Keys with no printable spelling are stored by name, so `Ctrl+\` is `ctrl-backslash` — type it either way and the wizard spells it for you, because as a literal `\` it cannot survive the settings store or the generated `.wezterm.lua`. Skip with `TS_LEADER=ctrl-a`.
 - **Theme** — `dark` (Catppuccin Mocha, default), `light` (VS Code Light Modern), or `follow` (track the OS light/dark setting; WezTerm switches live, the Starship/tmux palette is baked at apply and refreshed by `tstack update`/`tstack config`). Skip with `TS_THEME=dark|light|follow`.
 - **Terminal emulator** (Windows, macOS and desktop Linux — WSL and headless hosts never install one) — a tick-list, so each is individually opt-in and `[n]one` is one keystroke away. **WezTerm nightly**, **WezTerm stable** and (macOS/Linux) **Ghostty** are separate ticks. Whatever is installed starts ticked on its detected channel; on a fresh machine **nightly is pre-selected**, because upstream's newest stable is `20240203` — February 2024, with no cut since — and this stack's Lua config targets current builds.
 
@@ -95,7 +95,7 @@ Every question works the same way: the default is **marked with `>` and captione
 
   Skip the prompt with `TS_TERMINALS=wezterm-nightly,ghostty` / `TS_TERMINALS=wezterm-stable` / `TS_TERMINALS=none`; `TS_WEZTERM=nightly|stable|skip` still maps across. Change it later with **`tstack config wezterm install <stable|nightly>`**, which removes the other channel for you; `tstack config wezterm` (or `tstack wezterm`) shows your build, both channels' newest, and what changed in between. Rationale in `docs/decisions.md` § "Why the WezTerm channel is a question, and why it is not a saved setting".
 - **WezTerm multiplexer** — whether panes are hosted by `wezterm-mux-server` instead of the GUI, so a GUI crash leaves every pane alive and relaunching WezTerm reattaches. Defaults to **off**: the mux server loads its own copy of `.wezterm.lua`, so config changes then need `tstack mux restart` (which kills every pane), and mux panes can't render the per-pane Claude tint. Skipped on headless servers (no GUI to host). Change it any time with `tstack mux on|off`. Skip with `TS_WEZ_MUX=on|off`.
-- **Restore last session** — whether launching WezTerm reopens the workspace you last had (panes, layout and scrollback) or starts clean. Defaults to **off**; the autosave runs either way, so `Ctrl+Space` `L` still restores by hand and `tstack config restore on` flips it later. Skipped on headless servers. Skip with `TS_WEZ_RESTORE=on|off`.
+- **Restore last session** — whether launching WezTerm reopens the workspace you last had (panes, layout and scrollback) or starts clean. Defaults to **off**; the autosave runs either way, so `Ctrl+\` `L` still restores by hand and `tstack config restore on` flips it later. Skipped on headless servers. Skip with `TS_WEZ_RESTORE=on|off`.
 - **Apps** — five ways to answer: the **recommended set**, **everything**, **whole groups**, **individual tools**, or **none**. The Nerd Font, Starship, chezmoi, git and zsh are always installed regardless. Skip the question with `TS_APPS=recommended|all|none|id,id,…`.
 
   The catalog is grouped so you can take a category without reading 30 lines:
@@ -294,12 +294,12 @@ Open a new WezTerm tab — auto-reload picks up the new `.wezterm.lua`. Open a p
 
 On macOS, quit and relaunch WezTerm so it sets JetBrainsMono Nerd Font from the freshly-applied `~/.wezterm.lua`, then open a new tab and confirm the Starship two-line prompt renders with glyphs. WezTerm itself must be set to a Nerd Font for the launch-window prompt; the config does that automatically.
 
-**macOS — free the keybinding keys.** macOS intercepts the WezTerm leader and the directional pane F-keys before they reach the terminal, so out of the box `Ctrl+Space …` and `F1`–`F6` look dead. Two System Settings toggles fix it:
+**macOS — free the keybinding keys.** macOS intercepts the directional pane F-keys before they reach the terminal, and `Ctrl+Space` too if you chose it as the leader, so out of the box `F1`–`F6` look dead. One System Settings toggle fixes it, two with a `Ctrl+Space` leader:
 
 - **F-keys** → System Settings → Keyboard → enable **"Use F1, F2, etc. keys as standard function keys"** (or hold **Fn** + F1…F6). The bare F-row is otherwise hardware media keys (brightness, Mission Control, …).
-- **`Ctrl+Space`** → System Settings → Keyboard → Keyboard Shortcuts → **Input Sources** → uncheck **"Select the previous input source"**. That system shortcut swallows `Ctrl+Space` system-wide, which also disables the `Ctrl+Space 1`–`6` F-key fallback.
+- **`Ctrl+Space` (only if that is your leader)** → System Settings → Keyboard → Keyboard Shortcuts → **Input Sources** → uncheck **"Select the previous input source"**. That system shortcut swallows `Ctrl+Space` system-wide, which also disables the leader `1`–`6` F-key fallback. The default `Ctrl+\` leader needs nothing.
 
-Then `Ctrl+Space r` in WezTerm to reload, and the bindings in the command reference work.
+Then `Ctrl+\ r` in WezTerm to reload, and the bindings in the command reference work.
 
 ### Developing WezTerm config
 
@@ -309,7 +309,7 @@ WezTerm reads `%USERPROFILE%\.wezterm.lua` and `%USERPROFILE%\.wezterm\pane_nav.
 & C:\path\to\terminal-stack\scripts\sync-windows.ps1 -SourceDir C:\path\to\terminal-stack
 ```
 
-The canonical install (`%LOCALAPPDATA%\terminal-stack\stack`) resolves without any pin — set `$env:TERMINAL_STACK_DIR` in `profile.local.ps1` only when working against a **non-canonical** location, e.g. a dev clone at a workspace tier path (which is otherwise invisible to `tstack update` and the resolvers). Changes to `.wezterm.lua` usually auto-reload; press **`Ctrl+Space` `r`** after `pane_nav.lua` edits. Full loop, optional file-watcher, macOS path, and symlink trick: `docs/developing-wezterm.md`.
+The canonical install (`%LOCALAPPDATA%\terminal-stack\stack`) resolves without any pin — set `$env:TERMINAL_STACK_DIR` in `profile.local.ps1` only when working against a **non-canonical** location, e.g. a dev clone at a workspace tier path (which is otherwise invisible to `tstack update` and the resolvers). Changes to `.wezterm.lua` usually auto-reload; press **`Ctrl+\` `r`** after `pane_nav.lua` edits. Full loop, optional file-watcher, macOS path, and symlink trick: `docs/developing-wezterm.md`.
 
 ## Manual
 
@@ -619,7 +619,7 @@ rg --version | head -1
 chezmoi doctor | head -5
 ```
 
-Open WezTerm, confirm the active tab renders as a solid accent block and the clock shows on the right of the bar (`Ctrl+Space` `s` adds `user@host │ path`). Open a zsh pane, confirm Starship prompt with the branch glyph renders. Open a pwsh pane, run `cc` from a project dir, confirm the tab shows the Claude icon and the bare project name (a coloured state dot appears once Claude starts working).
+Open WezTerm, confirm the active tab renders as a solid accent block and the clock shows on the right of the bar (`Ctrl+\` `s` adds `user@host │ path`). Open a zsh pane, confirm Starship prompt with the branch glyph renders. Open a pwsh pane, run `cc` from a project dir, confirm the tab shows the Claude icon and the bare project name (a coloured state dot appears once Claude starts working).
 
 If you enabled the TTS daemon: `tstack config tts daemon status` should report healthy with the clone's git SHA, and `~/.claude/hooks/cc-tts-test.sh --daemon` (pwsh: `cc-tts-test.ps1 -Daemon`) should speak "Daemon test…". Then prove the never-silence fallback once: `cc-tts-test.sh --daemon-fallback` must still speak through the classic direct path.
 
