@@ -124,10 +124,10 @@ def mux_pids() -> list[str]:
 def rendered_cfg() -> Path | None:
     """The .wezterm.lua the GUI actually loads, which on WSL is the Windows one."""
     if plat.kind() == plat.WSL:
-        user = plat.windows_username()
-        if not user:
+        home = plat.windows_home()
+        if not home:
             return None
-        candidate = Path(f"/mnt/c/Users/{user}/.wezterm.lua")
+        candidate = home / ".wezterm.lua"
         return candidate if candidate.is_file() else None
     candidate = Path.home() / ".wezterm.lua"
     return candidate if candidate.is_file() else None
@@ -167,7 +167,9 @@ def sock_dirs() -> list[Path]:
     if plat.kind() == plat.WSL:
         user = plat.windows_username()
         if user:
-            out.append(Path(f"/mnt/c/Users/{user}/AppData/Local/wezterm"))
+            home = plat.windows_home()
+            if home:
+                out.append(home / "AppData" / "Local" / "wezterm")
     return out
 
 
@@ -203,7 +205,9 @@ def _apply() -> None:
     print("==> applying...")
     chezmoi = plat.find_chezmoi()
     if chezmoi and Path(chezmoi).exists():
-        subprocess.run([chezmoi, "apply"], check=False, start_new_session=True)
+        got = proc.capture([chezmoi, "apply"], timeout=600)
+        if got is None or got.returncode != 0:
+            print("!! chezmoi apply failed; the rendered config may be stale.", file=sys.stderr)
     else:
         print("    (no chezmoi here; the Windows sync renders this side)")
     print("==> done.")
@@ -274,7 +278,13 @@ def do_list() -> int:
     if not cli:
         print("tstack mux: wezterm CLI not found on PATH.", file=sys.stderr)
         return 1
-    return subprocess.run([cli, "cli", "list"], check=False, start_new_session=True).returncode
+    try:
+        return subprocess.run(
+            [cli, "cli", "list"], check=False, start_new_session=True, timeout=30
+        ).returncode
+    except subprocess.TimeoutExpired:
+        print("tstack mux: wezterm cli list did not answer in 30s.", file=sys.stderr)
+        return 1
 
 
 def do_kill(assume_yes: bool) -> int:

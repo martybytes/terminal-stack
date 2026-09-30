@@ -1,36 +1,13 @@
 """`tstack config` - view and change saved settings.
 
-PHASE II of the port (REVAMP-PLAN.md, phase 4). This module is built and tested
-but is NOT yet the entry point: `tstack/commands.conf` still routes `config` to
-`bootstrap/ts-config.sh` on POSIX and `@Set-TerminalStackConfig` on Windows.
+The POSIX entry point (tstack/commands.conf routes `config` here; Windows keeps
+`Set-TerminalStackConfig` until it can be exercised there). `apps`, `tts` and
+`reconfigure` DELEGATE to bootstrap/ts-config.sh, which ends in a package-manager
+install or the bootstrap's save sequence; `mux`, `wezterm`, `ghostty`, `herdr`
+and `workspace` hand off in-process to their ported commands.
 
-The row flips when every verb here is native. It cannot flip earlier: the two
-columns flip together, and a Python `config` that shelled out to
-`bootstrap/ts-config.sh` for its un-ported verbs would leave Windows -- which has
-no bash -- with no implementation at all. Half a subcommand cannot route.
-
-What IS native here: show (prose and --json), get, set, leader, theme, tmux,
-restore, atuin, memory, agents. What is not, and why:
-
-    apps      the picker plus a package-manager install path per platform
-    ghostty   file surgery: backup, restore, diff, and the WSL path resolution
-    tts       25 sub-verbs over 41 keys; _cc_tts.sh survives as a library
-    wizard    five callers outside `config`, so porting it here ports a
-              subsystem those five cannot reach
-
-Design rules this module is built to, from the port specification:
-
-* **argv before the clone.** `tstack config theme` is a usage error whether or
-  not a clone exists, and a user with a broken clone should still be told their
-  command line was wrong. This is the `mux` ordering, not the `services` one.
-* **One key per write.** The shell's `ts_save_config` is positional, so every
-  caller re-states all four values because omitting one DROPS it -- which is why
-  `set_leader` reads the theme back out just to write it again. Here each verb
-  writes exactly the key it owns.
-* **`agentmemoryEnabled` is derived.** It is written only by the memory writer.
-  The shell let `agents agentmemory off` write it directly, producing the exact
-  `memoryBackend=agentmemory` / `agentmemoryEnabled=off` pair `tstack doctor`
-  reports as drift.
+Every write goes through tstack/store.py, the one writer, and every save is
+followed by `chezmoi init` (derived keys) and `chezmoi apply`.
 """
 
 from __future__ import annotations
@@ -39,7 +16,6 @@ import json
 import os
 import subprocess
 import sys
-from pathlib import Path
 
 from .. import engine, paths, proc, schema, stacks, store
 from .. import platform as plat
@@ -566,22 +542,6 @@ def _prompt(args: list[str], out: Out, dry_run: bool) -> int:
     return 0
 
 
-def _ghostty(args: list[str], out: Out, dry_run: bool) -> int:
-    """The one implementation of the managed Ghostty config.
-
-    It replaces three: `bootstrap/ts-config.sh` covered macOS and the WSL view of
-    the Windows side, `$PROFILE`'s Set-TerminalStackConfig covered native
-    Windows, and each carried its own copy of the themeMode -> theme mapping.
-    Both shells now hand off here, the way `mux` and `wezterm` already do.
-    """
-    from . import ghostty as ghostty_cmd
-
-    sub = args[0] if args else "status"
-    if sub not in ghostty_cmd.VERBS:
-        return _usage("usage: tstack config ghostty [on|off|status|diff]")
-    return ghostty_cmd.main([sub, *(["--dry-run"] if dry_run else [])])
-
-
 def set_memory(backend: str, out: Out, dry_run: bool) -> int:
     """The ONLY writer of memoryBackend and its derived agentmemoryEnabled.
 
@@ -636,7 +596,7 @@ def set_memory(backend: str, out: Out, dry_run: bool) -> int:
     # is the whole bug: both shell twins return 0 when the .env is absent, which
     # on a fresh machine it always is, so every platform silently wrote nothing
     # and reported success.
-    env_file = stacks.stack_dir(paths.resolve_source_dir() or Path(), "headroom") / ".env"
+    env_file = stacks.stack_dir(paths.resolve_source_dir(), "headroom") / ".env"
     ok, message = stacks.write_memory_compose_file(env_file, backend)
     if ok:
         out.say(f"  {message}")
@@ -880,9 +840,6 @@ def main(argv: list[str]) -> int:
         paths.resolve_source_dir()
     except paths.CloneNotFound:
         return _fail("cannot locate the terminal-stack clone (set TERMINAL_STACK_DIR).")
-
-    if verb == "ghostty":
-        return _ghostty(args, out, dry_run)
 
     if verb == "prompt":
         return _prompt(args, out, dry_run)
