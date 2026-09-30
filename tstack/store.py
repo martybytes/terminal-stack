@@ -322,8 +322,14 @@ def writes_to_mirror() -> bool:
     """
     if plat.kind() != plat.WINDOWS:
         return False
-    chezmoi = plat.find_chezmoi()
-    return not (chezmoi and Path(chezmoi).exists())
+    # A configured chezmoi (a chezmoi.toml naming a sourceDir), not merely a
+    # binary: winget installs one, and with the old test every save on such a
+    # machine went to a chezmoi.toml nothing reads and read back as saved.
+    try:
+        body = toml_path().read_text(encoding="utf-8")
+    except OSError:
+        return True
+    return not any(line.strip().startswith("sourceDir") for line in body.splitlines())
 
 
 def _set_in_mirror(key: str, value: object) -> None:
@@ -343,10 +349,42 @@ def _set_in_mirror(key: str, value: object) -> None:
             raise StoreError(
                 f"{path} is not readable JSON; refusing to overwrite it: {exc}"
             ) from exc
-    current[key] = value
+    # The mirror's OWN shape: `ccTtsKokoroVoice` lives at ccTts.kokoro.voice,
+    # and its booleans are JSON booleans. Writing the flat key put a value where
+    # neither `store.get` (which reads the dotted path first) nor the daemon
+    # looked, so a Windows-only save read straight back as the old value.
+    _set_dotted(current, mirror_key(key), value)
     path.parent.mkdir(parents=True, exist_ok=True)
     _atomic_write(path, json.dumps(current, indent=2) + "\n")
     clear_cache()
+
+
+def _set_dotted(root: dict[str, Any], dotted: str, value: object) -> None:
+    """Assign at a dotted path, matching the type the mirror already holds there."""
+    parts = dotted.split(".")
+    node = root
+    for part in parts[:-1]:
+        child = node.get(part)
+        if not isinstance(child, dict):
+            child = {}
+            node[part] = child
+        node = child
+    leaf = parts[-1]
+    existing = node.get(leaf)
+    if isinstance(value, str):
+        low = value.strip().lower()
+        if isinstance(existing, bool) or (existing is None and low in ("true", "false")):
+            if low in ("true", "on", "yes", "1"):
+                value = True
+            elif low in ("false", "off", "no", "0"):
+                value = False
+        elif isinstance(existing, int) and not isinstance(existing, bool):
+            with contextlib.suppress(ValueError):
+                value = int(value)
+        elif isinstance(existing, float):
+            with contextlib.suppress(ValueError):
+                value = float(value)
+    node[leaf] = value
 
 
 def _render_line(key: str, value: str) -> str:

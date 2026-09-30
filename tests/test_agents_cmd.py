@@ -355,12 +355,22 @@ def test_install_paths_skip_a_vendor_cli_that_is_not_there(monkeypatch, capsys):
     assert ["rule", True] in ran
 
 
+def _ok(argv, timeout=60, stdin=None, ran=None):
+    import subprocess
+
+    if ran is not None:
+        ran.append(argv)
+    return subprocess.CompletedProcess(argv, 0, "", "")
+
+
 def test_caveman_install_pins_the_manifest_version(monkeypatch, capsys):
-    ran = []
+    ran: list = []
     monkeypatch.setattr(agents, "find_agent", lambda name: f"/usr/bin/{name}")
-    monkeypatch.setattr(agents, "_run", lambda argv, timeout=60, stdin=None: ran.append(argv))
+    # Every step succeeds: install() now REPORTS a failed step instead of
+    # printing "enabled" over it, so the stub has to answer like a real success.
+    monkeypatch.setattr(agents, "_run", lambda argv, timeout=60, stdin=None: _ok(argv, ran=ran))
     monkeypatch.setattr(agents, "caveman_rule", lambda enable: None)
-    agents.Caveman(ROOT, agents.Out()).install()
+    assert agents.Caveman(ROOT, agents.Out()).install() is True
     flat = [" ".join(c) for c in ran]
     assert any("plugin marketplace add" in f and "caveman" in f for f in flat)
     assert any("plugin install caveman@caveman --scope user -y" in f for f in flat)
@@ -533,3 +543,19 @@ def test_a_real_auth_answer_is_still_reported_as_a_failure(monkeypatch, capsys):
     monkeypatch.setattr(headroom, "probe_auth", lambda: (False, "HTTP 401"))
     assert headroom.run("on") == 1
     assert "authentication failed (HTTP 401)" in capsys.readouterr().out
+
+
+def test_caveman_install_reports_a_failed_step_instead_of_enabled(monkeypatch, capsys):
+    """Every result was ignored and it printed "Caveman ... enabled" regardless."""
+    import subprocess
+
+    monkeypatch.setattr(agents, "find_agent", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(
+        agents,
+        "_run",
+        lambda argv, timeout=60, stdin=None: subprocess.CompletedProcess(argv, 1, "", "boom"),
+    )
+    monkeypatch.setattr(agents, "caveman_rule", lambda enable: None)
+    assert agents.Caveman(ROOT, agents.Out()).install() is False
+    out = capsys.readouterr().out
+    assert "only partly enabled" in out and "enabled for installed agents" not in out

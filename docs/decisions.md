@@ -4126,4 +4126,55 @@ renders every KB file and resolves every reference the way the `doc` shell
 command does (exact label, basename, this OS's copy, unique substring), which
 turns the site into a permanent gate on the KB: a topic renamed without its
 references now fails the suite instead of failing the reader.
+## Why a destructive prompt is answered at the terminal or not at all
+
+Three copies of a yes/no prompt existed (`services`, `mux`, `ui`, and a fourth in
+`workspace`). Two opened `/dev/tty` as a single `r+` text handle. Python builds
+that on a seekable buffer, a tty is not seekable, the `UnsupportedOperation` is
+an `OSError`, and the `except` fell through to `input()` -- which reads stdin. So
+`echo "destroy all memories" | tstack services reset --purge` deleted every
+volume, under a docstring promising that a pipe could never answer. The same
+bug had already silenced the install wizard (see `tstack/wizard/console.py`).
+
+`tstack/confirm.py` is now the one implementation, on the wizard's `Console`
+(a reader and a writer, never one handle). No terminal means no consent: the
+command says so and stops. `-y` is the only stand-in for a yes, and the typed
+phrases that guard steps with no rollback have no stand-in at all. A test greps
+`tstack/` for the old pattern so a fifth copy cannot come back.
+
+## Why WSL never moves or removes the Windows install's clone
+
+`%LOCALAPPDATA%\terminal-stack\stack` was the canonical location for BOTH
+sides until 2026-09, so after the split it stayed on WSL's candidate lists as a
+"legacy" location -- and `install-wsl.sh` offered to MOVE it, with Move as the
+default answer. On a machine installed in the documented order (Windows first)
+that path is the Windows install's live clone; Enter would have dragged it onto
+ext4, and `tstack update` and `wso` on Windows would have lost their clone. The
+install log that surfaced this shows the prompt; only a typed `f` avoided it.
+
+The rule: on WSL, `paths.is_windows_side_clone()` / `ts_is_windows_side_clone`
+marks that path as the other side's. It stays a RESOLUTION candidate, or a
+pre-split machine whose chezmoi still points there stops finding its own clone.
+But it is never legacy-to-move, never an "other clone" the cleanup menu offers,
+and never a `.env` the Headroom token repair rewrites. `doctor` says "WSL still
+shares the Windows install's clone; re-run the WSL one-liner" -- which clones
+fresh and repoints chezmoi, the only correct migration for a shared clone.
+## Why the wizard's defaults are the saved answers
+
+Every question's default was the fresh-install value: `dark`, `ctrl-backslash`,
+mux off, atuin on, memory `agentmemory`. That is right once. On a configured
+machine the bootstraps save what the wizard returns, unconditionally, so a
+re-run that pressed Enter at every prompt -- exactly what `tstack reinstall`
+invites -- reset the theme, the leader, atuin, herdr, the memory backend, the
+Cursor mode and caveman to stock. The `prompt` profile was worse: it returned
+the dataclass defaults, `apps=[]` and `memory_backend="none"`, and the
+bootstrap saved them, emptying the app list and unwiring AgentMemory.
+
+`_saved(key, default)` in `tstack/wizard/flow.py` is now the only way a
+question gets its default: this machine's stored value, else the fresh-install
+one. `_saved_tmux()` had done this for the tmux prefix alone since the first
+reconfigure bug; it is the general rule now. The same fix makes `TS_ASSUME_YES`
+mean what the docs said: with every default being the saved answer, "take every
+default without prompting" is a no-op on a configured machine, which is the only
+safe thing an unattended re-run can be.
 

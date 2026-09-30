@@ -295,12 +295,25 @@ def test_wsl_is_not_the_standalone_case(monkeypatch):
     assert store.writes_to_mirror() is False
 
 
-def test_windows_with_chezmoi_is_not_the_standalone_case(monkeypatch, tmp_path):
+def test_windows_with_a_configured_chezmoi_is_not_the_standalone_case(monkeypatch, tmp_path):
+    """A chezmoi.toml naming a sourceDir is what makes [data] authoritative."""
+    monkeypatch.setattr(plat, "kind", lambda: plat.WINDOWS)
+    monkeypatch.setattr(plat, "find_chezmoi", lambda: str(tmp_path / "chezmoi.exe"))
+    toml = store.toml_path()
+    toml.parent.mkdir(parents=True, exist_ok=True)
+    toml.write_text('sourceDir = "C:/x/stack"\n[data]\n', encoding="utf-8")
+    assert store.writes_to_mirror() is False
+
+
+def test_windows_with_only_a_stray_chezmoi_binary_still_writes_the_mirror(monkeypatch, tmp_path):
+    """winget installs a chezmoi nobody configured. Deciding by the BINARY sent
+    every save to a chezmoi.toml that nothing reads, and it read back as saved."""
     binary = tmp_path / "chezmoi.exe"
     binary.write_text("", encoding="utf-8")
     monkeypatch.setattr(plat, "kind", lambda: plat.WINDOWS)
     monkeypatch.setattr(plat, "find_chezmoi", lambda: str(binary))
-    assert store.writes_to_mirror() is False
+    assert not store.toml_path().exists()
+    assert store.writes_to_mirror() is True
 
 
 def test_a_mirror_write_preserves_every_other_key(monkeypatch, tmp_path):

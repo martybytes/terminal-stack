@@ -33,7 +33,7 @@ function Get-TsWsConfPaths {
 # Later files win key-by-key, so the per-machine override beats the tracked map.
 function Get-TsWsConfig {
     if ($script:TsWsConfig -and -not $env:TS_WS_RELOAD) { return $script:TsWsConfig }
-    $orgs = @{}; $renames = @{}; $settings = @{}
+    $orgs = @{}; $renames = @{}; $settings = @{}; $orgNames = @{}
     foreach ($f in Get-TsWsConfPaths) {
         foreach ($line in (Get-Content -LiteralPath $f -ErrorAction SilentlyContinue)) {
             $t = $line.Trim()
@@ -41,7 +41,9 @@ function Get-TsWsConfig {
             $p = $t -split '\s+'
             if ($p.Count -lt 3) { continue }
             switch ($p[0]) {
-                'org'    { $orgs[$p[1].ToLower()]    = $p[2] }
+                # Lowercased key for lookups, spelling kept: every destination
+                # path uses workspace.conf's case. Twin: TS_WS_ORG_NAMES.
+                'org'    { $orgs[$p[1].ToLower()]    = $p[2]; $orgNames[$p[1].ToLower()] = $p[1] }
                 'rename' { $renames[$p[1].ToLower()] = $p[2] }
                 'set'    { $settings[$p[1]]          = $p[2] }
                 default  { Write-Warning "workspace.conf: unknown directive '$($p[0])' in $f" }
@@ -49,7 +51,7 @@ function Get-TsWsConfig {
         }
     }
     $script:TsWsConfig = [pscustomobject]@{
-        Orgs = $orgs; Renames = $renames; Settings = $settings
+        Orgs = $orgs; Renames = $renames; Settings = $settings; OrgNames = $orgNames
     }
     return $script:TsWsConfig
 }
@@ -64,8 +66,11 @@ function Get-TsWsSetting([string]$Key, [string]$Default) {
 function Get-TsWsCanonOwner([string]$Owner) {
     $c = Get-TsWsConfig
     $k = $Owner.ToLower()
-    if ($c.Renames.ContainsKey($k)) { return $c.Renames[$k] }
-    return $Owner
+    $renamed = if ($c.Renames.ContainsKey($k)) { $c.Renames[$k] } else { $Owner }
+    # A known org comes back in workspace.conf's spelling; an unknown owner keeps its own.
+    $rk = $renamed.ToLower()
+    if ($c.OrgNames.ContainsKey($rk)) { return $c.OrgNames[$rk] }
+    return $renamed
 }
 
 # Owner -> tier. Resolves the canonical name first, so a renamed owner still
@@ -79,7 +84,7 @@ function Get-TsWsTierForOwner([string]$Owner) {
 
 function Get-TsWsOwnOwners {
     $c = Get-TsWsConfig
-    return @($c.Orgs.Keys | Where-Object { $c.Orgs[$_] -eq 'src' } | Sort-Object)
+    return @($c.Orgs.Keys | Where-Object { $c.Orgs[$_] -eq 'src' } | Sort-Object | ForEach-Object { $c.OrgNames[$_] })
 }
 
 # Does <Path> belong to <Org>? The one --org filter, shared by every verb.

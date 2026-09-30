@@ -266,3 +266,9 @@ separate from Windows' `gh.exe`; reuse the Windows login with
 `TS_DRY_RUN=1 wso synceverything` - it clones every missing repo in every org in
 `workspace.conf`, which can be well over a hundred.
 
+## Owner spelling
+
+Destinations use the owner as `workspace.conf` spells it, whatever case the
+remote URL carries, so a repo is never filed twice on a case-sensitive
+filesystem. To change the spelling, change the `org` line.
+

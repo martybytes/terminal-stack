@@ -106,6 +106,10 @@ def test_config_store_divergence_is_reported_with_both_values(monkeypatch, tmp_p
     longer writes the mirror, so it is the Windows install that must notice the
     two stores disagreeing."""
     as_platform(monkeypatch, plat.WINDOWS)
+    # A Windows machine WITH a configured chezmoi: that is the only one where
+    # two stores exist to disagree. (Deciding this by the developer's real
+    # chezmoi.toml is how this test passed locally and failed on every runner.)
+    monkeypatch.setattr(store, "writes_to_mirror", lambda: False)
     mirror = tmp_path / "config.json"
     mirror.write_text("{}", encoding="utf-8")
     monkeypatch.setattr(store, "mirror_path", lambda: mirror)
@@ -552,12 +556,21 @@ def test_repair_needs_the_cleanup_helper(tmp_path, capsys):
     assert "not found" in capsys.readouterr().err
 
 
-def test_repair_points_at_the_cleanup_checklist(monkeypatch, tmp_path, capsys):
+def test_repair_runs_the_cleanup_checklist(monkeypatch, tmp_path, capsys):
+    """It used to PRINT the checklist's path with "follow the prompts" and return
+    0 without running it, so every "repair: tstack doctor --repair" hint led
+    nowhere."""
     as_platform(monkeypatch, plat.LINUX)
     (tmp_path / "bootstrap").mkdir()
     (tmp_path / "bootstrap" / "_cleanup.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+    ran: list[list[str]] = []
+    monkeypatch.setattr(doctor, "repair_clone_branch", lambda s: 0)
+    monkeypatch.setattr(doctor, "repair_headroom_token", lambda: 0)
+    monkeypatch.setattr(doctor, "repair_clone_location", lambda s: 0)
+    monkeypatch.setattr(doctor, "_run_attached", lambda argv: ran.append(argv) or 0)
     assert doctor.repair(tmp_path) == 0
     assert "cleanup checklist" in capsys.readouterr().out
+    assert ran and "ts_cleanup_menu" in ran[0][-1] and str(tmp_path) in ran[0][-1]
 
 
 # ------------------------------------------------------- the prompt preset

@@ -232,8 +232,14 @@ def submit_hook(source: str, event: str, state: str, raw: bytes) -> int:
     if payload is None:
         return 0
     cfg = Config()
+    # A WSL hook that hands its event to this exe sets CC_TTS_REPORT_DISABLED
+    # (forwarded through WSLENV). It applies the WINDOWS config, so a WSL
+    # session with voice on used to go silent when Windows had it off, with
+    # exit 0 and nothing to say why. 75 means "declined by config, decide for
+    # yourself"; the caller then runs its own side's path. A mute stays 0.
+    declined = 75 if os.environ.get("CC_TTS_REPORT_DISABLED") else 0
     if not cfg.get("enabled", False):
-        return 0
+        return declined
     # The mute is checked here, before the daemon POST and before any worker is spawned,
     # because this is the one place every hook on every host passes through. It is
     # deliberately absolute: no priority escape, since the whole point is silencing the
@@ -249,7 +255,7 @@ def submit_hook(source: str, event: str, state: str, raw: bytes) -> int:
                        hook_origin=str(payload.get("event") or ""))
         return 0
     if payload.get("state") and payload["state"] not in (cfg.get("events") or []):
-        return 0
+        return declined
     if cfg.get("daemon.enabled", False):
         if _post(cfg, payload):
             return 0

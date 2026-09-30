@@ -177,7 +177,8 @@ def collect(console: Console, ask_terminals: bool = False) -> Answers:
     if profile == PROFILE_PROMPT:
         development = "no"
     elif _env("TS_DEVELOPMENT"):
-        development = "yes" if _env("TS_DEVELOPMENT").lower() in ("yes", "on", "true") else "no"
+        # `1` and `0` too: every other TS_* toggle takes them, and `=1` meant "no".
+        development = "yes" if _on_off(_env("TS_DEVELOPMENT"), default="yes") == "on" else "no"
     elif bare:
         development = "no"
     else:
@@ -212,20 +213,37 @@ def collect(console: Console, ask_terminals: bool = False) -> Answers:
             ("light", "light", "VS Code Light Modern"),
             ("follow", "follow OS appearance", "WezTerm switches live"),
         ],
-        "dark",
+        _saved("themeMode", "dark"),
     )
 
     if profile == PROFILE_PROMPT:
         # What it says: Starship and a Nerd Font, and nothing else touched.
         # Every remaining answer is pinned rather than asked, and the review
         # lists them so that is visible rather than implied.
+        # Carry this machine's SAVED answers through, not the dataclass defaults:
+        # the bootstrap saves every field, so `apps=[]` and `memory_backend="none"`
+        # here wiped the app list and unwired AgentMemory on a configured box.
         return Answers(
             profile=profile,
             development=development,
             app_class=app_class,
             starship=starship,
             theme=theme,
+            leader=_saved("leaderChord", "ctrl-backslash"),
             tmux=_saved_tmux(),
+            wez_mux=_saved_on_off("weztermMux"),
+            wez_restore=_saved_on_off("weztermRestore"),
+            atuin=_saved_on_off("atuinEnabled"),
+            herdr=_saved_on_off("herdrConfig"),
+            apps=store.get("apps", "").split(),
+            cc_tts="on" if store.normalise(store.get("ccTtsEnabled", "false")) == "true" else "off",
+            cc_tts_message=_saved("ccTtsMessageMode", "template"),
+            cc_tts_daemon=_saved_on_off("ccTtsDaemon"),
+            memory_backend=_saved("memoryBackend", "none"),
+            headroom=_saved_on_off("headroomEnabled"),
+            headroom_cursor=_saved("headroomCursorMode", "mcp"),
+            caveman=_saved_on_off("cavemanEnabled"),
+            agentmemory=_saved_on_off("agentmemoryEnabled"),
             asked=ask.count,
         )
 
@@ -245,7 +263,7 @@ def collect(console: Console, ask_terminals: bool = False) -> Answers:
                 ("alt-space", "Alt+Space", ""),
                 ("custom", "custom chord", ""),
             ],
-            "ctrl-backslash",
+            _saved("leaderChord", "ctrl-backslash"),
         )
         if leader == "custom":
             leader = _chord(console, text(console, _CHORD_PROMPT))
@@ -260,6 +278,7 @@ def collect(console: Console, ask_terminals: bool = False) -> Answers:
         ask,
         bare,
         "TS_WEZ_MUX",
+        "weztermMux",
         "WezTerm multiplexer (keeps panes alive when the GUI dies):",
         [("off", "off", "panes are spawned by the GUI"), ("on", "on", "panes survive a GUI crash")],
         "  RECOMMENDATION: off. Config changes then need `tstack mux restart`,\n"
@@ -269,6 +288,7 @@ def collect(console: Console, ask_terminals: bool = False) -> Answers:
         ask,
         bare,
         "TS_WEZ_RESTORE",
+        "weztermRestore",
         "WezTerm session restore (reopen the last session at startup):",
         [("off", "off", "start clean every time"), ("on", "on", "reopen the last session")],
         "  RECOMMENDATION: off. Panes come back without their processes, and the\n"
@@ -291,7 +311,7 @@ def collect(console: Console, ask_terminals: bool = False) -> Answers:
         else ask.choose(
             "atuin shell history (replaces Ctrl+R):",
             [("off", "off", "keep fzf on Ctrl+R"), ("on", "on", "atuin owns Ctrl+R")],
-            "on",
+            _saved("atuinEnabled", "on"),
             "  RECOMMENDATION: on. Ctrl+R searches every shell's history from one\n"
             "  database, with the directory and exit status of each command.\n"
             "  Ctrl+T, Alt+C and Up-arrow are untouched. Nothing syncs anywhere.\n"
@@ -371,7 +391,7 @@ def collect(console: Console, ask_terminals: bool = False) -> Answers:
 
     # ---------------------------------------------------------------- memory
     memory, headroom, agentmemory, caveman = _agents(ask, profile, development, bare)
-    headroom_cursor = "mcp"
+    headroom_cursor = _saved("headroomCursorMode", "mcp")
     if headroom == "on":
         headroom_cursor = _env("TS_HEADROOM_CURSOR") or ask.choose(
             "Cursor Headroom mode:",
@@ -380,7 +400,7 @@ def collect(console: Console, ask_terminals: bool = False) -> Answers:
                 ("byok", "BYOK proxy", "provider API key required"),
                 ("off", "off", ""),
             ],
-            "mcp",
+            _saved("headroomCursorMode", "mcp"),
         )
 
     # -------------------------------------------------------------- services
@@ -474,6 +494,23 @@ def _chord(console: Console, typed: str) -> str:
     return "ctrl-backslash"
 
 
+def _saved(key: str, default: str) -> str:
+    """This machine's saved answer, else the fresh-install default.
+
+    Every question's default used to be the FRESH-INSTALL value, so a re-run of
+    the questionnaire (`tstack reinstall`, `tstack config wizard`) that pressed
+    Enter at each prompt reset the theme, the leader, atuin, herdr, the memory
+    backend and the rest to stock. The bootstraps then save what the wizard
+    returns, unconditionally.
+    """
+    value = store.get(key, "")
+    return value if value else default
+
+
+def _saved_on_off(key: str, default: str = "off") -> str:
+    return _on_off(_saved(key, default), default=default)
+
+
 def _saved_tmux() -> str:
     """Never asked, but a re-run must not silently reset it.
 
@@ -532,6 +569,7 @@ def _gui_toggle(
     ask: Asker,
     bare: bool,
     env: str,
+    key: str,
     title: str,
     options: list[tuple[str, str, str]],
     intro: str,
@@ -540,8 +578,8 @@ def _gui_toggle(
     if _env(env):
         return _on_off(_env(env))
     if bare:
-        return "off"
-    return ask.choose(title, options, "off", intro)
+        return _saved_on_off(key)
+    return ask.choose(title, options, _saved_on_off(key), intro)
 
 
 def _herdr(ask: Asker, selected: list[str]) -> str:
@@ -570,7 +608,7 @@ def _herdr(ask: Asker, selected: list[str]) -> str:
             ("off", "off", "herdr's config stays entirely yours"),
             ("on", "on", "the stack sets one key: the theme"),
         ],
-        "on",
+        _saved("herdrConfig", "on"),
         "  RECOMMENDATION: on. The stack sets exactly one key, [theme] name =\n"
         '  "terminal", so herdr uses the palette your terminal already has in\n'
         "  dark, light and follow alike. Every other line of that file is left\n"
@@ -732,11 +770,24 @@ def _agents(ask: Asker, profile: str, development: str, bare: bool) -> tuple[str
     the same job, so two stores means two half-filled ones.
     """
     if profile != PROFILE_FULL or development != "yes" or bare:
-        memory = _env("TS_MEMORY_BACKEND") or "none"
-        agentmemory = _on_off(_env("TS_AGENTMEMORY"))
-        if agentmemory == "on":
-            memory = "agentmemory"
-        return (memory, _on_off(_env("TS_HEADROOM")), agentmemory, _on_off(_env("TS_CAVEMAN")))
+        # Nothing is asked here, so nothing may be RESET here either: a headless
+        # or shell-profile re-run keeps what the machine already has.
+        memory = _env("TS_MEMORY_BACKEND") or _saved("memoryBackend", "none")
+        if _env("TS_AGENTMEMORY"):
+            agentmemory = _on_off(_env("TS_AGENTMEMORY"))
+            if agentmemory == "on":
+                memory = "agentmemory"
+        else:
+            agentmemory = "on" if memory == "agentmemory" else "off"
+        headroom = (
+            _on_off(_env("TS_HEADROOM"))
+            if _env("TS_HEADROOM")
+            else _saved_on_off("headroomEnabled")
+        )
+        caveman = (
+            _on_off(_env("TS_CAVEMAN")) if _env("TS_CAVEMAN") else _saved_on_off("cavemanEnabled")
+        )
+        return (memory, headroom, agentmemory, caveman)
 
     if _env("TS_MEMORY_BACKEND"):
         memory = _env("TS_MEMORY_BACKEND")
@@ -756,7 +807,9 @@ def _agents(ask: Asker, profile: str, development: str, bare: bool) -> tuple[str
                 ("none", "Headroom compresses only", "no memory at all"),
                 ("off", "Neither", "no proxy, no memory"),
             ],
-            "agentmemory",
+            _saved("memoryBackend", "agentmemory")
+            if _saved_on_off("headroomEnabled") == "on" or not store.get("memoryBackend", "")
+            else "off",
             "  RECOMMENDATION: AgentMemory remembers, Headroom compresses.\n"
             "  Only ONE memory system runs. They overlap, and two stores means two\n"
             "  half-filled ones with no way to tell which holds the answer you want.\n"
@@ -771,6 +824,10 @@ def _agents(ask: Asker, profile: str, development: str, bare: bool) -> tuple[str
         "none": ("none", "on", "off"),
     }
     memory, headroom, agentmemory = mapping.get(memory, ("none", "off", "off"))
+    if _env("TS_HEADROOM"):
+        # An explicit answer beats the mapping: TS_HEADROOM=off TS_AGENTMEMORY=on
+        # used to come out with headroom on.
+        headroom = _on_off(_env("TS_HEADROOM"))
 
     caveman = _env("TS_CAVEMAN") or ask.choose(
         "Caveman terse output for all projects?",
@@ -778,7 +835,7 @@ def _agents(ask: Asker, profile: str, development: str, bare: bool) -> tuple[str
             ("off", "off", "configure later with tstack config agents"),
             ("on", "on", "installs the pinned user-scope plugin/skill"),
         ],
-        "off",
+        _saved_on_off("cavemanEnabled"),
     )
     return (memory, headroom, agentmemory, _on_off(caveman))
 

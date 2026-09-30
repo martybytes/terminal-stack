@@ -49,6 +49,7 @@ import sys
 import sysconfig
 from pathlib import Path
 
+from .. import confirm
 from .. import platform as plat
 
 # `<clone>/tstack/main.py` -- the file every entry point already runs. Resolved
@@ -187,17 +188,12 @@ def _plan() -> tuple[str, list[str] | None, list[str]] | None:
 
 
 def _confirm(question: str, *, default_yes: bool) -> bool:
-    # Both halves: a cron run has a tty on neither, and a piped `tstack ui | cat`
-    # would otherwise block on a question nobody can see.
-    if not (sys.stdin.isatty() and sys.stderr.isatty()):
+    # The terminal, never stdin: a cron run has neither and a piped
+    # `tstack ui | cat` must not block on a question nobody can see.
+    answer = confirm.ask(f"  {question}? {'[Y/n]' if default_yes else '[y/N]'} ")
+    if answer is None:
         return False
-    print(f"  {question}? {'[Y/n]' if default_yes else '[y/N]'} ", end="", file=sys.stderr)
-    sys.stderr.flush()
-    try:
-        answer = input().strip().lower()
-    except (EOFError, KeyboardInterrupt):
-        print(file=sys.stderr)
-        return False
+    answer = answer.strip().lower()
     return answer in (("", "y", "yes") if default_yes else ("y", "yes"))
 
 

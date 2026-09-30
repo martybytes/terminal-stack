@@ -29,12 +29,11 @@ import os
 import shutil
 import subprocess
 import sys
-import time
 import urllib.error
 import urllib.request
 from pathlib import Path
 
-from .. import headroom_token, paths, proc
+from .. import headroom_token, paths, proc, store
 from .. import platform as plat
 from ..stacks import env_value, stack_dir
 
@@ -109,7 +108,7 @@ def user_root() -> Path:
     if plat.kind() == plat.WSL:
         user = plat.windows_username()
         if user:
-            candidate = Path(f"/mnt/c/Users/{user}")
+            candidate = plat.windows_home() or Path(f"/mnt/c/Users/{user}")
             if candidate.is_dir():
                 return candidate
     return Path.home()
@@ -125,7 +124,7 @@ def find_windows_python() -> str | None:
     if not user:
         return None
     roots = [
-        Path(f"/mnt/c/Users/{user}/AppData/Local/Programs/Python"),
+        (plat.windows_home() or Path(f"/mnt/c/Users/{user}")) / "AppData/Local/Programs/Python",
         Path("/mnt/c/Python314"),
         Path("/mnt/c/Python313"),
         Path("/mnt/c/Python312"),
@@ -156,12 +155,17 @@ def reexec_on_windows(argv: list[str]) -> int | None:
     entry = plat.to_windows_path(source / "tstack" / "main.py")
     if not entry:
         return None
-    got = subprocess.run(
-        [python, entry, "agents", *argv],
-        check=False,
-        start_new_session=True,
-        env=_windows_env(source),
-    )
+    try:
+        got = subprocess.run(
+            [python, entry, "agents", *argv],
+            check=False,
+            start_new_session=True,
+            env=_windows_env(source),
+            timeout=1800,
+        )
+    except subprocess.TimeoutExpired:
+        print("tstack agents: the Windows-side run did not finish in 30 minutes.", file=sys.stderr)
+        return 1
     return got.returncode
 
 
@@ -211,18 +215,11 @@ def dig(body: dict, dotted: str, default: object = "") -> object:
 
 
 def http_answers(url: str, timeout: int = 2) -> bool:
-    """Any HTTP response means something is listening.
+    """Any HTTP response means something is listening. One implementation:
+    wizard.probes (NOT a 2xx check -- AgentMemory answers 404 and 401)."""
+    from ..wizard import probes
 
-    NOT a 2xx check: AgentMemory answers 404 on `/` and 401 on `/health`, so a
-    strict probe reported the service DOWN while it was up and serving.
-    """
-    try:
-        with urllib.request.urlopen(url, timeout=timeout):
-            return True
-    except urllib.error.HTTPError:
-        return True
-    except (urllib.error.URLError, OSError, ValueError):
-        return False
+    return probes.answers(url, timeout)
 
 
 def tcp_answers(host: str, port: int, timeout: float = 1.0) -> bool:
@@ -637,20 +634,34 @@ def _read_json(path: Path, default: dict) -> dict | None:
 
 
 def _backup(path: Path) -> None:
-    """<path>.bak.YYYYMMDD, never clobbering a same-day backup."""
+    """<path>.bak.YYYYMMDD, never clobbering a same-day backup. One naming rule
+    for the whole stack: workspace.backup_path."""
     if not path.is_file():
         return
-    stamp = time.strftime("%Y%m%d")
-    candidate = path.with_name(f"{path.name}.bak.{stamp}")
-    counter = 1
-    while candidate.exists():
-        candidate = path.with_name(f"{path.name}.bak.{stamp}.{counter}")
-        counter += 1
-    candidate.write_bytes(path.read_bytes())
+    from .. import workspace
+
+    workspace.backup_path(path).write_bytes(path.read_bytes())
+
+
+def _attached(adapter: list[str], *flags: str) -> int:
+    """Run the hook adapter on the terminal, bounded. It prints its own report."""
+    try:
+        return subprocess.run(
+            [*adapter, *flags], check=False, start_new_session=True, timeout=600
+        ).returncode
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        print(f"  !!  hook adapter did not finish: {exc}", file=sys.stderr)
+        return 1
 
 
 def _write_cursor_mcp(name: str, entry: dict | None) -> None:
     path = user_root() / ".cursor" / "mcp.json"
+    if not path.parent.is_dir() and entry is None:
+        return  # no Cursor here, and nothing to remove
+    if not path.parent.is_dir():
+        # `repair` runs on every sync. Creating ~/.cursor on a machine with no
+        # Cursor made every such machine look like it had one.
+        return
     body = _read_json(path, {"mcpServers": {}})
     if body is None:
         print(f"  !!  refusing to overwrite malformed JSON: {path}", file=sys.stderr)
@@ -660,12 +671,19 @@ def _write_cursor_mcp(name: str, entry: dict | None) -> None:
         servers = {}
         body["mcpServers"] = servers
     if entry is None:
+        if name not in servers:
+            return
         servers.pop(name, None)
+    elif servers.get(name) == entry:
+        return  # already right: no rewrite, and no new .bak on every sync
     else:
         servers[name] = entry
-    path.parent.mkdir(parents=True, exist_ok=True)
+    # Backup, then an atomic replace: a hook-driven repair mid-write must not
+    # leave Cursor a half-written mcp.json.
     _backup(path)
-    path.write_text(json.dumps(body, indent=2) + "\n", encoding="utf-8")
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(body, indent=2) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
 
 
 def _json_mcp_matches(path: Path, name: str, spec: tuple[str, list[str]]) -> bool:
@@ -720,18 +738,8 @@ class Caveman:
         self.out = out
         self.body = manifest(source)
 
-    def pinned(self) -> str:
-        return str(dig(self.body, "agentmemory.version") or "")
-
-    def codex_cached(self) -> bool:
-        """Is the pinned plugin version already in Codex's plugin cache?"""
-        version = self.pinned()
-        if not version:
-            return False
-        cache = codex_home() / "plugins" / "cache" / "agentmemory" / "agentmemory" / version
-        return cache.is_dir()
-
-    def install(self) -> None:
+    def install(self) -> bool:
+        failed = False
         claude = find_agent("claude")
         if claude:
             for argv in (
@@ -746,12 +754,18 @@ class Caveman:
                 ["plugin", "install", "caveman@caveman", "--scope", "user", "-y"],
                 ["plugin", "enable", "caveman@caveman", "--scope", "user"],
             ):
-                _run([claude, *argv], timeout=600)
+                got = _run([claude, *argv], timeout=600)
+                # Say which step, rather than "enabled" over a plugin that is not
+                # installed. The marketplace add is idempotent and may report
+                # "already exists", which claude returns non-zero for.
+                if (got is None or got.returncode != 0) and argv[1] != "marketplace":
+                    self.out.bad(f"claude {' '.join(argv[:2])} failed")
+                    failed = True
         else:
             self.out.info("Claude Code not installed; skipped Caveman plugin")
         npx = find_agent("npx")
         if npx:
-            _run(
+            got = _run(
                 [
                     npx,
                     "-y",
@@ -769,14 +783,21 @@ class Caveman:
                 ],
                 timeout=900,
             )
+            if got is None or got.returncode != 0:
+                self.out.bad("the global Codex/Cursor Caveman skill did not install")
+                failed = True
         else:
             self.out.info("npx not installed; skipped the global Codex/Cursor Caveman skill")
         caveman_rule(True)
+        if failed:
+            self.out.bad("Caveman is only partly enabled (see above)")
+            return False
         self.out.good(f"Caveman {dig(self.body, 'caveman.version')} enabled for installed agents")
         self.out.info(
             'Cursor: add this once in Settings > Rules > User Rules: "Always apply the '
             'global caveman skill; use full mode unless I ask otherwise."'
         )
+        return True
 
     def remove(self, uninstall: bool) -> None:
         claude = find_agent("claude")
@@ -853,9 +874,9 @@ class Caveman:
         if action == "status":
             return 0 if self.status() else 1
         if action in ("on", "repair"):
-            self.install()
+            ok = self.install()
             self.status()
-            return 0
+            return 0 if ok else 1
         if action in ("off", "uninstall"):
             self.remove(uninstall=action == "uninstall")
             return 0
@@ -941,10 +962,8 @@ class AgentMemory:
         # fetch(...).catch(() => {}) then exits 0. Re-run on every on/repair,
         # because a plugin upgrade replaces the cache and silently reverts them.
         adapter = self.adapter()
-        if adapter:
-            got = subprocess.run([*adapter, "--apply"], check=False, start_new_session=True)
-            if got.returncode != 0:
-                self.out.bad("AgentMemory hook adapter reported problems (see above)")
+        if adapter and _attached(adapter, "--apply") != 0:
+            self.out.bad("AgentMemory hook adapter reported problems (see above)")
         self.out.info(
             "AgentMemory plugin enabled. Docker, secrets and server feature flags were not changed."
         )
@@ -953,8 +972,8 @@ class AgentMemory:
         # Undo the host-side wiring FIRST, while the plugin cache it patched is
         # still present: the restore reads the backups beside the vendor scripts.
         adapter = self.adapter()
-        if adapter:
-            subprocess.run([*adapter, "--undo", "--apply"], check=False, start_new_session=True)
+        if adapter and _attached(adapter, "--undo", "--apply") != 0:
+            self.out.bad("AgentMemory hook adapter could not undo everything (see above)")
         claude = find_agent("claude")
         if claude:
             if uninstall:
@@ -1237,7 +1256,9 @@ def main(argv: list[str]) -> int:
 
     tool = argv[0] if argv else "all"
     action = argv[1] if len(argv) > 1 else "status"
-    cursor_mode = argv[2] if len(argv) > 2 else "mcp"
+    # The saved mode, not "mcp": `repair` runs from every sync, and a byok user
+    # got Cursor re-registered as MCP every time.
+    cursor_mode = argv[2] if len(argv) > 2 else (store.get("headroomCursorMode", "") or "mcp")
 
     # `llm` has its own grammar: it is the one tool whose configuration is a URL
     # and a model rather than an on/off toggle, and it lives in a .env rather

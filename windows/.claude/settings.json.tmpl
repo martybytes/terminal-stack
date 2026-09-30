@@ -1,7 +1,7 @@
 {
   "statusLine": {
     "type": "command",
-    "command": "bash C:/Users/__WIN_USER__/.claude/statusline-command.sh"
+    "command": "bash \"__WIN_HOME__/.claude/statusline-command.sh\""
   },
   "hooks": {
     "UserPromptSubmit": [
@@ -10,7 +10,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "pwsh -NoLogo -NonInteractive -ExecutionPolicy Bypass -File C:/Users/__WIN_USER__/.claude/hooks/wez-tab-status.ps1 -State thinking"
+            "command": "pwsh -NoLogo -NonInteractive -ExecutionPolicy Bypass -File \"__WIN_HOME__/.claude/hooks/wez-tab-status.ps1\" -State thinking"
           }
         ]
       }
@@ -21,7 +21,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "pwsh -NoLogo -NonInteractive -ExecutionPolicy Bypass -File C:/Users/__WIN_USER__/.claude/hooks/wez-tab-status.ps1 -State working"
+            "command": "pwsh -NoLogo -NonInteractive -ExecutionPolicy Bypass -File \"__WIN_HOME__/.claude/hooks/wez-tab-status.ps1\" -State working"
           }
         ]
       }__CC_TTS_PRETOOLUSE_TTS__
@@ -32,7 +32,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "pwsh -NoLogo -NonInteractive -ExecutionPolicy Bypass -File C:/Users/__WIN_USER__/.claude/hooks/wez-tab-status.ps1 -State waiting"
+            "command": "pwsh -NoLogo -NonInteractive -ExecutionPolicy Bypass -File \"__WIN_HOME__/.claude/hooks/wez-tab-status.ps1\" -State waiting"
           }__CC_TTS_STOP_HOOK__
         ]
       }
@@ -43,7 +43,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "pwsh -NoLogo -NonInteractive -ExecutionPolicy Bypass -File C:/Users/__WIN_USER__/.claude/hooks/wez-tab-status.ps1 -State error"
+            "command": "pwsh -NoLogo -NonInteractive -ExecutionPolicy Bypass -File \"__WIN_HOME__/.claude/hooks/wez-tab-status.ps1\" -State error"
           }__CC_TTS_STOPFAILURE_HOOK__
         ]
       }
