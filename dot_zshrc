@@ -906,8 +906,14 @@ _tstack_update() {
       read -r "ans?Install them now? [y/N]: "
       case "$ans" in
         y|Y|yes|YES)
+          # `apps` SAVES what it is given as the whole selection, and pending
+          # includes class defaults that were never saved -- so hand it the
+          # union, or this would shrink the selection to the six missing tools.
+          # Same merge the pwsh twin does after Install-TsApps.
+          local _saved
+          _saved="$(bash -c 'source "$1/bootstrap/_config.sh" >/dev/null 2>&1 && ts_data_get_apps' _ "$src" 2>/dev/null)"
           TERMINAL_STACK_DIR="$src" TERMINAL_STACK_CHEZMOI="$cz" \
-            bash "$src/bootstrap/ts-config.sh" apps "$pending" ;;
+            bash "$src/bootstrap/ts-config.sh" apps "$_saved $pending" ;;
         *) echo "    Skipped. Run 'tstack config apps' when you want them." ;;
       esac
     else

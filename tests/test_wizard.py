@@ -256,6 +256,16 @@ def test_the_development_answer_picks_the_app_class(monkeypatch):
     assert "btop" in answers.apps
 
 
+@pytest.mark.parametrize("spec", ["lazygit fnm pipx", "lazygit,fnm,pipx", "lazygit, fnm  pipx"])
+def test_an_app_list_may_be_spaced_or_comma_separated(monkeypatch, spec):
+    """`tstack update` passes its pending list space-separated. A comma-only
+    split read it as ONE unknown id, installed nothing, and saved an empty
+    selection over the machine's real one."""
+    monkeypatch.setenv("TS_APPS", spec)
+    got = flow._apps(flow.Asker(Console()), "developer")
+    assert {"lazygit", "fnm", "pipx"} <= set(got)
+
+
 def test_the_agent_questions_are_skipped_when_there_are_no_agents(monkeypatch):
     """Voice announces what an AGENT is doing; a memory backend stores what one
     learned. On a machine getting neither they are questions about something not

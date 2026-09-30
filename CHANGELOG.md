@@ -27,6 +27,13 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **`tstack update`'s "Install them now?" installs them, and no longer erases
+  your app selection (09/30/2026).** It passed the missing tools as a
+  space-separated list; the picker split on commas only, matched nothing, and
+  `set_apps` saved the empty result as the machine's whole selection. The
+  picker now takes commas or spaces, zsh hands over the saved selection plus the
+  missing tools (as the PowerShell twin already did), and `tstack config apps
+  <spec>` refuses a spec that names no tool instead of saving nothing.
 - **The install questionnaire asks its questions again on Linux, WSL and macOS
   (09/30/2026).** It opened `/dev/tty` as one `r+` text handle, which Python
   builds on a seekable buffer; a tty is not seekable, the `UnsupportedOperation`
