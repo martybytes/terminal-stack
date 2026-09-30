@@ -197,6 +197,7 @@ tstack herdr           # the managed herdr config: status, on, off, update
 tstack omarchy         # Omarchy only: the theme template + event hooks it installs
 tstack update          # pull the latest stack and re-apply
 tstack rollback        # undo that update
+tstack docs serve      # the knowledge base in your browser (search, dark/light, copy)
 tstack reinstall       # pull, then run the installer again from the clone
 tstack apply           # re-apply the dotfiles; explains any conflict, backs yours up
 doc                    # fuzzy-find a runbook in the knowledge base

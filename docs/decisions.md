@@ -4107,6 +4107,25 @@ Docker Desktop round trip on the agent's critical path and needs the engine even
 to go direct. And the suite gets a conftest fixture that points the file at a
 temp path, because the code under test now writes the developer's real one.
 
+## Why the docs site is a hand-written renderer and one HTML string
+
+`tstack docs` had three constraints that ruled out the obvious tools. tstack is
+standard-library only, so no markdown package; `tstack/**/*.py` must be ASCII,
+so the page is a string with entities rather than a template file with a
+typographic dash in it; and the site has to work from a static folder opened
+with `file://` and from a PyInstaller exe, so there are no assets to bundle or
+serve -- the CSS and JS ride inside every page, the same decision the TTS
+daemon's dashboard made.
+
+The renderer (`tstack/kb/render.py`) implements exactly the constructs a census
+of the 77 KB files found: ATX headings, GFM tables (with `\|`), fenced code,
+two-space-nested lists, blockquotes, `code`, bold, italic, links, autolinks and
+the house `` `doc a/b` `` cross-reference. Everything is html-escaped, so the
+`<placeholder>` tokens runbooks are full of are shown, not swallowed. A test
+renders every KB file and resolves every reference the way the `doc` shell
+command does (exact label, basename, this OS's copy, unique substring), which
+turns the site into a permanent gate on the KB: a topic renamed without its
+references now fails the suite instead of failing the reader.
 ## Why a destructive prompt is answered at the terminal or not at all
 
 Three copies of a yes/no prompt existed (`services`, `mux`, `ui`, and a fourth in
