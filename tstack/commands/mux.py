@@ -218,9 +218,12 @@ def show_status() -> int:
     if rendered is None:
         print("  rendered : (no .wezterm.lua found - run 'chezmoi apply')")
     elif rendered != setting:
-        print(
-            f"  rendered : {rendered}   !! stale - run 'chezmoi apply' (Windows: sync-windows.ps1)"
+        how = (
+            "run 'tstack update' in PowerShell (the .wezterm.lua is on the Windows side)"
+            if plat.kind() == plat.WSL
+            else "run 'chezmoi apply' (Windows: tstack update)"
         )
+        print(f"  rendered : {rendered}   !! stale - {how}")
     else:
         print(f"  rendered : {rendered}   ({rendered_cfg()})")
 
@@ -250,6 +253,13 @@ def set_mux(want: str) -> int:
     store.set("weztermMux", want)
     store.chezmoi_init()
     _apply()
+    if plat.kind() == plat.WSL:
+        # The GUI, the server and the rendered .wezterm.lua are all on the
+        # Windows side, which a WSL install no longer writes. "Panes now spawn
+        # into the mux domain" was printed here over a config that never changed.
+        print("    saved. This renders into the Windows-side .wezterm.lua:")
+        print("    run 'tstack update' in PowerShell, then relaunch WezTerm.")
+        return 0
     if want == "on":
         print("    Panes now spawn into the mux domain 'main'. Relaunch WezTerm for a")
         print("    clean switch; 'tstack mux status' shows the server once it starts.")

@@ -67,10 +67,16 @@ def test_a_saved_setting_that_was_never_applied_is_called_stale(
     cfg = tmp_path / ".wezterm.lua"
     cfg.write_text("local MUX_ENABLED = 'off' == 'on'\n", encoding="utf-8")
     monkeypatch.setattr(mux, "rendered_cfg", lambda: cfg)
+    monkeypatch.setattr(plat, "kind", lambda: plat.LINUX)
     mux.main(["status"])
     out = capsys.readouterr().out
     assert "!! stale" in out
     assert "chezmoi apply" in out
+    # On WSL the file is the WINDOWS one, which chezmoi here cannot render.
+    monkeypatch.setattr(plat, "kind", lambda: plat.WSL)
+    mux.main(["status"])
+    out = capsys.readouterr().out
+    assert "!! stale" in out and "PowerShell" in out and "chezmoi apply" not in out
 
 
 def test_a_config_from_before_the_toggle_is_read_as_unconditional(monkeypatch, tmp_path):
@@ -137,10 +143,23 @@ def test_setting_the_mux_writes_the_setting_and_re_applies(monkeypatch, quiet_st
     monkeypatch.setattr(store, "set", lambda key, value: written.setdefault(key, value))
     monkeypatch.setattr(store, "chezmoi_init", lambda: True)
     monkeypatch.setattr(mux, "_apply", lambda: applied.append(1))
+    monkeypatch.setattr(plat, "kind", lambda: plat.LINUX)
     assert mux.set_mux("on") == 0
     assert written == {"weztermMux": "on"}
     assert applied == [1], "the setting alone changes nothing until chezmoi re-renders"
     assert "mux domain 'main'" in capsys.readouterr().out
+
+
+def test_on_wsl_the_mux_toggle_says_where_it_renders(monkeypatch, quiet_store, capsys):
+    """The rendered .wezterm.lua is on the Windows side, which a WSL install no
+    longer writes; "Panes now spawn into the mux domain" was a lie there."""
+    monkeypatch.setattr(store, "set", lambda key, value: None)
+    monkeypatch.setattr(store, "chezmoi_init", lambda: True)
+    monkeypatch.setattr(mux, "_apply", lambda: None)
+    monkeypatch.setattr(plat, "kind", lambda: plat.WSL)
+    assert mux.set_mux("on") == 0
+    out = capsys.readouterr().out
+    assert "tstack update' in PowerShell" in out and "mux domain" not in out
 
 
 def test_setting_it_to_what_it_already_is_still_re_renders(monkeypatch, quiet_store, capsys):
