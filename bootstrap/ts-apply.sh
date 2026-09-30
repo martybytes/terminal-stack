@@ -65,9 +65,24 @@ fi
 # pending change and applies silently. Filtering on both columns (as an earlier
 # version did) happens to agree on today's cases but describes the wrong rule.
 # Scripts are excluded: they are not files anyone hand-edits.
+#
+# A modify_ target is exempt. Its source is a script that REBUILDS the file
+# from whatever is there -- the part-owned splices (~/.claude/settings.json,
+# ~/.cursor/hooks.json, the Codex profile) -- so another app writing it is the
+# normal case, not a conflict. chezmoi agrees: it applies these without asking
+# (verified against 2.70: a hand-edited plain file gets the prompt, a
+# hand-edited modify_ target is re-spliced silently). Listing them here made
+# `tstack update` refuse the WHOLE apply, with no TTY, over a file the apply
+# would have handled correctly -- agentmemory's Cursor hooks, 2026-09-30.
 ts_apply_conflicts() {
-    "$CZ" status --path-style absolute --exclude scripts 2>/dev/null |
-        awk 'substr($0,1,1) != " " { print substr($0,4) }'
+    local target src
+    while IFS= read -r target; do
+        [ -n "$target" ] || continue
+        src="$("$CZ" source-path -- "$target" 2>/dev/null)" || src=""
+        case "${src##*/}" in modify_*) continue ;; esac
+        printf '%s\n' "$target"
+    done < <("$CZ" status --path-style absolute --exclude scripts 2>/dev/null |
+        awk 'substr($0,1,1) != " " { print substr($0,4) }')
 }
 
 ts_apply_explain() {
@@ -132,7 +147,13 @@ ts_apply_finish() {
     exec "$CZ" apply $VERBOSE
 }
 
-mapfile -t CONFLICTS < <(ts_apply_conflicts)
+# Not mapfile: macOS ships bash 3.2, and this script runs there under
+# install-mac.sh. tests/test_cursor_hooks_splice.py runs it on the macOS CI
+# runner, which is what caught the mapfile.
+CONFLICTS=()
+while IFS= read -r _conflict; do
+    [ -n "$_conflict" ] && CONFLICTS+=("$_conflict")
+done < <(ts_apply_conflicts)
 
 if [ "${#CONFLICTS[@]}" -eq 0 ]; then
     [ "$CHECK" -eq 1 ] && { echo "$INFO no conflicts; 'chezmoi apply' would not ask anything."; exit 0; }

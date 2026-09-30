@@ -28,7 +28,8 @@ everything else** — `model` (from `/model`), `enabledPlugins` and
 
 On Windows the sync splices its three keys in and leaves the rest byte-for-byte
 (`bootstrap/_merge_cursor_hooks.ps1` does the same for `~/.cursor/hooks.json`, per hook
-entry). So installing a plugin, switching model, or allowing an MCP tool survives an
+entry); on WSL/macOS/Linux the chezmoi `modify_` scripts in `dot_claude/` and
+`dot_cursor/` do the same job. So installing a plugin, switching model, or allowing an MCP tool survives an
 apply — and per-machine wiring an app needs (an MCP server URL in `env`, say) belongs
 in that file rather than in the repo.
 

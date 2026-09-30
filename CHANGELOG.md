@@ -52,6 +52,20 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **`~/.cursor/hooks.json` is spliced per entry on WSL/macOS/Linux too
+  (09/30/2026).** `tstack agents` wires agentmemory's seven Cursor hooks on the
+  POSIX side now, and the whole-file `dot_cursor/hooks.json.tmpl` would have
+  deleted them on the next apply (`chezmoi diff` showed every `AGENTMEMORY_URL`
+  entry going). It is `dot_cursor/modify_hooks.json.tmpl`, the twin of
+  `bootstrap/_merge_cursor_hooks.ps1`: same markers, ours-then-theirs, an
+  unparseable file echoed back untouched. And `tstack apply`/`tstack update`
+  no longer count a `modify_` target as a conflict: chezmoi re-splices those
+  without asking, so listing them refused the whole apply, with no TTY, over
+  one hook another tool wrote. Running that script on the macOS CI runner for
+  the first time also caught a `mapfile` in it: bash 3.2 has none, so
+  `install-mac.sh`'s apply step died at the conflict scan. It is a `while
+  read` loop now.
+
 - **`tstack agents agentmemory on|repair|off` wires the WSL side too (09/30/2026).**
   On a combined machine the command handed off to Windows and stopped, so it
   reported the Windows plugin files as wired while the WSL-side Claude Code
