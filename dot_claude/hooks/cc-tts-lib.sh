@@ -28,7 +28,14 @@ cc_tts_windows_hook() {
     # cc_tts_windows_hook <source> <event> <state> <raw-json>
     local source="$1" event="$2" state="$3" input="$4" exe
     exe="$(cc_tts_windows_exe)" || return 1
-    printf '%s' "$input" | "$exe" hook --source "$source" --event "$event" \
+    # CC_TTS_REPORT_DISABLED, forwarded through WSLENV: the exe applies the
+    # WINDOWS config, and used to exit 0 when that said "off" -- so a WSL session
+    # with voice ON was silent with nothing to say why. With the flag set it
+    # exits 75 instead when it declined for a CONFIG reason (disabled, or the
+    # event filtered), and the caller falls through to the WSL-side path. A
+    # mute stays 0: silence is the point of a mute.
+    CC_TTS_REPORT_DISABLED=1 WSLENV="${WSLENV:+$WSLENV:}CC_TTS_REPORT_DISABLED" \
+        printf '%s' "$input" | "$exe" hook --source "$source" --event "$event" \
         --state "$state"
 }
 
@@ -67,9 +74,13 @@ cc_tts_init_config() {
         return 0
     fi
 
+    # Written to a temp file and renamed: every hook process rewrites this, and
+    # Notification + PreToolUse fire together. Open-and-truncate let one of them
+    # read a half-written file, jq failed, `.enabled` read as false, and the
+    # announcement was dropped.
     if command -v python3 >/dev/null 2>&1; then
-        python3 - "$CC_TTS_CONFIG_BASE" "$CC_TTS_CONFIG_LOCAL" "$merged" <<'PY' 2>/dev/null || cp "$CC_TTS_CONFIG_BASE" "$merged"
-import json, sys
+        python3 - "$CC_TTS_CONFIG_BASE" "$CC_TTS_CONFIG_LOCAL" "$merged" <<'PY' 2>/dev/null || { cp "$CC_TTS_CONFIG_BASE" "$merged.$$" 2>/dev/null && mv -f "$merged.$$" "$merged"; }
+import json, os, sys
 base_p, local_p, out_p = sys.argv[1], sys.argv[2], sys.argv[3]
 def deep_merge(a, b):
     if not isinstance(a, dict) or not isinstance(b, dict):
@@ -93,8 +104,10 @@ if 'templates' in cfg and 'announce' not in cfg:
                        'templates': cfg.pop('templates')}
 if 'messageMode' in cfg and isinstance(cfg.get('announce'), dict):
     cfg['announce'].setdefault('messageMode', cfg.pop('messageMode'))
-with open(out_p, 'w', encoding='utf-8') as f:
+tmp_p = f"{out_p}.{os.getpid()}"
+with open(tmp_p, 'w', encoding='utf-8') as f:
     json.dump(cfg, f, indent=2)
+os.replace(tmp_p, out_p)
 PY
         CONFIG="$merged"
     else
@@ -110,7 +123,12 @@ cc_tts_json() {
         return
     fi
     if command -v jq >/dev/null 2>&1; then
-        jq -r "$key // empty" "$CONFIG" 2>/dev/null || echo "$default"
+        # `if == null`, not `// empty`: jq exits 0 on a missing key, so the
+        # `|| echo default` after `// empty` never ran and every absent key read
+        # as "" -- no engine, no player, a debounce of "". `//` also swallows a
+        # real `false`, which `== null` does not.
+        jq -r --arg d "$default" "if ($key) == null then \$d else ($key) end" "$CONFIG" 2>/dev/null \
+            || echo "$default"
         return
     fi
     if command -v python3 >/dev/null 2>&1; then

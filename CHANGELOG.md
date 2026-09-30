@@ -45,6 +45,57 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
   no longer compares against a `chezmoi.toml` a stray winget binary left.
   One HTTP probe, one backup-name rule and one Windows-home helper replace four,
   two and five copies; dead code from the port is gone.
+- **Voice notification hooks keep the "never silence" contract (09/30/2026).**
+  - With `jq` installed, no config default ever applied: `jq -r ".k // empty"`
+    exits 0 on a missing key, so the `|| echo default` never ran and an absent
+    `.engine`, `.player` or `.debounceSec` read as empty. Both readers now
+    return the default for a missing key and a real `false` for `false`.
+  - `.merged.json` was rewritten open-and-truncate by every hook; two firing
+    together (Notification + PreToolUse) let one read a half-written file and
+    drop its announcement. It is written to a temp file and renamed.
+  - On WSL the hook handed every event to the Windows exe and exited 0 whatever
+    it did, so voice ON in WSL and OFF in Windows meant silence with no message.
+    The exe now exits 75 when it declined for a config reason (and only when a
+    WSL hook asks), and the hook falls through to the WSL-side path. A mute
+    stays silent. Takes effect after the exe is rebuilt (`tstack config tts
+    daemon restart`).
+  - `cc-tts-notify.sh` exited 1 with no config, and `cc-speak.sh` execs it, so
+    every Stop hook reported a failure on a machine with no TTS config.
+  - Windows hook commands were built as `C:/Users/<USERNAME>/...`, unquoted.
+    The profile folder is not always the username (truncated Microsoft-account
+    names, `user.DOMAIN`) and a space split the command. Both syncs now
+    substitute `__WIN_HOME__` from `%USERPROFILE%`, and the templates quote it.
+- **Saves that corrupted, reverted or reset settings (09/30/2026).**
+  - `apps` saved from `tstack ui` (or `tstack config set apps ...`) wrote a TOML
+    string where `.chezmoi.toml.tmpl` does `range .apps`, so every later
+    `chezmoi init` failed while the dashboard looked fine. It is an array now.
+  - Re-running the questionnaire (`tstack reinstall`, `tstack config wizard`)
+    and pressing Enter reset the theme, leader, mux/restore, atuin, herdr, the
+    memory backend, caveman and the Cursor mode to stock, and the `prompt`
+    profile saved an empty app list and unwired AgentMemory. Every default is
+    now this machine's saved answer, and `TS_ASSUME_YES` takes every default
+    without a terminal, as documented. `TS_HEADROOM=off` is honoured next to
+    `TS_AGENTMEMORY=on`; `TS_DEVELOPMENT=1` means yes.
+  - Windows-only saves reverted: the mirror was written flat
+    (`ccTtsKokoroVoice`) while reads and the TTS daemon use the nested path
+    (`ccTts.kokoro.voice`), and a winget-installed chezmoi sent saves to a
+    `chezmoi.toml` nothing reads. The mirror is written in its own shape and
+    types, and `[data]` is authoritative only when chezmoi is configured.
+  - `tstack config agents headroom|caveman on|off` only wrote the key; the
+    wiring runs first and the key is saved on success, `uninstall` turns the key
+    off, `agents headroom cursor <mcp|byok|off>` works (it was a usage error),
+    and `repair` keeps the saved Cursor mode instead of resetting it to `mcp`.
+  - `tstack config memory` reported 0 over failed wiring or bootstrap steps and
+    started Headroom on machines that never enabled it; it propagates failures
+    and restarts only an enabled Headroom (or the one you just chose as backend).
+  - Every save's `chezmoi apply` ran unchecked and printed `==> done.` over a
+    failure (and, under `tstack ui`, wrote onto the dashboard). Output is
+    captured, failures are reported with the last lines, and the exit status is
+    returned.
+  - From WSL, `tstack mux on|off`, `config restore` and `config leader` render
+    into the Windows-side `.wezterm.lua`, which a WSL install no longer writes;
+    they said "done". They now say to run `tstack update` in PowerShell, and
+    `mux status` no longer suggests a `chezmoi apply` that cannot fix it.
 - **`wso synceverything` no longer says "0 cloned." when gh is logged out
   (09/30/2026).** Every `gh repo list` failed with its error discarded, so each
   owner looked complete - the default on WSL, where the Windows `gh.exe` is logged
