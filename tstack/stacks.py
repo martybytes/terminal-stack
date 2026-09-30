@@ -277,6 +277,29 @@ def docker(kind: str, args: list[str], timeout: int = 60) -> tuple[int, str]:
     return out.returncode, out.stdout
 
 
+def running_env(kind: str, project: str, key: str) -> str:
+    """`key` as a RUNNING container of compose project `project` holds it, or "".
+
+    The project is the compose file's own `name:`, so an unrelated container that
+    happens to carry the same variable is never read. Callers ask this only of a
+    live engine; it is two docker calls.
+    """
+    rc, ids = docker(kind, ["ps", "-q", "--filter", f"label=com.docker.compose.project={project}"])
+    if rc != 0 or not ids.strip():
+        return ""
+    rc, env = docker(
+        kind, ["inspect", "--format", "{{range .Config.Env}}{{println .}}{{end}}", *ids.split()]
+    )
+    if rc != 0:
+        return ""
+    for line in env.splitlines():
+        if line.startswith(f"{key}="):
+            value = line.split("=", 1)[1].strip()
+            if value:
+                return value
+    return ""
+
+
 # --------------------------------------------------------------------- volumes
 
 # One (old, new) pair per line of the bash twin's here-doc. The headroom three

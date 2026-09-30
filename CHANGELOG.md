@@ -27,6 +27,16 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **Headroom works from every shell on a machine, not just the clone that started
+  it (09/30/2026).** The proxy is per machine but the token was per clone, so with
+  a WSL clone, a Windows clone and a dev checkout only one matched the running
+  proxy; every PowerShell `claude`/`codex` launch said "Headroom is enabled but
+  unavailable" and went direct. `tstack services up|bootstrap` now records the
+  running proxy's token in one machine file (`%LOCALAPPDATA%\terminal-stack\headroom-token`
+  on Windows+WSL, the XDG state dir elsewhere) that zsh, PowerShell and Python
+  read first; a fresh clone adopts it instead of minting a rival; `tstack doctor`
+  reports a clone the proxy would reject and `--repair` aligns it. The wrappers
+  now say *why* a launch went direct: no token, token rejected, or unavailable.
 - **A TTS daemon a hook restarts keeps its tray icon (09/30/2026).** When a hook
   found the daemon enabled but not answering (after an exe rebuild, a crash, or
   on a machine with no logon autostart) it started one with `--no-tray`, a

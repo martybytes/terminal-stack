@@ -347,7 +347,23 @@ typeset -gi _TS_HEADROOM_PROBE_AT=0
 typeset -gi _TS_HEADROOM_PROBE_OK=0
 typeset -gi _TS_HEADROOM_WARNED=0
 _ts_headroom_token() {
-  local token="${HEADROOM_PROXY_TOKEN:-}" env_file="${HEADROOM_ENV_FILE:-}"
+  local token="${HEADROOM_PROXY_TOKEN:-}" env_file="${HEADROOM_ENV_FILE:-}" machine
+  # The MACHINE's token first -- what the running proxy holds, recorded by
+  # `tstack services up|bootstrap` -- then this clone's .env, which is only right
+  # if this clone started the proxy. One proxy per machine, so one token: on WSL
+  # that is the Windows-side file, shared with pwsh. Twin: Get-TsHeadroomToken;
+  # Python: tstack/headroom_token.py.
+  if [[ -z "$token" && -z "$env_file" ]]; then
+    if [[ -n "${WSL_DISTRO_NAME:-}" ]]; then
+      for machine in /mnt/c/Users/*/AppData/Local/terminal-stack/headroom-token(N); do
+        token="$(head -1 "$machine" 2>/dev/null)"; token="${token//[[:space:]]/}"
+        [[ -n "$token" ]] && break
+      done
+    elif [[ -r "${XDG_STATE_HOME:-$HOME/.local/state}/terminal-stack/headroom-token" ]]; then
+      token="$(head -1 "${XDG_STATE_HOME:-$HOME/.local/state}/terminal-stack/headroom-token")"
+      token="${token//[[:space:]]/}"
+    fi
+  fi
   if [[ -z "$token" ]]; then
     # <clone>/services/stacks/headroom/.env — resolved from the clone, not by
     # walking the workspace for a sibling repo (which the runtime clone is not in).
@@ -358,19 +374,35 @@ _ts_headroom_token() {
   [[ -n "$token" ]] || return 1
   print -r -- "$token"
 }
+typeset -g _TS_HEADROOM_WHY=""
 _ts_headroom_healthy() {
   [[ "$(_ts_agent_setting headroomEnabled)" == on ]] || return 1
-  local token
-  token="$(_ts_headroom_token)" || return 1
+  local token code
+  token="$(_ts_headroom_token)" || { _TS_HEADROOM_WHY=notoken; return 1; }
   local now="$(date +%s)"
   if (( now - _TS_HEADROOM_PROBE_AT < 5 )); then (( _TS_HEADROOM_PROBE_OK )); return; fi
   _TS_HEADROOM_PROBE_AT=$now; _TS_HEADROOM_PROBE_OK=0
   # Probe an authenticated data-plane-adjacent endpoint. /readyz and /health
   # deliberately bypass proxy auth, so they can be green while every agent
   # request receives Headroom's own 401 response.
-  curl -fsS --max-time 1 -H "X-Headroom-Proxy-Token: $token" \
-    http://127.0.0.1:8787/stats >/dev/null 2>&1 || return 1
+  code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 1 \
+    -H "X-Headroom-Proxy-Token: $token" http://127.0.0.1:8787/stats 2>/dev/null)"
+  case "$code" in
+    2??) _TS_HEADROOM_WHY="" ;;
+    # Up, and saying no to THIS token: another clone started it with its own.
+    401|403) _TS_HEADROOM_WHY=rejected; return 1 ;;
+    *) _TS_HEADROOM_WHY=down; return 1 ;;
+  esac
   _TS_HEADROOM_PROBE_OK=1
+}
+# Why this launch goes direct, with the fix. "Unavailable" was printed for all
+# three cases, and two of them are a proxy that is up and fine.
+_ts_headroom_direct_warning() {
+  case "$_TS_HEADROOM_WHY" in
+    rejected) print -u2 "warning: Headroom rejected this machine's proxy token (another clone started it?); this $1 launch is going direct. Fix: tstack doctor --repair" ;;
+    notoken)  print -u2 "warning: Headroom is enabled but no proxy token was found on this machine; this $1 launch is going direct. Fix: tstack services bootstrap" ;;
+    *)        print -u2 "warning: Headroom is enabled but unavailable on 127.0.0.1:8787; this $1 launch is going direct." ;;
+  esac
 }
 
 # Resolve an agent CLI at CALL time and cache the hit, rather than snapshotting
@@ -411,7 +443,7 @@ claude() {
   if [[ "$(_ts_agent_setting headroomEnabled)" != on ]]; then "$_TS_CLAUDE_BIN" "$@"; return; fi
   if ! _ts_headroom_healthy; then
     if (( ! _TS_HEADROOM_WARNED )); then
-      print -u2 'warning: Headroom is enabled but unavailable on 127.0.0.1:8787; this Claude launch is going direct.'
+      _ts_headroom_direct_warning Claude
       _TS_HEADROOM_WARNED=1
     fi
     "$_TS_CLAUDE_BIN" "$@"; return
@@ -508,7 +540,7 @@ _ts_codex() {
         --config 'model_providers.headroom.requires_openai_auth=true'
         --config 'model_providers.headroom.env_http_headers.X-Headroom-Proxy-Token="HEADROOM_PROXY_TOKEN"')
     elif (( ! _TS_HEADROOM_WARNED )); then
-      print -u2 'warning: Headroom is enabled but unavailable on 127.0.0.1:8787; this Codex launch is going direct.'
+      _ts_headroom_direct_warning Codex
       _TS_HEADROOM_WARNED=1
     fi
   fi

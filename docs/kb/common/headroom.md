@@ -76,8 +76,25 @@ Tell them apart by the body:
 | `{"error":"unauthorized"}` | headroom refusing you — wrong or missing proxy token |
 | anything naming an API key | you got through headroom; your provider refused it |
 
-The token is generated on this machine by `tstack services bootstrap` and written only
-to the gitignored `services/stacks/headroom/.env`.
+The token is generated on this machine by `tstack services bootstrap` and written to
+the gitignored `services/stacks/headroom/.env`.
+
+**One proxy per machine, so one token per machine.** Each clone has its own `.env`,
+but only the token the *running* proxy holds works. So `tstack services up|bootstrap`
+records that token in one file both shells read first:
+
+| machine | file |
+|---|---|
+| Windows + WSL (one Docker Desktop) | `%LOCALAPPDATA%\terminal-stack\headroom-token` (WSL reads it through `/mnt/c`) |
+| native Linux / macOS | `~/.local/state/terminal-stack/headroom-token` |
+
+Read order everywhere: `HEADROOM_PROXY_TOKEN`, then `HEADROOM_ENV_FILE`, then that
+file, then the clone's `.env`. A fresh clone's bootstrap adopts the running proxy's
+token (or the recorded one), never mints a rival. The wrappers say which failure
+sent a launch direct: **no token found** (`tstack services bootstrap`), **token
+rejected** (another clone started the proxy; `tstack doctor --repair` aligns the
+file and every clone's `.env` with it), or **unavailable** (not running). A session
+started before a token change keeps the old one until it is restarted.
 
 ## Both secrets are required to start
 

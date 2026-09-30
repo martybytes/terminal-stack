@@ -362,6 +362,17 @@ $script:TsHeadroomProbeOk = $false
 $script:TsHeadroomWarned = $false
 function Get-TsHeadroomToken {
     if ($env:HEADROOM_PROXY_TOKEN) { return $env:HEADROOM_PROXY_TOKEN }
+    # The MACHINE's token first -- what the running proxy holds, recorded by
+    # `tstack services up|bootstrap` on either side -- then this clone's .env,
+    # which is only right if this clone started the proxy. One proxy per machine,
+    # so one token. Twin: _ts_headroom_token; Python: tstack/headroom_token.py.
+    if (-not $env:HEADROOM_ENV_FILE) {
+        $machine = Join-Path $env:LOCALAPPDATA 'terminal-stack\headroom-token'
+        if (Test-Path -LiteralPath $machine) {
+            $t = (Get-Content -LiteralPath $machine -TotalCount 1)
+            if ($t -and $t.Trim()) { return $t.Trim() }
+        }
+    }
     $file = $env:HEADROOM_ENV_FILE
     if (-not $file) {
         # <clone>\services\stacks\headroom\.env — from the clone, not by walking
@@ -380,13 +391,31 @@ function Test-TsHeadroomRuntime {
     $script:TsHeadroomProbeAt = Get-Date
     $script:TsHeadroomProbeOk = $false
     $token = Get-TsHeadroomToken
-    if (-not $token) { return $false }
+    if (-not $token) { $script:TsHeadroomWhy = 'notoken'; return $false }
+    $script:TsHeadroomWhy = 'down'
     try {
         $r = Invoke-WebRequest -Uri 'http://127.0.0.1:8787/stats' -TimeoutSec 2 -UseBasicParsing `
             -Headers @{ 'X-Headroom-Proxy-Token' = $token }
         $script:TsHeadroomProbeOk = ($r.StatusCode -ge 200 -and $r.StatusCode -lt 300)
-    } catch {}
+        if ($script:TsHeadroomProbeOk) { $script:TsHeadroomWhy = '' }
+    } catch {
+        # Up, and saying no to THIS token: another clone started it with its own.
+        $status = $null
+        try { $status = [int]$_.Exception.Response.StatusCode } catch {}
+        if ($status -eq 401 -or $status -eq 403) { $script:TsHeadroomWhy = 'rejected' }
+    }
     return $script:TsHeadroomProbeOk
+}
+# Why this launch goes direct, with the fix. "Unavailable" was printed for all
+# three cases, and two of them are a proxy that is up and fine. Twin:
+# _ts_headroom_direct_warning.
+$script:TsHeadroomWhy = ''
+function Write-TsHeadroomDirectWarning([string]$Agent) {
+    switch ($script:TsHeadroomWhy) {
+        'rejected' { Write-Warning "Headroom rejected this machine's proxy token (another clone started it?); this $Agent launch is going direct. Fix: tstack doctor --repair" }
+        'notoken'  { Write-Warning "Headroom is enabled but no proxy token was found on this machine; this $Agent launch is going direct. Fix: tstack services bootstrap" }
+        default    { Write-Warning "Headroom is enabled but unavailable on 127.0.0.1:8787; this $Agent launch is going direct." }
+    }
 }
 
 # Resolve an agent CLI at CALL time and cache the hit, rather than snapshotting it
@@ -433,7 +462,7 @@ function claude {
     if ((Get-TsAgentRuntimeSetting headroomEnabled) -ne 'on') { & $bin @args; return }
     if (-not (Test-TsHeadroomRuntime)) {
         if (-not $script:TsHeadroomWarned) {
-            Write-Warning 'Headroom is enabled but unavailable on 127.0.0.1:8787; this Claude launch is going direct.'
+            Write-TsHeadroomDirectWarning 'Claude'
             $script:TsHeadroomWarned = $true
         }
         & $bin @args
@@ -566,7 +595,7 @@ function Invoke-TsCodex {
                     '--config', 'model_providers.headroom.env_http_headers.X-Headroom-Proxy-Token="HEADROOM_PROXY_TOKEN"'
                 )
             } elseif (-not $script:TsHeadroomWarned) {
-                Write-Warning 'Headroom is enabled but unavailable on 127.0.0.1:8787; this Codex launch is going direct.'
+                Write-TsHeadroomDirectWarning 'Codex'
                 $script:TsHeadroomWarned = $true
             }
         }
