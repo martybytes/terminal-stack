@@ -12,6 +12,7 @@ and must not block on a tty nobody is watching.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 from dataclasses import dataclass, field, replace
 
@@ -637,7 +638,11 @@ def _apps(ask: Asker, app_class: str) -> list[str]:
             return [a.id for a in available]
         if raw in ("none", ""):
             return []
-        wanted = {t.strip() for t in raw.split(",") if t.strip()}
+        # Commas OR whitespace. `tstack update` hands its pending list over
+        # space-separated (the shell's own list form), and a comma-only split
+        # read "lazygit fnm pipx" as one unknown id: "y" to "install them now?"
+        # then installed nothing and said no apps were selected.
+        wanted = {t for t in re.split(r"[,\s]+", raw) if t}
         return [a.id for a in available if a.id in wanted]
 
     saved = store.get("apps", "").split()

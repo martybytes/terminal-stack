@@ -448,6 +448,14 @@ case "${1:-}" in
         # A spec on the command line is passed through as TS_APPS, which is the
         # same escape hatch a scripted install uses -- one expansion, not two.
         _apps_sel="$(run_wizard_apps "${2:-}")" || exit $?
+        # A spec that names tools but resolves to none is a mistake, never a
+        # choice: `set_apps` SAVES its argument as the whole selection, so an
+        # empty one here erased every tool this machine had chosen. `none` is
+        # how you ask for nothing.
+        if [ -n "${2:-}" ] && [ "${2:-}" != none ] && [ -z "$_apps_sel" ]; then
+            echo "tstack config apps: '${2}' names no tool in the catalog; nothing was changed." >&2
+            exit 2
+        fi
         set_apps "$_apps_sel" ;;
     wezterm)
         shift
