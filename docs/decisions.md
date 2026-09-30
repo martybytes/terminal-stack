@@ -4107,3 +4107,22 @@ Docker Desktop round trip on the agent's critical path and needs the engine even
 to go direct. And the suite gets a conftest fixture that points the file at a
 temp path, because the code under test now writes the developer's real one.
 
+## Why the wizard's defaults are the saved answers
+
+Every question's default was the fresh-install value: `dark`, `ctrl-backslash`,
+mux off, atuin on, memory `agentmemory`. That is right once. On a configured
+machine the bootstraps save what the wizard returns, unconditionally, so a
+re-run that pressed Enter at every prompt -- exactly what `tstack reinstall`
+invites -- reset the theme, the leader, atuin, herdr, the memory backend, the
+Cursor mode and caveman to stock. The `prompt` profile was worse: it returned
+the dataclass defaults, `apps=[]` and `memory_backend="none"`, and the
+bootstrap saved them, emptying the app list and unwiring AgentMemory.
+
+`_saved(key, default)` in `tstack/wizard/flow.py` is now the only way a
+question gets its default: this machine's stored value, else the fresh-install
+one. `_saved_tmux()` had done this for the tmux prefix alone since the first
+reconfigure bug; it is the general rule now. The same fix makes `TS_ASSUME_YES`
+mean what the docs said: with every default being the saved answer, "take every
+default without prompting" is a no-op on a configured machine, which is the only
+safe thing an unattended re-run can be.
+

@@ -18,6 +18,7 @@ import re
 import secrets
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -235,7 +236,7 @@ class Compose:
         return [engine.binary_for(self.kind), "compose", *pre, *args]
 
     def run(
-        self, stack: str, args: list[str], capture: bool = False
+        self, stack: str, args: list[str], capture: bool = False, timeout: int = 1800
     ) -> subprocess.CompletedProcess[str]:
         argv = self.argv(stack, args)
         if self.dry_run:
@@ -250,16 +251,23 @@ class Compose:
         # Its own subprocess.run rather than proc.capture: the caller decides
         # whether output is captured at all, and compose must run in the stack's
         # directory. The encoding is not optional anywhere -- see tstack/proc.py.
-        return subprocess.run(
-            argv,
-            cwd=str(directory),
-            capture_output=capture,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=False,
-            start_new_session=True,
-        )
+        try:
+            return subprocess.run(
+                argv,
+                cwd=str(directory),
+                capture_output=capture,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                check=False,
+                start_new_session=True,
+                # A wedged engine must not hang `status` forever. Half an hour
+                # is generous for a pull; a caller that wants less passes less.
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired:
+            print(f"({stack}) timed out after {timeout}s: {' '.join(argv)}", file=sys.stderr)
+            return subprocess.CompletedProcess(argv, 124, "", f"timed out after {timeout}s")
 
     def ok(self, stack: str, args: list[str]) -> bool:
         return self.run(stack, args).returncode == 0
@@ -444,7 +452,9 @@ def replace_in_file(path: Path, pattern: str, replacement: str) -> bool:
     # than reproduced.
     crlf = "\r\n" in before and before.count("\n") == before.count("\r\n")
     subject = before.replace("\r\n", "\n") if crlf else before
-    result, matched = re.subn(pattern, replacement, subject, flags=re.MULTILINE)
+    # A FUNCTION replacement: the value is literal text, not a template. A `\`
+    # in a token read back from a container raised re.error here.
+    result, matched = re.subn(pattern, lambda _m: replacement, subject, flags=re.MULTILINE)
     if not matched:
         return False
     if result == subject:

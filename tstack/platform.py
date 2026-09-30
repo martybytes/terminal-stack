@@ -164,6 +164,21 @@ def windows_username() -> str | None:
     return name or None
 
 
+def windows_home() -> Path | None:
+    """The Windows profile folder as this process can reach it, or None.
+
+    %USERPROFILE% on Windows; the /mnt/c view of it on WSL. The one place the
+    `/mnt/c/Users/<user>` path is built -- it was spelled out in five modules.
+    """
+    if kind() == WINDOWS:
+        raw = os.environ.get("USERPROFILE")
+        return Path(raw) if raw else None
+    if kind() == WSL:
+        user = windows_username()
+        return Path(f"/mnt/c/Users/{user}") if user else None
+    return None
+
+
 def local_app_data() -> Path | None:
     """%LOCALAPPDATA% as this process can reach it, or None.
 
@@ -174,10 +189,8 @@ def local_app_data() -> Path | None:
         raw = os.environ.get("LOCALAPPDATA")
         return Path(raw) if raw else None
     if kind() == WSL:
-        user = windows_username()
-        if not user:
-            return None
-        return Path(f"/mnt/c/Users/{user}/AppData/Local")
+        home = windows_home()
+        return home / "AppData" / "Local" if home else None
     return None
 
 

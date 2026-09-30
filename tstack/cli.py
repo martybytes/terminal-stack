@@ -25,7 +25,6 @@ EXIT_ERROR = 1
 EXIT_USAGE = 2
 # Reserved for the update/rollback port (phase 7): "work done, now restart the
 # shell". A child process cannot re-exec its parent, so the shim acts on this.
-EXIT_RESTART_SHELL = 75
 
 
 def render_help() -> str:
