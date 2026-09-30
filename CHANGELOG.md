@@ -4,6 +4,16 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+### Added
+
+- **`tstack reinstall` (09/30/2026).** The install one-liner, run again from the
+  clone you have: pulls the runtime clone first (dirty clones refused, a
+  deleted branch returned to `main`, a `tstack rollback` point recorded), then
+  runs the freshly pulled `install-wsl.sh` / `install-linux.sh` /
+  `install-mac.sh` / `install.ps1` pinned to that clone. No download, no
+  clone-location questions; `--no-pull` and `--dry-run`. The installer runs
+  attached to the terminal, so the questionnaire can ask.
+
 ### Changed
 
 - **The default WezTerm leader is now `Ctrl+\` (09/25/2026).** `Ctrl+Space`
