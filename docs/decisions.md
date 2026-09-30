@@ -2729,6 +2729,43 @@ Both are now parameters, carried forward when the caller does not pass them.
 is the authority and it grows, so a hardcoded set here would reject a preset the
 installed starship has.
 
+## Why the agentmemory graph retrieval builds its adjacency once per search
+
+On 2026-09-30 the agentmemory container had been "unhealthy" for hours while visibly working:
+compressions succeeded, observations were captured, and yet `/agentmemory/livez` took 40 s or
+timed out, the console said "upstream offline", and worker invocations (`state::get`,
+`state::set`) died at 180 s. `docker stats` showed the node process at 150% CPU; a per-thread
+read of `/proc/<pid>/task/*/stat` put the **main thread at 100%** with the worker threads at
+13% each — the event loop itself was saturated, not the provider and not the disk.
+
+An 8-second CPU profile through Node's inspector (`kill -USR1`, then `Profiler.start`/`stop`
+over the 9229 WebSocket from inside the container) said where: **80% self time in
+`dijkstraTraversal`**, 17% garbage collector. Reading the vendor code explained the shape.
+`GraphRetrieval.searchByEntities` runs on every search — context injection for every prompt,
+`/search`, the MCP tools — and for **every** matching entity node calls `dijkstraTraversal`,
+which begins by building a node index and an adjacency map over **the entire edge store**.
+The entity match is a substring test in both directions, so a query naming "file" matches
+hundreds of start nodes; the edge store on this machine is 100+ MB after the recovery of 8,000
+dead-lettered observations grew the graph. Hundreds of full passes over 100 MB, synchronously,
+per search.
+
+The fix is in `services/stacks/agentmemory/patch-agentmemory.mjs`, where the other 0.9.29
+reliability patches already live: build the index and adjacency **once per node/edge list
+pair** (a `WeakMap` keyed on the edge array, checked against the node array) and reuse it for
+every start node of that search. It is a complexity fix, not a behaviour change — a
+side-by-side run of the pristine and patched classes on a synthetic graph returns identical
+rows in identical order, and the walk itself (`dist`, `pathTo`, the heap) is untouched.
+
+What it does **not** do, deliberately: cache across searches. The two lists come back from
+`kv.list` as fresh arrays each time, and caching them would need an invalidation hook in the
+sharded graph adapter's write path. If the profile still shows the main thread pinned after
+this, that — or bounding the substring match — is the next lever; measure first.
+
+Two things worth keeping from the investigation. `docker top` and host `/proc` cannot see
+into Docker Desktop's VM on WSL; per-thread CPU has to be read **inside** the container.
+And `kill -USR1` leaves the inspector listening on 127.0.0.1:9229 inside the container until
+the next restart — harmless, not exposed, but say so.
+
 ## What the bash agentmemory twin may not copy from the `.ps1`
 
 `bootstrap/_agentmemory.sh` keeps the `.ps1`'s `@T`/`@N` encoding on purpose, so

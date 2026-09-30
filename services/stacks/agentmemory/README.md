@@ -326,33 +326,16 @@ This repo keeps the server: image, compose, `.env`, the in-container bundle patc
 (`patch-agentmemory.mjs`), the data migrations, and the console pin. `check-capture.sh` checks
 that half.
 
-### On macOS and Linux, client wiring has no owner yet
+### On macOS and Linux, client wiring is `bootstrap/ts-agentmemory.sh`
 
-`bootstrap/ts-agentmemory.ps1` is PowerShell and Windows-only, and the hook commands it generates
-use cmd.exe's `set X=…&&` prefix, which no Unix shell understands. Until terminal-stack grows a
-macOS/Linux path, **this stack will serve and search but never capture** on those platforms: the
-server is healthy, MCP tools resolve, searches return hits, and no observation is ever written.
-
-That is exactly the silent failure documented in "None of the above proves memories are being
-*captured*" below — so expect it here rather than diagnosing it. `check-capture.sh` detects the
-missing entry point, reports it as a failure rather than a skip, and exits non-zero.
-
-The fix belongs in terminal-stack, not here. It needs:
-
-- a `.sh` twin of `bootstrap/ts-agentmemory.ps1` (and of `_agentmemory.ps1` and
-  `_merge_json_settings.ps1`, which it sources);
-- POSIX `VAR=value node …` prefixes in the generated hook commands instead of the cmd.exe chain;
-- the secret and `AGENTMEMORY_INJECT_CONTEXT` exported from **`~/.zshenv`**, not `~/.zshrc` — hook
-  subprocesses are non-interactive, so `~/.zshrc` is never sourced for them and a variable set
-  there reaches nothing and logs nothing;
-- `launchctl setenv` plus a `~/Library/LaunchAgents/` plist for GUI-launched Cursor and Codex
-  Desktop, which inherit from `launchd` and read neither shell file;
-- the stale-secret recovery edit re-pointed: its Windows form re-reads the authoritative value with
-  `reg query "HKCU\Environment"`, which on Unix throws, is caught, and leaves the recovery a
-  permanent no-op.
-
-Note also that `tstack agents` already handles the *plugin install* half in bash — it is only the
-hook wiring that is missing.
+The bash twin of `bootstrap/ts-agentmemory.ps1` (with `_agentmemory.sh` and
+`_merge_json_settings.sh`) wires the same hooks on WSL, Linux and macOS, with POSIX
+`VAR=value node …` prefixes. Before it existed this stack served and searched on those
+platforms but never captured — every vendor hook does `fetch(...).catch(() => {})` then
+`exit(0)`, so there was nothing to see. `check-capture.sh` probes for that exact path and
+reports a missing twin as a failure, not a skip. What the twin may and may not copy from the
+`.ps1` is in terminal-stack's `docs/decisions.md` § "What the bash agentmemory twin may not
+copy from the `.ps1`".
 
 ## Retrieval: how each host asks
 

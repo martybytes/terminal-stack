@@ -1180,6 +1180,73 @@ function registerGraphFunction(sdk, kv, provider) {`,
     before: `totalInsights++;\n\t\t\t\t}\n\t\t\t} catch {\n\t\t\t\tcontinue;\n\t\t\t}`,
     after: `totalInsights++;\n\t\t\t\t}\n\t\t\t} catch (err) {\n\t\t\t\tlogger.warn("Reflect cluster failed", { concepts: cluster.concepts, facts: cluster.facts.length, lessons: cluster.lessons.length, crystals: cluster.crystalNarratives.length, error: err instanceof Error ? err.message : String(err) });\n\t\t\t\tcontinue;\n\t\t\t}`,
   },
+  {
+    // Graph retrieval runs on every search (context injection, /search, the
+    // hooks) and, for EVERY matching entity node, rebuilt a node index and an
+    // adjacency map over the ENTIRE edge store before its Dijkstra walk. The
+    // entity match is a substring test, so one query can match hundreds of
+    // start nodes, and the edge store here is 100+ MB. A CPU profile of the
+    // live server on 2026-09-30 put 80% of main-thread time in
+    // dijkstraTraversal with the event loop pinned: /livez took 40 s+, the
+    // container went unhealthy, the console said "upstream offline", and
+    // state::get/set invocations from the workers timed out at 180 s. Build
+    // the index and adjacency ONCE per node/edge list pair (the same arrays
+    // are handed to every start node of one search) and reuse it. Same
+    // results, same order; only the repeated O(E) rebuild is gone.
+    label: "graph adjacency built once per search",
+    before: `var GraphRetrieval = class {`,
+    after: `const graphAdjacencyCache = /* @__PURE__ */ new WeakMap();
+function graphAdjacencyFor(allNodes, allEdges) {
+\tconst cached = graphAdjacencyCache.get(allEdges);
+\tif (cached && cached.nodes === allNodes) return cached.built;
+\tconst nodeIndex = /* @__PURE__ */ new Map();
+\tfor (const n of allNodes) nodeIndex.set(n.id, n);
+\tconst adjacency = /* @__PURE__ */ new Map();
+\tfor (const edge of allEdges) {
+\t\tconst a = edge.sourceNodeId;
+\t\tconst b = edge.targetNodeId;
+\t\tif (!adjacency.has(a)) adjacency.set(a, []);
+\t\tif (!adjacency.has(b)) adjacency.set(b, []);
+\t\tadjacency.get(a).push({
+\t\t\tneighborId: b,
+\t\t\tedge
+\t\t});
+\t\tadjacency.get(b).push({
+\t\t\tneighborId: a,
+\t\t\tedge
+\t\t});
+\t}
+\tconst built = { nodeIndex, adjacency };
+\tgraphAdjacencyCache.set(allEdges, { nodes: allNodes, built });
+\treturn built;
+}
+var GraphRetrieval = class {`,
+  },
+  {
+    label: "dijkstra reuses the shared adjacency",
+    before: `\tdijkstraTraversal(startNode, allNodes, allEdges, maxDepth) {
+\t\tconst nodeIndex = /* @__PURE__ */ new Map();
+\t\tfor (const n of allNodes) nodeIndex.set(n.id, n);
+\t\tconst adjacency = /* @__PURE__ */ new Map();
+\t\tfor (const edge of allEdges) {
+\t\t\tconst a = edge.sourceNodeId;
+\t\t\tconst b = edge.targetNodeId;
+\t\t\tif (!adjacency.has(a)) adjacency.set(a, []);
+\t\t\tif (!adjacency.has(b)) adjacency.set(b, []);
+\t\t\tadjacency.get(a).push({
+\t\t\t\tneighborId: b,
+\t\t\t\tedge
+\t\t\t});
+\t\t\tadjacency.get(b).push({
+\t\t\t\tneighborId: a,
+\t\t\t\tedge
+\t\t\t});
+\t\t}
+\t\tconst dist = /* @__PURE__ */ new Map();`,
+    after: `\tdijkstraTraversal(startNode, allNodes, allEdges, maxDepth) {
+\t\tconst { nodeIndex, adjacency } = graphAdjacencyFor(allNodes, allEdges);
+\t\tconst dist = /* @__PURE__ */ new Map();`,
+  },
 ];
 
 let patchedFiles = 0;

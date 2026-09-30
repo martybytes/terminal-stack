@@ -52,6 +52,18 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **agentmemory: graph retrieval no longer rebuilds the whole adjacency map
+  per entity node (09/30/2026).** Every search ran Dijkstra from each matching
+  entity node, and each run first indexed the entire edge store (100+ MB
+  here); a profile of the live server put 80% of main-thread time there, with
+  the event loop pinned, `/livez` timing out, the container "unhealthy" and
+  the console reporting "upstream offline" while work was in fact completing.
+  The stack's bundle patch now builds the index once per search and reuses
+  it. Same results, same order. Rebuild with
+  `tstack services up --build agentmemory`. The stack README also stops
+  claiming macOS/Linux capture has no owner: `bootstrap/ts-agentmemory.sh` is
+  it.
+
 - **`tstack agents agentmemory on|repair|off` wires the WSL side too (09/30/2026).**
   On a combined machine the command handed off to Windows and stopped, so it
   reported the Windows plugin files as wired while the WSL-side Claude Code
