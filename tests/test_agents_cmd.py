@@ -559,3 +559,37 @@ def test_caveman_install_reports_a_failed_step_instead_of_enabled(monkeypatch, c
     assert agents.Caveman(ROOT, agents.Out()).install() is False
     out = capsys.readouterr().out
     assert "only partly enabled" in out and "enabled for installed agents" not in out
+
+
+@pytest.mark.parametrize(
+    "action, flags",
+    [
+        ("repair", ["--apply"]),
+        ("on", ["--apply"]),
+        ("off", ["--undo", "--apply"]),
+        ("status", ["--check"]),
+    ],
+)
+def test_on_wsl_the_local_adapter_runs_before_the_windows_hand_off(
+    monkeypatch, tmp_path, action, flags
+):
+    """`repair` reported Windows' files as wired while the WSL-side Claude Code
+    plugin had none of the edits: the hand-off was the whole story."""
+    (tmp_path / "bootstrap").mkdir()
+    (tmp_path / "bootstrap" / "ts-agentmemory.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+    monkeypatch.setattr(agents.plat, "kind", lambda: agents.plat.WSL)
+    monkeypatch.setattr(agents.paths, "resolve_source_dir", lambda: tmp_path)
+    ran: list[list[str]] = []
+    monkeypatch.setattr(agents, "_attached", lambda adapter, *f: ran.append([*adapter, *f]) or 0)
+    order: list[str] = []
+    monkeypatch.setattr(agents, "reexec_on_windows", lambda argv: order.append("windows") or 0)
+    assert agents.main(["agentmemory", action]) == 0
+    assert ran == [["bash", str(tmp_path / "bootstrap" / "ts-agentmemory.sh"), *flags]]
+    assert order == ["windows"], "the Windows side still runs afterwards"
+
+
+def test_headroom_does_not_run_the_agentmemory_adapter_on_wsl(monkeypatch, tmp_path):
+    monkeypatch.setattr(agents.plat, "kind", lambda: agents.plat.WSL)
+    monkeypatch.setattr(agents, "_attached", lambda adapter, *f: pytest.fail("adapter ran"))
+    monkeypatch.setattr(agents, "reexec_on_windows", lambda argv: 0)
+    assert agents.main(["headroom", "repair"]) == 0
