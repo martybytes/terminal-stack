@@ -1,7 +1,9 @@
 # A dashboard for terminal-stack - design
 
-Status: **design only.** Nothing here is built. It is the last phase of the port
-described in `REVAMP-PLAN.md`, and it depends on every phase before it.
+Status: **built** (`tstack/ui/`, phase 8 of `REVAMP-PLAN.md`). Five tabs: Home,
+Settings, Doctor, Services, Docs. Saves and every slow read run in worker
+threads. The rest of this document is the design it was built to; where the
+build differs, the difference is noted inline.
 
 ## What changed since the first draft
 
@@ -58,7 +60,9 @@ Ordered by what is worth opening it for.
    needs no config access at all, so it exercises the widget layer while risking
    nothing.
 
-Deliberately absent:
+Deliberately absent (as designed; the build differs on the first point, where
+the TTS keys are listed like every other setting because one table that
+omits a group reads as a bug):
 
 - **The 41 `ccTts*` keys.** The daemon already has a full web dashboard for them
   (`ttsd/webui.py`), including override display and restart-required labels.

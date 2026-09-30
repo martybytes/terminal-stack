@@ -387,3 +387,145 @@ def next_choice(row: Row, backwards: bool = False) -> str | None:
         return row.options[0]
     step = -1 if backwards else 1
     return row.options[(index + step) % len(row.options)]
+
+
+# ------------------------------------------------------------ the dashboard
+# Read models for the other tabs. Pure functions over the commands' own code:
+# the dashboard never re-derives a fact the CLI already computes.
+
+
+@dataclass(frozen=True)
+class Check:
+    check: str
+    status: str  # OK | FAIL | NOTE
+    message: str
+    hint: str
+
+
+def doctor_report() -> tuple[list[Check], int]:
+    """Every doctor check and the issue count, from doctor.collect() itself."""
+    from ..commands import doctor
+
+    report = doctor.collect()
+    return (
+        # Upper-cased: checks.py spells them ok/fail/note, and the tab sorts on
+        # OK/FAIL/NOTE. One spelling here, whichever the checker uses.
+        [
+            Check(r.check, r.status.upper(), r.message, getattr(r, "hint", "") or "")
+            for r in report.results
+        ],
+        report.issues,
+    )
+
+
+@dataclass(frozen=True)
+class Stack:
+    name: str
+    level: str  # ok | warn | off | unknown
+    line: str
+    running: int
+    total: int
+    ports: str
+    hint: str
+
+
+def service_rows() -> list[Stack]:
+    """`tstack services status` as rows. Empty when there is no clone."""
+    from .. import paths
+    from ..commands import services
+
+    try:
+        source = paths.resolve_source_dir()
+    except paths.CloneNotFound:
+        return []
+    svc = services.Services(source, services.parse(["status"]))
+    svc.stacks = list(svc.all_stacks)
+    return [
+        Stack(r.name, r.level, r.line, r.running, r.total, r.ports, r.hint)
+        for r in services.status_rows(svc)
+    ]
+
+
+def service_action(verb: str, name: str) -> tuple[bool, str]:
+    """up | down | restart | logs one stack through the services command, with
+    its output captured. The same consent rules as the CLI: naming a stack is
+    consent to start it."""
+    from ..commands import services
+
+    if verb not in ("up", "down", "restart", "logs"):
+        return (False, f"unknown action: {verb}")
+    argv = [verb, name] + (["-n", "60"] if verb == "logs" else [])
+    buffer = io.StringIO()
+    try:
+        with redirect_stdout(buffer):
+            code = services.main(argv)
+    except SystemExit as exc:  # services uses SystemExit for hard refusals
+        code = int(exc.code or 1)
+    except Exception as exc:  # the dashboard must survive any failure
+        return (False, f"{type(exc).__name__}: {exc}")
+    text = buffer.getvalue().strip()
+    if verb == "logs":
+        return (code == 0, text or "(no output)")
+    tail = text.splitlines()[-3:] if text else []
+    return (code == 0, " / ".join(tail) if tail else f"{verb} {name}: exit {code}")
+
+
+def home_tiles() -> list[tuple[str, str]]:
+    """The one-screen summary: what is where, and whether it is healthy."""
+    from .. import headroom_token, paths, store
+    from ..wizard import probes
+
+    tiles: list[tuple[str, str]] = []
+    try:
+        src = paths.resolve_source_dir()
+        version = paths.clone_version(src)
+        tiles.append(("clone", str(src)))
+        tiles.append(
+            (
+                "version",
+                f"{version.get('short', '')} on {version.get('branch', '')}"
+                + (" (dirty)" if version.get("dirty") else ""),
+            )
+        )
+    except paths.CloneNotFound as exc:
+        tiles.append(("clone", f"not found: {exc}"))
+    tiles.append(
+        (
+            "theme / leader",
+            f"{store.get('themeMode', 'dark')} / {store.get('leaderChord', 'ctrl-backslash')}",
+        )
+    )
+    tiles.append(("memory backend", store.get("memoryBackend", "agentmemory")))
+    tiles.append(
+        (
+            "headroom",
+            f"{store.get('headroomEnabled', 'off')}; machine token "
+            + ("recorded" if headroom_token.read() else "none"),
+        )
+    )
+    daemon = store.get("ccTtsDaemon", "off")
+    if store.normalise(store.get("ccTtsEnabled", "false")) == "true":
+        port = store.get("ccTtsDaemonPort", "8890") or "8890"
+        alive = probes.answers(f"http://127.0.0.1:{port}/healthz", 1.0)
+        tiles.append(("voice", f"on; daemon {daemon}" + (", answering" if alive else "")))
+    else:
+        tiles.append(("voice", "off"))
+    return tiles
+
+
+def kb_topics() -> list[tuple[str, str, Path]]:
+    """(label, title, path) for every KB topic, sidebar order. Empty when the
+    knowledge base cannot be found."""
+    from ..kb.index import KbNotFound, topics
+
+    try:
+        return [(t.label, t.title, t.path) for t in topics()]
+    except KbNotFound:
+        return []
+
+
+def kb_markdown(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        return f"# unreadable\n\n{exc}"

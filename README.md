@@ -190,7 +190,7 @@ tstack --version       # clone path, branch, commit
 tstack doctor          # diagnose the install; --json for one record per check, exit 1 if anything is wrong
 tstack config          # interactive settings menu
 tstack config theme follow
-tstack ui              # every setting in one screen (offers to install Textual)
+tstack ui              # the dashboard: home, settings, doctor, services, docs (offers to install Textual)
 tstack config wizard   # replay the install questionnaire and save the answers
 tstack ghostty         # the managed Ghostty config: status, diff, on, off
 tstack herdr           # the managed herdr config: status, on, off, update
@@ -257,8 +257,10 @@ one **rendered** in a preview pane), and the CLI tools as a tick-list.
 AgentMemory's chat provider is editable there too, though it is not a saved
 setting at all — it lives in the stack's `.env`.
 
-It needs [Textual](https://textual.textualize.io/) (`uv tool install textual`),
-the one third-party library this stack's Python uses.
+It needs [Textual](https://textual.textualize.io/), the one third-party library
+this stack's Python uses; `tstack ui` offers to install it the first time (a
+`uv tool install` would put it in its own environment, where `tstack` cannot
+import it).
 
 Choices persist across updates. On a combined Windows + WSL machine, run
 `tstack config` **from WSL** — its `chezmoi apply` is authoritative for the
