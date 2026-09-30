@@ -178,7 +178,10 @@ ts_relocate_clone() {
                 ts_backup_file "$plps"
                 # Assignment lines only: a comment or an `if` that merely mentions
                 # the variable is the user's, and the pwsh twin removes only these.
-                sed -i '/^[[:space:]]*\$env:TERMINAL_STACK_DIR[[:space:]]*=/d' "$plps"
+                # grep + mv, not `sed -i`: BSD sed wants `-i ''` and GNU rejects it,
+                # so the one-liner failed outright on macOS.
+                grep -v '^[[:space:]]*\$env:TERMINAL_STACK_DIR[[:space:]]*=' "$plps" > "$plps.tmp.$$"
+                mv -f "$plps.tmp.$$" "$plps"
                 echo "$INFO removed the stale \$env:TERMINAL_STACK_DIR pin from $plps"
                 fixed=1
             fi
