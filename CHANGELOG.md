@@ -27,6 +27,24 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **Hangs, escapes and small lies in the Python core (09/30/2026).** Every
+  compose call, the Windows-side agents re-run, the hook adapter, `wezterm cli
+  list` and `ts-verify.sh` now have timeouts (a wedged Docker hung `tstack
+  services status` forever); the `--move` verification no longer times out at
+  15 s on the large trees it exists for; `sudo` runs attached to the terminal
+  so it can ask for a password (in its own session it failed with "a terminal
+  is required" and the WezTerm channel switch and engine start quietly did
+  nothing); `tstack services bootstrap` is allowed on the WSL Docker-shim path
+  (it needs no engine); a token with a backslash no longer crashes the `.env`
+  writer; the backup message no longer advertises a `restore` verb that does
+  not exist; `Caveman` reports a failed step instead of "enabled"; Cursor's
+  `mcp.json` is not rewritten (and re-backed-up) on every sync, and `~/.cursor`
+  is not created on machines without Cursor; doctor's Kokoro probe reads
+  `ccTtsKokoroUrl`, its AgentMemory secret check asks the engine rather than
+  `which docker` (it never fired on the WSL shim), and its config-store check
+  no longer compares against a `chezmoi.toml` a stray winget binary left.
+  One HTTP probe, one backup-name rule and one Windows-home helper replace four,
+  two and five copies; dead code from the port is gone.
 - **`wso synceverything` no longer says "0 cloned." when gh is logged out
   (09/30/2026).** Every `gh repo list` failed with its error discarded, so each
   owner looked complete - the default on WSL, where the Windows `gh.exe` is logged

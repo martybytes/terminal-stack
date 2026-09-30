@@ -1110,7 +1110,10 @@ def test_answering_is_the_test_never_a_2xx():
     a server is listening. `curl -fsS` treats either as failure, which is why it
     once reported the service down while it was up and serving."""
     body = (ROOT / "tstack/wizard/probes.py").read_text(encoding="utf-8")
-    assert "except urllib.error.HTTPError:\n        return True" in body
+    # An HTTP error IS an answer: status() returns its code, and answers() is
+    # "status != 0". (The old text gate looked for `return True` in an except.)
+    assert "except urllib.error.HTTPError as exc:\n        return int(exc.code)" in body
+    assert "return status(url, timeout, headers) != 0" in body
     # ...and the STRICT form is used only where the endpoint is a real readiness
     # check, which is Headroom's /readyz.
     strict = body[body.index("def headroom(") :]

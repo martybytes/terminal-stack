@@ -502,20 +502,37 @@ def _brew_install(want: str, other: str, label: str) -> None:
                 _restore(["brew", "install", "--cask", other], other)
 
 
+def _sudo(argv: list[str], timeout: int) -> subprocess.CompletedProcess[str] | None:
+    """A sudo command that may need a password. Attached to the terminal when
+    there is one: proc.capture starts a new session, and sudo in a session with
+    no controlling terminal fails with "a terminal is required", which the
+    ignored return codes below turned into a channel switch that quietly did
+    nothing."""
+    if not sys.stdin.isatty():
+        return _run(argv, timeout=timeout)
+    try:
+        return subprocess.run(
+            argv, check=False, text=True, encoding="utf-8", errors="replace", timeout=timeout
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
 def _apt_install(want: str, other: str) -> None:
     keyring = Path("/etc/apt/keyrings/wezterm-fury.gpg")
     if not (keyring.is_file() and keyring.stat().st_size):
         print(f"{INFO} WezTerm: adding the upstream apt repo")
         if not shutil.which("gpg"):
-            _run(["sudo", "apt-get", "install", "-y", "gnupg"], timeout=600)
-        _run(["sudo", "mkdir", "-p", "/etc/apt/keyrings"], timeout=30)
+            _sudo(["sudo", "apt-get", "install", "-y", "gnupg"], timeout=600)
+        _sudo(["sudo", "mkdir", "-p", "/etc/apt/keyrings"], timeout=30)
         # curl | gpg | tee, kept as a shell pipeline because that is what it is.
         added = subprocess.run(
             "curl -fsSL https://apt.fury.io/wez/gpg.key "
             "| sudo gpg --dearmor -o /etc/apt/keyrings/wezterm-fury.gpg",
             shell=True,
             check=False,
-            start_new_session=True,
+            start_new_session=not sys.stdin.isatty(),
+            timeout=120,
         )
         if added.returncode != 0:
             print(f"{WARN} WezTerm: could not fetch the repo key; skipping.")
@@ -528,17 +545,17 @@ def _apt_install(want: str, other: str) -> None:
         current = ""
     if line not in current:
         proc.capture(["sudo", "tee", str(listing)], stdin=line + "\n", timeout=60)
-    _run(["sudo", "apt-get", "update", "-qq"], timeout=600)
+    _sudo(["sudo", "apt-get", "update", "-qq"], timeout=600)
     got = _run(["dpkg", "-s", other], timeout=30)
     swapped = False
     if got and got.returncode == 0:
         print(f"{INFO} WezTerm: removing {other} (switching channel)")
-        removed = _run(["sudo", "apt-get", "purge", "-y", other], timeout=600)
+        removed = _sudo(["sudo", "apt-get", "purge", "-y", other], timeout=600)
         if not removed or removed.returncode != 0:
             print(f"{WARN} could not remove {other}; remove it by hand.")
         else:
             swapped = True
-    done = _run(["sudo", "apt-get", "install", "-y", want], timeout=1800)
+    done = _sudo(["sudo", "apt-get", "install", "-y", want], timeout=1800)
     if done and done.returncode == 0:
         version = installed()
         print(f"{INFO} WezTerm: {version[0] if version else 'installed'}")
