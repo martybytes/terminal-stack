@@ -27,6 +27,13 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **A TTS daemon a hook restarts keeps its tray icon (09/30/2026).** When a hook
+  found the daemon enabled but not answering (after an exe rebuild, a crash, or
+  on a machine with no logon autostart) it started one with `--no-tray`, a
+  debugging mode. That daemon spoke normally but had no icon, so a WSL session
+  had nothing to mute from except `ccmute`. It now launches exactly as logon
+  autostart does; the tray still falls back to headless on its own if it cannot
+  start.
 - **`tstack update`'s "Install them now?" installs them, and no longer erases
   your app selection (09/30/2026).** It passed the missing tools as a
   space-separated list; the picker split on commas only, matched nothing, and

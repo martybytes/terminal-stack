@@ -166,9 +166,17 @@ def _spawn_direct(payload: dict) -> bool:
 
 
 def _daemon_command() -> list[str]:
+    """The same launch as logon autostart: WITH the tray.
+
+    This used to pass --no-tray, a debugging mode. A daemon started here -- which
+    is every daemon after an exe rebuild or a crash, until the next logon -- then
+    spoke normally but had no icon, and with it no way to mute a WSL session short
+    of `ccmute`. The tray is optional chrome: when it cannot start, the daemon
+    carries on headless by itself (see __main__.main), so nothing is lost here.
+    """
     if getattr(sys, "frozen", False):
-        return [sys.executable, "daemon", "--no-tray"]
-    return [sys.executable, "-m", "ttsd", "daemon", "--no-tray"]
+        return [sys.executable, "daemon"]
+    return [sys.executable, "-m", "ttsd", "daemon"]
 
 
 def _ensure_daemon(cfg: Config) -> bool:

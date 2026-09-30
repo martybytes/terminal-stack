@@ -17,6 +17,10 @@ until then — has voice working with no tray icon and no autostart. `tstack
 config tts daemon on` is the fix, and `tstack config tts daemon status` says
 which of the two is in force.
 
+A daemon a hook starts (it found the daemon enabled but not running) now has the
+tray too. It used to start headless, so after an exe rebuild the icon was gone
+until the next logon. If yours has no icon, `tstack config tts daemon restart`.
+
 **Combined Windows+WSL setup: run the `tstack config tts …` verbs from WSL.**
 pwsh `tstack config` saves only the Windows `config.json`, and the next WSL
 `chezmoi apply` re-renders that file from chezmoi `[data]` — silently
