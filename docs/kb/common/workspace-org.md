@@ -256,3 +256,13 @@ needs a human — usually two diverged clones of the same repo, which is a `git 
 session, not something a tool should guess at. The exception is
 `runtime — not migrated`, which needs nothing from you: it is the stack protecting its
 own install, and `tstack doctor --repair` is what moves that clone.
+
+## `synceverything` needs a logged-in gh
+
+It lists each owner's repos with `gh repo list`, so `gh` must be **logged in**,
+not just installed; `wso doctor` shows `gh auth`. On WSL the Linux `gh` is
+separate from Windows' `gh.exe`; reuse the Windows login with
+`gh.exe auth token | gh auth login --with-token`. Preview first with
+`TS_DRY_RUN=1 wso synceverything` - it clones every missing repo in every org in
+`workspace.conf`, which can be well over a hundred.
+

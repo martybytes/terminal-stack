@@ -27,6 +27,15 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **`wso synceverything` no longer says "0 cloned." when gh is logged out
+  (09/30/2026).** Every `gh repo list` failed with its error discarded, so each
+  owner looked complete - the default on WSL, where the Windows `gh.exe` is logged
+  in and the Linux `gh` is not. It now refuses with the login command (including
+  reusing the Windows login: `gh.exe auth token | gh auth login --with-token`),
+  names any owner it could not list and exits non-zero; `wso sync` says the same
+  instead of listing nothing missing. `wso plan` on an organised workspace adds
+  "N repo(s) already organised under the tier folders - nothing to migrate"
+  instead of four bare zeros. Both twins.
 - **Headroom works from every shell on a machine, not just the clone that started
   it (09/30/2026).** The proxy is per machine but the token was per clone, so with
   a WSL clone, a Windows clone and a dev checkout only one matched the running
