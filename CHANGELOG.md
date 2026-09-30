@@ -27,6 +27,26 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **Voice notification hooks keep the "never silence" contract (09/30/2026).**
+  - With `jq` installed, no config default ever applied: `jq -r ".k // empty"`
+    exits 0 on a missing key, so the `|| echo default` never ran and an absent
+    `.engine`, `.player` or `.debounceSec` read as empty. Both readers now
+    return the default for a missing key and a real `false` for `false`.
+  - `.merged.json` was rewritten open-and-truncate by every hook; two firing
+    together (Notification + PreToolUse) let one read a half-written file and
+    drop its announcement. It is written to a temp file and renamed.
+  - On WSL the hook handed every event to the Windows exe and exited 0 whatever
+    it did, so voice ON in WSL and OFF in Windows meant silence with no message.
+    The exe now exits 75 when it declined for a config reason (and only when a
+    WSL hook asks), and the hook falls through to the WSL-side path. A mute
+    stays silent. Takes effect after the exe is rebuilt (`tstack config tts
+    daemon restart`).
+  - `cc-tts-notify.sh` exited 1 with no config, and `cc-speak.sh` execs it, so
+    every Stop hook reported a failure on a machine with no TTS config.
+  - Windows hook commands were built as `C:/Users/<USERNAME>/...`, unquoted.
+    The profile folder is not always the username (truncated Microsoft-account
+    names, `user.DOMAIN`) and a space split the command. Both syncs now
+    substitute `__WIN_HOME__` from `%USERPROFILE%`, and the templates quote it.
 - **`wso synceverything` no longer says "0 cloned." when gh is logged out
   (09/30/2026).** Every `gh repo list` failed with its error discarded, so each
   owner looked complete - the default on WSL, where the Windows `gh.exe` is logged
