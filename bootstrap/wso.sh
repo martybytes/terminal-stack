@@ -73,7 +73,7 @@ cmd_status() {
     while [ $# -gt 0 ]; do
         case "$1" in
             --dirty) only_dirty=1; shift ;;
-            --org)   org_filter="${2:-}"; shift 2 ;;
+            --org) [ $# -ge 2 ] || { echo "wso: --org needs a value" >&2; return 2; }; org_filter="$2"; shift 2 ;;
             *) echo "wso status: unknown option: $1" >&2; return 2 ;;
         esac
     done
@@ -204,8 +204,8 @@ cmd_plan() {
     local plan movec=0 conflictc=0 blockedc=0 inplacec=0 mode="" org_filter=""
     while [ $# -gt 0 ]; do
         case "$1" in
-            --mode) mode="${2:-}"; shift 2 ;;
-            --org)  org_filter="${2:-}"; shift 2 ;;
+            --mode) [ $# -ge 2 ] || { echo "wso: --mode needs a value" >&2; return 2; }; mode="$2"; shift 2 ;;
+            --org) [ $# -ge 2 ] || { echo "wso: --org needs a value" >&2; return 2; }; org_filter="$2"; shift 2 ;;
             *) echo "wso plan: unknown option: $1" >&2; return 2 ;;
         esac
     done
@@ -277,7 +277,7 @@ cmd_migrate() {
     while [ $# -gt 0 ]; do
         case "$1" in
             --fix-remotes) fix_remotes=1; shift ;;
-            --org)         org_filter="${2:-}"; shift 2 ;;
+            --org) [ $# -ge 2 ] || { echo "wso: --org needs a value" >&2; return 2; }; org_filter="$2"; shift 2 ;;
             *) echo "wso migrate: unknown option: $1" >&2; return 2 ;;
         esac
     done
@@ -387,7 +387,7 @@ cmd_sync() {
     local org_filter="" d
     while [ $# -gt 0 ]; do
         case "$1" in
-            --org) org_filter="${2:-}"; shift 2 ;;
+            --org) [ $# -ge 2 ] || { echo "wso: --org needs a value" >&2; return 2; }; org_filter="$2"; shift 2 ;;
             *) echo "wso sync: unknown option: $1" >&2; return 2 ;;
         esac
     done
@@ -479,7 +479,7 @@ cmd_synceverything() {
     local org_filter=""
     while [ $# -gt 0 ]; do
         case "$1" in
-            --org) org_filter="${2:-}"; shift 2 ;;
+            --org) [ $# -ge 2 ] || { echo "wso: --org needs a value" >&2; return 2; }; org_filter="$2"; shift 2 ;;
             *) echo "wso synceverything: unknown option: $1" >&2; return 2 ;;
         esac
     done
@@ -495,6 +495,10 @@ cmd_synceverything() {
     # Resolve the filter BEFORE the sync, so a typo'd org fails in a second
     # rather than after fast-forwarding every repo on the machine.
     owners="$(ts_ws_owners_for_filter "$org_filter")" || return 2
+    if [ -z "$owners" ]; then
+        echo "wso: workspace.conf lists no src orgs, so there is nothing to clone." >&2
+        return 1
+    fi
     cmd_sync ${org_filter:+--org "$org_filter"}
     local owner repo host cloned=0 unlisted=0 names
     host="$(ts_ws_setting host_default github.com)"
@@ -571,7 +575,7 @@ cmd_orphans() {
     while [ $# -gt 0 ]; do
         case "$1" in
             --push) do_push=1; shift ;;
-            --org)  org_filter="${2:-}"; shift 2 ;;
+            --org) [ $# -ge 2 ] || { echo "wso: --org needs a value" >&2; return 2; }; org_filter="$2"; shift 2 ;;
             *) echo "wso orphans: unknown option: $1" >&2; return 2 ;;
         esac
     done
@@ -635,8 +639,8 @@ cmd_archive() {
     local days="" org_filter=""
     while [ $# -gt 0 ]; do
         case "$1" in
-            --days) days="${2:-}"; shift 2 ;;
-            --org)  org_filter="${2:-}"; shift 2 ;;
+            --days) [ $# -ge 2 ] || { echo "wso: --days needs a value" >&2; return 2; }; days="$2"; shift 2 ;;
+            --org) [ $# -ge 2 ] || { echo "wso: --org needs a value" >&2; return 2; }; org_filter="$2"; shift 2 ;;
             *) echo "wso archive: unknown option: $1" >&2; return 2 ;;
         esac
     done
@@ -749,7 +753,7 @@ cmd_unarchive() {
         case "$1" in
             --all)       mode="all"; shift ;;
             --undo-last) mode="undo"; shift ;;
-            --org)       mode="org"; org="${2:-}"; shift 2 ;;
+            --org)       [ $# -ge 2 ] || { echo "wso: --org needs a value" >&2; return 2; }; mode="org"; org="$2"; shift 2 ;;
             --update)    update=1; shift ;;
             -*) echo "wso unarchive: unknown option: $1" >&2; return 2 ;;
             *)  mode="name"; name="$1"; shift ;;
@@ -765,6 +769,7 @@ cmd_unarchive() {
             echo "$INFO Reversing $log"
             local s dd
             while IFS=$'\t' read -r st s dd; do
+                dd="${dd%$'\r'}"   # a run logged by the PowerShell twin ends its lines CRLF
                 [ "$st" = "archived" ] || continue
                 # Logged relative and forward-slashed, so a run written by the
                 # PowerShell side on the same tree resolves here too.
@@ -898,7 +903,7 @@ cmd_doctor() {
     printf '  root            %s\n' "$ROOT"
     for t in src public archive local scratch; do
         if [ -d "$ROOT/$t" ]; then
-            printf '  %-15s %s repo(s)\n' "$t/" "$(ts_ws_managed_repos "$t" 2>/dev/null | grep -c . || echo 0)"
+            printf '  %-15s %s repo(s)\n' "$t/" "$(ts_ws_managed_repos "$t" 2>/dev/null | grep -c . || true)"
         else
             printf '  %-15s (not created yet)\n' "$t/"
         fi

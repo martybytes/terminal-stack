@@ -202,7 +202,7 @@ function Invoke-TsWsPlan([string[]]$Arguments) {
     $org = ''
     for ($i = 0; $i -lt $Arguments.Count; $i++) {
         switch -Regex ($Arguments[$i]) {
-            '^--org$' { $org = $Arguments[$i + 1]; $i++ }
+            '^--org$' { if ($i + 1 -ge $Arguments.Count) { Write-Warning 'wso: --org needs a value'; $global:LASTEXITCODE = 2; return }; $org = $Arguments[$i + 1]; $i++ }
             default   { Write-Warning "wso plan: unknown option: $($Arguments[$i])"; return }
         }
     }
@@ -234,11 +234,11 @@ function Invoke-TsWsMigrate([string[]]$Arguments) {
     foreach ($r in $moves) {
         if (Move-TsWsRepo $r.Source $r.Dest) {
             Write-TsWsInfo "moved $(Split-Path -Leaf $r.Source) -> $(Get-TsWsRelative $r.Dest (Get-TsWsRoot))"
-            "moved`t$(ConvertTo-TsWsLogPath $r.Source $root)`t$(ConvertTo-TsWsLogPath $r.Dest $root)" | Add-Content -LiteralPath $log -Encoding utf8
+            "moved`t$(ConvertTo-TsWsLogPath $r.Source $root)`t$(ConvertTo-TsWsLogPath $r.Dest $root)" | Add-TsWsLogLine $log
             $moved++
             if ($fixRemotes) { Repair-TsWsRemote $r.Dest }
         } else {
-            "failed`t$(ConvertTo-TsWsLogPath $r.Source $root)`t$(ConvertTo-TsWsLogPath $r.Dest $root)" | Add-Content -LiteralPath $log -Encoding utf8
+            "failed`t$(ConvertTo-TsWsLogPath $r.Source $root)`t$(ConvertTo-TsWsLogPath $r.Dest $root)" | Add-TsWsLogLine $log
             $failed++
         }
     }
@@ -297,7 +297,7 @@ function Invoke-TsWsSync([string[]]$Arguments) {
     $org = ''
     for ($i = 0; $i -lt $Arguments.Count; $i++) {
         switch -Regex ($Arguments[$i]) {
-            '^--org$' { $org = $Arguments[$i + 1]; $i++ }
+            '^--org$' { if ($i + 1 -ge $Arguments.Count) { Write-Warning 'wso: --org needs a value'; $global:LASTEXITCODE = 2; return }; $org = $Arguments[$i + 1]; $i++ }
             default   { Write-Warning "wso sync: unknown option: $($Arguments[$i])"; return }
         }
     }
@@ -361,16 +361,24 @@ function Show-TsWsMissing([string]$Org = '') {
     }
 }
 
+# LF, not Add-Content's CRLF: the bash twin's `unarchive --undo-last` reads the
+# same log on a shared tree, and a trailing \r made every destination "not a
+# directory" there. (bash also strips a \r on read, for logs already written.)
+function Add-TsWsLogLine {
+    param([Parameter(Position = 0)][string]$Log, [Parameter(ValueFromPipeline)][string]$Line)
+    process { [IO.File]::AppendAllText($Log, "$Line`n", [Text.UTF8Encoding]::new($false)) }
+}
+
 function Invoke-TsWsSyncEverything([string[]]$Arguments) {
     $org = ''
     for ($i = 0; $i -lt $Arguments.Count; $i++) {
         switch -Regex ($Arguments[$i]) {
-            '^--org$' { $org = $Arguments[$i + 1]; $i++ }
+            '^--org$' { if ($i + 1 -ge $Arguments.Count) { Write-Warning 'wso: --org needs a value'; $global:LASTEXITCODE = 2; return }; $org = $Arguments[$i + 1]; $i++ }
             default   { Write-Warning "wso synceverything: unknown option: $($Arguments[$i])"; return }
         }
     }
     if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
-        Write-Warning 'wso: gh not found - needed to enumerate your orgs. See: wso doctor'; return
+        Write-Warning 'wso: gh not found - needed to enumerate your orgs. Install it (wso doctor lists how).'; $global:LASTEXITCODE = 1; return
     }
     if (-not (Test-TsWsGhReady)) {
         Write-Warning "wso: gh is not logged in - needed to enumerate your orgs. $script:TsWsGhLoginHint"; return
@@ -378,7 +386,11 @@ function Invoke-TsWsSyncEverything([string[]]$Arguments) {
     # Resolve the filter BEFORE the sync, so a typo'd org fails in a second
     # rather than after fast-forwarding every repo on the machine.
     $owners = Get-TsWsOwnersForFilter $org
-    if ($null -eq $owners) { return }
+    if ($null -eq $owners) { $global:LASTEXITCODE = 2; return }
+    if (-not @($owners).Count) {
+        Write-Warning 'wso: workspace.conf lists no src orgs, so there is nothing to clone.'
+        $global:LASTEXITCODE = 1; return
+    }
     if ($org) { Invoke-TsWsSync @('--org', $org) } else { Invoke-TsWsSync @() }
     $root = Get-TsWsRoot
     $hostName = Get-TsWsSetting 'host_default' 'github.com'
@@ -409,7 +421,7 @@ function Invoke-TsWsSyncEverything([string[]]$Arguments) {
         # Never "0 cloned." alone: an owner that could not be listed is not an
         # owner with nothing missing.
         Write-TsWsWarn "$cloned cloned, $unlisted owner(s) could not be listed."
-        return
+        $global:LASTEXITCODE = 1; return
     }
     Write-TsWsInfo "$cloned cloned."
 }
@@ -534,7 +546,7 @@ function Invoke-TsWsArchive([string[]]$Arguments) {
     foreach ($d in (Get-TsWsManagedRepos @('src'))) {
         if (-not (Test-TsWsOrgMatch $d $org)) { continue }
         $act = Get-TsWsLastActivity $d
-        $age = if ($act) { [int]($now - $act).TotalDays } else { 99999 }
+        $age = if ($act) { [int][Math]::Floor(($now - $act).TotalDays) } else { 99999 }  # floor, as bash's integer division does
         if ($age -lt $days) { continue }
         $why = Get-TsWsUnsafeReason $d
         $when = if ($act) { $act.ToString('yyyy-MM-dd') } else { 'never' }
@@ -594,7 +606,7 @@ function Invoke-TsWsArchive([string[]]$Arguments) {
         $dest = Join-Path $root "archive\$rel"
         if (Move-TsWsRepo $s.Path $dest) {
             Write-TsWsInfo "archived $(Get-TsWsRelative $s.Path $root) -> archive\$rel"
-            "archived`t$(ConvertTo-TsWsLogPath $s.Path $root)`t$(ConvertTo-TsWsLogPath $dest $root)" | Add-Content -LiteralPath $log -Encoding utf8
+            "archived`t$(ConvertTo-TsWsLogPath $s.Path $root)`t$(ConvertTo-TsWsLogPath $dest $root)" | Add-TsWsLogLine $log
             $n++
         }
     }
@@ -794,7 +806,7 @@ function Invoke-TsWsDoctor([string[]]$Arguments) {
     $ff = & git config --get pull.ff 2>$null
     "  pull.ff         $(if ($ff) { $ff } else { '(unset - expected "only")' })"
     ""
-    if ($issues -eq 0) { Write-TsWsInfo 'All good.' } else { Write-TsWsWarn "$issues issue(s) found." }
+    if ($issues -eq 0) { Write-TsWsInfo 'All good.' } else { Write-TsWsWarn "$issues issue(s) found."; $global:LASTEXITCODE = 1 }
 }
 
 # ---------------------------------------------------------------- dispatch ----

@@ -27,6 +27,20 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **`wso`: the bash and PowerShell twins agree again (09/30/2026).** A repo whose
+  remote spells the owner differently from `workspace.conf` (MartyBytes vs
+  martybytes) was filed under the remote's case on Linux, `sync` reported it
+  missing and `synceverything` cloned a second copy; every destination now uses
+  the conf's spelling, on both sides. `wso <verb> --org` with no value died
+  silently under `set -e` (and pwsh applied no filter); both refuse with "--org
+  needs a value". A run log the PowerShell side wrote ended its lines CRLF, so a
+  WSL `unarchive --undo-last` on the shared tree matched nothing; pwsh writes
+  LF and bash tolerates a `\r`. Also: archive age floors on both sides (pwsh
+  rounded, so an 89.6-day-old repo was archived at `--days 90`); pwsh sets a
+  non-zero `$LASTEXITCODE` where bash returns 1; an empty org list is reported;
+  `wso doctor` no longer prints two zeros for an empty tier; the pin cleanup
+  removes only `$env:TERMINAL_STACK_DIR =` lines from `profile.local.ps1`; the
+  pwsh doctor's mangled "other clones" note reads correctly.
 - **Hangs, escapes and small lies in the Python core (09/30/2026).** Every
   compose call, the Windows-side agents re-run, the hook adapter, `wezterm cli
   list` and `ts-verify.sh` now have timeouts (a wedged Docker hung `tstack
