@@ -53,7 +53,9 @@ def clones(tmp_path, monkeypatch):
         "GIT_CONFIG_NOSYSTEM": "1",
     }.items():
         monkeypatch.setenv(key, value)
-    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    # state_dir() directly, not XDG_STATE_HOME: Windows ignores that and uses
+    # %LOCALAPPDATA%, where a real rollback-sha lives -- and this suite wrote one.
+    monkeypatch.setattr(plat, "state_dir", lambda: tmp_path / "state")
     bare = tmp_path / "origin.git"
     git("init", "-q", "--bare", "-b", "main", str(bare))
     work = tmp_path / "work"
