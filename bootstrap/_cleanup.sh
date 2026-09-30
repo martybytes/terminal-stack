@@ -44,6 +44,25 @@ ts_clone_candidates() {
     fi
 }
 
+# On WSL: is <path> the WINDOWS install's own runtime clone? It was WSL's
+# canonical location too until 2026-09, so it stays a resolution candidate for a
+# pre-split machine -- but it is never "legacy" to move onto ext4 and never an
+# "old clone" to remove: doing either from WSL orphans the Windows install.
+# Twin: tstack/paths.py is_windows_side_clone.
+# Its own function so a test can pin the answer: /proc/version differs on every
+# CI runner (absent on macOS, MINGW on Windows' Git Bash).
+ts_cleanup_on_wsl() {
+    [ -r /proc/version ] && grep -qi microsoft /proc/version 2>/dev/null
+}
+
+ts_is_windows_side_clone() {
+    ts_cleanup_on_wsl || return 1
+    case "$(_ts_realpath "$1")" in
+        /mnt/c/[Uu]sers/*/[Aa]pp[Dd]ata/[Ll]ocal/terminal-stack/stack) return 0 ;;
+    esac
+    return 1
+}
+
 # True when <dir> is a git clone of terminal-stack (remote URL mentions it).
 ts_is_stack_clone() {
     local d="$1"
@@ -76,6 +95,7 @@ ts_find_old_clones() {
         [ -e "$d" ] || continue
         ts_is_stack_clone "$d" || continue
         ts_is_dev_clone "$d" && continue   # dev checkouts are never "old clones"
+        ts_is_windows_side_clone "$d" && continue   # the Windows install's own; not ours to offer
         rp="$(_ts_realpath "$d")"
         [ "$rp" = "$current" ] && continue
         case "$seen" in *" $rp "*) continue ;; esac
@@ -201,7 +221,14 @@ ts_backup_file() {
     stamp="$(date +%Y%m%d)"
     base="$f.bak.$stamp"; bak="$base"; n=1
     while [ -e "$bak" ]; do bak="$base.$n"; n=$((n+1)); done
-    cp -a -- "$f" "$bak" 2>/dev/null && echo "$INFO backed up $f -> $bak"
+    if cp -a -- "$f" "$bak" 2>/dev/null; then
+        echo "$INFO backed up $f -> $bak"
+        return 0
+    fi
+    # Say so, and return non-zero: the caller must not delete what it could
+    # not back up. This used to hide the error and the removal went ahead.
+    echo "$WARN could not back up $f (permissions? locked?)"
+    return 1
 }
 
 # Interactive cleanup checklist. <current> is the clone to KEEP (never offered).
@@ -284,7 +311,9 @@ ts_cleanup_menu() {
     for i in $(seq 0 $((n - 1))); do
         [ "${ticks[$i]}" = "1" ] || continue
         d="${paths[$i]}"
-        [ "${kinds[$i]}" = "file" ] && ts_backup_file "$d"
+        if [ "${kinds[$i]}" = "file" ] && ! ts_backup_file "$d"; then
+            echo "$WARN not removing $d: no backup"; continue
+        fi
         if rm -rf -- "$d"; then echo "$INFO removed $d"; removed=$((removed + 1))
         else echo "$WARN failed to remove $d"; fi
     done

@@ -134,8 +134,11 @@ fi
 # master list: bootstrap/_cleanup.sh ts_clone_candidates.
 if [ ! -d "$TARGET_DIR/.git" ]; then
     LEGACY=""
-    for c in "/mnt/c/Users/$WIN_USER/AppData/Local/terminal-stack/stack" \
-             "/mnt/c/Users/$WIN_USER/terminal-stack" \
+    # NOT /mnt/c/Users/$WIN_USER/AppData/Local/terminal-stack/stack: that was
+    # WSL's canonical location too until 2026-09, but on a combined machine it is
+    # the WINDOWS install's live clone, and "Move" (the default answer) dragged it
+    # onto ext4 and orphaned the Windows side. A WSL install clones its own.
+    for c in "/mnt/c/Users/$WIN_USER/terminal-stack" \
              /mnt/c/DATA/Workspace/terminal-stack \
              "$HOME/code/terminal-stack" \
              "$HOME/terminal-stack"; do
@@ -159,8 +162,16 @@ if [ ! -d "$TARGET_DIR/.git" ]; then
                     # shellcheck source=/dev/null
                     . "$LEGACY/bootstrap/_cleanup.sh"
                     if command -v ts_relocate_clone >/dev/null 2>&1; then
-                        ts_relocate_clone "$LEGACY" "$TARGET_DIR" \
-                            || echo "$WARN Move failed; cloning fresh instead."
+                        if ! ts_relocate_clone "$LEGACY" "$TARGET_DIR"; then
+                            # A failed cross-device move can leave a half-populated
+                            # target, and `git clone` into a non-empty dir aborts
+                            # under set -e with the install half done.
+                            if [ -e "$TARGET_DIR" ]; then
+                                echo "$WARN Move failed and left $TARGET_DIR behind; inspect it, remove it, and re-run."
+                                exit 1
+                            fi
+                            echo "$WARN Move failed; cloning fresh instead."
+                        fi
                     else
                         echo "$WARN This clone predates the move routine; cloning fresh (old clone offered for cleanup later)."
                     fi

@@ -547,8 +547,13 @@ def test_declining_the_prompt_keeps_the_original_and_still_repoints(
 def test_the_confirm_defaults_to_no_when_stdin_is_not_a_terminal(monkeypatch, capsys):
     """A script that pipes into this must not lose a directory to a blank read."""
     monkeypatch.setattr("sys.stdin", io.StringIO(""))
+    # And never the terminal either: the prompt goes through tstack.confirm,
+    # which reads /dev/tty or nothing. Under pytest there is no tty to open.
+    from tstack.wizard.console import Console
+
+    monkeypatch.setattr(Console, "open", classmethod(lambda cls, tty="/dev/tty": cls()))
     assert workspace_cmd._confirm("Remove it?", assume_yes=False) is False
-    assert "assuming no" in capsys.readouterr().err
+    assert "no terminal to confirm on" in capsys.readouterr().err
     assert workspace_cmd._confirm("Remove it?", assume_yes=True) is True
 
 
