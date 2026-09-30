@@ -49,8 +49,14 @@ ts_clone_candidates() {
 # pre-split machine -- but it is never "legacy" to move onto ext4 and never an
 # "old clone" to remove: doing either from WSL orphans the Windows install.
 # Twin: tstack/paths.py is_windows_side_clone.
+# Its own function so a test can pin the answer: /proc/version differs on every
+# CI runner (absent on macOS, MINGW on Windows' Git Bash).
+ts_cleanup_on_wsl() {
+    [ -r /proc/version ] && grep -qi microsoft /proc/version 2>/dev/null
+}
+
 ts_is_windows_side_clone() {
-    { [ -r /proc/version ] && grep -qi microsoft /proc/version 2>/dev/null; } || return 1
+    ts_cleanup_on_wsl || return 1
     case "$(_ts_realpath "$1")" in
         /mnt/c/[Uu]sers/*/[Aa]pp[Dd]ata/[Ll]ocal/terminal-stack/stack) return 0 ;;
     esac
