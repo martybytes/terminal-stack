@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -20,7 +21,10 @@ WSO = ROOT / "bootstrap" / "wso.sh"
 LIB = ROOT / "bootstrap" / "_workspace.sh"
 PS_CMD = (ROOT / "bootstrap" / "_workspace_cmd.ps1").read_text(encoding="utf-8")
 PS_LIB = (ROOT / "bootstrap" / "_workspace.ps1").read_text(encoding="utf-8")
-needs_bash = pytest.mark.skipif(BASH is None, reason="needs bash")
+needs_bash = pytest.mark.skipif(
+    BASH is None or sys.platform == "win32",
+    reason="needs bash; on Windows the pwsh twin is the implementation",
+)
 
 
 def _env(tmp_path: Path, conf: str = "") -> dict[str, str]:
@@ -85,7 +89,8 @@ def test_a_trailing_org_flag_is_a_usage_error_not_a_silent_exit(tmp_path):
 @needs_bash
 def test_the_pin_cleanup_removes_assignments_only(tmp_path):
     """`sed '/TERMINAL_STACK_DIR/d'` also deleted comments and conditionals that
-    merely mentioned the variable; the pwsh twin only ever removed assignments."""
+    merely mentioned the variable; the pwsh twin only ever removed assignments.
+    (And `sed -i` itself failed on macOS, whose sed wants `-i ''`.)"""
     plps = tmp_path / "profile.local.ps1"
     plps.write_text(
         "# TERMINAL_STACK_DIR pins the clone\n"
@@ -94,14 +99,22 @@ def test_the_pin_cleanup_removes_assignments_only(tmp_path):
         encoding="utf-8",
     )
     src = (ROOT / "bootstrap/_cleanup.sh").read_text(encoding="utf-8")
-    line = next(l for l in src.splitlines() if "sed -i" in l and "TERMINAL_STACK_DIR" in l)
-    cmd = line.strip().replace('"$plps"', f'"{plps}"')
-    assert (
-        subprocess.run(
-            [BASH, "-c", cmd], check=False, timeout=30, start_new_session=True
-        ).returncode
-        == 0
+    lines = [
+        ln.strip()
+        for ln in src.splitlines()
+        if "TERMINAL_STACK_DIR[[:space:]]*=" in ln or '"$plps.tmp.$$" "$plps"' in ln
+    ]
+    assert len(lines) == 2, lines
+    cmd = f'plps="{plps.as_posix()}"\n' + "\n".join(lines)
+    got = subprocess.run(
+        [BASH, "-c", cmd],
+        check=False,
+        timeout=30,
+        start_new_session=True,
+        capture_output=True,
+        text=True,
     )
+    assert got.returncode == 0, got.stderr
     assert plps.read_text(encoding="utf-8") == (
         "# TERMINAL_STACK_DIR pins the clone\nif ($env:TERMINAL_STACK_DIR) { Write-Host hi }\n"
     )
