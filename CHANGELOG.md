@@ -40,6 +40,12 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **`tstack agents agentmemory on|repair|off` wires the WSL side too (09/30/2026).**
+  On a combined machine the command handed off to Windows and stopped, so it
+  reported the Windows plugin files as wired while the WSL-side Claude Code
+  and Cursor plugin caches had none of the edits - every WSL session captured
+  nothing, and `tstack doctor` said so while `repair` said all was well. The
+  WSL adapter now runs first (`--check` for `status`), then the Windows side.
 - **A piped stdin can no longer answer a destructive prompt (09/30/2026).**
   `tstack services reset --purge` and `migrate-volumes` opened `/dev/tty` as one
   read-write text handle, which always fails on a terminal, then fell back to
