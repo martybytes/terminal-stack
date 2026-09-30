@@ -1,0 +1,170 @@
+#!/usr/bin/env python3
+"""Splice the stack-owned hook ENTRIES of this template into the live
+~/.cursor/hooks.json instead of replacing the file. POSIX twin of
+bootstrap/_merge_cursor_hooks.ps1 (Windows); keep the two ownership rules
+identical.
+
+Why a key splice (dot_claude/modify_settings.json.tmpl) is not enough here:
+everything in this file lives under ONE top-level `hooks` key, and other tools
+put their entries in the same event arrays we use. agentmemory's Cursor wiring
+(`tstack agents`, via bootstrap/ts-agentmemory.sh on WSL/Linux/macOS) adds
+seven hooks, two of which -- `stop` and `postToolUse` -- are events our TTS
+hooks are already in. Splicing the `hooks` value wholesale would delete them
+just as effectively as the whole-file target this script replaced did: on
+2026-09-30 `chezmoi diff` showed every AGENTMEMORY_URL entry about to go, and
+`tstack update` refused the apply. docs/decisions.md § "Why `~/.cursor/hooks.json`
+needs per-entry ownership" called this day: "The day Cursor is wired to
+agentmemory inside WSL, it needs a `modify_` script."
+
+So ownership is per ENTRY. Each event array is rebuilt as *our rendered
+entries, then every foreign entry that was already there*. An entry is ours if
+its command references one of the markers below, or if it is identical to
+something we are rendering right now. An event we no longer render and nobody
+else uses disappears -- that is how turning TTS off removes our hooks without
+touching anyone else's. Every other top-level key, and the live file's event
+order, survives.
+
+Ordering is ours-then-theirs, which is also what agentmemory's installer
+produces (it appends itself after everything it does not own), so the two
+converge instead of rewriting the file on each other's account.
+
+chezmoi hands us the current target contents on stdin and takes stdout as the
+new contents. We refuse rather than guess: if the live file is present but
+unparseable, we echo it back untouched instead of destroying hand-edits.
+"""
+import json
+import sys
+from collections import OrderedDict
+
+# The stack-owned fragment. chezmoi renders this before the script runs.
+FRAGMENT = r"""
+{
+  "version": 1,
+  "hooks": {
+{{- if eq (index . "ccTtsEnabled" | default "false") "true" }}
+    "afterFileEdit": [
+      {
+        "command": "cat > /dev/null",
+        "timeout": 1
+      }
+    ],
+    "afterAgentResponse": [
+      {
+        "command": "{{ .chezmoi.homeDir }}/.cursor/hooks/cursor-tts-response.sh",
+        "timeout": 15
+      }
+    ],
+    "stop": [
+      {
+        "command": "{{ .chezmoi.homeDir }}/.cursor/hooks/cursor-tts.sh",
+        "timeout": 15
+      }
+    ],
+    "postToolUse": [
+      {
+        "matcher": "AskQuestion|AskUserQuestion",
+        "command": "{{ .chezmoi.homeDir }}/.cursor/hooks/cursor-tts-input.sh",
+        "timeout": 15
+      }
+    ]
+{{- end }}
+  }
+}
+"""
+
+# What this stack has ever written into ~/.cursor/hooks.json, identified by what
+# the entry's command references. Same list as the .ps1 twin. An entry matching
+# none of these -- and not identical to something we render right now -- belongs
+# to someone else and must survive: agentmemory's hooks/agentmemory/*.mjs, or
+# anything the user added by hand.
+MARKERS = (
+    "terminal-stack",  # AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe
+    "cursor-tts",  # .cursor/hooks/cursor-tts*.sh (POSIX) / *.ps1 (legacy Windows)
+    "cat > /dev/null",  # our afterFileEdit no-op. Needs to be a marker, not just
+    # an exact match against the render: with TTS off we render no hooks at
+    # all, and it has to go then too.
+)
+
+
+def canonical(value):
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
+def is_ours(entry, ours):
+    command = entry.get("command", "") if isinstance(entry, dict) else ""
+    if not isinstance(command, str):
+        command = ""
+    if any(marker in command for marker in MARKERS):
+        return True
+    canon = canonical(entry)
+    return any(canonical(o) == canon for o in ours)
+
+
+def emit(text):
+    # Binary, not sys.stdout.write: text mode translates \n on the way out, so
+    # on a CRLF host every apply adds a \r that the next apply reads back and
+    # doubles. This script's contract is that only OUR entries change; the
+    # bytes it writes are part of that.
+    sys.stdout.buffer.write(text.encode("utf-8"))
+    raise SystemExit(0)
+
+
+def refuse(reason, live_raw):
+    # Echoing the input back is a no-op apply; a destroyed hand-edit would not
+    # be recoverable.
+    sys.stderr.write(
+        "modify_hooks.json: live ~/.cursor/hooks.json %s; leaving it untouched.\n" % reason
+    )
+    emit(live_raw)
+
+
+live_raw = sys.stdin.read()
+fragment = json.loads(FRAGMENT, object_pairs_hook=OrderedDict)
+
+# No live file yet (fresh machine): nothing to preserve, so the fragment IS the
+# file -- exactly the plain copy the whole-file target used to do.
+if not live_raw.strip():
+    emit(json.dumps(fragment, indent=2) + "\n")
+
+try:
+    live = json.loads(live_raw, object_pairs_hook=OrderedDict)
+except ValueError as exc:
+    refuse("is not valid JSON (%s)" % exc, live_raw)
+
+if not isinstance(live, dict):
+    refuse("is not a JSON object", live_raw)
+
+rendered_hooks = fragment.get("hooks")
+if not isinstance(rendered_hooks, dict):
+    rendered_hooks = OrderedDict()
+live_hooks = live.get("hooks")
+if not isinstance(live_hooks, dict):
+    live_hooks = OrderedDict()
+
+# Live event order first so an untouched file keeps its shape, then any event
+# only the template has.
+events = list(live_hooks.keys())
+events += [ev for ev in rendered_hooks if ev not in live_hooks]
+
+merged_hooks = OrderedDict()
+for event in events:
+    ours = rendered_hooks.get(event, [])
+    if not isinstance(ours, list):
+        ours = [ours]
+    theirs = live_hooks.get(event, [])
+    if not isinstance(theirs, list):
+        theirs = [theirs]
+    foreign = [e for e in theirs if e is not None and not is_ours(e, ours)]
+    entries = list(ours) + foreign
+    # An event we no longer render and nobody else uses disappears.
+    if entries:
+        merged_hooks[event] = entries
+
+# Splice: `version` and `hooks` are ours; every other top-level key -- and the
+# live file's key order -- is preserved.
+merged = OrderedDict(live)
+if "version" in fragment:
+    merged["version"] = fragment["version"]
+merged["hooks"] = merged_hooks
+
+emit(json.dumps(merged, indent=2) + "\n")

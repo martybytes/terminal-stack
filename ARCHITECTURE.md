@@ -21,6 +21,7 @@ terminal-stack/
 ├── dot_config/starship.toml        → ~/.config/starship.toml (WSL)
 ├── dot_claude/modify_settings.json.tmpl → ~/.claude/settings.json (spliced per key, not replaced)
 ├── dot_claude/hooks/...            → ~/.claude/hooks/... (WSL)
+├── dot_cursor/modify_hooks.json.tmpl → ~/.cursor/hooks.json (spliced per entry, not replaced)
 ├── dot_codex/...                   → ~/.codex/... (WSL; also mirrored to Windows)
 └── windows/                        ← NOT applied by chezmoi
     ├── .wezterm.lua.tmpl           → /mnt/c/Users/<you>/.wezterm.lua (sync-hook template)

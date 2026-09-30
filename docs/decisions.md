@@ -1571,9 +1571,30 @@ same array order instead of rewriting the file on each other's account every run
 by an on → off → on round trip that returns to exactly four stack entries and seven
 agentmemory ones, with a second identical run reporting no change at all.
 
-The WSL-side `dot_cursor/hooks.json.tmpl` is still a whole-file chezmoi target, for the same
-reason as its Claude counterpart: nothing else writes the WSL copy today. The day Cursor is
-wired to agentmemory inside WSL, it needs a `modify_` script.
+The POSIX side was a whole-file chezmoi target (`dot_cursor/hooks.json.tmpl`) for the same
+reason as its Claude counterpart: nothing else wrote the WSL copy. That ended on 2026-09-30,
+when `tstack agents` started running `bootstrap/ts-agentmemory.sh` on the WSL side and
+installed agentmemory's seven Cursor hooks into `~/.cursor/hooks.json` there. The next
+`tstack update` showed exactly the predicted diff — every `AGENTMEMORY_URL=…` entry about to
+go — and refused the apply. It is now `dot_cursor/modify_hooks.json.tmpl`, a `modify_`
+script with the same three markers and the same ours-then-theirs rule as the `.ps1`
+(`tests/test_cursor_hooks_splice.py` compares the marker lists and drives the script through
+an on → off round trip against the agentmemory-wired file).
+
+### Why `ts-apply.sh` does not count a `modify_` target as a conflict
+
+The refusal above was the second bug. `bootstrap/ts-apply.sh` lists as conflicts every
+target `chezmoi status` marks in column 1 — destination differs from what chezmoi last wrote —
+because that column is what makes a plain `chezmoi apply` stop and ask. A hand-edited
+`modify_` target is marked the same way, but chezmoi does **not** ask about it (checked against
+2.70 with a sandbox source: the plain file got the
+`has changed since chezmoi last wrote it` prompt, the `modify_` file was re-spliced
+silently). That is the right behaviour, because the script rebuilds the file from whatever
+is there; another app writing it is the normal case for every part-owned file we have. So
+`ts_apply_conflicts` now asks `chezmoi source-path` for each candidate and drops those whose
+source is `modify_*`. Without that, one Cursor hook written by agentmemory made `tstack
+update` refuse the **whole** apply — with no TTY to ask on and exit 4 — over a file the apply
+would have handled correctly.
 
 
 ## Why the agentmemory harness wiring lives here
