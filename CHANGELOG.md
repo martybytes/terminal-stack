@@ -61,7 +61,10 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
   unparseable file echoed back untouched. And `tstack apply`/`tstack update`
   no longer count a `modify_` target as a conflict: chezmoi re-splices those
   without asking, so listing them refused the whole apply, with no TTY, over
-  one hook another tool wrote.
+  one hook another tool wrote. Running that script on the macOS CI runner for
+  the first time also caught a `mapfile` in it: bash 3.2 has none, so
+  `install-mac.sh`'s apply step died at the conflict scan. It is a `while
+  read` loop now.
 
 - **A piped stdin can no longer answer a destructive prompt (09/30/2026).**
   `tstack services reset --purge` and `migrate-volumes` opened `/dev/tty` as one

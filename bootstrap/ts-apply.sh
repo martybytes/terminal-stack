@@ -147,7 +147,13 @@ ts_apply_finish() {
     exec "$CZ" apply $VERBOSE
 }
 
-mapfile -t CONFLICTS < <(ts_apply_conflicts)
+# Not mapfile: macOS ships bash 3.2, and this script runs there under
+# install-mac.sh. tests/test_cursor_hooks_splice.py runs it on the macOS CI
+# runner, which is what caught the mapfile.
+CONFLICTS=()
+while IFS= read -r _conflict; do
+    [ -n "$_conflict" ] && CONFLICTS+=("$_conflict")
+done < <(ts_apply_conflicts)
 
 if [ "${#CONFLICTS[@]}" -eq 0 ]; then
     [ "$CHECK" -eq 1 ] && { echo "$INFO no conflicts; 'chezmoi apply' would not ask anything."; exit 0; }
