@@ -30,7 +30,7 @@ import urllib.request
 from collections.abc import Callable
 from pathlib import Path
 
-from .. import engine, headroom_token, paths, stacks, store
+from .. import confirm, engine, headroom_token, paths, stacks, store
 
 HELP = """tstack services - the local Docker service stacks: bring them up, prove they work.
 
@@ -740,36 +740,17 @@ def cmd_migrate_volumes(svc: Services) -> None:
         return
     # Nothing is destroyed here, so this needs consent but not a typed phrase: the
     # old volume survives as the rollback.
-    reply = (
-        "y" if svc.args.assume_yes else _ask("Copy these now? The old volumes are kept. [y/N]: ")
-    )
-    if not reply.lower().startswith("y"):
+    if not confirm.confirm(
+        "Copy these now? The old volumes are kept.",
+        assume_yes=svc.args.assume_yes,
+        tool="tstack services",
+    ):
         out.note("nothing copied")
         return
     for old, new in pending:
         if not _volume_copy(svc, old, new):
             out.bad(f"{old} -> {new} failed")
     out.note("when the stack is proven on the new volumes: docker volume rm <old>")
-
-
-def _ask(prompt: str) -> str:
-    """Read consent from the terminal, not from stdin.
-
-    /dev/tty on purpose, exactly as the bash twin does: `tstack services ... | tee`
-    must still be able to ask, and a piped stdin must never be able to answer a
-    destructive prompt on the user's behalf.
-    """
-    try:
-        with open("/dev/tty", "r+", encoding="utf-8") as tty:
-            tty.write(prompt)
-            tty.flush()
-            return (tty.readline() or "").strip()
-    except OSError:
-        pass
-    try:
-        return input(prompt).strip()
-    except (OSError, EOFError):
-        return ""
 
 
 def _volume_copy(svc: Services, old: str, new: str) -> bool:
@@ -947,8 +928,12 @@ def cmd_reset(svc: Services) -> None:
             out.bad("backup failed - nothing was destroyed")
             raise SystemExit(2)
         phrase = "destroy all memories" if svc.args.purge else "destroy headroom data"
-        print(f"\nThis will DESTROY volumes. Type exactly: {phrase}")
-        if _ask("") != phrase:
+        # From the terminal, never stdin: a pipe must not be able to type this.
+        if not confirm.typed(
+            f"\nThis will DESTROY volumes. Type exactly: {phrase}\n> ",
+            phrase,
+            tool="tstack services",
+        ):
             out.note("phrase did not match - nothing was destroyed")
             raise SystemExit(1)
     out.section("reset")

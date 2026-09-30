@@ -27,7 +27,7 @@ import sys
 import time
 from pathlib import Path
 
-from .. import paths, proc, store
+from .. import confirm, paths, proc, store
 from .. import platform as plat
 
 HELP = """tstack mux - WezTerm multiplexer domain: keep panes alive when the GUI dies.
@@ -175,28 +175,7 @@ def sock_dirs() -> list[Path]:
 
 
 def _confirm(prompt: str, assume_yes: bool) -> bool:
-    if assume_yes:
-        return True
-    try:
-        with open("/dev/tty", "r+", encoding="utf-8") as tty:
-            tty.write(f"{prompt} [y/N]: ")
-            tty.flush()
-            answer = (tty.readline() or "").strip()
-    except OSError:
-        if not sys.stdin.isatty():
-            print(
-                "tstack mux: no terminal to confirm on - re-run with -y if you mean it.",
-                file=sys.stderr,
-            )
-            return False
-        try:
-            answer = input(f"{prompt} [y/N]: ").strip()
-        except (OSError, EOFError):
-            return False
-    if answer.lower() in ("y", "yes"):
-        return True
-    print("aborted.")
-    return False
+    return confirm.confirm(prompt, assume_yes=assume_yes, tool="tstack mux")
 
 
 def _apply() -> None:

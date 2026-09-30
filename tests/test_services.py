@@ -205,7 +205,7 @@ def test_migrate_volumes_refuses_to_report_all_clear_without_an_engine(tree, cal
 
 def test_migrate_volumes_needs_consent_and_keeps_the_old_volume(tree, calls, monkeypatch, capsys):
     monkeypatch.setattr(stacks, "volumes_pending", lambda kind: [("old", "new")])
-    monkeypatch.setattr(services, "_ask", lambda prompt: "n")
+    monkeypatch.setattr(services.confirm, "ask", lambda prompt: "n")
     svc = build(tree, "migrate-volumes")
     svc.engine_ok = True
     services.cmd_migrate_volumes(svc)
@@ -674,7 +674,7 @@ def test_the_backup_root_never_hard_codes_one_persons_path(monkeypatch):
 
 
 def test_reset_destroys_nothing_without_the_typed_phrase(tree, calls, monkeypatch, capsys):
-    monkeypatch.setattr(services, "_ask", lambda prompt: "yes please")
+    monkeypatch.setattr(services.confirm, "ask", lambda prompt: "yes please")
     monkeypatch.setattr(services, "backup_all", lambda svc: True)
     svc = build(tree, "reset", "--destroy-data")
     svc.engine_ok = True
@@ -695,14 +695,14 @@ def test_only_purge_removes_a_memory_volume(tree, calls, monkeypatch, store_off)
     monkeypatch.setattr(services, "backup_all", lambda svc: True)
     store_off["agentmemoryEnabled"] = "on"
 
-    monkeypatch.setattr(services, "_ask", lambda prompt: "destroy headroom data")
+    monkeypatch.setattr(services.confirm, "ask", lambda prompt: "destroy headroom data")
     svc = build(tree, "reset", "--destroy-data")
     svc.engine_ok = True
     services.cmd_reset(svc)
     assert not any("volume rm" in " ".join(a) for a in calls["docker"])
 
     calls["docker"].clear()
-    monkeypatch.setattr(services, "_ask", lambda prompt: "destroy all memories")
+    monkeypatch.setattr(services.confirm, "ask", lambda prompt: "destroy all memories")
     svc = build(tree, "reset", "--purge")
     svc.engine_ok = True
     services.cmd_reset(svc)

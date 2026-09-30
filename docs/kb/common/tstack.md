@@ -7,7 +7,7 @@ commands any more, and no aliases for them.
 |---|---|
 | `tstack config` | view and change saved settings (the table below) |
 | `tstack ui` | every setting in one screen; offers to install Textual the first time |
-| `tstack doctor` | diagnose the install; `--quiet`, `--json`, `--repair` (see below) |
+| `tstack doctor` | diagnose the install; `--quiet`, `--json`, `--repair` runs the fixes (branch, Headroom token, clone location, cleanup checklist), each confirmed at the terminal |
 | `tstack update` | pull the latest stack and re-apply |
 | `tstack rollback` | undo the last update |
 | `tstack reinstall` | pull, then run this platform's installer again from the clone - the one-liner, locally; `--no-pull`, `--dry-run` |

@@ -34,7 +34,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .. import checks, engine, headroom_token, herdr, paths, proc, stacks, store
+from .. import checks, confirm, engine, headroom_token, herdr, paths, proc, stacks, store
 from .. import platform as plat
 from ..checks import Report
 from . import agents
@@ -856,6 +856,14 @@ def check_clone_location(report: Report, src: Path | None) -> None:
             "clone-location",
             "clone is a dev checkout (workspace tier path) - deliberate pin, left alone",
         )
+    elif paths.is_windows_side_clone(src):
+        # Shared with the Windows install from before the split. Moving it would
+        # orphan that install; the fix is a clone of WSL's own.
+        report.note(
+            "clone-location",
+            "WSL still shares the Windows install's clone; re-run the WSL install "
+            f"one-liner to give WSL its own at {canon} (it clones fresh and repoints chezmoi)",
+        )
     else:
         report.note(
             "clone-location",
@@ -883,6 +891,8 @@ def _headroom_stale(live: str) -> tuple[bool, list[Path]]:
     machine_stale = headroom_token.read() != live
     clones = []
     for clone in paths.clones():
+        if paths.is_windows_side_clone(clone.path):
+            continue  # a WSL install writes nothing under /mnt/c; Windows repairs its own
         env = _headroom_env(clone.path)
         value = stacks.env_value(env, HEADROOM_TOKEN_KEY) if env.is_file() else ""
         if value and value != live:
@@ -1020,7 +1030,13 @@ def check_clone_branch(report: Report, src: Path | None) -> None:
 
 
 def check_other_clones(report: Report, src: Path | None) -> None:
-    others = [c.path for c in paths.clones() if src is None or c.path.resolve() != src.resolve()]
+    others = [
+        c.path
+        for c in paths.clones()
+        if (src is None or c.path.resolve() != src.resolve())
+        # The Windows side's own clone is not "other": it is the other side's.
+        and not paths.is_windows_side_clone(c.path)
+    ]
     if others:
         listed = ", ".join(str(p) for p in others)
         report.note(
@@ -1155,11 +1171,13 @@ def render(report: Report, quiet: bool) -> list[str]:
 
 
 def repair(src: Path | None) -> int:
-    """Delegate the destructive half.
+    """Fix what is fixable, confirming each step, and say how it went.
 
     Clone relocation and the cleanup checklist live in bootstrap/_cleanup.{sh,ps1},
-    which the installers also use. They are not doctor's twins and are not
-    doctor's to reimplement.
+    which the installers also use; they are RUN here, attached to the terminal so
+    their prompts work, rather than reimplemented. This used to print the path
+    of the checklist with "follow the prompts" and return 0 without running it,
+    so every hint that said "repair: tstack doctor --repair" led nowhere.
     """
     if src is None:
         print(
@@ -1168,15 +1186,83 @@ def repair(src: Path | None) -> int:
         )
         return 1
     print("==> tstack doctor --repair")
-    repair_clone_branch(src)
-    repair_headroom_token()
+    rc = 0
+    rc |= repair_clone_branch(src)
+    rc |= repair_headroom_token()
+    rc |= repair_clone_location(src)
     cleanup = src / "bootstrap" / ("_cleanup.ps1" if plat.kind() == plat.WINDOWS else "_cleanup.sh")
     if not cleanup.is_file():
         print(f"  !! {cleanup} not found; cannot run the cleanup checklist.", file=sys.stderr)
         return 1
-    print(f"  cleanup checklist: {cleanup}")
-    print("  (relocation and clone cleanup are interactive; follow the prompts)")
-    return 0
+    print("  cleanup checklist (old clones and leftover files; nothing is removed unconfirmed):")
+    rc |= _run_attached(_cleanup_argv(cleanup, "menu", src))
+    return 1 if rc else 0
+
+
+def _cleanup_argv(cleanup: Path, what: str, src: Path, dest: Path | None = None) -> list[str]:
+    if plat.kind() == plat.WINDOWS:
+        pwsh = plat.find_pwsh() or "pwsh"
+        call = (
+            f"Invoke-TsCleanupMenu '{src}'"
+            if what == "menu"
+            else f"if (-not (Move-TsClone -Source '{src}' -Dest '{dest}')) {{ exit 1 }}"
+        )
+        return [
+            pwsh,
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            f". '{cleanup}'; {call}",
+        ]
+    call = f'ts_cleanup_menu "{src}"' if what == "menu" else f'ts_relocate_clone "{src}" "{dest}"'
+    return ["bash", "-c", f'. "{cleanup}"; {call}']
+
+
+def _run_attached(argv: list[str]) -> int:
+    """Inherit the terminal: these scripts ask questions on /dev/tty. Deliberately
+    not proc.capture (no new session, no captured output)."""
+    try:
+        return subprocess.run(argv, check=False).returncode
+    except OSError as exc:
+        print(f"  !! could not run {argv[0]}: {exc}", file=sys.stderr)
+        return 1
+
+
+def repair_clone_location(src: Path) -> int:
+    """Offer to move a legacy-path runtime clone to the canonical location.
+
+    Never for a dev clone (a deliberate pin), and never for the clone WSL shares
+    with the Windows install: moving that one onto ext4 orphans the Windows
+    side. There the right fix is a fresh WSL clone, which the installer does.
+    """
+    canon = paths.canonical_clone_dir()
+    if not canon or paths.is_dev_clone(src):
+        return 0
+    try:
+        if src.resolve() == canon.resolve():
+            return 0
+    except OSError:
+        if str(src) == str(canon):
+            return 0
+    if paths.is_windows_side_clone(src):
+        print(
+            "  clone location: WSL shares the Windows install's clone. Not moving it -\n"
+            "  re-run the WSL install one-liner; it clones fresh and repoints chezmoi."
+        )
+        return 0
+    if canon.exists():
+        print(
+            f"  clone location: {canon} already exists; the cleanup checklist below offers the extra one."
+        )
+        return 0
+    if not confirm.confirm(f"  move the runtime clone {src} -> {canon}", tool="tstack doctor"):
+        return 0
+    cleanup = src / "bootstrap" / ("_cleanup.ps1" if plat.kind() == plat.WINDOWS else "_cleanup.sh")
+    if not cleanup.is_file():
+        print(f"  !! {cleanup} not found; cannot move the clone.", file=sys.stderr)
+        return 1
+    return _run_attached(_cleanup_argv(cleanup, "move", src, canon))
 
 
 def repair_clone_branch(src: Path) -> int:
@@ -1196,7 +1282,10 @@ def repair_clone_branch(src: Path) -> int:
         print(f"  !! {src} has uncommitted changes; leaving its branch alone.", file=sys.stderr)
         return 1
     print(f"  clone branch: '{branch or 'detached'}' -> {paths.RELEASE_BRANCH}")
-    _run(["git", "-C", str(src), "fetch", "--quiet", "--prune", "origin"])
+    fetched = _run(["git", "-C", str(src), "fetch", "--quiet", "--prune", "origin"], timeout=300)
+    if fetched is None or fetched.returncode != 0:
+        print("  !! git fetch failed (offline?); branch left alone.", file=sys.stderr)
+        return 1
     got = _run(["git", "-C", str(src), "checkout", paths.RELEASE_BRANCH])
     if got is None or got.returncode != 0:
         got = _run(
@@ -1213,7 +1302,10 @@ def repair_clone_branch(src: Path) -> int:
     if got is None or got.returncode != 0:
         print(f"  !! could not switch {src} to {paths.RELEASE_BRANCH}.", file=sys.stderr)
         return 1
-    _run(["git", "-C", str(src), "pull", "--ff-only"])
+    pulled = _run(["git", "-C", str(src), "pull", "--ff-only"], timeout=300)
+    if pulled is None or pulled.returncode != 0:
+        print(f"  !! on {paths.RELEASE_BRANCH}, but git pull --ff-only failed.", file=sys.stderr)
+        return 1
     print(f"  now on {paths.RELEASE_BRANCH}")
     return 0
 

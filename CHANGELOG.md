@@ -27,6 +27,36 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **A piped stdin can no longer answer a destructive prompt (09/30/2026).**
+  `tstack services reset --purge` and `migrate-volumes` opened `/dev/tty` as one
+  read-write text handle, which always fails on a terminal, then fell back to
+  `input()` - so `echo "destroy all memories" | tstack services reset --purge`
+  deleted every volume with nobody at the keyboard. One helper
+  (`tstack/confirm.py`) now asks on the controlling terminal or refuses; the
+  `mux`, `ui` and `workspace` prompts use it too, and a test greps the package
+  for the old pattern.
+- **The WSL installer no longer offers to move the Windows install's clone
+  (09/30/2026).** `/mnt/c/Users/<you>/AppData/Local/terminal-stack/stack` was
+  scanned as a "legacy" clone with Move as the default answer; on a combined
+  machine it is the Windows side's live clone, and Enter would have dragged it
+  onto ext4 and orphaned that install. WSL now leaves it alone everywhere: the
+  installer clones fresh, the cleanup menu never lists it, `tstack doctor` says
+  "WSL still shares the Windows install's clone" instead of "legacy - move it",
+  and neither `--repair` nor the Headroom token repair writes to it.
+- **`tstack doctor --repair` repairs (09/30/2026).** It printed the cleanup
+  checklist's path with "follow the prompts" and returned 0 without running it;
+  it now runs the checklist and the relocation offer attached to the terminal,
+  checks `git fetch`/`pull` before saying "now on main", and exits non-zero when
+  any step failed.
+- **The Windows installer stops when you quit the questionnaire (09/30/2026).**
+  The bootstrap's "quit - nothing was installed or changed" was a bare `return`
+  that `install.ps1` never saw, so it carried on into the profile sync. It is
+  now exit 3, honoured like the POSIX installers; native `git pull`/`clone`
+  failures also stop the install instead of continuing with a stale tree, and
+  the cleanup menu skips itself instead of blocking on `Read-Host` when there is
+  no terminal.
+- **Cleanup never deletes what it could not back up (09/30/2026).** Both twins
+  hid the copy error (pwsh even printed "backed up") and removed the file anyway.
 - **`wso synceverything` no longer says "0 cloned." when gh is logged out
   (09/30/2026).** Every `gh repo list` failed with its error discarded, so each
   owner looked complete - the default on WSL, where the Windows `gh.exe` is logged

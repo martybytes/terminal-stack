@@ -169,12 +169,20 @@ function Find-TsStray {
 
 # Back up a file as <path>.bak.YYYYMMDD[.N] before removal (repo convention).
 function Backup-TsFile([string]$f) {
-    if (-not (Test-Path $f)) { return }
+    if (-not (Test-Path $f)) { return $true }
     $stamp = Get-Date -Format 'yyyyMMdd'
     $bak = "$f.bak.$stamp"; $n = 1
     while (Test-Path $bak) { $bak = "$f.bak.$stamp.$n"; $n++ }
-    Copy-Item -LiteralPath $f -Destination $bak -Force -ErrorAction SilentlyContinue
+    try {
+        Copy-Item -LiteralPath $f -Destination $bak -Force -ErrorAction Stop
+    } catch {
+        # Say so, and return $false: the caller must not delete what it could not
+        # back up. This used to print "backed up" and the removal went ahead.
+        Write-Warning "could not back up $f ($($_.Exception.Message))"
+        return $false
+    }
     Write-Host "==> backed up $f -> $bak"
+    return $true
 }
 
 # Interactive cleanup checklist. $current is the clone to KEEP (never offered).
@@ -184,6 +192,13 @@ function Invoke-TsCleanupMenu([string]$current) {
     $items += @(Find-TsStray)
     if ($items.Count -eq 0) { Write-Host '==> Cleanup: no old clones or leftover files found.'; return }
 
+    # No terminal, no questions: Read-Host on a redirected stdin blocks forever,
+    # and install.ps1 guards every other prompt this way. The bash twin gets an
+    # empty answer and cancels; say so explicitly here.
+    if ([Console]::IsInputRedirected) {
+        Write-Host "==> Cleanup skipped (no terminal to ask on). Run 'tstack doctor --repair' from a console."
+        return
+    }
     while ($true) {
         Write-Host ''
         Write-Host '==> Old terminal-stack instances / leftover files found:'
@@ -218,7 +233,9 @@ function Invoke-TsCleanupMenu([string]$current) {
 
     $removed = 0
     foreach ($it in $selected) {
-        if ($it.Kind -eq 'file') { Backup-TsFile $it.Path }
+        if ($it.Kind -eq 'file' -and -not (Backup-TsFile $it.Path)) {
+            Write-Warning "not removing $($it.Path): no backup"; continue
+        }
         try { Remove-Item -LiteralPath $it.Path -Recurse -Force -ErrorAction Stop; Write-Host "==> removed $($it.Path)"; $removed++ }
         catch { Write-Warning "failed to remove $($it.Path): $_" }
     }
