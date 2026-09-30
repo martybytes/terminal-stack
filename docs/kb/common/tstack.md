@@ -10,6 +10,7 @@ commands any more, and no aliases for them.
 | `tstack doctor` | diagnose the install; `--quiet`, `--json`, `--repair` (see below) |
 | `tstack update` | pull the latest stack and re-apply |
 | `tstack rollback` | undo the last update |
+| `tstack reinstall` | pull, then run this platform's installer again from the clone - the one-liner, locally; `--no-pull`, `--dry-run` |
 | `tstack apply` | re-apply the dotfiles, explaining any conflict first (POSIX) |
 | `tstack services` | the Docker service stacks - see `doc services` |
 | `tstack workspace` | the workspace root, and moving it - see `doc common/workspace-nav` |
@@ -306,5 +307,26 @@ JSON-RPC initialize handshake before registering the command.
 Run it from **WSL**. Its apply is the authoritative one: a pwsh save writes only
 the `config.json` mirror, so the two stores silently diverge and the next
 `chezmoi apply` from WSL renders the setting back. See `doc common/stack`.
+
+## Reinstall
+
+`tstack reinstall` is the install one-liner run again, from the clone you
+already have. It pulls the runtime clone first (refusing uncommitted changes,
+returning a clone whose branch was deleted to `main`, and recording a
+`tstack rollback` point when something is incoming), then runs the installer
+it just pulled - `install-wsl.sh`, `install-linux.sh`, `install-mac.sh` or
+`install.ps1` - pinned to that clone. Nothing is downloaded and nothing asks
+where the clone lives; the questionnaire, bootstrap, `chezmoi apply` and doctor
+all run as on a first install, with this machine's saved answers as the
+defaults.
+
+```sh
+tstack reinstall            # pull, then reinstall
+tstack reinstall --no-pull  # reinstall the commit you have (offline)
+tstack reinstall --dry-run  # show what would run
+```
+
+Use `tstack update` for the everyday case: it re-applies config and offers
+missing tools, but never re-asks the questionnaire or re-runs the bootstrap.
 
 See also `doc common/stack` (update/rollback/doctor), `doc common/tts`.
