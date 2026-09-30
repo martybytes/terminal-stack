@@ -1246,6 +1246,31 @@ class Llm:
         return 2
 
 
+WSL_LOCAL_ACTIONS = ("on", "repair", "off", "uninstall", "status")
+
+
+def _wire_wsl_side(action: str) -> int:
+    """Run the WSL-side hook adapter (bootstrap/ts-agentmemory.sh) for this side's
+    Claude Code / Cursor plugin caches. Attached to the terminal; it prints its
+    own report. `status` is the --check pass; nothing else touches the store."""
+    try:
+        source = paths.resolve_source_dir()
+    except paths.CloneNotFound:
+        return 0
+    script = source / "bootstrap" / "ts-agentmemory.sh"
+    if not script.is_file():
+        return 0
+    flags = (
+        ["--check"]
+        if action == "status"
+        else (["--undo", "--apply"] if action in ("off", "uninstall") else ["--apply"])
+    )
+    print(f"== WSL side ({' '.join(flags)})")
+    rc = _attached(["bash", str(script)], *flags)
+    print("== Windows side")
+    return rc
+
+
 # ----------------------------------------------------------------- entry point
 
 
@@ -1293,7 +1318,14 @@ def main(argv: list[str]) -> int:
         print("tstack agents: cursor mode must be mcp, byok, or off", file=sys.stderr)
         return 2
 
-    # On a combined install the agents and their config live on Windows.
+    # On a combined install the agents and their config live on Windows -- but
+    # Claude Code and Cursor run INSIDE WSL too, with their own plugin caches
+    # under the WSL home. The hand-off used to be the whole story, so the WSL
+    # side's agentmemory hooks were never wired: `repair` printed "already
+    # carries all edits" about the Windows files while every WSL session
+    # captured nothing. Wire this side first, then hand off.
+    if plat.kind() == plat.WSL and tool in ("agentmemory", "all") and action in WSL_LOCAL_ACTIONS:
+        _wire_wsl_side(action)
     handed_off = reexec_on_windows(argv)
     if handed_off is not None:
         return handed_off
