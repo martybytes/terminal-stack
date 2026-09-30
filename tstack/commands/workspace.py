@@ -21,7 +21,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from .. import workspace
+from .. import confirm, workspace
 
 HELP = """tstack workspace - the workspace root, and moving the tree that lives at it.
 
@@ -127,16 +127,10 @@ def reset(dry_run: bool) -> int:
 
 
 def _confirm(question: str, assume_yes: bool) -> bool:
-    if assume_yes or os.environ.get("TS_WS_YES") == "1":
+    # TS_WS_YES=1 is the bash twin's non-interactive consent, kept as-is.
+    if os.environ.get("TS_WS_YES") == "1":
         return True
-    if not sys.stdin.isatty():
-        _err(f"{question} -- not a terminal, assuming no.")
-        return False
-    try:
-        return input(f"{question} [y/N]: ").strip().lower() in ("y", "yes")
-    except (EOFError, KeyboardInterrupt):
-        _err("")
-        return False
+    return confirm.confirm(question, assume_yes=assume_yes, tool="tstack workspace")
 
 
 def set_root(

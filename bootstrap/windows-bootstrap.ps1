@@ -101,7 +101,11 @@ if (-not $pythonExe) {
 # (rc 3) apart from "failed", which a bare $null return cannot express.
 $wizardRc = 0
 $wizard = Invoke-TsWizard -SourceDir $SourceDir -AskTerminals:$askTerminals -ExitCode ([ref]$wizardRc)
-if ($wizardRc -eq 3) { Write-Host '==> quit - nothing was installed or changed.'; return }
+# `exit 3`, not `return`: this script runs under `& $bootstrap` from install.ps1,
+# and a bare return left $LASTEXITCODE unset, so the installer carried on into
+# the profile sync after "nothing was installed or changed". exit from a script
+# invoked with & ends only the script and sets $LASTEXITCODE for the caller.
+if ($wizardRc -eq 3) { Write-Host '==> quit - nothing was installed or changed.'; exit 3 }
 if (-not $wizard) { throw "The install questionnaire failed (exit $wizardRc)." }
 
 # The workspace root is NOT a wizard question -- it has no bash twin, and

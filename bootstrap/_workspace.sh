@@ -39,7 +39,7 @@ ts_ws_conf_files() {
 # associative arrays entirely.
 ts_ws_load_config() {
     [ -n "${TS_WS_LOADED:-}" ] && [ -z "${TS_WS_RELOAD:-}" ] && return 0
-    TS_WS_ORGS=""; TS_WS_RENAMES=""; TS_WS_SETTINGS=""
+    TS_WS_ORGS=""; TS_WS_RENAMES=""; TS_WS_SETTINGS=""; TS_WS_ORG_NAMES=""
     local f kind a b
     while IFS= read -r f; do
         [ -n "$f" ] || continue
@@ -47,7 +47,13 @@ ts_ws_load_config() {
             case "$kind" in ''|\#*) continue ;; esac
             [ -n "$a" ] || continue
             case "$kind" in
-                org)    TS_WS_ORGS="$TS_WS_ORGS $(ts_ws_lower "$a")=$b" ;;
+                # The key is lowercased for lookups; the SPELLING is kept too, so
+                # every destination path uses workspace.conf's case. A remote
+                # spelled MartyBytes used to be filed under that case on Linux,
+                # `sync` then looked for martybytes/ and said it was missing, and
+                # `synceverything` cloned a second copy.
+                org)    TS_WS_ORGS="$TS_WS_ORGS $(ts_ws_lower "$a")=$b"
+                        TS_WS_ORG_NAMES="$TS_WS_ORG_NAMES $(ts_ws_lower "$a")=$a" ;;
                 rename) TS_WS_RENAMES="$TS_WS_RENAMES $(ts_ws_lower "$a")=$b" ;;
                 set)    TS_WS_SETTINGS="$TS_WS_SETTINGS $a=$b" ;;
                 *)      echo "$WARN workspace.conf: unknown directive '$kind' in $f" >&2 ;;
@@ -55,7 +61,7 @@ ts_ws_load_config() {
         done < "$f"
     done < <(ts_ws_conf_files)
     TS_WS_LOADED=1
-    export TS_WS_ORGS TS_WS_RENAMES TS_WS_SETTINGS TS_WS_LOADED
+    export TS_WS_ORGS TS_WS_RENAMES TS_WS_SETTINGS TS_WS_ORG_NAMES TS_WS_LOADED
 }
 
 # ts_ws_lookup "<a=1 b=2>" <key> <default> — last match wins, so an override
@@ -73,7 +79,11 @@ ts_ws_setting() { ts_ws_load_config; ts_ws_lookup "$TS_WS_SETTINGS" "$1" "$2"; }
 # Owner -> canonical owner, applying the rename map (martsamp77 -> martybytes).
 ts_ws_canon_owner() {
     ts_ws_load_config
-    ts_ws_lookup "$TS_WS_RENAMES" "$(ts_ws_lower "$1")" "$1"
+    local renamed
+    renamed="$(ts_ws_lookup "$TS_WS_RENAMES" "$(ts_ws_lower "$1")" "$1")"
+    # A known org comes back in workspace.conf's spelling, whatever the remote
+    # said; an unknown owner keeps its own.
+    ts_ws_lookup "$TS_WS_ORG_NAMES" "$(ts_ws_lower "$renamed")" "$renamed"
 }
 
 # Owner -> tier. Checks the canonical name, so a renamed owner still resolves
@@ -119,7 +129,7 @@ ts_ws_own_owners() {
     ts_ws_load_config
     local pair out=""
     for pair in $TS_WS_ORGS; do
-        case "$pair" in *=src) out="$out ${pair%%=*}" ;; esac
+        case "$pair" in *=src) out="$out $(ts_ws_lookup "$TS_WS_ORG_NAMES" "${pair%%=*}" "${pair%%=*}")" ;; esac
     done
     printf '%s\n' "${out# }"
 }

@@ -31,15 +31,36 @@ HEADROOM_URL = "http://127.0.0.1:8787"
 KOKORO_URL = "http://127.0.0.1:8880"
 
 
-def answers(url: str, timeout: float = 2.0) -> bool:
-    """Any HTTP response means something is listening. Not a 2xx check."""
+def status(url: str, timeout: float = 2.0, headers: dict[str, str] | None = None) -> int:
+    """The HTTP status a URL answers with, or 0 when nothing answers.
+
+    THE probe. Four copies of it had grown (doctor, agents, services, here);
+    each got the "answering is the test, never a 2xx" rule right, which is the
+    only reason the drift was harmless -- so far.
+    """
     try:
-        with urllib.request.urlopen(url, timeout=timeout):
-            return True
-    except urllib.error.HTTPError:
-        return True
+        # Inside the try: Request() itself raises ValueError on a malformed or
+        # empty URL, and "nothing answers" is the right reading of that too.
+        request = urllib.request.Request(url, headers=headers or {}, method="GET")
+        response = urllib.request.urlopen(request, timeout=timeout)
+    except urllib.error.HTTPError as exc:
+        return int(exc.code)
     except (urllib.error.URLError, OSError, ValueError):
-        return False
+        return 0
+    # Not a `with`: the suite stubs urlopen with bare objects, and a response
+    # is a response whether or not it is a context manager.
+    try:
+        return int(getattr(response, "status", 200) or 200)
+    finally:
+        close = getattr(response, "close", None)
+        if callable(close):
+            close()
+
+
+def answers(url: str, timeout: float = 2.0, headers: dict[str, str] | None = None) -> bool:
+    """Any HTTP response means something is listening. Not a 2xx check:
+    AgentMemory answers 404 on `/` and 401 on `/agentmemory/health`."""
+    return status(url, timeout, headers) != 0
 
 
 def agentmemory() -> tuple[bool, str]:

@@ -227,9 +227,13 @@ if (Test-Path (Join-Path $targetDir '.git')) {
     Write-Host "==> Repo already at $targetDir; git pull"
     Set-TsCloneBranch -CloneDir $targetDir -Branch $releaseBranch
     & git -C $targetDir pull --ff-only
+    # $ErrorActionPreference = 'Stop' does not cover native commands: a diverged
+    # clone printed git's error and the install carried on with the stale tree.
+    if ($LASTEXITCODE) { throw "git pull --ff-only failed in $targetDir (exit $LASTEXITCODE)." }
 } else {
     Write-Host "==> Cloning $repoUrl ($releaseBranch) -> $targetDir"
     & git clone --branch $releaseBranch $repoUrl $targetDir
+    if ($LASTEXITCODE) { throw "cloning $repoUrl failed (exit $LASTEXITCODE)." }
 }
 
 # 3b. Offer to clean up old clones + retired leftover files (pre-ticked checklist;
@@ -264,7 +268,13 @@ if (-not (Test-Path $bootstrap)) {
 Write-Host "==> Running $bootstrap"
 # -SourceDir explicitly: the bootstrap runs the questionnaire out of this clone,
 # and every POSIX installer exports SOURCE_DIR for the same reason.
+$global:LASTEXITCODE = 0
 & $bootstrap -SourceDir $targetDir
+# rc 3 is "the user quit at the questionnaire". Everything after this point
+# writes $PROFILE, .wezterm.lua and .claude\settings.json, none of which a quit
+# should touch. Twin of the rc-3 check in install-wsl.sh.
+if ($LASTEXITCODE -eq 3) { Write-Host '==> Install cancelled at the questionnaire; nothing was changed.'; return }
+if ($LASTEXITCODE) { throw "$bootstrap failed (exit $LASTEXITCODE)." }
 
 # 5. Sync windows/** to %USERPROFILE% and docs/kb/** to
 #    %LOCALAPPDATA%\terminal-stack\docs\kb\ (PowerShell-native equivalent of the WSL

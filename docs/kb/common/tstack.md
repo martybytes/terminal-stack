@@ -7,7 +7,7 @@ commands any more, and no aliases for them.
 |---|---|
 | `tstack config` | view and change saved settings (the table below) |
 | `tstack ui` | the dashboard: Home, Settings (every setting and which layer set it), Doctor, Services (`s` start, `x` stop, `l` logs), Docs; `alt+1..5` switch tabs; offers to install Textual the first time |
-| `tstack doctor` | diagnose the install; `--quiet`, `--json`, `--repair` (see below) |
+| `tstack doctor` | diagnose the install; `--quiet`, `--json`, `--repair` runs the fixes (branch, Headroom token, clone location, cleanup checklist), each confirmed at the terminal |
 | `tstack update` | pull the latest stack and re-apply |
 | `tstack rollback` | undo the last update |
 | `tstack docs` | the knowledge base in your browser: `serve` (default port 8896), `open <topic>`, `build [DIR]` (static HTML), `check` (every `doc` reference resolves) |

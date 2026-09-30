@@ -31,7 +31,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from .. import engine, headroom_token, paths, stacks, store
+from .. import confirm, engine, headroom_token, paths, stacks, store
 
 HELP = """tstack services - the local Docker service stacks: bring them up, prove they work.
 
@@ -678,7 +678,7 @@ def _fill_secret(svc: Services, path: Path, key: str, placeholder: str, size: in
         if proxy:
             _record_machine_token(svc, live)
         return
-    svc.out.step(f"generate {key} ({size} random bytes)")
+    svc.out.step(f"generate {key} ({size} hex characters)")
     if not svc.out.apply:
         return
     secret = stacks.rand_hex(size)
@@ -772,36 +772,17 @@ def cmd_migrate_volumes(svc: Services) -> None:
         return
     # Nothing is destroyed here, so this needs consent but not a typed phrase: the
     # old volume survives as the rollback.
-    reply = (
-        "y" if svc.args.assume_yes else _ask("Copy these now? The old volumes are kept. [y/N]: ")
-    )
-    if not reply.lower().startswith("y"):
+    if not confirm.confirm(
+        "Copy these now? The old volumes are kept.",
+        assume_yes=svc.args.assume_yes,
+        tool="tstack services",
+    ):
         out.note("nothing copied")
         return
     for old, new in pending:
         if not _volume_copy(svc, old, new):
             out.bad(f"{old} -> {new} failed")
     out.note("when the stack is proven on the new volumes: docker volume rm <old>")
-
-
-def _ask(prompt: str) -> str:
-    """Read consent from the terminal, not from stdin.
-
-    /dev/tty on purpose, exactly as the bash twin does: `tstack services ... | tee`
-    must still be able to ask, and a piped stdin must never be able to answer a
-    destructive prompt on the user's behalf.
-    """
-    try:
-        with open("/dev/tty", "r+", encoding="utf-8") as tty:
-            tty.write(prompt)
-            tty.flush()
-            return (tty.readline() or "").strip()
-    except OSError:
-        pass
-    try:
-        return input(prompt).strip()
-    except (OSError, EOFError):
-        return ""
 
 
 def _volume_copy(svc: Services, old: str, new: str) -> bool:
@@ -924,9 +905,17 @@ def cmd_test(svc: Services) -> None:
         if not script.is_file():
             out.skip(f"{name}: no ts-verify.sh")
             continue
-        got = subprocess.run(
-            ["bash", str(script)], check=False, start_new_session=True, cwd=str(svc.dir(name))
-        )
+        try:
+            got = subprocess.run(
+                ["bash", str(script)],
+                check=False,
+                start_new_session=True,
+                cwd=str(svc.dir(name)),
+                timeout=900,
+            )
+        except subprocess.TimeoutExpired:
+            out.bad(f"{name}: integration checks timed out")
+            continue
         if got.returncode == 0:
             out.ok(f"{name}: integration checks passed")
         else:
@@ -979,8 +968,12 @@ def cmd_reset(svc: Services) -> None:
             out.bad("backup failed - nothing was destroyed")
             raise SystemExit(2)
         phrase = "destroy all memories" if svc.args.purge else "destroy headroom data"
-        print(f"\nThis will DESTROY volumes. Type exactly: {phrase}")
-        if _ask("") != phrase:
+        # From the terminal, never stdin: a pipe must not be able to type this.
+        if not confirm.typed(
+            f"\nThis will DESTROY volumes. Type exactly: {phrase}\n> ",
+            phrase,
+            tool="tstack services",
+        ):
             out.note("phrase did not match - nothing was destroyed")
             raise SystemExit(1)
     out.section("reset")
@@ -1181,14 +1174,10 @@ def _wait_http(url: str, secs: int, mode: str) -> bool:
 
 
 def _http_code(url: str) -> int:
-    request = urllib.request.Request(url, method="GET")
-    try:
-        with urllib.request.urlopen(request, timeout=5) as response:
-            return int(response.status)
-    except urllib.error.HTTPError as exc:
-        return int(exc.code)
-    except (urllib.error.URLError, OSError, ValueError):
-        return 0
+    """The status a URL answers with, 0 for nothing. One implementation: wizard.probes."""
+    from ..wizard import probes
+
+    return probes.status(url, 5)
 
 
 def port_publication(svc: Services, port: str) -> int:
@@ -1267,7 +1256,12 @@ def backup_all(svc: Services) -> bool:
     for volume in stacks.data_volumes(svc.kind):
         ok = _backup_volume(svc, volume, directory) and ok
     if ok:
-        out.info(f"restore with: tstack services restore {directory.name}")
+        # There is no `restore` verb. Say what exists: the tarballs, and the
+        # docker command that puts one back.
+        out.info(f"backups in {directory}; restore one with:")
+        out.info(
+            "  docker run --rm -v <volume>:/to -v <dir>:/from alpine tar -xzf /from/<volume>.tgz -C /to"
+        )
     return ok
 
 
@@ -1403,9 +1397,13 @@ def main(argv: list[str]) -> int:
 
     # The engine, and the one path where it is a Windows process talking to a
     # POSIX one. Refuse before anything is torn down rather than after.
+    # `bootstrap` needs no engine at all -- it seeds .env files and secrets --
+    # so the bind-mount refusal below must not stop it, or a WSL clone on ext4
+    # with Docker Desktop's integration off never gets its .env and every
+    # agent step says "proxy token unavailable".
     if svc.kind == engine.WSL_SHIM and not args.dry_run:
         reason = engine.require_windows_visible(stacks.stack_root(source))
-        if reason and args.cmd not in ("status",):
+        if reason and args.cmd not in ("status", "bootstrap"):
             print(f"tstack services: {reason}", file=sys.stderr)
             return 1
 
@@ -1480,7 +1478,13 @@ def launch_engine(kind: str, dry_run: bool = False) -> str | None:
         return "open -a Docker"
     if not dry_run:
         subprocess.run(
-            ["sudo", "systemctl", "start", "docker"], check=False, start_new_session=True
+            # Attached to the terminal, not a new session: sudo has to be able
+            # to ask for a password. In its own session it failed with "a
+            # terminal is required" and this then waited 180s for nothing.
+            ["sudo", "systemctl", "start", "docker"],
+            check=False,
+            start_new_session=not sys.stdin.isatty(),
+            timeout=120,
         )
     return "systemctl start docker"
 

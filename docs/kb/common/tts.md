@@ -179,3 +179,13 @@ Windows extras — the tray, the dashboard, mute, duplicate suppression, the WSL
 firewall path — are in `doc windows/tts-daemon`.
 
 See also `doc common/claude-code`, `doc tstack config`.
+
+## WSL and Windows disagree on whether voice is on
+
+On a combined machine the WSL hooks hand each event to the Windows
+`terminal-stack-tts.exe`, which applies the Windows config. If Windows has voice
+off (or the event filtered) the exe says so with exit 75 - only when a WSL hook
+asks - and the hook falls through to the WSL-side engines, so WSL's own setting
+wins for WSL sessions. A mute is honoured by both. This needs an exe built after
+09/30/2026: `tstack config tts daemon restart` rebuilds it.
+

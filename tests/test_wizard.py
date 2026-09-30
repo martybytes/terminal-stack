@@ -1110,7 +1110,10 @@ def test_answering_is_the_test_never_a_2xx():
     a server is listening. `curl -fsS` treats either as failure, which is why it
     once reported the service down while it was up and serving."""
     body = (ROOT / "tstack/wizard/probes.py").read_text(encoding="utf-8")
-    assert "except urllib.error.HTTPError:\n        return True" in body
+    # An HTTP error IS an answer: status() returns its code, and answers() is
+    # "status != 0". (The old text gate looked for `return True` in an except.)
+    assert "except urllib.error.HTTPError as exc:\n        return int(exc.code)" in body
+    assert "return status(url, timeout, headers) != 0" in body
     # ...and the STRICT form is used only where the endpoint is a real readiness
     # check, which is Headroom's /readyz.
     strict = body[body.index("def headroom(") :]
@@ -1165,6 +1168,10 @@ def test_config_agents_repair_reaches_the_command_that_does_it(monkeypatch):
 
     calls: list[list[str]] = []
     monkeypatch.setattr(agents_cmd, "main", lambda argv: (calls.append(argv), 0)[1])
+    # `on` now SAVES after the wiring succeeds; this test is about the routing,
+    # and on a Windows runner the save would want a %LOCALAPPDATA% mirror.
+    monkeypatch.setattr(config_cmd.store, "set", lambda key, value: None)
+    monkeypatch.setattr(config_cmd, "_apply", lambda out, dry: 0)
     assert config_cmd.main(["agents", "headroom", "repair"]) == 0
     assert calls == [["headroom", "repair"]]
 

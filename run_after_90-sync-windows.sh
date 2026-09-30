@@ -91,6 +91,15 @@ resolve_win_user() {
 }
 
 WIN_USER="$(resolve_win_user || true)"
+# The profile FOLDER, forward-slashed: not always C:/Users/<USERNAME> (truncated
+# Microsoft-account names, user.DOMAIN), and quoted in the templates for spaces.
+resolve_win_home() {
+    local h
+    h=$(/mnt/c/Windows/System32/cmd.exe /c 'echo %USERPROFILE%' 2>/dev/null </dev/null | tr -d '\r\n' || true)
+    case "$h" in [A-Za-z]:\\*) printf '%s' "$h" | tr '\\' '/'; return 0 ;; esac
+    [ -n "$WIN_USER" ] && printf 'C:/Users/%s' "$WIN_USER"
+}
+WIN_HOME="$(resolve_win_home || true)"
 if [ -z "$WIN_USER" ]; then
   echo "sync-windows: could not resolve Windows username." >&2
   echo "  Add to ~/.config/chezmoi/chezmoi.toml:" >&2
@@ -131,12 +140,12 @@ if [ "$CC_TTS_ENABLED" = true ]; then
   CC_TTS_STOP_HOOK=$',
           {
             "type": "command",
-            "command": "C:/Users/'"$WIN_USER"'/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe hook --source claude --event stop --state waiting"
+            "command": "\"'"$WIN_HOME"'/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe\" hook --source claude --event stop --state waiting"
           }'
   CC_TTS_STOPFAILURE_HOOK=$',
           {
             "type": "command",
-            "command": "C:/Users/'"$WIN_USER"'/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe hook --source claude --event stop_failure --state error"
+            "command": "\"'"$WIN_HOME"'/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe\" hook --source claude --event stop_failure --state error"
           }'
   CC_TTS_CURSOR_HOOKS='{
     "afterFileEdit": [
@@ -147,20 +156,20 @@ if [ "$CC_TTS_ENABLED" = true ]; then
     ],
     "afterAgentResponse": [
       {
-        "command": "C:/Users/'"$WIN_USER"'/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe hook --source cursor --event cursor_response --state waiting",
+        "command": "\"'"$WIN_HOME"'/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe\" hook --source cursor --event cursor_response --state waiting",
         "timeout": 15
       }
     ],
     "stop": [
       {
-        "command": "C:/Users/'"$WIN_USER"'/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe hook --source cursor --event cursor_stop --state waiting",
+        "command": "\"'"$WIN_HOME"'/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe\" hook --source cursor --event cursor_stop --state waiting",
         "timeout": 15
       }
     ],
     "postToolUse": [
       {
         "matcher": "AskQuestion|AskUserQuestion",
-        "command": "C:/Users/'"$WIN_USER"'/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe hook --source cursor --event cursor_question --state question",
+        "command": "\"'"$WIN_HOME"'/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe\" hook --source cursor --event cursor_question --state question",
         "timeout": 15
       }
     ]
@@ -171,7 +180,7 @@ if [ "$CC_TTS_ENABLED" = true ]; then
         "hooks": [
           {
             "type": "command",
-            "command": "C:/Users/'"$WIN_USER"'/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe hook --source claude --event question --state question"
+            "command": "\"'"$WIN_HOME"'/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe\" hook --source claude --event question --state question"
           }
         ]
       }'
@@ -182,7 +191,7 @@ if [ "$CC_TTS_ENABLED" = true ]; then
         "hooks": [
           {
             "type": "command",
-            "command": "C:/Users/'"$WIN_USER"'/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe hook --source claude --event notification --state question"
+            "command": "\"'"$WIN_HOME"'/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe\" hook --source claude --event notification --state question"
           }
         ]
       }
@@ -333,7 +342,7 @@ sync_tree() {
         fi
       fi
       if command -v python3 >/dev/null 2>&1; then
-        WIN_USER="$WIN_USER" LEADER_KEY="$LEADER_KEY" LEADER_MODS="$LEADER_MODS" \
+        WIN_USER="$WIN_USER" WIN_HOME="$WIN_HOME" LEADER_KEY="$LEADER_KEY" LEADER_MODS="$LEADER_MODS" \
         THEME_MODE="$THEME_MODE" THEME_RESOLVED="$THEME_RESOLVED" TMUX_PREFIX="$TMUX_PREFIX" \
         WEZ_MUX="$WEZ_MUX" WEZ_RESTORE="$WEZ_RESTORE" \
         CC_TTS_STOP_HOOK="$CC_TTS_STOP_HOOK" CC_TTS_STOPFAILURE_HOOK="$CC_TTS_STOPFAILURE_HOOK" \
@@ -344,6 +353,7 @@ import os, sys
 text = open(sys.argv[1], encoding="utf-8").read()
 repl = {
     "__WIN_USER__": os.environ.get("WIN_USER", ""),
+    "__WIN_HOME__": os.environ.get("WIN_HOME", ""),
     "__LEADER_KEY__": os.environ.get("LEADER_KEY", ""),
     "__LEADER_MODS__": os.environ.get("LEADER_MODS", ""),
     "__THEME_MODE__": os.environ.get("THEME_MODE", ""),

@@ -183,6 +183,27 @@ def dev_clone_at(start: Path | None = None) -> Path | None:
     return path
 
 
+def is_windows_side_clone(path: Path | str) -> bool:
+    """On WSL: is `path` the WINDOWS install's own runtime clone?
+
+    `/mnt/c/Users/<u>/AppData/Local/terminal-stack/stack` was WSL's canonical
+    location too until 2026-09, so it stays a resolution candidate for a machine
+    installed before the split. But on a combined machine it is now the Windows
+    side's live clone: never "legacy" to move onto ext4, never an "other clone"
+    to clean up, never a .env for WSL to rewrite. install-wsl.sh offered to MOVE
+    it by default, which would have orphaned the Windows install.
+    """
+    if plat.kind() != plat.WSL:
+        return False
+    parts = Path(path).as_posix().rstrip("/").split("/")
+    return (
+        len(parts) == 9
+        and parts[:3] == ["", "mnt", "c"]
+        and parts[3].lower() == "users"
+        and [x.lower() for x in parts[5:]] == ["appdata", "local", "terminal-stack", "stack"]
+    )
+
+
 def clones() -> list[Clone]:
     """Every terminal-stack clone on this machine, in priority order."""
     pin = os.environ.get("TERMINAL_STACK_DIR")
