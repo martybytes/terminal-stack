@@ -29,6 +29,7 @@ def _no_terminal(monkeypatch):
 
 def test_a_pipe_cannot_type_the_destructive_phrase(monkeypatch, capsys):
     """stdin holds the exact phrase; it must still be refused."""
+    monkeypatch.delenv("CI", raising=False)
     _no_terminal(monkeypatch)
     monkeypatch.setattr(sys, "stdin", __import__("io").StringIO("destroy all memories\n"))
     assert confirm.typed("Type it: ", "destroy all memories", tool="t") is False
@@ -36,6 +37,7 @@ def test_a_pipe_cannot_type_the_destructive_phrase(monkeypatch, capsys):
 
 
 def test_a_pipe_cannot_say_yes_either(monkeypatch, capsys):
+    monkeypatch.delenv("CI", raising=False)
     _no_terminal(monkeypatch)
     monkeypatch.setattr(sys, "stdin", __import__("io").StringIO("y\n"))
     assert confirm.confirm("Proceed", tool="t") is False
@@ -48,7 +50,8 @@ def test_assume_yes_is_the_only_flag_that_stands_in_for_a_yes(monkeypatch):
 
 
 @posix_only
-def test_the_terminal_answer_is_what_counts():
+def test_the_terminal_answer_is_what_counts(monkeypatch):
+    monkeypatch.delenv("CI", raising=False)  # a real terminal, not a runner
     master, slave = os.openpty()
     tty = os.ttyname(slave)
     try:
@@ -86,3 +89,12 @@ def test_every_prompting_command_goes_through_the_helper():
         src = (ROOT / "tstack" / rel).read_text(encoding="utf-8")
         assert "input(" not in src, f"{rel} still reads stdin for a prompt"
         assert "confirm." in src, f"{rel} does not use tstack.confirm"
+
+
+def test_under_ci_nothing_is_ever_asked(monkeypatch):
+    """A runner's process can own a tty with nobody at it; the suite hung there."""
+    monkeypatch.setenv("CI", "true")
+    monkeypatch.setattr(
+        Console, "open", classmethod(lambda cls, tty="/dev/tty": pytest.fail("opened"))
+    )
+    assert confirm.ask("?") is None

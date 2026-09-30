@@ -13,13 +13,21 @@ no consent; the caller says so and stops. Piped stdin is never read.
 
 from __future__ import annotations
 
+import os
 import sys
 
 from .wizard.console import Console
 
 
 def ask(prompt: str) -> str | None:
-    """One line from the terminal, or None when there is nobody to ask."""
+    """One line from the terminal, or None when there is nobody to ask.
+
+    Never under CI: a runner's process can own a tty with nobody at it, and a
+    prompt there waits forever. The Windows and WSL suites hung for 30 minutes
+    on exactly that before this guard existed.
+    """
+    if os.environ.get("CI"):
+        return None
     console = Console.open()
     try:
         if not console.interactive:
