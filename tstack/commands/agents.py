@@ -160,9 +160,30 @@ def reexec_on_windows(argv: list[str]) -> int | None:
         [python, entry, "agents", *argv],
         check=False,
         start_new_session=True,
-        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+        env=_windows_env(source),
     )
     return got.returncode
+
+
+def _windows_env(source: Path) -> dict[str, str]:
+    """The environment for the Windows re-exec, pinned to THIS clone.
+
+    The Windows side runs this clone's code (`entry` above) but resolved its DATA
+    -- the manifest, headroom's .env and its proxy token -- from its own chezmoi,
+    i.e. from whichever Windows clone that points at. On a machine whose WSL
+    install had just moved to ext4 that was the legacy AppData clone with no
+    token at all, so every install printed "Headroom not running" at a proxy
+    answering on 8787. A Windows process sees only the variables WSLENV names.
+    """
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+    pin = plat.to_windows_path(source)
+    if pin:
+        env["TERMINAL_STACK_DIR"] = str(pin)
+        names = [n for n in env.get("WSLENV", "").split(":") if n]
+        if not any(n.split("/", 1)[0] == "TERMINAL_STACK_DIR" for n in names):
+            names.append("TERMINAL_STACK_DIR")
+        env["WSLENV"] = ":".join(names)
+    return env
 
 
 # ------------------------------------------------------------------- manifest
@@ -263,12 +284,7 @@ class Headroom:
         env = os.environ.get("HEADROOM_PROXY_TOKEN")
         if env:
             return env
-        override = os.environ.get("HEADROOM_ENV_FILE")
-        path = (
-            Path(override)
-            if override
-            else self.source / "services" / "stacks" / "headroom" / ".env"
-        )
+        path = self.token_path()
         try:
             for line in path.read_text(encoding="utf-8").splitlines():
                 if line.startswith("HEADROOM_PROXY_TOKEN="):
@@ -276,6 +292,24 @@ class Headroom:
         except OSError:
             return ""
         return ""
+
+    def token_path(self) -> Path:
+        override = os.environ.get("HEADROOM_ENV_FILE")
+        if override:
+            return Path(override)
+        return self.source / "services" / "stacks" / "headroom" / ".env"
+
+    def answering(self) -> bool:
+        """Any HTTP answer from the proxy, without a token. Answering is the
+        test, never a 2xx: a 401 here is a proxy that is up."""
+        proxy = str(dig(self.body, "headroom.proxyUrl"))
+        try:
+            with urllib.request.urlopen(f"{proxy}/stats", timeout=5):
+                return True
+        except urllib.error.HTTPError:
+            return True
+        except (urllib.error.URLError, OSError, ValueError):
+            return False
 
     def probe_auth(self) -> tuple[bool, str]:
         """(ok, why). Retried ONCE, and only on a connection failure.
@@ -533,7 +567,12 @@ class Headroom:
             if action == "on":
                 self.offer_start()
             ok, why = self.probe_auth()
-            if not ok and why in ("unreachable", TOKEN_UNAVAILABLE):
+            # An HTTP answer IS a running proxy. No token proves nothing either
+            # way, so only then is the port asked.
+            running = not ok and (
+                why.startswith("HTTP") or (why == TOKEN_UNAVAILABLE and self.answering())
+            )
+            if not ok and not running:
                 # Not running (or never set up) is a state, not a fault: one
                 # line with the way forward, rather than "authentication failed"
                 # on every install and every sync of a machine whose Docker is
@@ -549,7 +588,16 @@ class Headroom:
                     if action == "on"
                     else "registrations were not changed"
                 )
-                self.out.bad(f"Headroom proxy authentication failed ({why}); {tail}.")
+                # It IS running, so "not running" would send someone to start a
+                # stack that is up. The usual cause is a proxy another clone
+                # started, carrying that clone's token.
+                self.out.bad(
+                    f"Headroom is running but proxy authentication failed ({why}); {tail}."
+                )
+                self.out.info(
+                    f"token file: {self.token_path()}. If another clone started the "
+                    "proxy, recreate it from this one: tstack services up headroom"
+                )
                 return 1
             self.register(add=True)
             self.status()

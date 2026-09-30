@@ -2952,6 +2952,14 @@ were carried as ids that do not resolve), so Windows routes them through
 the winget pass and before the agent CLIs, in **both** `Install-TsApps` and
 `windows-bootstrap.ps1`'s own loop.
 
+**On Debian/Ubuntu/WSL the same group goes through `ts_debian_py_tool`** --
+`uv tool install`, else pipx -- and never apt, whose `python3-*` packages are
+system libraries (and PEP 668 refuses a bare `pip install --user`). `fnm`, `uv`
+and `ruff` take their upstream release. The apt installer used to be a `case`
+with no default arm, so those ten ids fell through without a word on every
+Debian-family box; `ts_debian_pkg` is now total like `ts_arch_pkg`, and
+`tests/test_distro.py` holds both to it.
+
 **Binary names can differ from the id**, and can differ from the executable
 inside the package: winget's btop4win ships `btop4win.exe`, but its PATH shim is
 `btop.exe`, so probing only `btop4win` reported a fresh install as missing

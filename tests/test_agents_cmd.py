@@ -472,10 +472,38 @@ def test_headroom_not_running_is_one_quiet_line_not_an_auth_failure(monkeypatch,
     headroom = agents.Headroom(ROOT, agents.Out(), "mcp")
     monkeypatch.setattr(headroom, "offer_start", lambda: False)
     monkeypatch.setattr(headroom, "probe_auth", lambda: (False, agents.TOKEN_UNAVAILABLE))
+    monkeypatch.setattr(headroom, "answering", lambda: False)
     assert headroom.run(action) == 1
     out = capsys.readouterr().out
     assert "Headroom not running; wiring skipped" in out
     assert "authentication failed" not in out
+
+
+def test_a_running_headroom_is_never_reported_as_not_running(monkeypatch, capsys):
+    """The reported install: the proxy answered on 8787, but the clone doing the
+    wiring had no token, and the one line printed was "Headroom not running"."""
+    headroom = agents.Headroom(ROOT, agents.Out(), "mcp")
+    monkeypatch.setattr(headroom, "probe_auth", lambda: (False, agents.TOKEN_UNAVAILABLE))
+    monkeypatch.setattr(headroom, "answering", lambda: True)
+    assert headroom.run("repair") == 1
+    out = capsys.readouterr().out
+    assert "not running" not in out
+    assert "Headroom is running" in out
+    assert "tstack services up headroom" in out
+
+
+def test_the_windows_reexec_is_pinned_to_the_calling_clone(monkeypatch):
+    """The Windows side ran this clone's code against ANOTHER clone's data --
+    whichever its own chezmoi named -- and a Windows process sees only what
+    WSLENV forwards."""
+    monkeypatch.setattr(agents.plat, "to_windows_path", lambda p: r"\\wsl.localhost\Ubuntu\c")
+    monkeypatch.setenv("WSLENV", "WT_SESSION:USERPROFILE/p")
+    env = agents._windows_env(Path("/home/u/.local/share/terminal-stack"))
+    assert env["TERMINAL_STACK_DIR"] == r"\\wsl.localhost\Ubuntu\c"
+    assert env["WSLENV"].split(":") == ["WT_SESSION", "USERPROFILE/p", "TERMINAL_STACK_DIR"]
+    # Idempotent: a nested re-exec does not grow the list.
+    monkeypatch.setenv("WSLENV", env["WSLENV"])
+    assert agents._windows_env(Path("/x"))["WSLENV"].count("TERMINAL_STACK_DIR") == 1
 
 
 @pytest.mark.parametrize("ci, tty", [("", False), ("true", True)])

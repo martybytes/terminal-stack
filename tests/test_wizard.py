@@ -878,6 +878,29 @@ def test_the_console_survives_a_terminal_it_cannot_open(monkeypatch):
     console.close()
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX ptys only")
+def test_the_console_opens_a_real_terminal_and_is_interactive():
+    """A tty is not seekable. Opening it `r+` in text mode raised
+    UnsupportedOperation (an OSError), so every POSIX install fell through to
+    the silent non-interactive console: no menu, no questions, all defaults."""
+    import os
+
+    master, slave = os.openpty()
+    try:
+        console = Console.open(os.ttyname(slave))
+        assert console.interactive
+        os.write(master, b"2\n")
+        assert console.ask("q: ") == "2"
+        console.say("menu line")
+        seen = b""
+        while b"menu line" not in seen:  # the pty echoes the prompt and the answer first
+            seen += os.read(master, 1024)
+        console.close()
+    finally:
+        os.close(master)
+        os.close(slave)
+
+
 def test_a_console_write_that_fails_does_not_take_the_wizard_down(tmp_path):
     """A terminal can go away mid-run. Losing the menu is survivable; a
     traceback out of an installer is not."""

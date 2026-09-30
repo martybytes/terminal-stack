@@ -17,6 +17,31 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **The install questionnaire asks its questions again on Linux, WSL and macOS
+  (09/30/2026).** It opened `/dev/tty` as one `r+` text handle, which Python
+  builds on a seekable buffer; a tty is not seekable, the `UnsupportedOperation`
+  is an `OSError`, and the wizard fell through to its non-interactive console.
+  Every POSIX install took every default without printing a menu, so the tools
+  you had not picked were installed and the ones you wanted were never offered.
+  It now opens a separate reader and writer.
+- **Debian, Ubuntu and WSL install the runtimes and the Python group
+  (09/30/2026).** The apt installer had no route at all for `fnm`, `node`,
+  `python`, `uv`, `pipx`, `ruff`, `ipython`, `httpie`, `poetry` and
+  `pre-commit`: they were selected, listed, and silently skipped. `fnm`, `uv`
+  and `ruff` now come from their upstream releases, `pipx` and `python` from
+  apt, the Python CLIs through `uv tool install` (else pipx), and Node LTS via
+  fnm. Like the pacman side, an id with no route is now reported
+  (`ts_debian_pkg`), and a test keeps the mapping total.
+- **lazygit installs on Linux again (09/30/2026).** Its 0.65 release renamed the
+  asset `…_Linux_…` to `…_linux_…`; the match accepts both (lazydocker too).
+- **A running Headroom is no longer reported as "not running" (09/30/2026).**
+  On WSL, `tstack agents` re-runs under Windows Python, which resolved its data
+  from its own chezmoi clone rather than the one calling it; a clone with no
+  token read as "not running" at a proxy answering on 8787. The re-exec is now
+  pinned to the calling clone (`TERMINAL_STACK_DIR` through `WSLENV`), a
+  reachable proxy is never called "not running", and `services bootstrap` in a
+  fresh clone adopts the token of an already-running headroom stack instead of
+  minting one that the live proxy rejects.
 - **The Alt+L launcher no longer lists an `SSHMUX:` twin for every ssh host
   (09/25/2026).** `wezterm.default_ssh_domains()` makes an `SSH:` and an
   `SSHMUX:` domain per `~/.ssh/config` host; the second needs wezterm on the
