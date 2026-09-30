@@ -593,6 +593,7 @@ ts_install_node_lts() {
     command -v fnm >/dev/null 2>&1 || return 0
     if [ "$(ts_node_major)" -ge 20 ] 2>/dev/null; then
         echo "==> node: $(node --version 2>/dev/null) already current"
+        ts_link_fnm_node
         return 0
     fi
     echo "==> node: installing the current LTS via fnm"
@@ -601,6 +602,33 @@ ts_install_node_lts() {
         || echo "!! fnm install --lts failed; run it by hand."
     eval "$(fnm env 2>/dev/null)" || true
     command -v node >/dev/null 2>&1 && echo "==> node: $(node --version)"
+    ts_link_fnm_node
+}
+
+# fnm puts node on PATH per SHELL (`fnm env`), and only in a shell that ran it.
+# Agent hooks run under /bin/sh with the PATH their agent started with, so a
+# Claude session opened before Node existed -- or any process not launched from
+# zsh -- gets "node: not found" on every agentmemory hook, each one silently
+# losing its capture. ~/.local/bin is on every PATH the stack sets up, so link
+# the DEFAULT version there: it follows `fnm default`, and in an interactive
+# shell fnm's own per-directory entry still comes first. Never replaces a node
+# that is not our link.
+ts_link_fnm_node() {
+    local dir bin link target
+    dir="${FNM_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/fnm}"
+    for bin in node npm npx; do
+        target="$dir/aliases/default/bin/$bin"
+        link="$HOME/.local/bin/$bin"
+        [ -x "$target" ] || continue
+        if [ -e "$link" ] || [ -L "$link" ]; then
+            [ -L "$link" ] && [ "$(readlink "$link")" = "$target" ] && continue
+            [ -L "$link" ] && case "$(readlink "$link")" in "$dir"/*) ;; *) continue ;; esac
+            [ -L "$link" ] || continue
+        fi
+        mkdir -p "$HOME/.local/bin"
+        ln -sfn "$target" "$link" && echo "==> $bin: linked into ~/.local/bin for hooks and non-interactive shells"
+    done
+    return 0
 }
 
 # ── Agent CLIs ─────────────────────────────────────────────────────────────────
