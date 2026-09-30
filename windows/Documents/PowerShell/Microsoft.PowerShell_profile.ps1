@@ -2328,6 +2328,7 @@ doc edit <topic>        edit a topic   |   doc new <os>/<name>   scaffold one
 doc ls                  list topics (this OS + common + local)
 doc --os <linux|macos|windows> ...    browse another OS
 doc sync [msg]          commit doc edits back to the repo (+ changelog, confirm push)
+doc web [topic]         the knowledge base in your browser (tstack docs serve)
 
 picker keys: ctrl-u/ctrl-d scroll preview · ctrl-/ toggle preview · alt-e edit
 reader keys: j/k or arrows scroll · /pattern searches · q quits
@@ -2364,6 +2365,7 @@ function doc {
         '^(ls|list)$'   { Get-DocIndex $os | Sort-Object Label | ForEach-Object { $_.Label }; break }
         '^(edit|new)$'  { Invoke-DocEdit $cmd $tail $os; break }
         '^(sync)$'      { Invoke-DocSync $tail; break }
+        '^(web)$'       { if ($tail) { tstack docs open $tail } else { tstack docs serve }; break }
         '^(-h|--help|help)$' { Write-DocHelp; break }
         default         { Invoke-DocOpen $cmd $os; break }
     }

@@ -10,6 +10,7 @@ commands any more, and no aliases for them.
 | `tstack doctor` | diagnose the install; `--quiet`, `--json`, `--repair` (see below) |
 | `tstack update` | pull the latest stack and re-apply |
 | `tstack rollback` | undo the last update |
+| `tstack docs` | the knowledge base in your browser: `serve` (default port 8896), `open <topic>`, `build [DIR]` (static HTML), `check` (every `doc` reference resolves) |
 | `tstack reinstall` | pull, then run this platform's installer again from the clone - the one-liner, locally; `--no-pull`, `--dry-run` |
 | `tstack apply` | re-apply the dotfiles, explaining any conflict first (POSIX) |
 | `tstack services` | the Docker service stacks - see `doc services` |

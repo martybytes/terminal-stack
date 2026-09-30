@@ -30,4 +30,4 @@ tool when you want to watch what happens rather than have an agent report it.
 - Nothing is persisted: no volume, no profile, no cookies. A session that needs
   state has to establish it.
 
-See also: `doc services` · `doc frontend-testing`
+See also: `doc services` · the `frontend-testing` skill in Claude Code

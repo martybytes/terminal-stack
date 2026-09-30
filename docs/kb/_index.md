@@ -15,6 +15,7 @@ every row names the command that diagnoses it.
 | `doc edit <topic>` / `doc new <os>/<name>` | edit / scaffold a topic |
 | `doc ls` / `doc --os <linux\|macos\|windows>` | list topics / browse another OS |
 | `doc sync` | commit your doc edits back to the repo (+ changelog, optional push) |
+| `doc web [topic]` | this knowledge base in your browser, with search (`tstack docs serve`) |
 
 Picker keys: `ctrl-u`/`ctrl-d` scroll the preview, `ctrl-/` toggles it, `alt-e`
 edits the highlighted topic. The reader is `less`: `/pattern` searches, `q` quits.

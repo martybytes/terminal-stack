@@ -2023,6 +2023,7 @@ doc edit <topic>        edit a topic   |   doc new <os>/<name>   scaffold one
 doc ls                  list topics (this OS + common + local)
 doc --os <linux|macos|windows> ...    browse another OS
 doc sync [msg]          commit doc edits back to the repo (+ changelog, confirm push)
+doc web [topic]         the knowledge base in your browser (tstack docs serve)
 
 picker keys: ctrl-u/ctrl-d scroll preview · ctrl-/ toggle preview · alt-e edit
 reader keys: j/k or arrows scroll · /pattern searches · q quits
@@ -2052,6 +2053,7 @@ doc() {
     ls|list)        _doc_index "$os" | sort | cut -f1 ;;
     edit|new)       _doc_edit "$cmd" "${(j: :)rest[2,-1]}" "$os" ;;
     sync)           _doc_sync "${(j: :)rest[2,-1]}" ;;
+    web)            if [[ -n "${rest[2]:-}" ]]; then tstack docs open "${rest[2]}"; else tstack docs serve; fi ;;
     -h|--help|help) _doc_help ;;
     *)              _doc_open "$cmd" "$os" ;;
   esac

@@ -6,6 +6,19 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Added
 
+- **`tstack docs`: the knowledge base in your browser (09/30/2026).** `tstack
+  docs serve` (or `doc web [topic]` in either shell) serves `docs/kb` on
+  127.0.0.1:8896 with a grouped sidebar, search across titles, headings,
+  commands and text (press `/`), Catppuccin dark/light following your theme,
+  `doc a/b` cross-references as links, click-to-copy on every command line, and
+  the personal `~/.doc.local` layer tagged `[local]`. Pages render on each
+  request, so an edit shows on reload. `tstack docs build [DIR]` writes plain
+  HTML with relative links that works from disk or any host; `tstack docs
+  check` fails when a `doc` reference names no topic, and is a test now too.
+  Standard library only: a small renderer for the markdown the KB actually
+  uses, one HTML shell with inline CSS/JS, no assets, no downloads.
+### Added
+
 - **`tstack reinstall` (09/30/2026).** The install one-liner, run again from the
   clone you have: pulls the runtime clone first (dirty clones refused, a
   deleted branch returned to `main`, a `tstack rollback` point recorded), then
