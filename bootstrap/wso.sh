@@ -258,6 +258,14 @@ cmd_plan() {
     echo
     printf '%s ready, %s conflicted, %s blocked, %s already correct\n' \
         "$movec" "$conflictc" "$blockedc" "$inplacec"
+    # Four zeros read as "found nothing". The plan only looks at folders loose
+    # under the root; say how many are already filed, so an organised workspace
+    # does not look like a broken scan.
+    if [ -z "$(printf '%s' "$plan" | tr -d '[:space:]')" ]; then
+        local organised
+        organised="$(ts_ws_managed_repos | grep -c . || true)"
+        [ "$organised" -gt 0 ] && printf '%s repo(s) already organised under the tier folders - nothing to migrate\n' "$organised"
+    fi
     echo
     TS_WS_PLAN="$plan"
 }
@@ -397,6 +405,31 @@ cmd_sync() {
 # Canonicalised, so `--org martsamp77` selects the martybytes org rather than
 # quietly selecting nothing -- the tree carries the canonical name, and so does
 # the workspace.conf `org` line the loop below reads.
+# gh must be LOGGED IN, not just installed: logged out, `gh repo list` prints
+# nothing and exits non-zero, and with its stderr discarded every owner looked
+# empty -- `synceverything` said "0 cloned." on a machine missing every repo.
+# That is WSL's default: gh.exe on Windows is logged in, the Linux gh is not.
+TS_WS_GH_LOGIN_HINT='run: gh auth login   (on WSL, reuse the Windows login: gh.exe auth token | gh auth login --with-token)'
+ts_ws_gh_ready() {
+    command -v gh >/dev/null 2>&1 || return 1
+    gh auth status >/dev/null 2>&1
+}
+
+# One owner's repo names, or non-zero with gh's first stderr line on stderr.
+ts_ws_gh_list() {
+    local out err rc=0
+    err="$(mktemp "${TMPDIR:-/tmp}/wsogh.XXXXXX")" || return 1
+    out="$(gh repo list "$1" --limit 500 --json name -q '.[].name' 2>"$err")" || rc=$?
+    if [ "$rc" -ne 0 ]; then
+        head -1 "$err" >&2
+        rm -f "$err"
+        return "$rc"
+    fi
+    rm -f "$err"
+    [ -n "$out" ] && printf '%s\n' "$out"
+    return 0
+}
+
 ts_ws_owners_for_filter() {
     local org="$1" owner want
     if [ -z "$org" ]; then ts_ws_own_owners; return 0; fi
@@ -410,17 +443,26 @@ ts_ws_owners_for_filter() {
 
 ts_ws_report_missing() {
     command -v gh >/dev/null 2>&1 || return 0
-    local owner missing=0 line repo host org_filter="${1:-}" owners
+    if ! ts_ws_gh_ready; then
+        echo "--"
+        echo "gh is not logged in, so repos missing from this machine cannot be listed. $TS_WS_GH_LOGIN_HINT"
+        return 0
+    fi
+    local owner missing=0 line repo host org_filter="${1:-}" owners names
     host="$(ts_ws_setting host_default github.com)"
     owners="$(ts_ws_owners_for_filter "$org_filter")" || return 0
     for owner in $owners; do
+        if ! names="$(ts_ws_gh_list "$owner" 2>&1)"; then
+            printf '   could not list %s: %s\n' "$owner" "$names"
+            continue
+        fi
         while IFS= read -r repo; do
             [ -n "$repo" ] || continue
             [ -d "$ROOT/src/$host/$owner/$repo" ] && continue
             [ -d "$ROOT/archive/$host/$owner/$repo" ] && continue
             missing=$((missing + 1))
             if [ "$missing" -le 20 ]; then printf '   missing: %s/%s\n' "$owner" "$repo"; fi
-        done < <(gh repo list "$owner" --limit 500 --json name -q '.[].name' 2>/dev/null)
+        done <<< "$names"
     done
     if [ "$missing" -gt 0 ] && [ -n "$org_filter" ]; then
         echo "--"
@@ -445,14 +487,23 @@ cmd_synceverything() {
         echo "wso: gh not found — needed to enumerate your orgs. Install it (wso doctor lists how)." >&2
         return 1
     }
+    ts_ws_gh_ready || {
+        echo "wso: gh is not logged in — needed to enumerate your orgs. $TS_WS_GH_LOGIN_HINT" >&2
+        return 1
+    }
     local owners
     # Resolve the filter BEFORE the sync, so a typo'd org fails in a second
     # rather than after fast-forwarding every repo on the machine.
     owners="$(ts_ws_owners_for_filter "$org_filter")" || return 2
     cmd_sync ${org_filter:+--org "$org_filter"}
-    local owner repo host cloned=0
+    local owner repo host cloned=0 unlisted=0 names
     host="$(ts_ws_setting host_default github.com)"
     for owner in $owners; do
+        if ! names="$(ts_ws_gh_list "$owner" 2>&1)"; then
+            echo "$WARN could not list $owner's repos: $names" >&2
+            unlisted=$((unlisted + 1))
+            continue
+        fi
         while IFS= read -r repo; do
             [ -n "$repo" ] || continue
             local dest="$ROOT/src/$host/$owner/$repo"
@@ -469,8 +520,14 @@ cmd_synceverything() {
             else
                 echo "$WARN failed to clone $owner/$repo" >&2
             fi
-        done < <(gh repo list "$owner" --limit 500 --json name -q '.[].name' 2>/dev/null)
+        done <<< "$names"
     done
+    if [ "$unlisted" -gt 0 ]; then
+        # Never "0 cloned." alone: an owner that could not be listed is not an
+        # owner with nothing missing.
+        printf '%s %d cloned, %d owner(s) could not be listed.\n' "$WARN" "$cloned" "$unlisted" >&2
+        return 1
+    fi
     printf '%s %d cloned.\n' "$INFO" "$cloned"
 }
 

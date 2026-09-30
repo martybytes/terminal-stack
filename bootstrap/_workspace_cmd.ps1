@@ -188,6 +188,11 @@ function Show-TsWsPlan($Rows, [string]$Mode, [string]$Org = '') {
         @($Rows | Where-Object { $_.Status -eq 'conflict' }).Count,
         @($Rows | Where-Object { $_.Status -in @('blocked', 'runtime') }).Count,
         @($Rows | Where-Object { $_.Status -eq 'inplace' }).Count
+    # Four zeros read as "found nothing". Twin: cmd_plan in wso.sh.
+    if (@($Rows).Count -eq 0) {
+        $organised = @(Get-TsWsManagedRepos).Count
+        if ($organised -gt 0) { "$organised repo(s) already organised under the tier folders - nothing to migrate" }
+    }
     ""
 }
 
@@ -303,18 +308,43 @@ function Invoke-TsWsSync([string[]]$Arguments) {
     Show-TsWsMissing $org
 }
 
+# gh must be LOGGED IN, not just installed: logged out, `gh repo list` prints
+# nothing, and with its stderr discarded every owner looked empty. Twin:
+# ts_ws_gh_ready / ts_ws_gh_list in wso.sh.
+$script:TsWsGhLoginHint = 'run: gh auth login   (on WSL, reuse the Windows login: gh.exe auth token | gh auth login --with-token)'
+function Test-TsWsGhReady {
+    if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { return $false }
+    & gh auth status 2>&1 | Out-Null
+    return ($LASTEXITCODE -eq 0)
+}
+# @{ Ok; Names; Error } for one owner.
+function Get-TsWsGhRepos([string]$Owner) {
+    $out = & gh repo list $Owner --limit 500 --json name -q '.[].name' 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        $first = @($out | ForEach-Object { "$_" } | Where-Object { $_ }) | Select-Object -First 1
+        return @{ Ok = $false; Names = @(); Error = "$first" }
+    }
+    return @{ Ok = $true; Names = @($out | ForEach-Object { "$_" } | Where-Object { $_ }); Error = '' }
+}
+
 # What exists in your orgs but not on this machine. Reported, never cloned -
 # putting 100 repos on a laptop is a decision, not a default.
 function Show-TsWsMissing([string]$Org = '') {
     if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { return }
+    if (-not (Test-TsWsGhReady)) {
+        "--"
+        "gh is not logged in, so repos missing from this machine cannot be listed. $script:TsWsGhLoginHint"
+        return
+    }
     $root = Get-TsWsRoot
     $hostName = Get-TsWsSetting 'host_default' 'github.com'
     $missing = 0
     $owners = Get-TsWsOwnersForFilter $Org
     if ($null -eq $owners) { return }
     foreach ($owner in $owners) {
-        $names = & gh repo list $owner --limit 500 --json name -q '.[].name' 2>$null
-        foreach ($r in $names) {
+        $listed = Get-TsWsGhRepos $owner
+        if (-not $listed.Ok) { "   could not list ${owner}: $($listed.Error)"; continue }
+        foreach ($r in $listed.Names) {
             if (-not $r) { continue }
             if (Test-Path -LiteralPath (Join-Path $root "src\$hostName\$owner\$r")) { continue }
             if (Test-Path -LiteralPath (Join-Path $root "archive\$hostName\$owner\$r")) { continue }
@@ -342,6 +372,9 @@ function Invoke-TsWsSyncEverything([string[]]$Arguments) {
     if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
         Write-Warning 'wso: gh not found - needed to enumerate your orgs. See: wso doctor'; return
     }
+    if (-not (Test-TsWsGhReady)) {
+        Write-Warning "wso: gh is not logged in - needed to enumerate your orgs. $script:TsWsGhLoginHint"; return
+    }
     # Resolve the filter BEFORE the sync, so a typo'd org fails in a second
     # rather than after fast-forwarding every repo on the machine.
     $owners = Get-TsWsOwnersForFilter $org
@@ -351,9 +384,15 @@ function Invoke-TsWsSyncEverything([string[]]$Arguments) {
     $hostName = Get-TsWsSetting 'host_default' 'github.com'
     $scheme = Get-TsWsSetting 'scheme_own' 'ssh'
     $cloned = 0
+    $unlisted = 0
     foreach ($owner in $owners) {
-        $names = & gh repo list $owner --limit 500 --json name -q '.[].name' 2>$null
-        foreach ($r in $names) {
+        $listed = Get-TsWsGhRepos $owner
+        if (-not $listed.Ok) {
+            Write-TsWsWarn "could not list ${owner}'s repos: $($listed.Error)"
+            $unlisted++
+            continue
+        }
+        foreach ($r in $listed.Names) {
             if (-not $r) { continue }
             $dest = Join-Path $root "src\$hostName\$owner\$r"
             if (Test-Path -LiteralPath $dest) { continue }
@@ -365,6 +404,12 @@ function Invoke-TsWsSyncEverything([string[]]$Arguments) {
             if ($LASTEXITCODE -eq 0) { Write-TsWsInfo "cloned $owner/$r"; $cloned++ }
             else { Write-TsWsWarn "failed to clone $owner/$r" }
         }
+    }
+    if ($unlisted -gt 0) {
+        # Never "0 cloned." alone: an owner that could not be listed is not an
+        # owner with nothing missing.
+        Write-TsWsWarn "$cloned cloned, $unlisted owner(s) could not be listed."
+        return
     }
     Write-TsWsInfo "$cloned cloned."
 }
