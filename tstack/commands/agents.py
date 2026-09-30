@@ -34,7 +34,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from .. import headroom_token, paths, proc
+from .. import headroom_token, paths, proc, store
 from .. import platform as plat
 from ..stacks import env_value, stack_dir
 
@@ -1237,7 +1237,9 @@ def main(argv: list[str]) -> int:
 
     tool = argv[0] if argv else "all"
     action = argv[1] if len(argv) > 1 else "status"
-    cursor_mode = argv[2] if len(argv) > 2 else "mcp"
+    # The saved mode, not "mcp": `repair` runs from every sync, and a byok user
+    # got Cursor re-registered as MCP every time.
+    cursor_mode = argv[2] if len(argv) > 2 else (store.get("headroomCursorMode", "") or "mcp")
 
     # `llm` has its own grammar: it is the one tool whose configuration is a URL
     # and a model rather than an on/off toggle, and it lives in a .env rather

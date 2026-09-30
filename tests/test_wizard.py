@@ -1165,6 +1165,10 @@ def test_config_agents_repair_reaches_the_command_that_does_it(monkeypatch):
 
     calls: list[list[str]] = []
     monkeypatch.setattr(agents_cmd, "main", lambda argv: (calls.append(argv), 0)[1])
+    # `on` now SAVES after the wiring succeeds; this test is about the routing,
+    # and on a Windows runner the save would want a %LOCALAPPDATA% mirror.
+    monkeypatch.setattr(config_cmd.store, "set", lambda key, value: None)
+    monkeypatch.setattr(config_cmd, "_apply", lambda out, dry: 0)
     assert config_cmd.main(["agents", "headroom", "repair"]) == 0
     assert calls == [["headroom", "repair"]]
 

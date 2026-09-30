@@ -41,7 +41,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .. import engine, paths, schema, stacks, store
+from .. import engine, paths, proc, schema, stacks, store
 from .. import platform as plat
 
 HELP = """tstack config - view and change saved settings.
@@ -314,28 +314,47 @@ def get(key: str) -> int:
 # --------------------------------------------------------------------- writing
 
 
-def _apply(out: Out, dry_run: bool) -> None:
+def _apply(out: Out, dry_run: bool) -> int:
     """`chezmoi init` regenerates the derived keys; apply renders the files.
 
     init is not optional after a save: leaderKey, leaderMods, tmuxPrefixResolved
     and resolvedTheme are computed from .chezmoi.toml.tmpl, so skipping it leaves
     them describing the previous answer.
+
+    Returns the exit status, and CAPTURES chezmoi's output: this used to ignore
+    both, print "==> done." over a failed apply, and -- under `tstack ui` -- let
+    the child write straight onto the Textual screen.
     """
     if dry_run:
         out.say("==> would apply (--dry-run)")
-        return
+        return 0
     # "..." not U+2026, deliberately. The shell prints an ellipsis character and
     # this is the one place the port does not reproduce it byte-for-byte: a
     # Windows console on codepage 437 renders it as a replacement glyph, and
     # tests/test_tstack_cli.py forbids non-ASCII anywhere under tstack/ for
     # exactly that reason. The gate is enforced; the shell's byte is not.
     out.say("==> applying...")
-    store.chezmoi_init()
-    _refresh_windows_mirror(out)
+    rc = 0
     chezmoi = plat.find_chezmoi()
+    # No chezmoi at all (a Windows-standalone install) is not a failure: the
+    # Windows sync renders from the mirror. A chezmoi that exists and fails is.
+    if chezmoi and not store.chezmoi_init():
+        out.bad("chezmoi init failed: the derived keys (leaderKey, resolvedTheme, ...) are stale")
+        rc = 1
+    _refresh_windows_mirror(out)
     if chezmoi:
-        subprocess.run([chezmoi, "apply"], check=False, timeout=600)
-    out.say("==> done.")
+        got = proc.capture([chezmoi, "apply"], timeout=600)
+        if got is None:
+            out.bad("chezmoi apply did not finish (timed out or could not start)")
+            rc = 1
+        elif got.returncode != 0:
+            tail = [ln for ln in (got.stderr or got.stdout or "").splitlines() if ln.strip()][-6:]
+            out.bad(f"chezmoi apply failed (exit {got.returncode})")
+            for line in tail:
+                out.say(f"    {line}")
+            rc = 1
+    out.say("==> done." if rc == 0 else "==> finished with errors.")
+    return rc
 
 
 def _refresh_windows_mirror(out: Out) -> None:
@@ -395,10 +414,26 @@ def set_value(key: str, value: str, out: Out, dry_run: bool) -> int:
     if dry_run:
         out.say(f"==> would set {key} = {value}")
         return 0
-    store.set(key, value)
+    if key == "apps":
+        # A TOML ARRAY, never a string: .chezmoi.toml.tmpl does `range .apps`,
+        # and `apps = "eza fzf"` made every later `chezmoi init` fail while the
+        # dashboard -- which reads the value as a list either way -- looked fine.
+        store.set_list(key, value.split())
+    else:
+        store.set(key, value)
     out.say(f"saved: {key} = {value}")
-    _apply(out, dry_run)
-    return 0
+    rc = _apply(out, dry_run)
+    if key in GUI_SIDE_KEYS and plat.kind() == plat.WSL:
+        # The GUI config this renders into is the WINDOWS .wezterm.lua, which a
+        # WSL install no longer writes. Saying "done" here was a lie.
+        out.say(
+            "  this renders into the Windows-side .wezterm.lua: run 'tstack update' in PowerShell"
+        )
+    return rc
+
+
+# Settings rendered only into the GUI config, which on WSL lives on the Windows side.
+GUI_SIDE_KEYS = frozenset({"leaderChord", "weztermMux", "weztermRestore"})
 
 
 DELEGATED_HELP = {
@@ -569,12 +604,19 @@ def set_memory(backend: str, out: Out, dry_run: bool) -> int:
     # this runs it rather than only writing the key.
     from . import agents as agents_cmd
 
+    rc = 0
     if backend == "agentmemory":
         if agents_cmd.main(["agentmemory", "on"]) != 0:
             out.bad("AgentMemory wiring failed; retry: tstack config agents agentmemory repair")
+            rc = 1
     elif before == "agentmemory":
-        agents_cmd.main(["agentmemory", "off"])
-        out.say("  AgentMemory hooks removed from Claude/Codex/Cursor.")
+        if agents_cmd.main(["agentmemory", "off"]) == 0:
+            out.say("  AgentMemory hooks removed from Claude/Codex/Cursor.")
+        else:
+            out.bad(
+                "AgentMemory hooks could not all be removed; retry: tstack agents agentmemory off"
+            )
+            rc = 1
 
     from . import services as services_cmd
 
@@ -583,7 +625,9 @@ def set_memory(backend: str, out: Out, dry_run: bool) -> int:
     # are `:?`-required, so it dies at `compose config` complaining about a
     # VARIABLE rather than about the missing file. bootstrap needs no engine and
     # no network, is idempotent by design, and never rotates a value somebody set.
-    services_cmd.main(["bootstrap"])
+    if services_cmd.main(["bootstrap"]) != 0:
+        out.bad("services bootstrap failed; the compose file below may not exist yet")
+        rc = 1
 
     # The overlay's `command:` carries `--memory`, which has no environment
     # variable and is the entire Headroom-memory feature. Writing the key without
@@ -600,6 +644,15 @@ def set_memory(backend: str, out: Out, dry_run: bool) -> int:
         # Loud, because the silence is the bug. Both shell twins report success
         # here and Headroom then remembers nothing, with every container healthy.
         out.bad(message)
+        rc = 1
+
+    if backend != "headroom" and store.normalise(store.get("headroomEnabled", "off")) != "true":
+        # Naming a stack is consent to START it (services.py), and this machine
+        # never enabled Headroom. `tstack config memory none` with Docker up used
+        # to bring the proxy up on a box that had said no to it. Choosing
+        # Headroom AS the memory backend is choosing to run it.
+        out.say("  headroom is not enabled on this machine, so nothing to restart.")
+        return rc
 
     # Restart rather than print the command: the setting and the running state
     # must not disagree, and a headroom still running the old compose file is
@@ -615,12 +668,13 @@ def set_memory(backend: str, out: Out, dry_run: bool) -> int:
         out.say("  restarting headroom so the change takes effect...")
         if services_cmd.main(["restart", "headroom"]) != 0:
             out.bad("headroom restart failed - run: tstack services restart headroom")
+            rc = 1
     else:
         out.say("  the container engine is not reachable, so headroom was not restarted.")
         for line in engine.engine_advice(engine.os_name(), kind):
             out.say(f"    {line}")
         out.say("  apply it later with: tstack services restart headroom")
-    return 0
+    return rc
 
 
 def show_memory(out: Out) -> int:
@@ -683,37 +737,57 @@ def set_agents(tool: str, action: str, out: Out, dry_run: bool, cursor: str = ""
     """
     if tool not in AGENT_KEYS:
         return _usage(f"tstack config agents: unknown tool '{tool}'")
-    if action not in ("on", "off", "status", "repair", "uninstall"):
+    if action not in ("on", "off", "status", "repair", "uninstall", "cursor"):
         return _usage(
             "usage: tstack config agents "
-            "<headroom|caveman|agentmemory|playwright> on|off|status|repair|uninstall"
+            "<headroom|caveman|agentmemory|playwright> on|off|status|repair|uninstall\n"
+            "       tstack config agents headroom cursor <mcp|byok|off>"
         )
     if action == "status":
         return show_agents(out)
-    if cursor:
-        # `agents headroom cursor <mcp|byok|off>` in the shell. Only headroom has
-        # a Cursor mode, and only `tstack agents` knows how to rewire it.
-        from . import agents as agents_cmd
+    from . import agents as agents_cmd
 
-        return int(agents_cmd.main([tool, action, cursor]))
+    if action == "cursor":
+        # `agents headroom cursor <mcp|byok|off>`: documented, and a usage error
+        # until now -- nothing in Python wrote headroomCursorMode. Save the mode,
+        # then rewire Cursor to it.
+        if tool != "headroom" or cursor not in ("mcp", "byok", "off"):
+            return _usage("usage: tstack config agents headroom cursor <mcp|byok|off>")
+        if dry_run:
+            out.say(f"==> would set headroomCursorMode = {cursor}")
+            return 0
+        store.set("headroomCursorMode", cursor)
+        out.say(f"saved: headroomCursorMode = {cursor}")
+        return int(agents_cmd.main(["headroom", "repair", cursor]))
     if tool == "agentmemory" and action in ("on", "off"):
         return _usage(
             "tstack config agents: agentmemoryEnabled is derived from memoryBackend "
             "- use: tstack config memory agentmemory|headroom|none"
         )
-    if action in ("repair", "uninstall"):
+    if action == "repair":
         # `tstack agents` owns the client wiring and does exactly this. Saying
         # "use the shell" became a dead end the moment `config` stopped being the
         # shell on POSIX.
-        from . import agents as agents_cmd
-
         return int(agents_cmd.main([tool, action]))
     if dry_run:
-        out.say(f"==> would set {AGENT_KEYS[tool]} = {action}")
+        out.say(f"==> would set {AGENT_KEYS[tool]} = {'off' if action == 'uninstall' else action}")
         return 0
-    store.set(AGENT_KEYS[tool], action)
-    out.say(f"saved: {AGENT_KEYS[tool]} = {action}")
-    return 0
+    # The WIRING first, the key second, as the shell twin did: a key that says
+    # "on" over clients that were never registered (or "off" over ones still
+    # registered) is the drift `tstack doctor` exists to report. `uninstall`
+    # never wrote the key at all, so the next sync's `repair` wired it all back.
+    # The Cursor mode rides along as the third argument (`headroom on byok`).
+    # playwright has no wiring step in `tstack agents`; its key is the whole toggle.
+    rc = 0
+    if tool in agents_cmd.TOOLS:
+        rc = int(agents_cmd.main([tool, action, cursor] if cursor else [tool, action]))
+        if rc != 0 and action != "off":
+            out.bad(f"{tool} {action} did not complete; setting left unchanged")
+            return rc
+    saved = "off" if action == "uninstall" else action
+    store.set(AGENT_KEYS[tool], saved)
+    out.say(f"saved: {AGENT_KEYS[tool]} = {saved}")
+    return _apply(out, dry_run) or rc
 
 
 # ----------------------------------------------------------------- entry point
