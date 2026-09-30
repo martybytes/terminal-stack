@@ -6,7 +6,7 @@ commands any more, and no aliases for them.
 | Command | What it does |
 |---|---|
 | `tstack config` | view and change saved settings (the table below) |
-| `tstack ui` | every setting in one screen; offers to install Textual the first time |
+| `tstack ui` | the dashboard: Home, Settings (every setting and which layer set it), Doctor, Services (`s` start, `x` stop, `l` logs), Docs; `alt+1..5` switch tabs; offers to install Textual the first time |
 | `tstack doctor` | diagnose the install; `--quiet`, `--json`, `--repair` (see below) |
 | `tstack update` | pull the latest stack and re-apply |
 | `tstack rollback` | undo the last update |
