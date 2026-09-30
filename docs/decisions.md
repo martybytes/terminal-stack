@@ -4081,3 +4081,29 @@ group can `docker run -v /:/host` — and ships
 that *installs* the engine has to refuse it too, or the stack quietly undoes a
 decision the distro made deliberately. A test drives the function under both
 distro ids.
+
+## Why the Headroom token is per machine, not per clone
+
+The proxy is per machine: a combined Windows+WSL box runs one Docker Desktop
+container for both sides. The token was per clone: every `services/stacks/headroom/.env`
+held its own. On the machine that surfaced this there were three clones -- the WSL
+runtime clone, the Windows runtime clone (no `.env` at all), a Windows dev
+checkout -- and one proxy, started from whichever ran `services up` last. Every
+PowerShell `claude`/`codex` launch printed "Headroom is enabled but unavailable"
+and went direct, for a proxy that was up and answering.
+
+The token that counts is the one the running container holds, so that is what is
+recorded: `tstack/headroom_token.py` owns one file per machine, written by
+`services up headroom` (read back from the container) and by `services bootstrap`
+(adopt the container's, else the file's, else generate). All three readers --
+Python, `_ts_headroom_token`, `Get-TsHeadroomToken` -- consult it before the
+clone's `.env`. A clone's own value is still never rotated behind its back;
+`tstack doctor` reports a clone that disagrees with the running proxy and
+`--repair` aligns it, the same report-don't-reconcile rule as the agentmemory
+one-server check.
+
+Rejected: asking the container at every launch (`docker inspect`), which costs a
+Docker Desktop round trip on the agent's critical path and needs the engine even
+to go direct. And the suite gets a conftest fixture that points the file at a
+temp path, because the code under test now writes the developer's real one.
+

@@ -30,7 +30,7 @@ import urllib.request
 from collections.abc import Callable
 from pathlib import Path
 
-from .. import engine, paths, stacks, store
+from .. import engine, headroom_token, paths, stacks, store
 
 HELP = """tstack services - the local Docker service stacks: bring them up, prove they work.
 
@@ -382,6 +382,8 @@ def cmd_up(svc: Services) -> None:
             continue
         if not svc.compose.ok(name, _up_argv(svc)):
             svc.out.bad(f"up failed for {name}")
+        elif name == "headroom" and not svc.args.dry_run:
+            _record_machine_token(svc, _running_secret(svc, svc.dir(name), PROXY_TOKEN))
 
 
 def _port_holders(svc: Services) -> dict[str, str]:
@@ -589,6 +591,9 @@ def _seed_env(svc: Services, directory: Path) -> None:
         (svc.out.info if ok else svc.out.warn)(message)
 
 
+PROXY_TOKEN = "HEADROOM_PROXY_TOKEN"
+
+
 def _generated_secrets(source: Path) -> list[dict]:
     catalog = source / "bootstrap" / "agent-tools.json"
     try:
@@ -608,10 +613,26 @@ def _fill_secret(svc: Services, path: Path, key: str, placeholder: str, size: in
     if not path.is_file():
         return
     current = stacks.env_value(path, key)
+    proxy = key == PROXY_TOKEN
+    live = _running_secret(svc, path.parent, key)
     if current and current != placeholder:
         svc.out.info(f"{key} already set - left untouched")
+        if proxy:
+            # Never rotated -- but the machine token follows the proxy that is
+            # actually running, not whichever clone ran bootstrap last.
+            # With no proxy up, an already-recorded token stays; only a machine
+            # that has none takes this clone's.
+            _record_machine_token(svc, live or headroom_token.read() or current)
+            if live and live != current:
+                svc.out.warn(
+                    f"{key} here differs from the running proxy's - agents launched "
+                    "from this clone would be rejected; tstack doctor --repair aligns it"
+                )
         return
-    live = _running_secret(svc, path.parent, key)
+    if not live and proxy:
+        # No proxy running, but another clone on this machine already recorded
+        # the token the stack uses. Adopting it keeps one token per machine.
+        live = headroom_token.read()
     if live:
         # A fresh clone next to a stack another clone started (a Windows dev
         # checkout, the legacy /mnt/c clone). Minting a new value here is what
@@ -622,6 +643,8 @@ def _fill_secret(svc: Services, path: Path, key: str, placeholder: str, size: in
             svc.out.warn(f"could not set {key}")
             return
         svc.out.info(f"{key} set ({stacks.secret_fingerprint(live)}) - matches the live container")
+        if proxy:
+            _record_machine_token(svc, live)
         return
     svc.out.step(f"generate {key} ({size} random bytes)")
     if not svc.out.apply:
@@ -633,37 +656,32 @@ def _fill_secret(svc: Services, path: Path, key: str, placeholder: str, size: in
     # A fingerprint, never the value: a secret echoed to a terminal lives in
     # scrollback, and this one is also in `docker logs` until rotation.
     svc.out.info(f"{key} set ({stacks.secret_fingerprint(secret)})")
+    if proxy:
+        _record_machine_token(svc, secret)
 
 
 def _running_secret(svc: Services, directory: Path, key: str) -> str:
-    """`key` as a RUNNING container of this stack's compose project holds it, or "".
+    """`key` as a RUNNING container of this stack holds it, or "".
 
     Only asked of a live engine: `bootstrap` needs no engine and must stay quiet
-    without one. The project is the compose file's own `name:`, so this cannot
-    pick up an unrelated container that happens to carry the same variable.
+    without one.
     """
     if not svc.engine_ok:
         return ""
     project = stacks.project_name(directory)
-    if not project:
-        return ""
-    rc, ids = stacks.docker(
-        svc.kind, ["ps", "-q", "--filter", f"label=com.docker.compose.project={project}"]
-    )
-    if rc != 0 or not ids.strip():
-        return ""
-    rc, env = stacks.docker(
-        svc.kind,
-        ["inspect", "--format", "{{range .Config.Env}}{{println .}}{{end}}", *ids.split()],
-    )
-    if rc != 0:
-        return ""
-    for line in env.splitlines():
-        if line.startswith(f"{key}="):
-            value = line.split("=", 1)[1].strip()
-            if value:
-                return value
-    return ""
+    return stacks.running_env(svc.kind, project, key) if project else ""
+
+
+def _record_machine_token(svc: Services, token: str) -> None:
+    """The live proxy's token, where every clone on this machine reads it first.
+
+    See tstack/headroom_token.py: one proxy per machine, so one token per machine.
+    """
+    if not token or not svc.out.apply or headroom_token.read() == token:
+        return
+    if headroom_token.write(token):
+        where = headroom_token.path()
+        svc.out.info(f"machine token {where} ({stacks.secret_fingerprint(token)})")
 
 
 def _external_volumes(source: Path) -> list[str]:

@@ -34,7 +34,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .. import checks, herdr, paths, proc, store
+from .. import checks, engine, headroom_token, herdr, paths, proc, stacks, store
 from .. import platform as plat
 from ..checks import Report
 from . import agents
@@ -863,6 +863,92 @@ def check_clone_location(report: Report, src: Path | None) -> None:
         )
 
 
+HEADROOM_TOKEN_KEY = "HEADROOM_PROXY_TOKEN"
+
+
+def _headroom_live_token() -> str:
+    """The token the running Headroom proxy holds, or "" (no engine, not running)."""
+    kind = engine.docker_kind(timeout=5)
+    if not engine.is_up(kind, timeout=5):
+        return ""
+    return stacks.running_env(kind, "ts-headroom", HEADROOM_TOKEN_KEY)
+
+
+def _headroom_env(clone: Path) -> Path:
+    return clone / "services" / "stacks" / "headroom" / ".env"
+
+
+def _headroom_stale(live: str) -> tuple[bool, list[Path]]:
+    """(machine token stale, clones whose .env holds a different token)."""
+    machine_stale = headroom_token.read() != live
+    clones = []
+    for clone in paths.clones():
+        env = _headroom_env(clone.path)
+        value = stacks.env_value(env, HEADROOM_TOKEN_KEY) if env.is_file() else ""
+        if value and value != live:
+            clones.append(clone.path)
+    return machine_stale, clones
+
+
+def check_headroom_token(report: Report) -> None:
+    """One proxy per machine, so one token per machine.
+
+    Each clone used to carry its own, and only the one that started the proxy
+    matched it: every agent launched from any other clone's shell printed
+    "Headroom is enabled but unavailable" and went direct, silently. Fingerprints
+    only; a token is never printed.
+    """
+    if store.normalise(store.get("headroomEnabled", "off")) != "true":
+        return
+    live = _headroom_live_token()
+    if not live:
+        return
+    machine_stale, clones = _headroom_stale(live)
+    if not machine_stale and not clones:
+        report.ok(
+            "headroom-token", f"one token, the running proxy's ({stacks.secret_fingerprint(live)})"
+        )
+        return
+    parts = []
+    if machine_stale:
+        parts.append("the machine token file")
+    parts += [str(c) for c in clones]
+    report.fail(
+        "headroom-token",
+        "the running proxy rejects the token in "
+        + ", ".join(parts)
+        + " - agents launched there go direct",
+        "tstack doctor --repair",
+    )
+
+
+def repair_headroom_token() -> int:
+    """Align the machine file and every clone's .env with the running proxy."""
+    if store.normalise(store.get("headroomEnabled", "off")) != "true":
+        return 0
+    live = _headroom_live_token()
+    if not live:
+        return 0
+    machine_stale, clones = _headroom_stale(live)
+    rc = 0
+    if machine_stale:
+        if headroom_token.write(live):
+            print(f"  headroom token: {headroom_token.path()} <- running proxy")
+        else:
+            print("  !! could not write the machine headroom token", file=sys.stderr)
+            rc = 1
+    for clone in clones:
+        env = _headroom_env(clone)
+        if stacks.replace_in_file(
+            env, f"^{HEADROOM_TOKEN_KEY}=.*$", f"{HEADROOM_TOKEN_KEY}={live}"
+        ):
+            print(f"  headroom token: {env} <- running proxy")
+        else:
+            print(f"  !! could not update {env}", file=sys.stderr)
+            rc = 1
+    return rc
+
+
 def check_wsl_docker_shim(report: Report, src: Path | None) -> None:
     """WSL + Docker Desktop with this distro's integration OFF + an ext4 clone.
 
@@ -1038,6 +1124,7 @@ def collect() -> Report:
     check_agentmemory_wiring(report, src)
     check_agentmemory_one_server(report)
     check_agentmemory_secret(report, src)
+    check_headroom_token(report)
     check_smb(report)
     check_clone_location(report, src)
     check_clone_branch(report, src)
@@ -1082,6 +1169,7 @@ def repair(src: Path | None) -> int:
         return 1
     print("==> tstack doctor --repair")
     repair_clone_branch(src)
+    repair_headroom_token()
     cleanup = src / "bootstrap" / ("_cleanup.ps1" if plat.kind() == plat.WINDOWS else "_cleanup.sh")
     if not cleanup.is_file():
         print(f"  !! {cleanup} not found; cannot run the cleanup checklist.", file=sys.stderr)

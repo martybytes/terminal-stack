@@ -34,7 +34,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from .. import paths, proc
+from .. import headroom_token, paths, proc
 from .. import platform as plat
 from ..stacks import env_value, stack_dir
 
@@ -284,6 +284,13 @@ class Headroom:
         env = os.environ.get("HEADROOM_PROXY_TOKEN")
         if env:
             return env
+        # The machine's token -- what the running proxy holds -- before this
+        # clone's own .env, which is only right if this clone started it. An
+        # explicit HEADROOM_ENV_FILE still wins. See tstack/headroom_token.py.
+        if not os.environ.get("HEADROOM_ENV_FILE"):
+            machine = headroom_token.read()
+            if machine:
+                return machine
         path = self.token_path()
         try:
             for line in path.read_text(encoding="utf-8").splitlines():
@@ -595,8 +602,8 @@ class Headroom:
                     f"Headroom is running but proxy authentication failed ({why}); {tail}."
                 )
                 self.out.info(
-                    f"token file: {self.token_path()}. If another clone started the "
-                    "proxy, recreate it from this one: tstack services up headroom"
+                    "another clone probably started the proxy with its own token; "
+                    "tstack doctor --repair aligns this machine's token with it"
                 )
                 return 1
             self.register(add=True)

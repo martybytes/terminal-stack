@@ -489,7 +489,7 @@ def test_a_running_headroom_is_never_reported_as_not_running(monkeypatch, capsys
     out = capsys.readouterr().out
     assert "not running" not in out
     assert "Headroom is running" in out
-    assert "tstack services up headroom" in out
+    assert "tstack doctor --repair" in out
 
 
 def test_the_windows_reexec_is_pinned_to_the_calling_clone(monkeypatch):
