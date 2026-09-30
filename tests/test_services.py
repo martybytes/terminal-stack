@@ -504,6 +504,35 @@ def test_a_secret_somebody_set_is_never_rotated(tree, calls, capsys):
     assert "already set" in capsys.readouterr().out
 
 
+def test_a_fresh_clone_adopts_the_token_of_a_running_proxy(tree, calls, capsys, monkeypatch):
+    """The reported install: a new WSL clone minted its own token beside a proxy
+    another clone had started, and every probe after that got 401."""
+    monkeypatch.setenv("TS_STACK_ENGINE_UP", "1")
+    root = stacks.stack_root(tree)
+    env = root / "headroom" / ".env"
+    env.write_text("HEADROOM_PROXY_TOKEN=changeme\n", encoding="utf-8")
+    calls["answers"]["ps -q"] = (0, "abc123\n")
+    calls["answers"]["inspect"] = (0, "PATH=/bin\nHEADROOM_PROXY_TOKEN=livetoken\n")
+    svc = build(tree, "bootstrap")
+    services._fill_secret(svc, env, "HEADROOM_PROXY_TOKEN", "changeme", 32)
+    assert stacks.env_value(env, "HEADROOM_PROXY_TOKEN") == "livetoken"
+    ps = next(a for a in calls["docker"] if a[:2] == ["ps", "-q"])
+    assert "label=com.docker.compose.project=ts-headroom" in ps
+    out = capsys.readouterr().out
+    assert "livetoken" not in out, "the secret was printed"
+    assert "adopt" in out
+
+
+def test_no_engine_means_no_docker_call_while_seeding_a_secret(tree, calls):
+    """`bootstrap` needs no engine; asking one that is not up would hang an install."""
+    root = stacks.stack_root(tree)
+    env = root / "headroom" / ".env"
+    env.write_text("HEADROOM_PROXY_TOKEN=changeme\n", encoding="utf-8")
+    services._fill_secret(build(tree, "bootstrap"), env, "HEADROOM_PROXY_TOKEN", "changeme", 32)
+    assert calls["docker"] == []
+    assert stacks.env_value(env, "HEADROOM_PROXY_TOKEN") not in ("changeme", "")
+
+
 def test_external_volumes_are_read_out_of_the_compose_files(tree):
     root = stacks.stack_root(tree)
     (root / "agentmemory" / "docker-compose.yml").write_text(

@@ -611,6 +611,18 @@ def _fill_secret(svc: Services, path: Path, key: str, placeholder: str, size: in
     if current and current != placeholder:
         svc.out.info(f"{key} already set - left untouched")
         return
+    live = _running_secret(svc, path.parent, key)
+    if live:
+        # A fresh clone next to a stack another clone started (a Windows dev
+        # checkout, the legacy /mnt/c clone). Minting a new value here is what
+        # made the installer report a healthy proxy as "not running": the file
+        # and the container disagreed, and every probe from this clone got 401.
+        svc.out.step(f"adopt {key} from the running {path.parent.name} stack")
+        if svc.out.apply and not stacks.replace_in_file(path, f"^{key}=.*$", f"{key}={live}"):
+            svc.out.warn(f"could not set {key}")
+            return
+        svc.out.info(f"{key} set ({stacks.secret_fingerprint(live)}) - matches the live container")
+        return
     svc.out.step(f"generate {key} ({size} random bytes)")
     if not svc.out.apply:
         return
@@ -621,6 +633,37 @@ def _fill_secret(svc: Services, path: Path, key: str, placeholder: str, size: in
     # A fingerprint, never the value: a secret echoed to a terminal lives in
     # scrollback, and this one is also in `docker logs` until rotation.
     svc.out.info(f"{key} set ({stacks.secret_fingerprint(secret)})")
+
+
+def _running_secret(svc: Services, directory: Path, key: str) -> str:
+    """`key` as a RUNNING container of this stack's compose project holds it, or "".
+
+    Only asked of a live engine: `bootstrap` needs no engine and must stay quiet
+    without one. The project is the compose file's own `name:`, so this cannot
+    pick up an unrelated container that happens to carry the same variable.
+    """
+    if not svc.engine_ok:
+        return ""
+    project = stacks.project_name(directory)
+    if not project:
+        return ""
+    rc, ids = stacks.docker(
+        svc.kind, ["ps", "-q", "--filter", f"label=com.docker.compose.project={project}"]
+    )
+    if rc != 0 or not ids.strip():
+        return ""
+    rc, env = stacks.docker(
+        svc.kind,
+        ["inspect", "--format", "{{range .Config.Env}}{{println .}}{{end}}", *ids.split()],
+    )
+    if rc != 0:
+        return ""
+    for line in env.splitlines():
+        if line.startswith(f"{key}="):
+            value = line.split("=", 1)[1].strip()
+            if value:
+                return value
+    return ""
 
 
 def _external_volumes(source: Path) -> list[str]:

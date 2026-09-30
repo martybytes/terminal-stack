@@ -31,6 +31,14 @@ for a yes: start Docker when it is installed but stopped (up to two minutes),
 Docker. `repair`, which every sync runs, never asks. Declined or unattended, both
 print one line, `Headroom not running; wiring skipped`, and the command for later.
 
+A proxy that answers but rejects this clone's token is reported as running, with
+the token file it read. That is almost always a stack another clone started (a
+Windows checkout, or the legacy `/mnt/c` clone): run `tstack services up
+headroom` from this clone to recreate it with this clone's `.env`. A fresh
+clone's `tstack services bootstrap` adopts the token of a running headroom stack
+rather than generating a new one, so this only happens when the two already
+disagree.
+
 `tstack config agents headroom on|repair` instead registers this stdio command:
 
 ```sh

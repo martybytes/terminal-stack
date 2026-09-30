@@ -27,6 +27,53 @@ common_pkg_prereqs() {
         >/dev/null
 }
 
+# Catalog id -> apt package(s). Empty means "not from apt": the id has its own
+# route further down common_install_selected_apps (an upstream release, a vendor
+# repo, uv). Non-zero means NO case arm at all -- a catalog row nobody taught this
+# file about -- and the installer REPORTS it rather than dropping it. That silent
+# drop is how fnm, node, python, uv, pipx, ruff, ipython, httpie, poetry and
+# pre-commit went uninstalled on every Debian/Ubuntu/WSL box with no message.
+# tests/test_distro.py asserts the mapping is total, same as ts_arch_pkg.
+ts_debian_pkg() {
+    case "$1" in
+        delta)   echo git-delta ;;              # github fallback below
+        fd)      echo fd-find ;;                # ships `fdfind`; symlinked below
+        python)  echo "python3 python3-venv python3-pip" ;;
+        # apt, under their own name. eza/gh/btop/duf may be absent on older
+        # releases; each has a GitHub fallback below.
+        tmux|fzf|ripgrep|zoxide|micro|bat|eza|tldr|gh|tree|duf|ncdu|btop|\
+        glances|rclone|nvtop|pipx)
+            echo "$1" ;;
+        # Not apt: routed below.
+        ghq|lazygit|glow|neovim|lazydocker|zed|dust|gdu|bottom|bandwhich|gping|\
+        atuin|yazi|llmfit|fnm|node|uv|ruff|ipython|httpie|poetry|pre-commit)
+            echo "" ;;
+        *)       return 1 ;;
+    esac
+}
+
+# One Python CLI in its own environment: `uv tool install`, else pipx. The twin
+# of Install-TsPyTool in _config.ps1, and apt is deliberately not a route --
+# Debian's python3-* packages are system libraries, and since PEP 668 a bare
+# `pip install --user` refuses outright.
+ts_debian_py_tool() {
+    local id="$1" pkg="${2:-$1}"
+    if command -v "$id" >/dev/null 2>&1; then
+        echo "$INFO $id already on PATH ($(command -v "$id"))"
+        return 0
+    fi
+    if command -v uv >/dev/null 2>&1; then
+        echo "$INFO $id: uv tool install $pkg"
+        uv tool install "$pkg" >/dev/null 2>&1 && return 0
+        echo "$WARN $id: uv tool install failed; trying pipx"
+    fi
+    if command -v pipx >/dev/null 2>&1; then
+        pipx install "$pkg" >/dev/null 2>&1 && return 0
+    fi
+    echo "$WARN $id unavailable; tick uv (or pipx), then: uv tool install $pkg"
+    return 1
+}
+
 # Install the user-selected toggleable apps (catalog ids). No-op when the list is
 # empty — the wizard's "customize / decline all" path must not fall back to recommended.
 # apt where it has them; the bespoke installers (glow/neovim/eza/delta/zed/…)
@@ -41,28 +88,20 @@ common_install_selected_apps() {
         echo "$INFO Optional apps install via sudo apt — you may be prompted for your password"
     fi
     echo "$INFO Installing selected apps: $apps"
-    local apt_pkgs="" id
+    local apt_pkgs="" id pkg
     for id in $apps; do
+        # The AI CLIs, herdr and docker are install ROUTES, handled below.
+        ts_app_is_ai "$id" && continue
+        ts_app_is_herdr "$id" && continue
+        ts_app_is_docker "$id" && continue
         case "$id" in
-            tmux)    apt_pkgs="$apt_pkgs tmux" ;;
-            fzf)     apt_pkgs="$apt_pkgs fzf" ;;
-            ripgrep) apt_pkgs="$apt_pkgs ripgrep" ;;
-            zoxide)  apt_pkgs="$apt_pkgs zoxide" ;;
-            micro)   apt_pkgs="$apt_pkgs micro" ;;
-            bat)     apt_pkgs="$apt_pkgs bat" ;;
-            eza)     apt_pkgs="$apt_pkgs eza" ;;        # may be absent pre-23.10; github fallback below
-            delta)   apt_pkgs="$apt_pkgs git-delta" ;;
-            tldr)    apt_pkgs="$apt_pkgs tldr" ;;
-            gh)      apt_pkgs="$apt_pkgs gh" ;;          # universe on 24.04+; github fallback below
-            fd)      apt_pkgs="$apt_pkgs fd-find" ;;      # ships the binary as `fdfind`; symlinked below
-            tree)    apt_pkgs="$apt_pkgs tree" ;;
-            duf)     apt_pkgs="$apt_pkgs duf" ;;
-            ncdu)    apt_pkgs="$apt_pkgs ncdu" ;;
-            btop)    apt_pkgs="$apt_pkgs btop" ;;         # 22.04+; github fallback below
-            glances) apt_pkgs="$apt_pkgs glances" ;;
-            rclone)  apt_pkgs="$apt_pkgs rclone" ;;      # apt lags upstream; fine for tstack smb
-            nvtop)   command -v nvidia-smi >/dev/null 2>&1 && apt_pkgs="$apt_pkgs nvtop" ;;
+            nvtop) command -v nvidia-smi >/dev/null 2>&1 || continue ;;
         esac
+        if ! pkg="$(ts_debian_pkg "$id")"; then
+            echo "$WARN no Debian install route for catalog id '$id' — skipped (add it to ts_debian_pkg)"
+            continue
+        fi
+        [ -n "$pkg" ] && apt_pkgs="$apt_pkgs $pkg"
     done
     if [ -n "$apt_pkgs" ]; then
         # shellcheck disable=SC2086
@@ -107,14 +146,14 @@ common_install_selected_apps() {
     esac
     case " $apps " in *" lazygit "*)
         command -v lazygit >/dev/null 2>&1 \
-            || common_install_github_binary "jesseduffield/lazygit" "lazygit" "lazygit_.*_Linux_$(common_arch_tag gnu)\\.tar\\.gz$" \
+            || common_install_github_binary "jesseduffield/lazygit" "lazygit" "lazygit_.*_[Ll]inux_$(common_arch_tag gnu)\\.tar\\.gz$" \
             || echo "$WARN lazygit unavailable (GitHub fallback failed)" ;;
     esac
     case " $apps " in *" glow "*)   common_install_glow ;; esac
     case " $apps " in *" neovim "*) common_install_neovim ;; esac
     case " $apps " in *" lazydocker "*)
         if command -v docker >/dev/null 2>&1; then
-            common_install_github_binary "jesseduffield/lazydocker" "lazydocker" "lazydocker_.*_Linux_$(common_arch_tag gnu)\\.tar\\.gz$" || true
+            common_install_github_binary "jesseduffield/lazydocker" "lazydocker" "lazydocker_.*_[Ll]inux_$(common_arch_tag gnu)\\.tar\\.gz$" || true
         else
             echo "$INFO lazydocker selected but docker not found; skipping"
         fi ;;
@@ -193,6 +232,46 @@ common_install_selected_apps() {
             || common_install_github_binary "AlexsJones/llmfit" "llmfit" "llmfit-.*-$(common_arch_tag rust)-unknown-linux-gnu\\.tar\\.gz$" \
             || echo "$WARN llmfit unavailable (GitHub fallback failed)" ;;
     esac
+    # Runtimes and the Python group. None of these is in apt under a usable
+    # name (Debian's `fnm` does not exist, its `ruff` lags a year, and its
+    # python3-* tools are libraries), so each takes its upstream release or uv.
+    # uv first: the Python tools below install THROUGH it. Both it and
+    # `uv tool install` land in ~/.local/bin, which a fresh login may not have
+    # on PATH yet -- and then "installed" would be followed by "unavailable".
+    case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) PATH="$HOME/.local/bin:$PATH" ;; esac
+    case " $apps " in *" uv "*)
+        command -v uv >/dev/null 2>&1 \
+            || common_install_github_binary "astral-sh/uv" "uv" "uv-$(common_arch_tag rust)-unknown-linux-gnu\\.tar\\.gz$" \
+            || echo "$WARN uv unavailable (GitHub fallback failed)"
+        command -v uvx >/dev/null 2>&1 \
+            || common_install_github_binary "astral-sh/uv" "uvx" "uv-$(common_arch_tag rust)-unknown-linux-gnu\\.tar\\.gz$" \
+            || true ;;
+    esac
+    case " $apps " in *" ruff "*)
+        command -v ruff >/dev/null 2>&1 \
+            || common_install_github_binary "astral-sh/ruff" "ruff" "ruff-$(common_arch_tag rust)-unknown-linux-gnu\\.tar\\.gz$" \
+            || echo "$WARN ruff unavailable (GitHub fallback failed)" ;;
+    esac
+    # fnm names its x86_64 asset `fnm-linux.zip` and its ARM one `fnm-arm64.zip`.
+    case " $apps " in *" fnm "*)
+        local fnm_asset="fnm-linux\\.zip$"
+        [ "$(common_arch_tag deb)" = arm64 ] && fnm_asset="fnm-arm64\\.zip$"
+        command -v fnm >/dev/null 2>&1 \
+            || common_install_github_binary "Schniz/fnm" "fnm" "$fnm_asset" \
+            || echo "$WARN fnm unavailable (GitHub fallback failed)" ;;
+    esac
+    # `node` without fnm has nothing to install it with: say so rather than
+    # reach for apt's nodejs, which is too old for gemini and competes with fnm.
+    case " $apps " in *" node "*)
+        case " $apps " in *" fnm "*) ;; *)
+            command -v node >/dev/null 2>&1 \
+                || echo "$WARN node needs fnm to install it: tstack config apps fnm" ;;
+        esac ;;
+    esac
+    ts_install_node_lts "$apps" || true
+    for id in ipython httpie poetry pre-commit; do
+        case " $apps " in *" $id "*) ts_debian_py_tool "$id" || true ;; esac
+    done
     ts_install_ai_clis "$apps"
     # herdr comes from herdr.dev's own installer rather than a GitHub-release
     # fallback: that script picks the right asset per architecture and wires up

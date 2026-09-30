@@ -285,6 +285,69 @@ def test_every_installable_catalog_id_has_an_arch_package():
 
 
 @pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+def test_every_installable_catalog_id_has_a_debian_route():
+    """The apt twin of the Arch gate above.
+
+    The Debian installer had no mapping function at all -- a `case` whose ids
+    fell through silently -- and ten catalog rows (fnm, node, python, uv, pipx,
+    ruff, ipython, httpie, poetry, pre-commit) installed nothing on any
+    Debian/Ubuntu/WSL box while the wizard listed them as selected.
+    """
+    ids = _linux_catalog_ids()
+    assert ids, "the catalog reader returned nothing; the rest of this is vacuous"
+    script = (
+        ". bootstrap/_common-debian.sh >/dev/null 2>&1\n"
+        f"for i in {' '.join(ids)}; do\n"
+        '  ts_app_is_ai "$i" && continue\n'
+        '  ts_app_is_herdr "$i" && continue\n'
+        '  ts_app_is_docker "$i" && continue\n'
+        '  ts_debian_pkg "$i" >/dev/null 2>&1 || echo "$i"\n'
+        "done\n"
+    )
+    got = subprocess.run(
+        [BASH, "-c", script],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+        start_new_session=True,
+    )
+    unmapped = got.stdout.split()
+    assert not unmapped, f"no Debian install route for: {unmapped} (add them to ts_debian_pkg)"
+
+
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+def test_every_debian_non_apt_id_has_its_own_route():
+    """`ts_debian_pkg` answering "" promises a route further down. Hold it to that:
+    every such id must be named in a `*" <id> "*` arm or the py-tool loop."""
+    text = DEBIAN_LIB.read_text(encoding="utf-8")
+    body = text[text.index("common_install_selected_apps() {") :]
+    script = (
+        ". bootstrap/_common-debian.sh >/dev/null 2>&1\n"
+        f"for i in {' '.join(_linux_catalog_ids())}; do\n"
+        '  p="$(ts_debian_pkg "$i" 2>/dev/null)" || continue\n'
+        '  [ -z "$p" ] && echo "$i"\n'
+        "done\n"
+    )
+    got = subprocess.run(
+        [BASH, "-c", script],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+        start_new_session=True,
+    )
+    routed = got.stdout.split()
+    assert routed, "no non-apt ids reported; the check is vacuous"
+    loop = re.search(r"for id in ([a-z -]+); do\n\s+case \" \$apps \" in", body)
+    looped = set(loop.group(1).split()) if loop else set()
+    missing = [i for i in routed if f'*" {i} "*' not in body and i not in looped]
+    assert not missing, f"ts_debian_pkg says these have a route, but none exists: {missing}"
+
+
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_the_arch_package_names_that_differ_from_their_id():
     """Six ids are not their own package name on Arch. Getting one wrong is a
     pacman error at install time, which is loud -- but getting one SILENTLY

@@ -39,25 +39,35 @@ class Console:
         return self._script is not None or (self._reader is not None and self._writer is not None)
 
     @classmethod
-    def open(cls) -> Console:
+    def open(cls, tty: str = "/dev/tty") -> Console:
         """The controlling terminal, or a non-interactive console.
 
         Never raises. A container, a CI runner and a piped installer all land
         here, and every one of them must still complete with defaults.
+
+        Two handles, never one `r+`: a text-mode `r+` is a BufferedRandom, which
+        demands a SEEKABLE file, and a tty is not one. The UnsupportedOperation
+        it raises is an OSError, so the except below turned every POSIX install
+        into a silent all-defaults run -- no menu printed, nothing asked. `tty`
+        is a parameter so the suite can hand it a real pty.
         """
         if sys.platform == "win32":  # pragma: no cover - exercised on Windows only
             try:
                 return cls(open("CONIN$", encoding="utf-8"), open("CONOUT$", "w", encoding="utf-8"))
             except OSError:
                 return cls()
+        reader = None
         try:
-            # Deliberately not a context manager: the handle has to outlive this
-            # call and is closed by close(). ruff's SIM115 is about leaks, and
-            # the lifetime here is the wizard's.
-            handle = open("/dev/tty", "r+", encoding="utf-8")  # noqa: SIM115
+            # Deliberately not context managers: the handles have to outlive
+            # this call and are closed by close(). ruff's SIM115 is about leaks,
+            # and the lifetime here is the wizard's.
+            reader = open(tty, encoding="utf-8")  # noqa: SIM115
+            writer = open(tty, "w", encoding="utf-8")  # noqa: SIM115
         except OSError:
+            if reader is not None:
+                reader.close()
             return cls()
-        return cls(handle, handle)
+        return cls(reader, writer)
 
     @classmethod
     def scripted(cls, answers: Iterable[str]) -> Console:
