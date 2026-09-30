@@ -36,6 +36,13 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
   instead of listing nothing missing. `wso plan` on an organised workspace adds
   "N repo(s) already organised under the tier folders - nothing to migrate"
   instead of four bare zeros. Both twins.
+- **Agent hooks find Node (09/30/2026).** fnm puts `node` on PATH per shell, so
+  hooks - which run under `/bin/sh` with the PATH their agent started with -
+  failed `node: not found` in any session opened before Node was installed, and
+  every agentmemory capture was lost. The Node step now links fnm's default
+  `node`/`npm`/`npx` into `~/.local/bin`, which follows `fnm default`, never
+  replaces a `node` that is not its own link, and runs on machines where Node
+  was already current.
 - **Headroom works from every shell on a machine, not just the clone that started
   it (09/30/2026).** The proxy is per machine but the token was per clone, so with
   a WSL clone, a Windows clone and a dev checkout only one matched the running
