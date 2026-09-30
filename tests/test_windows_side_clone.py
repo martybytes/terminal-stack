@@ -88,7 +88,7 @@ def test_the_cleanup_menu_never_offers_it(tmp_path):
     fake.mkdir(parents=True)
     script = (
         f". {ROOT / 'bootstrap/_cleanup.sh'} >/dev/null 2>&1\n"
-        'grep() { [ "$1" = -qi ] && [ "$2" = microsoft ] && return 0; command grep "$@"; }\n'
+        "ts_cleanup_on_wsl() { return 0; }\n"
         f'_ts_realpath() {{ printf %s "${{1#{tmp_path}}}"; }}\n'
         f'ts_is_windows_side_clone "{fake}" && echo windows-side\n'
         'ts_is_windows_side_clone "/home/u/.local/share/terminal-stack" || echo mine\n'
