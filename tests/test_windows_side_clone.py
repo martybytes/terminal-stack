@@ -79,7 +79,10 @@ def test_the_installer_no_longer_scans_it_as_legacy():
     assert "Move failed and left $TARGET_DIR behind" in body
 
 
-@pytest.mark.skipif(not BASH, reason="bash is unavailable")
+@pytest.mark.skipif(
+    not BASH or sys.platform == "win32",
+    reason="the bash cleanup is not the Windows implementation; _cleanup.ps1 is",
+)
 def test_the_cleanup_menu_never_offers_it(tmp_path):
     """The bash twin of is_windows_side_clone, driving the real finder."""
     import subprocess
