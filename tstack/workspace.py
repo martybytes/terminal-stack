@@ -637,8 +637,13 @@ def verify(source: Path, dest: Path, say: Say = print) -> bool:
             # returned TRUE for a copy it had not looked at -- the one result
             # this function must never produce, because a confirmed delete is
             # on the other side of it.
+            # Hours, not proc.capture's 15 s default: a dry run over a large
+            # tree took longer than that, timed out, and `--move` refused on
+            # exactly the big disks it exists for. Refusing is the safe
+            # direction, which is why nobody noticed the feature was unusable.
             attempt = proc.capture(
-                ["rsync", *flags, "-n", "--itemize-changes", "--delete", f"{source}/", f"{dest}/"]
+                ["rsync", *flags, "-n", "--itemize-changes", "--delete", f"{source}/", f"{dest}/"],
+                timeout=6 * 3600,
             )
             if attempt is not None and attempt.returncode == 0:
                 out = attempt

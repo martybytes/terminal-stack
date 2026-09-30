@@ -284,7 +284,7 @@ function Test-TsInstall {
     # Leftover clones are advisory, not a health failure — note without counting.
     $others = @(Find-TsClones $SourceDir)
     if ($others.Count -gt 0) {
-        Write-Host '  note: other terminal-stack clones present ('tstack doctor --repair' can clean them up):'
+        Write-Host "  note: other terminal-stack clones present ('tstack doctor --repair' can clean them up):"
         $others | ForEach-Object { Write-Host "        $($_.Path)" }
     }
 

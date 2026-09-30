@@ -271,15 +271,19 @@ def check_config_stores(report: Report) -> None:
         return
     mirror = store.mirror_path()
     if not mirror or not mirror.is_file():
-        if plat.kind() == plat.WINDOWS:
-            report.fail(
-                "config-mirror",
-                f"config.json missing ({mirror})",
-                "run install.ps1 or tstack config",
-            )
+        report.fail(
+            "config-mirror",
+            f"config.json missing ({mirror})",
+            "run install.ps1 or tstack config",
+        )
         return
     report.ok("config-mirror", f"config: {mirror}")
 
+    if store.writes_to_mirror():
+        # No configured chezmoi here: the mirror IS the store, and a chezmoi.toml
+        # a stray winget binary may have left holds nothing that renders. Comparing
+        # against it reported divergences nobody could act on.
+        return
     found = store.divergences()
     for key, mine, theirs in found:
         report.fail(
@@ -402,7 +406,8 @@ def check_tts(report: Report) -> None:
 
     engine = store.get("ccTtsEngine", "kokoro")
     if engine == "kokoro":
-        alive = _probe_http("http://127.0.0.1:8880/health") or _probe_http("http://127.0.0.1:8880/")
+        kokoro = (store.get("ccTtsKokoroUrl", "") or "http://127.0.0.1:8880").rstrip("/")
+        alive = _probe_http(f"{kokoro}/health") or _probe_http(f"{kokoro}/")
         if alive:
             report.ok("tts-engine", "kokoro TTS engine reachable")
         else:
@@ -522,7 +527,7 @@ def _check_claude_tts_hooks(report: Report) -> None:
             "tts-hooks",
             f"TTS is enabled but {settings} has no terminal-stack-tts hooks - "
             "nothing will ever call the daemon",
-            "repair: tstack config tts on (from WSL)",
+            "repair: tstack config tts on, then 'tstack update' in PowerShell",
         )
 
 
@@ -728,12 +733,16 @@ def check_agentmemory_secret(report: Report, src: Path | None) -> None:
         return
     if store.normalise(store.get("agentmemoryEnabled", "off")) != "true":
         return
-    if not shutil.which("docker"):
+    # The engine probe, not `which("docker")`: Docker Desktop's WSL stub is on
+    # PATH and exits 1 for everything, and a WSL box on the interop path has no
+    # Linux `docker` at all -- so this check never fired where it mattered.
+    kind = engine.docker_kind(timeout=5)
+    if not engine.is_up(kind, timeout=5):
         return
     container = _agentmemory_container()
     if not container:
         return
-    got = _run(["docker", "exec", container, "cat", "/data/.hmac"], timeout=5)
+    got = _run([engine.binary_for(kind), "exec", container, "cat", "/data/.hmac"], timeout=5)
     in_container = (got.stdout.strip() if got and got.returncode == 0 else "").strip()
     recovered = _agentmemory_recovered_secret(src)
     if not in_container or not recovered:
@@ -756,31 +765,18 @@ def _tts_port() -> int:
 
 
 def _tts_local_json() -> Path | None:
-    if plat.is_windows_side() and plat.kind() == plat.WSL:
-        user = plat.windows_username()
-        if user:
-            return Path(f"/mnt/c/Users/{user}/.claude/tts/local.json")
+    """The TTS daemon's local.json on the side that runs the daemon."""
+    if plat.kind() == plat.WSL:
+        home = plat.windows_home()
+        return home / ".claude" / "tts" / "local.json" if home else None
     return Path.home() / ".claude" / "tts" / "local.json"
 
 
 def _probe_http(url: str, timeout: float = 2.0, headers: dict[str, str] | None = None) -> bool:
-    """Answering is the test, never a 2xx.
+    """Answering is the test, never a 2xx. One implementation: wizard.probes."""
+    from ..wizard import probes
 
-    AgentMemory returns 404 on `/` and 401 on `/agentmemory/health`, so a
-    `curl -fsS`-shaped check reported the service down while it was up. Only a
-    refused connection counts as down.
-    """
-    import urllib.error
-    import urllib.request
-
-    request = urllib.request.Request(url, headers=headers or {})
-    try:
-        urllib.request.urlopen(request, timeout=timeout)
-        return True
-    except urllib.error.HTTPError:
-        return True
-    except Exception:
-        return False
+    return probes.answers(url, timeout, headers)
 
 
 def check_smb(report: Report) -> None:
@@ -975,8 +971,6 @@ def check_wsl_docker_shim(report: Report, src: Path | None) -> None:
     """
     if plat.kind() != plat.WSL or src is None:
         return
-    from .. import engine
-
     if engine.docker_kind() != engine.WSL_SHIM:
         return
     reason = engine.require_windows_visible(src)

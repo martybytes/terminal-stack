@@ -20,7 +20,9 @@ case "$state" in waiting|error|question|permission) ;; *)
 esac
 
 cc_tts_init_config
-[ -f "$CONFIG" ] || { [ "$_foreground" -eq 1 ] && echo "cc-tts-notify: missing config" >&2; exit 1; }
+# Exit 0: cc-speak.sh execs this on every Stop, so exit 1 here made Claude
+# report a failed hook on every turn of a machine that simply has no TTS config.
+[ -f "$CONFIG" ] || { [ "$_foreground" -eq 1 ] && echo "cc-tts-notify: missing config" >&2; exit 0; }
 [ "$_foreground" -eq 0 ] && [ "$(cc_tts_json .enabled false)" != true ] && exit 0
 # Absolute: no priority escape, and checked here because this path plays audio itself
 # rather than delegating to the Windows EXE. A foreground run (cc-tts-test) is exempt --

@@ -212,7 +212,7 @@ def test_get_prints_a_bare_value(capsys):
 
 
 def test_set_validates_through_the_schema(monkeypatch, capsys):
-    monkeypatch.setattr(config, "_apply", lambda out, dry: None)
+    monkeypatch.setattr(config, "_apply", lambda out, dry: 0)
     assert config.main(["set", "themeMode", "purple"]) == 2
     assert "must be one of" in capsys.readouterr().err
     assert config.main(["set", "themeMode", "light"]) == 0
@@ -221,7 +221,7 @@ def test_set_validates_through_the_schema(monkeypatch, capsys):
 
 def test_a_derived_key_is_refused(monkeypatch, capsys):
     """`Setting.validate()` already refuses it; this pins that `set` asks."""
-    monkeypatch.setattr(config, "_apply", lambda out, dry: None)
+    monkeypatch.setattr(config, "_apply", lambda out, dry: 0)
     assert config.main(["set", "agentmemoryEnabled", "off"]) == 2
     assert "derived" in capsys.readouterr().err
 
@@ -230,6 +230,17 @@ def test_memory_is_the_only_writer_of_the_derived_key(monkeypatch, tmp_path):
     # tmp_path, never ROOT: set_memory writes headroom's .env now, and aiming a
     # test at the real tree edits the developer's own clone.
     monkeypatch.setattr(config.paths, "resolve_source_dir", lambda: tmp_path)
+    # The wiring and the services step are recorded elsewhere; here only the
+    # store matters, so both callees answer 0. set_memory now PROPAGATES their
+    # failures instead of returning 0 over them, which is why they need a stub.
+    from tstack.commands import agents as agents_cmd
+    from tstack.commands import services as services_cmd
+
+    monkeypatch.setattr(agents_cmd, "main", lambda argv: 0)
+    monkeypatch.setattr(services_cmd, "main", lambda argv: 0)
+    env = tmp_path / "services" / "stacks" / "headroom" / ".env"
+    env.parent.mkdir(parents=True)
+    env.write_text("COMPOSE_PATH_SEPARATOR=:\nCOMPOSE_FILE=docker-compose.yml\n", encoding="utf-8")
     assert config.main(["memory", "headroom"]) == 0
     body = toml_text()
     assert 'memoryBackend = "headroom"' in body
@@ -278,7 +289,7 @@ def test_atuin_on_windows_sets_the_key_and_says_what_it_does_not_do(monkeypatch,
     # mirror, so this test restores it.
     mirror = local / "terminal-stack" / "config.json"
     monkeypatch.setattr(store, "mirror_path", lambda: mirror)
-    monkeypatch.setattr(config, "_apply", lambda out, dry: None)
+    monkeypatch.setattr(config, "_apply", lambda out, dry: 0)
     monkeypatch.setattr(config.paths, "resolve_source_dir", lambda: ROOT)
     assert config.main(["atuin", "on"]) == 0
     assert "no PowerShell integration" in capsys.readouterr().out

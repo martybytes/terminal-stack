@@ -21,6 +21,12 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# The profile FOLDER, forward-slashed, for every path a hook runs. It is not
+# always C:\Users\<USERNAME>: a Microsoft-account name is truncated, a domain
+# user gets user.DOMAIN, and a folder with a space needs the quotes the
+# templates now carry. __WIN_USER__ stays for everything that wants the name.
+$WinHome = ("$env:USERPROFILE" -replace '\\', '/').TrimEnd('/')
+if ([string]::IsNullOrWhiteSpace($WinHome)) { $WinHome = "C:/Users/$WinUser" }
 if ([string]::IsNullOrWhiteSpace($WinUser)) {
     throw "sync-windows: -WinUser is empty and `$env:USERNAME is unset."
 }
@@ -70,7 +76,7 @@ $ccTtsStopHook = if ($ccTtsEnabled) {
 ,
           {
             `"type`": `"command`",
-            `"command`": `"C:/Users/$WinUser/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe hook --source claude --event stop --state waiting`"
+            `"command`": `"\`"$WinHome/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe\`" hook --source claude --event stop --state waiting`"
           }
 "@
 } else { '' }
@@ -79,7 +85,7 @@ $ccTtsStopFailureHook = if ($ccTtsEnabled) {
 ,
           {
             `"type`": `"command`",
-            `"command`": `"C:/Users/$WinUser/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe hook --source claude --event stop_failure --state error`"
+            `"command`": `"\`"$WinHome/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe\`" hook --source claude --event stop_failure --state error`"
           }
 "@
 } else { '' }
@@ -94,20 +100,20 @@ $ccTtsCursorHooks = if ($ccTtsEnabled) {
     ],
     `"afterAgentResponse`": [
       {
-        `"command`": `"C:/Users/$WinUser/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe hook --source cursor --event cursor_response --state waiting`",
+        `"command`": `"\`"$WinHome/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe\`" hook --source cursor --event cursor_response --state waiting`",
         `"timeout`": 15
       }
     ],
     `"stop`": [
       {
-        `"command`": `"C:/Users/$WinUser/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe hook --source cursor --event cursor_stop --state waiting`",
+        `"command`": `"\`"$WinHome/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe\`" hook --source cursor --event cursor_stop --state waiting`",
         `"timeout`": 15
       }
     ],
     `"postToolUse`": [
       {
         `"matcher`": `"AskQuestion|AskUserQuestion`",
-        `"command`": `"C:/Users/$WinUser/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe hook --source cursor --event cursor_question --state question`",
+        `"command`": `"\`"$WinHome/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe\`" hook --source cursor --event cursor_question --state question`",
         `"timeout`": 15
       }
     ]
@@ -122,7 +128,7 @@ $ccTtsPreToolUseTts = if ($ccTtsEnabled) {
         `"hooks`": [
           {
             `"type`": `"command`",
-            `"command`": `"C:/Users/$WinUser/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe hook --source claude --event question --state question`"
+            `"command`": `"\`"$WinHome/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe\`" hook --source claude --event question --state question`"
           }
         ]
       }
@@ -137,7 +143,7 @@ $ccTtsInputHooks = if ($ccTtsEnabled) {
         `"hooks`": [
           {
             `"type`": `"command`",
-            `"command`": `"C:/Users/$WinUser/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe hook --source claude --event notification --state question`"
+            `"command`": `"\`"$WinHome/AppData/Local/terminal-stack/tts-daemon/terminal-stack-tts.exe\`" hook --source claude --event notification --state question`"
           }
         ]
       }
@@ -146,6 +152,7 @@ $ccTtsInputHooks = if ($ccTtsEnabled) {
 } else { '' }
 $tok = @{
     '__WIN_USER__'               = $WinUser
+    '__WIN_HOME__'               = $WinHome
     '__LEADER_KEY__'             = if ($tsCfg.leaderKey)          { $tsCfg.leaderKey }          else { 'phys:Backslash' }
     '__LEADER_MODS__'            = if ($tsCfg.leaderMods)         { $tsCfg.leaderMods }         else { 'CTRL' }
     '__THEME_MODE__'             = if ($tsCfg.themeMode)          { $tsCfg.themeMode }          else { 'dark' }

@@ -89,7 +89,12 @@ def main(argv: list[str]) -> int:
     if os.environ.get("TS_ASSUME_YES", "").strip() not in ("", "0", "no", "false"):
         assume_yes = True
 
-    console = Console.open()
+    # --assume-yes means "take every default without prompting" (as documented
+    # in tstack config's help and INSTALL.md), so it gets a console with nobody
+    # at it: every question takes its default -- which is this machine's saved
+    # answer -- and the review is skipped. It used to skip only the review and
+    # still ask every question on a terminal.
+    console = Console() if assume_yes else Console.open()
     try:
         if only == "apps":
             # One question, no review: the caller asked for the picker, not the

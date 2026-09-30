@@ -856,6 +856,10 @@ def test_the_agentmemory_secret_check_cannot_abort_the_doctor(monkeypatch):
     probes are bounded -- Python's own timeout being the portable watchdog the
     shell had to hand-write, macOS having no timeout(1).
     """
+    # The check asks the ENGINE now, not `which docker`: without a probe the
+    # runner has no engine and the check returns before the stub is reached.
+    monkeypatch.setenv("TS_STACK_DOCKER_PROBE", "native")
+    monkeypatch.setenv("TS_STACK_ENGINE_UP", "1")
     from tstack import store
     from tstack.commands import doctor
 
@@ -926,6 +930,10 @@ def test_the_secret_probe_reads_cmd_exe_only_on_the_windows_side(monkeypatch, tm
 
 def test_the_secret_itself_is_never_printed(monkeypatch, capsys):
     """It is a credential, and the report is read over someone's shoulder."""
+    # The check asks the ENGINE now, not `which docker`: without a probe the
+    # runner has no engine and the check returns before the stub is reached.
+    monkeypatch.setenv("TS_STACK_DOCKER_PROBE", "native")
+    monkeypatch.setenv("TS_STACK_ENGINE_UP", "1")
     from tstack import store
     from tstack.commands import doctor
 
