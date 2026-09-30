@@ -6,6 +6,18 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Added
 
+- **`tstack ui` is a dashboard (09/30/2026).** Five tabs (`alt+1..5`): Home
+  (clone, version, theme, memory backend, Headroom token, voice, doctor and
+  service counts), Settings (the existing table), Doctor (every check, failures
+  first, with the hint for the highlighted one; `r` re-runs), Services (each
+  stack's state and ports; `s` start, `x` stop after a confirmation, `l` logs;
+  the same consent rules as the CLI), and Docs (the knowledge base with a
+  filter box and a rendered reader). Saves run in a worker thread with a
+  status line instead of freezing the screen for the length of a `chezmoi
+  apply`; so do the doctor and the engine probes. `tstack services status`
+  gained the structured read model the dashboard uses (`status_rows`).
+### Added
+
 - **`tstack docs`: the knowledge base in your browser (09/30/2026).** `tstack
   docs serve` (or `doc web [topic]` in either shell) serves `docs/kb` on
   127.0.0.1:8896 with a grouped sidebar, search across titles, headings,

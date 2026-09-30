@@ -28,6 +28,7 @@ import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 from .. import confirm, engine, headroom_token, paths, stacks, store
@@ -271,8 +272,22 @@ class Services:
 # ----------------------------------------------------------------------- verbs
 
 
-def cmd_status(svc: Services) -> None:
-    out = svc.out
+@dataclass
+class StackRow:
+    """One stack's state, as `status` prints it and as the dashboard shows it."""
+
+    name: str
+    level: str  # ok | warn | off | unknown
+    line: str  # the words status prints after the glyph
+    running: int = 0
+    total: int = 0
+    ports: str = ""
+    hint: str = ""  # a second line, when intent and reality disagree
+
+
+def status_rows(svc: Services) -> list[StackRow]:
+    """The read model behind `status`: computed once, printed or rendered."""
+    rows: list[StackRow] = []
     for name in svc.stacks:
         state = stacks.stack_state(name)
         running = total = 0
@@ -282,32 +297,45 @@ def cmd_status(svc: Services) -> None:
             rc, ids = svc.compose.quiet(name, ["ps", "-aq"])
             total = len([x for x in ids.splitlines() if x.strip()]) if rc == 0 else 0
         if state and total == 0:
-            print(f"  --  {name:<15} {state}")
+            rows.append(StackRow(name, "off", state))
             continue
         if state:
             # Intent and reality disagree. A warn, not a failure: this is exactly
             # what a doctor exists to surface, and it is not "broken".
-            print(f"  {out.warn_glyph}   {name:<15} running, but {state}")
-            out.issues += 1
             keep = (
                 f"tstack config agents {name} on"
                 if name in ("headroom", "caveman")
                 else ("tstack config memory agentmemory" if name.endswith("memory") else "")
             )
-            print(
-                f"      {keep + '   (keep it)   |   ' if keep else ''}tstack services down {name}   (stop it)"
-            )
+            hint = f"{keep + '   (keep it)   |   ' if keep else ''}tstack services down {name}   (stop it)"
+            rows.append(StackRow(name, "warn", f"running, but {state}", running, total, hint=hint))
             continue
         if not svc.engine_ok:
-            print(f"      {name:<15} enabled (engine unreachable, state unknown)")
+            rows.append(StackRow(name, "unknown", "enabled (engine unreachable, state unknown)"))
         elif total == 0:
-            print(f"  {out.warn_glyph}   {name:<15} not created")
-            out.issues += 1
+            rows.append(StackRow(name, "warn", "not created"))
         elif running == total:
-            print(f"  ok  {name:<15} running ({running}/{total})  {_published(svc, name)}")
+            ports = _published(svc, name)
+            rows.append(StackRow(name, "ok", f"running ({running}/{total})", running, total, ports))
         else:
-            print(f"  {out.warn_glyph}   {name:<15} partial ({running}/{total})")
+            rows.append(StackRow(name, "warn", f"partial ({running}/{total})", running, total))
+    return rows
+
+
+def cmd_status(svc: Services) -> None:
+    out = svc.out
+    for row in status_rows(svc):
+        if row.level == "off":
+            print(f"  --  {row.name:<15} {row.line}")
+        elif row.level == "unknown":
+            print(f"      {row.name:<15} {row.line}")
+        elif row.level == "ok":
+            print(f"  ok  {row.name:<15} {row.line}  {row.ports}")
+        else:
+            print(f"  {out.warn_glyph}   {row.name:<15} {row.line}")
             out.issues += 1
+            if row.hint:
+                print(f"      {row.hint}")
 
 
 def _published(svc: Services, name: str) -> str:
