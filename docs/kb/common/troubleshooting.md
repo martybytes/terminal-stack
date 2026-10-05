@@ -87,6 +87,16 @@ services/stacks/agentmemory/reconcile-llm-queue.sh --apply    # cold backup, qua
 moved aside to `/data/queue_store.quarantine-<stamp>` and a full volume backup
 is written first.
 
+Run it from the clone the stack was started from, normally the runtime clone
+(`~/.local/share/terminal-stack/services/stacks/agentmemory`). A dev clone has
+no `.env` there, so a restart from it drops the provider credentials and the
+backlog dead-letters all over again. The script checks this and names the right
+directory if you get it wrong.
+
+A dead-letter count that stays put while compression succeeds is a leftover,
+not a live failure. Check that recent `llm_call` lines show a real
+`providerLatencyMs`, not `0`, and reconcile once the queue `depth` is back to 0.
+
 ## The console says "UPSTREAM OFFLINE"
 
 It means one thing: the console could not reach AgentMemory's

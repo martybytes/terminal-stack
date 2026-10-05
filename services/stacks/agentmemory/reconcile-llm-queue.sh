@@ -337,6 +337,10 @@ printf '%sreconcile-llm-queue  mode=%s  stack=%s%s\n' "$C_WHITE" "$TSS_MODE" "$s
 [ "$TSS_APPLY" = 1 ] || info 'read-only preview; add --apply to back up, quarantine, and reconcile'
 
 section 'Preflight'
+tss_assert_compose_home ts-agentmemory-server "$stack_dir" \
+    || die "ts-agentmemory-server was started from $TSS_COMPOSE_HOME, not $stack_dir.
+Recreating it from here would drop that directory's .env (the LLM provider credentials).
+Run the copy of this script in $TSS_COMPOSE_HOME instead."
 docker compose config --quiet || die 'docker compose config failed'
 docker volume inspect "$volume_name" >/dev/null 2>&1 || die "Docker volume $volume_name does not exist"
 image="$(tss_compose_image "$stack_dir" agentmemory)" || die 'could not resolve the agentmemory image'

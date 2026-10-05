@@ -55,6 +55,23 @@ function Step([string]$Text) {
 function Info([string]$Text) { Write-Host "       $Text" -ForegroundColor DarkGray }
 function Warn([string]$Text) { Write-Host "  !    $Text" -ForegroundColor Yellow }
 
+# Refuse to recreate the server from a directory other than the one it was
+# started from. A dev clone's stack directory has no .env, and both env_files
+# are required:false, so `docker compose up -d` there brings the server back
+# with no OPENAI_* at all and compose says nothing: every compression job then
+# dead-letters. Twin of tss_assert_compose_home in _stack.sh. No container, no opinion.
+function Assert-ComposeHome([string]$Container, [string]$Dir) {
+    $composeHome = & docker inspect $Container --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' 2>$null
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($composeHome)) { return }
+    $composeHome = "$composeHome".Trim()
+    if (-not (Test-Path -LiteralPath $composeHome -PathType Container)) { return }
+    $a = (Get-Item -LiteralPath $composeHome).FullName.TrimEnd('\', '/')
+    $b = (Get-Item -LiteralPath $Dir).FullName.TrimEnd('\', '/')
+    if (-not [string]::Equals($a, $b, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "$Container was started from $composeHome, not $Dir.`nRecreating it from here would drop that directory's .env (the LLM provider credentials).`nRun the copy of this script in $composeHome instead."
+    }
+}
+
 # The console lives in its OWN compose project (ts-agent007memory) since the
 # split, so `docker compose stop console` from this directory stops nothing and
 # reports nothing -- it would have left the console reading a volume this script
@@ -290,6 +307,7 @@ if (-not $Apply) { Info 'read-only preview; add -Apply to back up, quarantine, a
 Push-Location $stackDir
 try {
     Section 'Preflight'
+    Assert-ComposeHome -Container 'ts-agentmemory-server' -Dir $stackDir
     Invoke-Compose -Arguments @('config', '--quiet')
     & docker volume inspect $volumeName *> $null
     if ($LASTEXITCODE -ne 0) { throw "Docker volume $volumeName does not exist" }

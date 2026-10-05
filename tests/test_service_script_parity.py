@@ -124,6 +124,26 @@ def test_reconcile_embedded_programs_are_identical():
         )
 
 
+def test_scripts_that_recreate_the_server_refuse_a_foreign_compose_home():
+    """reconcile-llm-queue.sh --apply, run from a dev clone, recreated the server
+    from a stack directory with no .env. Both env_files are required:false, so it
+    came back with no OPENAI_* and no warning, and dead-lettered 3,625 compression
+    jobs in ten minutes. The guard must run before anything is stopped."""
+    for stem in ["reconcile-llm-queue", "migrate-durable-llm"]:
+        for suffix, guard, first_stop in [
+            (".sh", "tss_assert_compose_home ts-agentmemory-server", "docker compose stop"),
+            (".ps1", "Assert-ComposeHome -Container 'ts-agentmemory-server'", "'stop'"),
+        ]:
+            path = SERVICES / "stacks/agentmemory" / (stem + suffix)
+            text = read(path)
+            preflight = text.index("ection 'Preflight'")
+            assert guard in text[preflight:], f"{path.name} does not check the compose home"
+            at = text.index(guard, preflight)
+            stops = [m.start() for m in re.finditer(re.escape(first_stop), text)]
+            later = [s for s in stops if s > preflight]
+            assert not later or at < min(later), f"{path.name} checks after stopping"
+
+
 # --------------------------------------------------------------------------
 def test_sh_scripts_are_bash_32_clean():
     """macOS ships bash 3.2 and always will (docs/service-conventions.md, "Scripts")."""
