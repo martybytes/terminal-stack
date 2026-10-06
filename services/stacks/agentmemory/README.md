@@ -1032,6 +1032,13 @@ to remain empty and healthy for 105 seconds, covering the queue's full retry win
 reported. Malformed or unreadable session records are logged and excluded from follow-up summary and
 graph jobs instead of becoming poison DLQ messages.
 
+Run the copy of the script in the directory the stack was started from, normally the runtime clone.
+`-Apply` recreates the server from the script's own directory, and a dev clone has no `.env` there.
+Both `env_file`s are `required: false`, so compose would start the server with no provider
+credentials, say nothing, and dead-letter every compression job. Both this script and
+`migrate-durable-llm` compare the running container's compose working directory with their own
+first, and refuse before stopping anything if the two differ.
+
 For a code-only container replacement immediately after a completed reconciliation, an empty regular
 file at `/data/.skip-next-llm-recovery` suppresses one startup pass. The entrypoint consumes the marker
 before launch, so later restarts recover normally; do not use it to bypass a needed state repair.

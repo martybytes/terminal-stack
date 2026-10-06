@@ -63,6 +63,10 @@ tss_mode >/dev/null
 printf '%smigrate-durable-llm  mode=%s  stack=%s%s\n' "$C_WHITE" "$TSS_MODE" "$stack_dir" "$C_RESET"
 
 section 'Preflight'
+tss_assert_compose_home ts-agentmemory-server "$stack_dir" \
+    || die "ts-agentmemory-server was started from $TSS_COMPOSE_HOME, not $stack_dir.
+Recreating it from here would drop that directory's .env (the LLM provider credentials).
+Run the copy of this script in $TSS_COMPOSE_HOME instead."
 docker compose config --quiet || die 'docker compose config failed'
 docker volume inspect ts-agentmemory-data >/dev/null 2>&1 || die 'Docker volume ts-agentmemory-data does not exist'
 secret="$(docker compose exec -T agentmemory cat /data/.hmac 2>/dev/null | tr -d '\r\n' || true)"

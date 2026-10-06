@@ -288,6 +288,19 @@ tss_assert_within() {                      # <root> <path>
     case "$rpath/" in "$rroot"/*) return 0 ;; *) return 1 ;; esac
 }
 
+# PREDICATE. Refuse to recreate <container> from a directory other than the one
+# it was started from. A dev clone's stack directory has no .env, and both
+# env_files are required:false, so `docker compose up -d` there brings the
+# server back with no OPENAI_* at all and compose says nothing: every
+# compression job then dead-letters. On failure TSS_COMPOSE_HOME names the
+# directory the script should have been run from. No container, no opinion.
+tss_assert_compose_home() {                # <container> <stack-dir>
+    TSS_COMPOSE_HOME="$(docker inspect "$1" --format \
+        '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' 2>/dev/null)" || return 0
+    [ -n "$TSS_COMPOSE_HOME" ] && [ -d "$TSS_COMPOSE_HOME" ] || return 0
+    [ "$(tss_realpath "$TSS_COMPOSE_HOME")" = "$(tss_realpath "$2")" ]
+}
+
 # There is no Unix C:\DATA. XDG state under $HOME is the equivalent, and it is
 # also the only place Docker Desktop for Mac shares by default — a backup root
 # outside $HOME fails to bind-mount.

@@ -52,6 +52,15 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **agentmemory: the queue scripts refuse to recreate the server from the
+  wrong clone (10/05/2026).** `reconcile-llm-queue` and `migrate-durable-llm`
+  restart the server with `docker compose up -d` from their own directory. Run
+  from a dev clone, whose stack directory has no `.env`, that brought the
+  server back with no `OPENAI_*` (both `env_file`s are `required: false`, so
+  compose says nothing), and every compression job dead-lettered: 3,625 in ten
+  minutes. Both scripts, in both shells, now compare the running container's
+  compose working directory with their own before stopping anything, and name
+  the directory to run from instead.
 - **agentmemory: graph retrieval no longer rebuilds the whole adjacency map
   per entity node (09/30/2026).** Every search ran Dijkstra from each matching
   entity node, and each run first indexed the entire edge store (100+ MB
