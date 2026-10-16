@@ -52,6 +52,13 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **WezTerm: Ctrl+Enter submits in Claude Code (10/15/2026).** It inserted a
+  newline instead. WezTerm had no binding for it, and the Windows console
+  delivers Ctrl+Enter as LF, which Claude Code reads as `Ctrl+J`, its newline
+  key. Both GUI configs now send a CR for Ctrl+Enter, the counterpart of the
+  existing Shift+Enter binding that sends LF. In pwsh this also gives up
+  PSReadLine's Ctrl+Enter (insert line above).
+
 - **agentmemory: the queue scripts refuse to recreate the server from the
   wrong clone (10/05/2026).** `reconcile-llm-queue` and `migrate-durable-llm`
   restart the server with `docker compose up -d` from their own directory. Run
