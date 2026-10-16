@@ -456,6 +456,10 @@ config.keys = {
   -- default chat:newline). WezTerm doesn't deliver a distinct Shift+Enter to the
   -- app by default, so the app-level keybinding (keybindings.json) alone can't fire.
   { key = 'Enter', mods = 'SHIFT', action = act.SendString '\n' },
+  -- Ctrl+Enter → submit in CLI REPLs (Claude Code): send CR. Unbound, the Windows
+  -- console turns Ctrl+Enter into LF (= Ctrl+J, chat:newline), so it inserted a
+  -- newline instead of submitting.
+  { key = 'Enter', mods = 'CTRL', action = act.SendString '\r' },
 }
 
 -- ── Identity helpers (status bar user@host + path, from the *active pane*) ────

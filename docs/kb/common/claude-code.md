@@ -103,12 +103,14 @@ upstream. The 10-segment bars are green below 70%, yellow at 70-89%, red at 90%+
 `5h`/`7d` are the rate-limit budgets; the grey suffix is the reset as one coarse
 unit (`14m`, `2h`, `2d`).
 
-## Enter vs Shift+Enter
+## Enter, Shift+Enter, Ctrl+Enter
 
 `~/.claude/keybindings.json` binds `Enter` = submit, `Shift+Enter` = newline. Most
 terminals never deliver a distinct Shift+Enter to the app, so that binding alone
 can't fire — WezTerm closes the gap by sending a literal LF (`Ctrl+J`, the default
 newline binding) for `Shift+Enter`; see `doc wezterm/panes` § "Literal keys".
+`Ctrl+Enter` is pinned the other way, to a CR, so it submits: unbound, the
+Windows console delivers Ctrl+Enter as LF, which Claude Code reads as newline.
 Inside tmux it survives thanks to `extended-keys`/`allow-passthrough` — see
 `doc common/tmux`.
 
