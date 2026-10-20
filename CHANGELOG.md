@@ -64,6 +64,12 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **Agent007Memory: an "OpenAI-compatible" self-hosted model is free
+  (10/20/2026).** The label is a protocol, but it matched the paid-vendor
+  pattern before the private-endpoint check, so a vLLM box on the LAN showed
+  as paid: cost panels on, billing sync on, and the new dead-letter redrive
+  stuck in manual mode. A "-compatible" label now lets the endpoint decide.
+
 - **pwsh: no more "Cannot create a file when that file already exists" at
   shell start (10/20/2026).** Panes opening together all regenerated the
   starship/zoxide init cache, and `Move-Item -Force` deletes then moves, so
