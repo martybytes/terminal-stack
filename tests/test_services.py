@@ -159,6 +159,36 @@ def test_restart_takes_everything_down_before_bringing_anything_up(tree, store_o
     assert "restart" not in verbs, "compose restart reuses the container and ignores .env"
 
 
+def test_up_and_restart_refuse_a_stack_another_clone_created(tree, store_off, calls):
+    """After a Docker Desktop upgrade the Windows install ran `services up` and
+    recreated agentmemory from the Windows clone, whose .env has no OPENAI_*; the
+    LLM settings lived in the WSL clone. Compose said nothing. A WSL path does not
+    exist on Windows, so the check must not require the other home to exist."""
+    for key in ("agentmemoryEnabled", "headroomEnabled"):
+        store_off[key] = "on"
+    calls["answers"]["project=ts-agentmemory --format"] = (
+        0,
+        "/home/someone/elsewhere/agentmemory\n",
+    )
+    for verb, cmd in (("up", services.cmd_up), ("restart", services.cmd_restart)):
+        calls["compose"].clear()
+        svc = build(tree, verb)
+        cmd(svc)
+        touched = {s for s, _ in calls["compose"]}
+        assert "agentmemory" not in touched, f"{verb} recreated a foreign stack"
+        assert {"headroom", "agent007memory"} <= touched, f"{verb} skipped the others"
+        assert svc.out.issues >= 1
+
+
+def test_a_stack_created_from_this_clone_is_not_foreign(tree, store_off, calls):
+    store_off["agentmemoryEnabled"] = "on"
+    home = str(stacks.stack_root(tree) / "agentmemory")
+    calls["answers"]["project=ts-agentmemory --format"] = (0, home + "\n")
+    svc = build(tree, "up")
+    services.cmd_up(svc)
+    assert "agentmemory" in {s for s, _ in calls["compose"]}
+
+
 def test_dry_run_prints_the_argv_and_runs_nothing(tree, capsys):
     compose = stacks.Compose(tree, engine.NATIVE, dry_run=True)
     got = compose.run("agentmemory", ["up", "-d"])

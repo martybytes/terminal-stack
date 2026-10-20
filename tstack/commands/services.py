@@ -412,6 +412,8 @@ def cmd_up(svc: Services) -> None:
             svc.out.note("that container is not part of this stack. Either stop it, or")
             svc.out.note(f"move this stack's port in services/stacks/{name}/.env")
             continue
+        if _refuse_foreign_home(svc, name):
+            continue
         if not svc.compose.ok(name, _up_argv(svc)):
             svc.out.bad(f"up failed for {name}")
         elif name == "headroom" and not svc.args.dry_run:
@@ -500,13 +502,50 @@ def cmd_restart(svc: Services) -> None:
     # restarting agentmemory while agent007memory still holds ts-agentmemory-net
     # leaves the console pointed at a container that no longer exists, and it only
     # recovers on its own restart timer.
-    for name in reversed(svc.selected()):
+    #
+    # The home check runs before ANY down, or a refused stack would be left down.
+    names = [n for n in svc.selected() if not _refuse_foreign_home(svc, n)]
+    for name in reversed(names):
         svc.out.section(name)
         svc.compose.run(name, ["down"])
-    for name in svc.selected():
+    for name in names:
         svc.out.section(name)
         if not svc.compose.ok(name, _up_argv(svc)):
             svc.out.bad(f"restart failed for {name}")
+
+
+def _refuse_foreign_home(svc: Services, name: str) -> bool:
+    """Refuse to recreate a stack whose containers another clone created.
+
+    A combined Windows + WSL machine has two runtime clones, each with its own
+    stack .env files, and only one of them holds the LLM settings. Docker Desktop
+    restarted after an upgrade, the Windows install ran `services up`, and
+    agentmemory came back from the clone with no OPENAI_*: every compression job
+    then "succeeded" against no provider. Both env_files are required:false, so
+    compose says nothing.
+
+    No path test on the other home: a WSL path does not exist on Windows, and
+    that is exactly the case this is for. `down` from any clone clears the claim.
+    """
+    if svc.args.dry_run:
+        return False
+    here = svc.dir(name)
+    homes = stacks.compose_homes(svc.kind, stacks.project_name(here))
+    foreign = sorted(h for h in homes if not _same_dir(h, here))
+    if not foreign:
+        return False
+    svc.out.bad(f"{name}: running from another clone: {foreign[0]}")
+    svc.out.note("its .env files are the ones in use; recreating it from here would drop them")
+    svc.out.note(f"run it from that clone, or move it here: tstack services down {name}, then up")
+    return True
+
+
+def _same_dir(label: str, here: Path) -> bool:
+    try:
+        there = Path(label).resolve()
+    except OSError:
+        return False
+    return os.path.normcase(str(there)) == os.path.normcase(str(here.resolve()))
 
 
 def cmd_bootstrap(svc: Services) -> None:
