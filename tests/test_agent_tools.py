@@ -271,6 +271,11 @@ def test_pwsh_profile_caches_tool_init_instead_of_respawning():
         call = ps[ps.index(f"-Name {tool} -Exe") :]
         call = call[: call.index("\n") + 200]
         assert ". $tsInit.Path" in call, f"{tool} init is not dot-sourced from the cache"
+    # Panes start together. Move-Item -Force is delete-then-move, so they raced
+    # into "Cannot create a file when that file already exists", and its
+    # non-terminating error printed straight past the try/catch.
+    assert "Move-Item -LiteralPath" not in helper
+    assert "[System.IO.File]::Move($tmp, $target, $true)" in helper
     # fnm must NOT be cached: its output embeds a per-shell FNM_MULTISHELL_PATH.
     assert "-Name fnm -Exe" not in ps
 
@@ -288,7 +293,8 @@ def test_console_codepage_helper_is_compiled_once_not_per_shell():
     ]
     assert "-OutputAssembly" in block and "Add-Type -Path" in block
     # Never compile straight onto the target: another pane may have it loaded.
-    assert '$tsCpTmp = "$tsCpDll.$PID.tmp"' in block and "Move-Item" in block
+    assert '$tsCpTmp = "$tsCpDll.$PID.tmp"' in block
+    assert "[System.IO.File]::Move($tsCpTmp, $tsCpDll, $true)" in block
     # And the in-memory compile stays as the fallback.
     assert block.count("-MemberDefinition $tsCpSrc") == 2
 

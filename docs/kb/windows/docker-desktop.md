@@ -39,6 +39,26 @@ resolves `-f`, build contexts and bind mounts as *Windows* paths, and a
 `\wsl.localhost` share is not reliably bind-mountable — a failure that would
 land after your stack was already stopped.
 
+### After a Docker Desktop upgrade: "waiting 1m0s for the backend socket"
+
+```
+running wsl distro proxy in Ubuntu distro: waiting 1m0s for the backend socket
+... test -s /mnt/wsl/docker-desktop/shared-sockets/host-services/backend.sock: exit status 1
+```
+
+The upgrade restarts the `docker-desktop` distro, but the shared-socket
+bind mounts into `/mnt/wsl` are not re-made, so the integration agent for
+your distro gives up. Nothing in the distro is wrong. Fix:
+
+```powershell
+docker desktop restart     # or: Troubleshoot -> Restart, NOT "Skip WSL distro integration"
+```
+
+Then check that the stacks came back from the right clone. On a combined
+Windows + WSL machine only one clone holds the AgentMemory LLM settings;
+`tstack services up` refuses to recreate a stack another clone started, and
+names the one to run it from.
+
 ## Resources
 
 Settings → Resources. The whole set of stacks is comfortable in 8 GB; headroom's

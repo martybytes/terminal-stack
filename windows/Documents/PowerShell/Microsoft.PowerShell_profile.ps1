@@ -675,9 +675,19 @@ function Get-TsToolInit {
             $dir = Split-Path -Parent $target
             if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
             # Another pane may be regenerating the same file: write private, then swap.
+            # File.Move, not Move-Item -Force: that deletes then moves, so panes
+            # opening together lose the race between the two ("Cannot create a file
+            # when that file already exists"), and its error is non-terminating, so
+            # it printed past this catch on every pane start.
             $tmp = "$target.$PID.tmp"
             Set-Content -LiteralPath $tmp -Value ($stamp + "`n" + $text) -Encoding UTF8 -NoNewline
-            Move-Item -LiteralPath $tmp -Destination $target -Force
+            try {
+                [System.IO.File]::Move($tmp, $target, $true)
+            } catch {
+                Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+                # Losing the swap usually means a sibling pane just wrote the same file.
+                if ((([System.IO.File]::ReadLines($target)) | Select-Object -First 1) -ne $stamp) { throw }
+            }
             return [pscustomobject]@{ Path = $target; Text = $text }
         } catch { }
     }
@@ -716,7 +726,7 @@ public static extern bool SetConsoleOutputCP(uint wCodePageID);
             # and a locked overwrite would throw where a swap just loses the race.
             $tsCpTmp = "$tsCpDll.$PID.tmp"
             Add-Type -Namespace Native -Name ConsoleCP -MemberDefinition $tsCpSrc -OutputAssembly $tsCpTmp -ErrorAction Stop
-            Move-Item -LiteralPath $tsCpTmp -Destination $tsCpDll -Force
+            [System.IO.File]::Move($tsCpTmp, $tsCpDll, $true)
         } catch { Remove-Item -LiteralPath "$tsCpDll.$PID.tmp" -Force -ErrorAction SilentlyContinue }
     }
     if (Test-Path -LiteralPath $tsCpDll) { try { Add-Type -Path $tsCpDll } catch { } }

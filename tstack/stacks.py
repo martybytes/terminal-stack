@@ -308,6 +308,28 @@ def running_env(kind: str, project: str, key: str) -> str:
     return ""
 
 
+def compose_homes(kind: str, project: str) -> set[str]:
+    """The directories compose project `project`'s containers were created from.
+
+    Stopped containers count: they come back from the same place. Empty when the
+    project has no containers, or the engine is not answering.
+    """
+    rc, blob = docker(
+        kind,
+        [
+            "ps",
+            "-a",
+            "--filter",
+            f"label=com.docker.compose.project={project}",
+            "--format",
+            '{{.Label "com.docker.compose.project.working_dir"}}',
+        ],
+    )
+    if rc != 0:
+        return set()
+    return {line.strip() for line in blob.splitlines() if line.strip()}
+
+
 # --------------------------------------------------------------------- volumes
 
 # One (old, new) pair per line of the bash twin's here-doc. The headroom three

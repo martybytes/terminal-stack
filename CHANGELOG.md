@@ -52,6 +52,22 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **pwsh: no more "Cannot create a file when that file already exists" at
+  shell start (10/20/2026).** Panes opening together all regenerated the
+  starship/zoxide init cache, and `Move-Item -Force` deletes then moves, so
+  they raced between the two. Its error is non-terminating, so it printed
+  straight past the `try`/`catch`. Both cache swaps in `$PROFILE` now use
+  `[System.IO.File]::Move(..., $true)`, and a lost race whose winner wrote the
+  same stamp counts as success.
+- **`tstack services up`/`restart` refuse a stack another clone created
+  (10/20/2026).** On a combined Windows + WSL machine each runtime clone has
+  its own stack `.env` files, and only one holds the AgentMemory LLM settings.
+  After a Docker Desktop upgrade the Windows side recreated agentmemory from
+  the clone with no `OPENAI_*`, compose said nothing, and every compression
+  job "succeeded" against no provider. The check reads the containers' compose
+  `working_dir` label, runs before any `down`, and names the clone to run
+  from; `tstack services down <stack>` from either side releases it.
+
 - **WezTerm: Ctrl+Enter submits in Claude Code (10/15/2026).** It inserted a
   newline instead. WezTerm had no binding for it, and the Windows console
   delivers Ctrl+Enter as LF, which Claude Code reads as `Ctrl+J`, its newline
