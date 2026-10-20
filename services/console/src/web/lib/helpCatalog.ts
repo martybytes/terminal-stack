@@ -35,7 +35,7 @@ export const HELP_CATALOG = {
   "durable-wait": { title: "Durable wait", summary: "Time from queue insertion until a worker admitted the job.", section: "queueing-and-derived-work" },
   "provider-gate": { title: "Provider gate", summary: "Time a running worker waited for an available provider-concurrency slot.", section: "queueing-and-derived-work" },
   "job-runtime": { title: "Job runtime", summary: "Time from worker start until the derived-memory job completed or failed.", section: "queueing-and-derived-work" },
-  "dead-letter": { title: "Dead letter", summary: "Jobs that exhausted retries and now require operator investigation.", section: "queueing-and-derived-work" },
+  "dead-letter": { title: "Dead letter", summary: "Jobs that exhausted retries. On a free local model the recent ones are reprocessed automatically; otherwise the Dead letters page offers Process or Clear.", section: "dead-letters-page" },
   "estimated-cost": { title: "Estimated cost", summary: "A catalog estimate from reported tokens. It appears only for providers that may charge API fees.", section: "costs-and-provider-switching" },
   "billed-cost": { title: "Billed cost", summary: "Provider-reported project cost for complete billing days, which may lag live activity.", section: "costs-and-provider-switching" },
   "success-rate": { title: "Success rate", summary: "Successful completed calls divided by all completed calls in the displayed window.", section: "llm-calls-page" },

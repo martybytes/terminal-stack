@@ -59,6 +59,15 @@ parentPort.on("message", (command: HistoryWorkerCommand) => {
       respond({ type: "response", id: command.id, ok: true, result: database.billingState(command.scope) });
       return;
     }
+    if (command.type === "meta-get") {
+      respond({ type: "response", id: command.id, ok: true, result: database.metaValue(command.key) });
+      return;
+    }
+    if (command.type === "meta-set") {
+      database.setMetaValue(command.key, command.value);
+      respond({ type: "response", id: command.id, ok: true, result: null });
+      return;
+    }
     if (command.type === "billing-state-set") {
       database.setBillingState(command.state);
       respond({ type: "response", id: command.id, ok: true, result: null });

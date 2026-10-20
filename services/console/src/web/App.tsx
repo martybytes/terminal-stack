@@ -13,6 +13,7 @@ import LlmCalls from "./pages/LlmCalls";
 import Overview from "./pages/Overview";
 import Reports from "./pages/Reports";
 import Operations from "./pages/Operations";
+import DeadLetters from "./pages/DeadLetters";
 import Help from "./pages/Help";
 import { PreferencesProvider } from "./lib/preferences";
 
@@ -29,6 +30,7 @@ export default function App(): JSX.Element {
             <Route path="/llm" element={<LlmCalls />} />
             <Route path="/reports" element={<Reports />} />
             <Route path="/operations" element={<Operations />} />
+            <Route path="/dead-letters" element={<DeadLetters />} />
             <Route path="/help" element={<Help />} />
             <Route path="/timeline" element={<Timeline />} />
             <Route path="/memories" element={<Memories />} />

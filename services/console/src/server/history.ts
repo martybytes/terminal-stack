@@ -494,6 +494,14 @@ class HistoryService {
     await this.call({ type: "billing-state-set", state });
   }
 
+  async metaValue(key: string): Promise<string | null> {
+    return await this.call({ type: "meta-get", key }) as string | null;
+  }
+
+  async setMetaValue(key: string, value: string): Promise<void> {
+    await this.call({ type: "meta-set", key, value });
+  }
+
   async shutdown(): Promise<void> {
     if (this.stopping) return;
     this.stopping = true;

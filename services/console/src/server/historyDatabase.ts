@@ -480,6 +480,16 @@ export class HistoryDatabase {
       .run(scope.provider, scope.scopeType, scope.scopeId, scope.scopeLabel, Date.now());
   }
 
+  metaValue(key: string): string | null {
+    const row = this.db.prepare("SELECT value FROM history_meta WHERE key=?").get(key) as DbRow | undefined;
+    return row && typeof row.value === "string" ? row.value : null;
+  }
+
+  setMetaValue(key: string, value: string): void {
+    this.db.prepare("INSERT INTO history_meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+      .run(key, value);
+  }
+
   billingState(scope: BillingScopeRecord): BillingSyncStateRecord | null {
     const row = this.db.prepare(`SELECT * FROM billing_sync_state
       WHERE provider=? AND scope_type=? AND scope_id=?`).get(scope.provider, scope.scopeType, scope.scopeId) as DbRow | undefined;

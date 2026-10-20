@@ -4236,3 +4236,28 @@ mean what the docs said: with every default being the saved answer, "take every
 default without prompting" is a no-op on a configured machine, which is the only
 safe thing an unattended re-run can be.
 
+## Why dead letters are requeued automatically only on a free model, and only for 24 hours
+
+When AgentMemory was recreated without its provider settings, every compression job failed three
+times and dead-lettered, and nothing ever looked at them again. The only tool was
+`reconcile-llm-queue`, which stops the stack and quarantines the whole queue: right for a corrupt
+queue, far too heavy for "the model was down for an hour".
+
+Agent007Memory now requeues dead letters one message at a time. The automatic path has three limits,
+and each one stops a specific failure:
+
+- **Free model only.** On a local model a requeued job costs electricity. On a paid one, a
+  backlog of thousands is a bill nobody chose, so the console asks and shows the estimate instead.
+  An unrecognised provider counts as paid.
+- **Only messages under 24 hours old.** A requeued job re-checks state before it calls the model,
+  so even an old one does no harm. But a dead letter from last week is far more likely to be
+  a real fault than an outage, and requeuing it every minute would hide that. Recent failures are
+  almost always the outage you just fixed.
+- **Only once the model provably answers.** The outage that prompted this logged
+  `"outcome":"success"` with `providerLatencyMs: 0` for every call. A health check that
+  trusted the outcome would have requeued straight into the same failure. The check needs a
+  success that took time. If requeued jobs come back anyway, automatic processing pauses for 30 minutes.
+
+It is one message at a time because `iii::queue::redrive` (bulk) cannot be scoped to the
+messages the operator was shown.
+
