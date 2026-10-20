@@ -4248,7 +4248,9 @@ and each one stops a specific failure:
 
 - **Free model only.** On a local model a requeued job costs electricity. On a paid one, a
   backlog of thousands is a bill nobody chose, so the console asks and shows the estimate instead.
-  An unrecognised provider counts as paid.
+  An unrecognised provider counts as paid. "Free" means a private endpoint and no vendor name;
+  an "OpenAI-compatible" label is a protocol, not a vendor, so the endpoint decides. Matching
+  "openai" in it first kept the first live deploy in manual mode against a LAN vLLM box.
 - **Only messages under 24 hours old.** A requeued job re-checks state before it calls the model,
   so even an old one does no harm. But a dead letter from last week is far more likely to be
   a real fault than an outage, and requeuing it every minute would hide that. Recent failures are

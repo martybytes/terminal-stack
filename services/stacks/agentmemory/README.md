@@ -1030,6 +1030,12 @@ jobs fail again at once, it pauses for 30 minutes. On a **paid or unrecognised p
 happens on its own: the **Dead letters** page (`http://127.0.0.1:3114/#/dead-letters`) offers
 Process or Clear, per message or all at once, and asks first with a cost estimate.
 
+"Free" is decided from `LLM_PROVIDER` and `OPENAI_BASE_URL`. A bare vendor name (OpenAI,
+Anthropic, Groq, OpenRouter and the like) is paid even behind a private gateway. Anything else,
+including an "OpenAI-compatible" label, which names a protocol rather than a vendor, is free when
+the base URL is localhost or a private address, and unrecognised otherwise. The page's banner
+says which mode it chose and why.
+
 Requeuing is safe one message at a time because every handler re-checks current state before it
 calls the model, so a stale job costs a queue hop, not a call. The bulk `iii::queue::redrive` is
 still never used: it cannot be scoped to the messages someone looked at.
