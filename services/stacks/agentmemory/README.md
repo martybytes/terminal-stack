@@ -1011,9 +1011,32 @@ recovery queues at most 10 old observations at a time and places the next recove
 wave, so multi-thousand-observation projects cannot monopolize queue admission. Summaries are queued
 after the raw backlog reaches zero.
 
+### Dead letters: automatic on a free model, your call on a paid one
+
+A job dead-letters after three queue retries 30 seconds apart. That almost always means the
+provider was down or misconfigured, not that the work is wrong. Agent007Memory handles them
+one message at a time, through three authenticated routes this patch adds:
+
+| Route | Does |
+|---|---|
+| `GET /agentmemory/llm/dlq?limit=` | Lists dead letters: id, family, failed/queued time, retries, project, session. Never the payload body or the error text. |
+| `POST /agentmemory/llm/dlq/redrive {messageIds}` | Puts each named message back on the queue (`iii::queue::redrive_message`). |
+| `POST /agentmemory/llm/dlq/discard {messageIds}` | Drops each named message (`iii::queue::discard_message`). The observation is untouched. |
+
+On a **free local model** the console requeues dead letters under 24 hours old automatically,
+ten a minute, but only once the latest LLM call reached the provider and succeeded. A
+`"success"` at 0 ms, which is what a missing provider looks like, does not count. If requeued
+jobs fail again at once, it pauses for 30 minutes. On a **paid or unrecognised provider** nothing
+happens on its own: the **Dead letters** page (`http://127.0.0.1:3114/#/dead-letters`) offers
+Process or Clear, per message or all at once, and asks first with a cost estimate.
+
+Requeuing is safe one message at a time because every handler re-checks current state before it
+calls the model, so a stale job costs a queue hop, not a call. The bulk `iii::queue::redrive` is
+still never used: it cannot be scoped to the messages someone looked at.
+
 ### Reconciling a stale queue or historical DLQ
 
-Do not bulk-redrive an old DLQ just to make the console counters reach zero. Durable queue records
+Do not bulk-redrive an old DLQ just to make the console counters reach zero; the Dead letters page above handles individual messages. Durable queue records
 can outlive the state change they originally requested, while compression, summary, and incremental
 graph handlers use current memory state as their source of truth. Preview the state-aware repair:
 

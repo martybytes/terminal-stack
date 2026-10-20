@@ -218,6 +218,16 @@ Operations are guarded because they may queue significant work. Actions require 
 
 A **dry run** is read-only. Preview counts can change before execution because agents remain active. Local inference removes external API fees but not CPU, memory, queue, or time costs.
 
+## Dead letters page
+
+A job lands in the dead-letter queue after it fails every retry (three, 30 seconds apart). That usually means the provider was down or misconfigured, not that the work is wrong. The page lists each one with its family, age, retries, project, and session; never its content or error text.
+
+**Automatic mode (free local model).** Once the model answers again, the console requeues dead letters under 24 hours old, ten a minute. "Answers again" means the latest LLM call reached the provider and succeeded: a success logged in 0 ms, which is what a missing provider looks like, does not count. If requeued jobs fail again straight away, automatic processing pauses for 30 minutes; **Resume** clears the pause. Dead letters older than 24 hours are probably stale and wait for you.
+
+**Manual mode (paid or unrecognised provider).** Nothing is requeued without you. **Process** puts the selected jobs back on the LLM queue and asks first with a cost estimate, averaged per family from recent priced calls. **Clear** discards the selected jobs.
+
+Both actions touch only the queued job. A requeued job re-checks current state before it calls the model, so finished or vanished work is skipped without a call. Clearing never deletes an observation; an uncompressed one is still picked up by recovery later.
+
 ## Display customization
 
 Customize opens page-specific controls for sections, cards, columns, counts, width, density, scale, pins, and exclusions.

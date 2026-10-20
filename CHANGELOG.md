@@ -6,6 +6,18 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Added
 
+- **Dead letters are requeued automatically on a free model (10/20/2026).**
+  When the LLM provider is down, AgentMemory's jobs fail every retry and
+  sit in the dead-letter queue for good. Agent007Memory now watches for the
+  model to answer again. On a free local model it requeues the dead letters
+  under 24 hours old, ten a minute, and pauses for 30 minutes if they fail
+  again. On a paid or unrecognised provider it does nothing on its own: the
+  new **Dead letters** page (`#/dead-letters`, linked from the LLM page's DLQ
+  count) offers Process or Clear per message or for all, with a cost
+  estimate. Backed by three authenticated agentmemory routes under
+  `/agentmemory/llm/dlq` that work per message; the bulk redrive is still
+  never used.
+
 - **`tstack ui` is a dashboard (09/30/2026).** Five tabs (`alt+1..5`): Home
   (clone, version, theme, memory backend, Headroom token, voice, doctor and
   service counts), Settings (the existing table), Doctor (every check, failures

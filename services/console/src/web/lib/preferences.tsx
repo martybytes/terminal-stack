@@ -13,7 +13,7 @@ export const PREFERENCES_KEY = "agent007memory.preferences.v1";
 
 export type PageId =
   | "dashboard" | "overview" | "projects" | "llm" | "reports" | "operations"
-  | "requests" | "timeline" | "memories" | "sessions" | "help";
+  | "deadLetters" | "requests" | "timeline" | "memories" | "sessions" | "help";
 export type ThemeMode = "dark" | "light" | "system";
 export type HelpMode = "adaptive" | "minimal" | "off";
 export type PageWidth = "fluid" | "wide" | "focused";
@@ -154,6 +154,13 @@ export const PAGE_DEFINITIONS: Record<PageId, PageDefinition> = {
       { id: "boundary", label: "Safety boundary", required: true },
     ],
     focused: { hiddenSections: ["recovery", "repairs"] },
+  },
+  deadLetters: {
+    id: "deadLetters", label: "Dead letters",
+    sections: [
+      { id: "mode", label: "Processing mode", required: true },
+      { id: "table", label: "Dead-letter table" },
+    ],
   },
   requests: {
     id: "requests", label: "Live Requests",

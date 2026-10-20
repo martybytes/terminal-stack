@@ -227,3 +227,20 @@ def test_every_ps1_flag_has_a_kebab_case_counterpart():
             if kebab not in sh_text and sh.name not in registered:
                 problems.append(f"{ps.name} has -{flag} but {sh.name} has no {kebab}")
     assert not problems, "\n".join(problems)
+
+
+def test_dead_letters_are_handled_one_message_at_a_time_behind_auth():
+    """The console redrives and discards dead letters per message. The bulk
+    iii::queue::redrive cannot be scoped to the messages the operator looked at,
+    and an unauthenticated route would let any local process empty the queue."""
+    patch = read(SERVICES / "stacks/agentmemory/patch-agentmemory.mjs")
+    for path, method in [
+        ("/agentmemory/llm/dlq", "GET"),
+        ("/agentmemory/llm/dlq/redrive", "POST"),
+        ("/agentmemory/llm/dlq/discard", "POST"),
+    ]:
+        line = next(ln for ln in patch.splitlines() if f'api_path: "{path}"' in ln)
+        assert f'http_method: "{method}"' in line, path
+        assert 'middleware_function_ids: ["middleware::api-auth"]' in line, path
+    assert '"iii::queue::redrive"' not in patch, "bulk redrive is never used"
+    assert "iii::queue::redrive_message" in patch and "iii::queue::discard_message" in patch

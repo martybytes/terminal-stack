@@ -768,6 +768,57 @@ var StateKV = class {
 \t\tfunction_id: "api::llm-requeue-pending",
 \t\tconfig: { api_path: "/agentmemory/llm/requeue-pending", http_method: "POST", middleware_function_ids: ["middleware::api-auth"] }
 \t});
+\t// Dead letters, one message at a time. iii 0.11.2 shapes, confirmed against the
+\t// engine: dlq_messages takes { topic, limit } and returns
+\t// [{ id, failed_at (seconds), retries, error, payload, size_bytes }];
+\t// redrive_message and discard_message take { queue, message_id } and return
+\t// { redriven: n } (discard names its count the same way). The bulk
+\t// iii::queue::redrive is never used: a handler re-checks state, but a bulk
+\t// redrive cannot be scoped to the messages the caller looked at.
+\tconst dlqRow = (msg) => ({
+\t\tid: typeof msg?.id === "string" ? msg.id : "",
+\t\tfamily: typeof msg?.payload?.family === "string" ? msg.payload.family : "unknown",
+\t\tfailedAt: Number(msg?.failed_at) > 0 ? Number(msg.failed_at) * 1e3 : null,
+\t\tqueuedAt: Number(msg?.payload?.queuedAt) > 0 ? Number(msg.payload.queuedAt) : null,
+\t\tretries: Number(msg?.retries) || 0,
+\t\tproject: typeof msg?.payload?.project === "string" ? msg.payload.project : null,
+\t\tsessionId: typeof msg?.payload?.sessionId === "string" ? msg.payload.sessionId : null,
+\t\tobservationId: typeof msg?.payload?.observationId === "string" ? msg.payload.observationId : null
+\t});
+\tconst dlqIds = (req) => Array.isArray(req.body?.messageIds) ? [...new Set(req.body.messageIds.filter((id) => typeof id === "string" && /^[A-Za-z0-9-]{1,64}$/.test(id)))].slice(0, 200) : [];
+\tconst dlqEach = async (function_id, ids) => {
+\t\tlet done = 0;
+\t\tlet failed = 0;
+\t\tfor (const message_id of ids) {
+\t\t\tconst result = await sdk.trigger({ function_id, payload: { queue: AGENTMEMORY_LLM_QUEUE, message_id } }).catch(() => null);
+\t\t\tif (Number(result?.redriven) > 0) done += 1;
+\t\t\telse failed += 1;
+\t\t}
+\t\treturn { done, failed };
+\t};
+\tsdk.registerFunction("api::llm-dlq-list", async (req) => {
+\t\tconst limit = Math.max(1, Math.min(1000, Number(req.query_params?.["limit"]) || 500));
+\t\tconst messages = await sdk.trigger({ function_id: "engine::queue::dlq_messages", payload: { topic: AGENTMEMORY_LLM_QUEUE, limit } }).catch(() => null);
+\t\tif (!Array.isArray(messages)) return { status_code: 503, body: { error: "dlq_unavailable" } };
+\t\treturn { status_code: 200, body: { ts: Date.now(), queueName: AGENTMEMORY_LLM_QUEUE, messages: messages.map(dlqRow).filter((row) => row.id) } };
+\t});
+\tsdk.registerTrigger({ type: "http", function_id: "api::llm-dlq-list", config: { api_path: "/agentmemory/llm/dlq", http_method: "GET", middleware_function_ids: ["middleware::api-auth"] } });
+\tsdk.registerFunction("api::llm-dlq-redrive", async (req) => {
+\t\tconst ids = dlqIds(req);
+\t\tif (!ids.length) return { status_code: 400, body: { error: "messageIds_required" } };
+\t\tconst { done, failed } = await dlqEach("iii::queue::redrive_message", ids);
+\t\tlogger.info("LLM dead letters redriven", { requested: ids.length, redriven: done, failed });
+\t\treturn { status_code: 200, body: { requested: ids.length, redriven: done, failed } };
+\t});
+\tsdk.registerTrigger({ type: "http", function_id: "api::llm-dlq-redrive", config: { api_path: "/agentmemory/llm/dlq/redrive", http_method: "POST", middleware_function_ids: ["middleware::api-auth"] } });
+\tsdk.registerFunction("api::llm-dlq-discard", async (req) => {
+\t\tconst ids = dlqIds(req);
+\t\tif (!ids.length) return { status_code: 400, body: { error: "messageIds_required" } };
+\t\tconst { done, failed } = await dlqEach("iii::queue::discard_message", ids);
+\t\tlogger.info("LLM dead letters discarded", { requested: ids.length, discarded: done, failed });
+\t\treturn { status_code: 200, body: { requested: ids.length, discarded: done, failed } };
+\t});
+\tsdk.registerTrigger({ type: "http", function_id: "api::llm-dlq-discard", config: { api_path: "/agentmemory/llm/dlq/discard", http_method: "POST", middleware_function_ids: ["middleware::api-auth"] } });
 \tsdk.registerFunction("api::graph-migration-start", async () => {
 \t\tconst result = await sdk.trigger({ function_id: "mem::graph-migrate-v2", payload: {}, timeoutMs: 6e5 });
 \t\treturn { status_code: result?.success === false ? 500 : 200, body: result };

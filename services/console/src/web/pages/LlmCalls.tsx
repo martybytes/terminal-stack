@@ -596,9 +596,9 @@ export function LlmSummaryTiles({
         label="Dead letter"
         value={
           queue ? (
-            <span className={queue.dlqDepth > 0 ? "text-bad" : "text-fg1"}>
+            <Link to="/dead-letters" className={queue.dlqDepth > 0 ? "text-bad hover:underline" : "text-fg1 hover:underline"}>
               {fmtNum(queue.dlqDepth)}
-            </span>
+            </Link>
           ) : (
             "—"
           )
@@ -680,7 +680,7 @@ function QueueStatus({ snapshot }: { snapshot: LlmSnapshot }) {
         <Setting label="Workers" value={queue ? fmtNum(queue.consumers) : "—"} mono />
         <Setting label="Provider slots" value={fmtNum(providerSlots)} mono />
         <Setting label="Recovery wave" value={fmtNum(snapshot.config.recoveryBatchSize)} mono />
-        <Setting label="DLQ" value={queue ? fmtNum(queue.dlqDepth) : "—"} mono />
+        <Setting label="DLQ" value={queue ? <Link to="/dead-letters" className="hover:underline">{fmtNum(queue.dlqDepth)}</Link> : "—"} mono />
       </div>
     </Card>
   );

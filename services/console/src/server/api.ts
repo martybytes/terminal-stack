@@ -16,6 +16,7 @@ import { llmTelemetry } from "./llmTelemetry.js";
 import { store } from "./observations.js";
 import { history } from "./history.js";
 import { operations } from "./operations.js";
+import { dlqProcessor } from "./dlqProcessor.js";
 import { billing, BillingCooldownError } from "./billing.js";
 import { enrichSessions, memoryEffectiveness } from "./memoryEffectiveness.js";
 import { memoryTokenEstimator } from "./memoryTokenEstimator.js";
@@ -128,6 +129,20 @@ export async function startUi(opts: {
   app.post<{ Body: Record<string, unknown> }>("/api/operations/summarize", async (request, reply) => {
     if (!hasActionHeader(request.headers)) return reply.code(403).send({ error: "operation confirmation header required" });
     return operationReply(reply, () => operations.summarize(request.body ?? {}));
+  });
+  app.get("/api/dlq", async (_request, reply) => {
+    try { return await dlqProcessor.snapshot(); }
+    catch (error) { return reply.code(502).send({ error: "dead letters unavailable", detail: error instanceof Error ? error.message : String(error) }); }
+  });
+  app.post<{ Params: { action: "redrive" | "discard" }; Body: { ids?: unknown; all?: unknown } }>("/api/dlq/:action", async (request, reply) => {
+    if (!hasActionHeader(request.headers)) return reply.code(403).send({ error: "operation confirmation header required" });
+    if (request.params.action !== "redrive" && request.params.action !== "discard") return reply.code(404).send({ error: "unknown operation" });
+    const body = request.body ?? {};
+    return operationReply(reply, () => request.params.action === "redrive" ? dlqProcessor.redrive(body) : dlqProcessor.discard(body));
+  });
+  app.post("/api/dlq-auto/resume", async (request, reply) => {
+    if (!hasActionHeader(request.headers)) return reply.code(403).send({ error: "operation confirmation header required" });
+    return operationReply(reply, () => dlqProcessor.resume());
   });
   app.post("/api/operations/graph-snapshot/rebuild", async (request, reply) => {
     if (!hasActionHeader(request.headers)) return reply.code(403).send({ error: "operation confirmation header required" });

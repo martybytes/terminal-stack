@@ -12,6 +12,7 @@ import { startUi } from "./api.js";
 import { startProxy } from "./proxy.js";
 import { history } from "./history.js";
 import { billing } from "./billing.js";
+import { dlqProcessor } from "./dlqProcessor.js";
 import type { DashboardSnapshot, WsServerMessage } from "../shared/types.js";
 import { assessLlmEndpoint } from "../shared/llmEndpoint.js";
 import { memoryTokenEstimator } from "./memoryTokenEstimator.js";
@@ -45,6 +46,7 @@ llmTelemetry.subscribe((event) => {
   hub.broadcast({ type: "llm-completion", ts: event.ts, data: event });
 });
 llmTelemetry.subscribeCalls((call, sourceInstanceId) => history.noteLlmCall(call, sourceInstanceId));
+dlqProcessor.subscribe((state) => hub.broadcast({ type: "dlq-processed", ts: Date.now(), data: state }));
 
 let wsConnected = false;
 let sinceTs = Date.now();
@@ -78,6 +80,7 @@ await history.start();
 if (assessLlmEndpoint(config.llmProvider, config.llmEndpoint, config.llmModel).costApplicability !== "local") billing.start();
 metrics.start();
 llmTelemetry.start();
+await dlqProcessor.start();
 
 try {
   memoryTokenEstimator.seed(await store.sessions());

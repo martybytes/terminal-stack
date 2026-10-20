@@ -426,6 +426,43 @@ export interface LlmQueueTelemetry {
   activeJobs: number;
 }
 
+// One dead-lettered LLM job, as agentmemory's /llm/dlq exposes it: identifiers
+// and timing only, never the payload body or the error text.
+export interface DlqMessage {
+  id: string;
+  family: string;
+  failedAt: number | null;
+  queuedAt: number | null;
+  retries: number;
+  project: string | null;
+  sessionId: string | null;
+  observationId: string | null;
+}
+
+export interface DlqProcessorState {
+  lastRunAt: number | null;
+  lastRedriven: number;
+  lastReason: string | null;
+  pausedUntil: number | null;
+}
+
+export interface DlqRow extends DlqMessage {
+  ageMs: number | null;
+  autoEligible: boolean;
+}
+
+export interface DlqSnapshot {
+  ts: number;
+  available: boolean;
+  mode: "automatic" | "manual";
+  costApplicability: import("./llmEndpoint.js").LlmCostApplicability;
+  costReason: string;
+  autoWindowMs: number;
+  rows: DlqRow[];
+  estimatedCostNanos: number | null;
+  processor: DlqProcessorState;
+}
+
 export interface LlmSnapshot {
   ts: number;
   sourceInstanceId: string | null;
@@ -760,6 +797,7 @@ export type WsServerMessage =
   | { type: "metrics"; ts: number; data: MetricsTick }
   | { type: "project-flow"; ts: number; data: ProjectFlowEvent }
   | { type: "llm-completion"; ts: number; data: LlmCompletionEvent }
+  | { type: "dlq-processed"; ts: number; data: DlqProcessorState }
   | {
       type: "upstream";
       ts: number;

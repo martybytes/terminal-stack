@@ -11,6 +11,7 @@ import {
   Clock,
   Database,
   FolderKanban,
+  Inbox,
   PanelLeftClose,
   PanelLeftOpen,
   PanelsTopLeft,
@@ -36,6 +37,7 @@ const NAV: { to: string; label: string; icon: LucideIcon; end?: boolean }[] = [
   { to: "/llm", label: "LLM Calls", icon: BrainCircuit },
   { to: "/reports", label: "Reports", icon: ChartColumn },
   { to: "/operations", label: "Operations", icon: Wrench },
+  { to: "/dead-letters", label: "Dead letters", icon: Inbox },
   { to: "/requests", label: "Live Requests", icon: Activity },
   { to: "/timeline", label: "Timeline", icon: Clock },
   { to: "/memories", label: "Memories", icon: Database },
@@ -45,7 +47,7 @@ const NAV: { to: string; label: string; icon: LucideIcon; end?: boolean }[] = [
 
 const PAGE_BY_PATH: Record<string, PageId> = {
   "/": "dashboard", "/overview": "overview", "/projects": "projects", "/llm": "llm",
-  "/reports": "reports", "/operations": "operations", "/requests": "requests",
+  "/reports": "reports", "/operations": "operations", "/dead-letters": "deadLetters", "/requests": "requests",
   "/timeline": "timeline", "/memories": "memories", "/sessions": "sessions", "/help": "help",
 };
 

@@ -13,7 +13,7 @@
     "dev:web": "vite",
     "build": "vite build && tsc -p tsconfig.server.json",
     "start": "node dist/server/index.js",
-    "test": "tsx --test test/requestMetadata.test.ts test/requestAgent.test.ts test/requestIntent.test.ts test/memoryLifecycle.test.ts test/memoryFlow.test.ts test/memoryEconomics.test.ts test/responseMetadata.test.ts test/projectActivity.test.ts test/projectOrder.test.ts test/llmActivity.test.ts test/llmQueue.test.ts test/llmThroughput.test.ts test/llmEndpoint.test.ts test/llmCost.test.ts test/billing.test.ts test/historyDatabase.test.ts test/reports.test.ts test/format.test.ts",
+    "test": "tsx --test test/requestMetadata.test.ts test/requestAgent.test.ts test/requestIntent.test.ts test/memoryLifecycle.test.ts test/memoryFlow.test.ts test/memoryEconomics.test.ts test/responseMetadata.test.ts test/projectActivity.test.ts test/projectOrder.test.ts test/llmActivity.test.ts test/llmQueue.test.ts test/llmThroughput.test.ts test/llmEndpoint.test.ts test/llmCost.test.ts test/billing.test.ts test/historyDatabase.test.ts test/reports.test.ts test/format.test.ts test/dlqProcessor.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.server.json --noEmit"
   },
   "dependencies": {

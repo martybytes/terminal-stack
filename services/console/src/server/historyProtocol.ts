@@ -201,6 +201,8 @@ export type HistoryWorkerCommand =
   | { id: number; type: "billing-scope"; scope: BillingScopeRecord }
   | { id: number; type: "billing-state-get"; scope: BillingScopeRecord }
   | { id: number; type: "billing-state-set"; state: BillingSyncStateRecord }
+  | { id: number; type: "meta-get"; key: string }
+  | { id: number; type: "meta-set"; key: string; value: string }
   | { id: number; type: "shutdown"; endedAt: number };
 
 export type HistoryWorkerCommandInput =
@@ -213,6 +215,8 @@ export type HistoryWorkerCommandInput =
   | { type: "billing-scope"; scope: BillingScopeRecord }
   | { type: "billing-state-get"; scope: BillingScopeRecord }
   | { type: "billing-state-set"; state: BillingSyncStateRecord }
+  | { type: "meta-get"; key: string }
+  | { type: "meta-set"; key: string; value: string }
   | { type: "shutdown"; endedAt: number };
 
 export type HistoryWorkerResponse =
