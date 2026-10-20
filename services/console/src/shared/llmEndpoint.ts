@@ -34,7 +34,11 @@ export function assessLlmEndpoint(provider: string | null, endpoint: string | nu
   const providerName = provider?.trim() ?? "";
   const inferenceActive = Boolean(model?.trim()) && !/(?:no llm|noop|disabled)/i.test(providerName);
   if (!inferenceActive) return { costApplicability: "local", costReason: "No active external inference model", inferenceActive: false };
-  if (PAID_PROVIDER.test(providerName)) return { costApplicability: "paid", costReason: `${providerName} is a hosted API provider`, inferenceActive: true };
+  // "OpenAI-compatible" names a protocol, not a vendor: vLLM, LM Studio and
+  // llama.cpp all speak it. Only a bare vendor name is proof of a hosted bill;
+  // a "-compatible" label falls through to the endpoint test below.
+  const protocolOnly = /compatible/i.test(providerName);
+  if (PAID_PROVIDER.test(providerName) && !protocolOnly) return { costApplicability: "paid", costReason: `${providerName} is a hosted API provider`, inferenceActive: true };
   let isPrivate = false;
   if (endpoint) {
     try { isPrivate = privateHost(new URL(endpoint).hostname); } catch { /* invalid endpoints remain unknown */ }
