@@ -26,7 +26,13 @@ def _lib_env(tmp_path: Path, config: dict) -> dict[str, str]:
     cfg_dir = tmp_path / ".claude" / "tts"
     cfg_dir.mkdir(parents=True, exist_ok=True)
     (cfg_dir / "config.json").write_text(json.dumps(config), encoding="utf-8")
+    # The Windows python3 is an app-execution alias for the Python install manager. With no
+    # LOCALAPPDATA it cannot find its Python, so it installs a fresh one into the cwd and
+    # registers it under HKCU, and the reader returns the installer's output, not the value.
+    passthrough = {k: os.environ[k] for k in ("LOCALAPPDATA", "USERPROFILE", "SYSTEMROOT")
+                   if k in os.environ}
     return {
+        **passthrough,
         "HOME": str(tmp_path),
         "PATH": os.environ.get("PATH", ""),
         "CC_TTS_CONFIG_DIR": str(cfg_dir),
@@ -91,7 +97,8 @@ def test_the_windows_exe_is_asked_to_report_a_config_decline():
     assert "CC_TTS_REPORT_DISABLED=1" in lib and "WSLENV=" in lib
     exe = (ROOT / "bootstrap/tts-daemon/ttsd/hooks.py").read_text(encoding="utf-8")
     assert 'declined = 75 if os.environ.get("CC_TTS_REPORT_DISABLED") else 0' in exe
-    assert exe.count("return declined") == 2, "disabled AND event-filtered both decline"
+    assert exe.count("return declined") == 3, (
+        "disabled, an SDK-driven session, and event-filtered all decline")
 
 
 def test_a_missing_config_is_a_quiet_exit_not_a_failing_hook():
@@ -119,3 +126,55 @@ def test_hook_paths_use_the_profile_folder_quoted():
     assert '"__WIN_HOME__": os.environ.get("WIN_HOME", "")' in sh
     assert "C:/Users/'\"$WIN_USER\"'/AppData" not in sh
     assert "echo %USERPROFILE%" in sh
+
+
+def _lib(tmp_path: Path, config: dict, script: str, **extra: str) -> subprocess.CompletedProcess:
+    env = {**_lib_env(tmp_path, config), **extra}
+    return subprocess.run(
+        [BASH, "-c", f'. "{LIB}"; {script}'],  # type: ignore[list-item]
+        env=env, cwd=tmp_path, capture_output=True, text=True, encoding="utf-8",
+        timeout=60, check=False, start_new_session=True,
+    )
+
+
+@needs_bash
+@pytest.mark.parametrize("entrypoint,speak_sdk,source,silenced", [
+    ("sdk-ts", None, "claude", True),
+    ("sdk-py", False, "claude", True),
+    ("sdk-ts", True, "claude", False),
+    ("cli", None, "claude", False),
+    ("", None, "claude", False),
+    ("sdk-ts", None, "cursor", False),
+])
+def test_sdk_driven_claude_sessions_are_silenced(tmp_path, entrypoint, speak_sdk, source,
+                                                 silenced):
+    """Obsidian's Claudian runs claude through the SDK with the user's hooks, and opened a
+    new session -- a new ordinal and voice -- per chat. Twin of is_sdk_session."""
+    cfg: dict = {"enabled": True}
+    if speak_sdk is not None:
+        cfg["sources"] = {"claude": {"speakSdk": speak_sdk}}
+    got = _lib(tmp_path, cfg, f'cc_tts_sdk_silenced {source}',
+               CLAUDE_CODE_ENTRYPOINT=entrypoint)
+    assert (got.returncode == 0) is silenced, got.stderr
+
+
+def test_every_claude_hook_script_checks_the_sdk_gate_before_handing_off():
+    """The exe cannot see CLAUDE_CODE_ENTRYPOINT from WSL and a daemon POST carries no
+    environment, so the scripts must decide before either."""
+    hooks = ROOT / "dot_claude" / "hooks"
+    for name in ("executable_cc-speak.sh", "executable_cc-speak-input.sh"):
+        src = (hooks / name).read_text(encoding="utf-8")
+        gate = src.index('cc_tts_sdk_silenced "$source" && exit 0')
+        assert gate < src.index("cc_tts_windows_hook "), name
+
+
+@needs_bash
+def test_the_idle_reminder_leaves_no_state(tmp_path):
+    """Stop already said the turn finished; idle_prompt repeated it as a question."""
+    idle = json.dumps({"notification_type": "idle_prompt",
+                       "message": "Claude is waiting for your input"})
+    perm = json.dumps({"notification_type": "permission_prompt",
+                       "message": "Claude needs your permission"})
+    show = 'cc_tts_parse_input_state "$IN" notification; printf "[%s]" "$CC_TTS_PARSED_STATE"'
+    assert _lib(tmp_path, {}, show, IN=idle).stdout == "[]"
+    assert _lib(tmp_path, {}, show, IN=perm).stdout == "[question]"

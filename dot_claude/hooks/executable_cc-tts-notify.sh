@@ -29,6 +29,7 @@ cc_tts_init_config
 # you asked for that one.
 [ "$_foreground" -eq 0 ] && cc_tts_muted && exit 0
 cc_tts_event_enabled "$state" || exit 0
+[ "$_foreground" -eq 0 ] && cc_tts_sdk_silenced "$source" && exit 0
 
 project_dir="${CLAUDE_PROJECT_DIR:-${CURSOR_PROJECT_DIR:-$PWD}}"
 if [ -n "${CC_TTS_HOOK_JSON:-}" ] && command -v jq >/dev/null 2>&1; then

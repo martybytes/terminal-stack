@@ -227,6 +227,15 @@ AskUserQuestion. AskUserQuestion" and added nothing.)
 
 If duplicates *are* showing up:
 
+- **Several voices for one project, "two", "three"** — check whether an editor
+  plugin is driving Claude. Obsidian's Claudian runs `claude.exe` through the
+  Agent SDK with your user hooks and opens a new session per chat. Those
+  sessions are silent now (`CLAUDE_CODE_ENTRYPOINT` is `sdk*`). If you still hear
+  them, the exe predates 10/25/2026: run `tstack config tts daemon restart`. To
+  hear them on purpose, set `sources.claude.speakSdk` to `true` in `local.json`.
+- **"Finished", then "I have a question for you" a minute later** — that was
+  Claude's `idle_prompt` reminder, and an exe from before 10/25/2026 still
+  speaks it.
 - **`tstack config tts daemon status` first.** While the daemon is down each hook speaks from
   its own detached process. They still take turns (a lock file serialises them) and still
   deduplicate through the shared history, but the daemon is the path that also coalesces —

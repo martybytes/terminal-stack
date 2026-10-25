@@ -39,6 +39,18 @@ cc_tts_windows_hook() {
         --state "$state"
 }
 
+# An Agent SDK client (an editor plugin such as Obsidian's Claudian, a script) loads the
+# same user hooks as a terminal session and opens a new session per chat, so each one spoke
+# with its own ordinal and voice. Claude Code exports CLAUDE_CODE_ENTRYPOINT to its hooks
+# (cli, sdk-ts, sdk-py, ...). Twin of is_sdk_session in ttsd/hooks.py; checked by the hook
+# scripts before the Windows handoff, because the exe cannot see this variable from WSL and
+# a daemon POST carries no environment at all.
+cc_tts_sdk_silenced() {
+    [ "${1:-claude}" = claude ] || return 1
+    case "${CLAUDE_CODE_ENTRYPOINT:-}" in sdk*) ;; *) return 1 ;; esac
+    [ "$(cc_tts_json .sources.claude.speakSdk false)" != true ]
+}
+
 # The absolute mute, as the tray icon / hotkey / ccmute write it. The sentinel lives in
 # the Windows daemon's state dir, because on a combined host that is the process that does
 # the talking; a native Linux host, which has no ttsd, keeps its own next to the config.
@@ -458,6 +470,9 @@ cc_tts_parse_input_state() {
             fi
             ;;
         notification)
+            # idle_prompt is the 60s "still waiting" reminder; Stop already announced the
+            # turn, so leave the state empty and the caller says nothing.
+            case "$input" in *'"idle_prompt"'*) return 0 ;; esac
             CC_TTS_PARSED_STATE=question
             if command -v jq >/dev/null 2>&1 && [ -n "$input" ]; then
                 CC_TTS_PARSED_OVERRIDE="$(printf '%s' "$input" | jq -r '.message // empty' 2>/dev/null)"

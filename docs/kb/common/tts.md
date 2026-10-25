@@ -155,6 +155,21 @@ The wizard probes all of these and tells you which are reachable before you
 choose. If you hear the system voice instead of your usual one, the floor caught
 a fallback — Kokoro is probably down. A once-a-day notice says so.
 
+## What it deliberately does not announce
+
+- **Claude sessions an SDK client drives.** An editor plugin such as Obsidian's
+  Claudian runs `claude` through the Agent SDK with your user settings, so it
+  gets the same hooks as a terminal session. It also opens a new session per chat,
+  so each one spoke with its own ordinal and voice ("forge42 two", "forge42
+  three"). Claude Code tells the hooks which one is running through
+  `CLAUDE_CODE_ENTRYPOINT` (`cli`, `sdk-ts`, `sdk-py`), and an `sdk*` session is
+  silent unless `sources.claude.speakSdk` is `true` in `~/.claude/tts/local.json`.
+- **The idle reminder.** About a minute after a turn ends, Claude sends an
+  `idle_prompt` Notification. Stop has already said the turn finished, and every
+  notification used to become a question, so one turn was announced twice:
+  *"finished"*, then *"I have a question for you"*. It is dropped now. Other
+  notifications, such as a permission prompt, still speak.
+
 ## It went quiet
 
 - **`~/.claude/tts/local.json` with `"enabled": false`** overrides everything and

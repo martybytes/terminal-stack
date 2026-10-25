@@ -64,6 +64,19 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **Voice notifications: editor plugins and the idle reminder are quiet
+  (10/25/2026).** Obsidian's Claudian plugin runs `claude` through the Agent SDK
+  with your user hooks and opens a new session for every chat, so each chat was
+  announced in its own voice and with its own number ("forge42 two", "forge42
+  three"). A Claude session whose `CLAUDE_CODE_ENTRYPOINT` is `sdk*` is now
+  silent unless `sources.claude.speakSdk` is `true`. The check is in the
+  Windows exe and in all three POSIX hook scripts, and runs before the WSL
+  handoff, because neither the exe nor a daemon POST can see that variable from
+  WSL. Separately, Claude's 60-second `idle_prompt` Notification repeated the
+  Stop announcement as *"I have a question for you"*. It is dropped now.
+  Windows needs the exe rebuilt (`tstack config tts daemon restart`) to pick
+  this up.
+
 - **Agent007Memory: an "OpenAI-compatible" self-hosted model is free
   (10/20/2026).** The label is a protocol, but it matched the paid-vendor
   pattern before the private-endpoint check, so a vLLM box on the LAN showed
