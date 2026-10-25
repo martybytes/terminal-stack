@@ -29,7 +29,11 @@ DEFAULTS: dict[str, Any] = {
     "engine": "kokoro",
     "events": ["waiting", "error", "question", "permission"],
     "sources": {
-        "claude": {"prefixEnabled": True, "prefix": "Claude"},
+        # speakSdk: a Claude session driven through the Agent SDK (an editor plugin such as
+        # Obsidian's Claudian, a script) loads the same user hooks as a terminal session
+        # and opens a new session per chat, so each one arrived with its own ordinal and
+        # voice. Off unless asked for; CLAUDE_CODE_ENTRYPOINT tells the two apart.
+        "claude": {"prefixEnabled": True, "prefix": "Claude", "speakSdk": False},
         "cursor": {"prefixEnabled": True, "prefix": "Cursor"},
         "codex": {"prefixEnabled": True, "prefix": "Codex"},
     },

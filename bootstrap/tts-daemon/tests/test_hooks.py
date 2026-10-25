@@ -139,3 +139,79 @@ def test_spawn_direct_reports_failure_instead_of_raising(tmp_path, monkeypatch):
 
     _unusable_state_root(tmp_path, monkeypatch)
     assert _spawn_direct({"v": 1, "source": "claude"}) is False
+
+
+def test_claude_idle_reminder_is_silent_because_stop_already_spoke():
+    """idle_prompt repeats the Stop announcement a minute later, and used to say it as a question."""
+    assert build_payload(
+        "claude", "notification", "question",
+        raw({"session_id": "s1", "notification_type": "idle_prompt",
+             "message": "Claude is waiting for your input"}),
+    ) is None
+
+
+def test_claude_other_notifications_still_speak_as_questions():
+    payload = build_payload(
+        "claude", "notification", "question",
+        raw({"session_id": "s1", "notification_type": "permission_prompt",
+             "message": "Claude needs your permission to use Bash"}),
+    )
+    assert payload is not None
+    assert payload["state"] == "question"
+    assert payload["override"] == "Claude needs your permission to use Bash"
+
+
+def _submit_with(monkeypatch, entrypoint, speak_sdk=None):
+    """Run submit_hook with the daemon POST stubbed; returns (rc, posted payloads)."""
+    import ttsd.hooks as hooks
+
+    settings = {"enabled": True, "daemon.enabled": True,
+                "events": ["waiting", "error", "question", "permission"]}
+    if speak_sdk is not None:
+        settings["sources.claude.speakSdk"] = speak_sdk
+
+    class _Cfg:
+        def get(self, dotted, default=None):
+            return settings.get(dotted, default)
+
+    posted = []
+    monkeypatch.setattr(hooks, "Config", _Cfg)
+    monkeypatch.setattr(hooks.mute, "is_muted", lambda: False)
+    monkeypatch.setattr(hooks, "_post", lambda cfg, payload: posted.append(payload) or True)
+    monkeypatch.setattr(hooks, "_spawn_direct", lambda *a, **k: False)
+    monkeypatch.delenv("CC_TTS_REPORT_DISABLED", raising=False)
+    if entrypoint is None:
+        monkeypatch.delenv("CLAUDE_CODE_ENTRYPOINT", raising=False)
+    else:
+        monkeypatch.setenv("CLAUDE_CODE_ENTRYPOINT", entrypoint)
+    rc = hooks.submit_hook("claude", "stop", "waiting",
+                           raw({"session_id": "s1", "cwd": "C:/work/forge42"}))
+    return rc, posted
+
+
+def test_sdk_driven_claude_session_is_silent_by_default(monkeypatch):
+    """Obsidian's Claudian runs claude.exe through the SDK with the user's hooks."""
+    rc, posted = _submit_with(monkeypatch, "sdk-ts")
+    assert rc == 0
+    assert posted == []
+
+
+def test_sdk_driven_claude_session_speaks_when_opted_in(monkeypatch):
+    rc, posted = _submit_with(monkeypatch, "sdk-ts", speak_sdk=True)
+    assert rc == 0
+    assert len(posted) == 1
+
+
+def test_terminal_claude_session_still_speaks(monkeypatch):
+    for entrypoint in ("cli", None):
+        _, posted = _submit_with(monkeypatch, entrypoint)
+        assert len(posted) == 1, entrypoint
+
+
+def test_sdk_gate_applies_to_claude_only(monkeypatch):
+    from ttsd.hooks import is_sdk_session
+
+    monkeypatch.setenv("CLAUDE_CODE_ENTRYPOINT", "sdk-ts")
+    assert is_sdk_session("claude")
+    assert not is_sdk_session("cursor")
+    assert not is_sdk_session("codex")

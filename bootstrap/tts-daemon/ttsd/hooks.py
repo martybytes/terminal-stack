@@ -76,6 +76,11 @@ def build_payload(source: str, event: str, state: str, raw: bytes) -> dict | Non
         state = "permission"
         override = str(data.get("tool_name") or data.get("message") or "")
     elif event == "notification":
+        # idle_prompt is Claude's 60-second "still waiting" reminder. Stop already said the
+        # turn was finished, so speaking it announced one turn twice -- as a question, since
+        # every notification became one here.
+        if str(data.get("notification_type") or "") == "idle_prompt":
+            return None
         state = "question"
         override = str(data.get("message") or "")
 
@@ -227,6 +232,17 @@ def _ensure_daemon(cfg: Config) -> bool:
     return False
 
 
+def is_sdk_session(source: str) -> bool:
+    """A Claude session an Agent SDK client drives (sdk-ts, sdk-py, sdk-cli), not a terminal.
+
+    Claude Code exports CLAUDE_CODE_ENTRYPOINT to its hooks. An editor plugin such as
+    Obsidian's Claudian runs claude.exe through the SDK with the user's settings, so it gets
+    every one of these hooks, and it opens a new session per chat.
+    """
+    entrypoint = str(os.environ.get("CLAUDE_CODE_ENTRYPOINT") or "").lower()
+    return source.lower() == "claude" and entrypoint.startswith("sdk")
+
+
 def submit_hook(source: str, event: str, state: str, raw: bytes) -> int:
     payload = build_payload(source, event, state, raw)
     if payload is None:
@@ -239,6 +255,8 @@ def submit_hook(source: str, event: str, state: str, raw: bytes) -> int:
     # yourself"; the caller then runs its own side's path. A mute stays 0.
     declined = 75 if os.environ.get("CC_TTS_REPORT_DISABLED") else 0
     if not cfg.get("enabled", False):
+        return declined
+    if is_sdk_session(source) and not cfg.get("sources.claude.speakSdk", False):
         return declined
     # The mute is checked here, before the daemon POST and before any worker is spawned,
     # because this is the one place every hook on every host passes through. It is

@@ -14,11 +14,14 @@ LIB="$(dirname "$0")/cc-tts-lib.sh"
 # shellcheck source=cc-tts-lib.sh
 . "$LIB"
 
+cc_tts_sdk_silenced "$source" && exit 0
 if cc_tts_windows_hook "$source" "$event" question "$input" >/dev/null 2>&1; then
     exit 0
 fi
 
 cc_tts_parse_input_state "$input" "$event"
+# A notification the parser left without a state is the idle reminder: say nothing.
+[ "$event" = notification ] && [ -z "$CC_TTS_PARSED_STATE" ] && exit 0
 state="${CC_TTS_PARSED_STATE:-question}"
 override="${CC_TTS_PARSED_OVERRIDE:-}"
 
