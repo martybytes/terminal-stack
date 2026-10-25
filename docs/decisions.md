@@ -625,6 +625,30 @@ Dedupe made the redundancy worse rather than harmless: `recently_spoken` is **fi
 
 Accepted cost: the `permission` state becomes unreachable from Claude (Cursor still sends it), so permission prompts can no longer be muted separately from questions via the `events` list, and `announce.templates.permission` is now only exercised by Cursor and `tstack config tts test`. The absolute mute covers the "silence everything" case that granularity was standing in for.
 
+## Why SDK-driven Claude sessions and `idle_prompt` are silent
+
+An editor plugin (Obsidian's Claudian) runs `claude.exe` through the Agent SDK with
+`--setting-sources=user,project,local`, so it gets every user hook. It also opens a
+**new session per chat**, and the registry gives each new session key its own
+ordinal and voice. On 10/25/2026 that came out as "forge42 finished", "Error in
+forge42 two" and "forge42 three finished" within two minutes. Dedupe cannot catch
+this, because it is keyed by session. Claude Code tells the hooks which kind of
+session is running through `CLAUDE_CODE_ENTRYPOINT` (`cli`, `sdk-ts`, `sdk-py`), so an
+`sdk*` session declines unless `sources.claude.speakSdk` is `true`. That is a key read
+with a code default, not a chezmoi `[data]` key, so overriding it is a `local.json` edit.
+
+**The bash gate runs before the Windows handoff, not inside `cc-tts-notify.sh`
+alone.** The exe cannot see the variable from WSL (it is not in `WSLENV`), and a
+daemon POST carries no environment at all. A gate that only the direct path checked
+would be skipped whenever the daemon was up.
+
+`idle_prompt` is Claude's 60-second "still waiting" reminder. Both twins forced every
+Notification to `state=question`, so it was spoken as a P0 question a minute after
+Stop had already said the turn finished, and dedupe's 5-second window could not
+reach back that far. The reminder is dropped, not downgraded: the `summarize.py`
+"Still waiting in …" line is now unreachable from Claude. That is accepted, since
+saying it would still announce one turn twice.
+
 ## Why ducking snapshots pre-duck volumes to disk before touching anything
 
 Windows persists per-app mixer volume indefinitely. A daemon that dies between ramp-down and restore leaves the music at 30% until the user finds the Volume Mixer — so the duck engine writes `state\duck-snapshot.json` *before* the first volume change, restores any stale snapshot at next startup, runs a 15 s watchdog while holding, and exposes `POST /v1/duck/release` plus a `--restore-volumes` oneshot that `tstack doctor --repair` invokes. Pause mode uses the Windows media-session API (`TryPauseAsync` only on sessions that were Playing, resume exactly those) and never simulates the media key, which is a blind toggle other apps can hijack.
