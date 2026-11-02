@@ -4287,3 +4287,24 @@ and each one stops a specific failure:
 It is one message at a time because `iii::queue::redrive` (bulk) cannot be scoped to the
 messages the operator was shown.
 
+## Why the leader check probes for a global hotkey
+
+Found 2026-11-01: the saved leader `ctrl-backslash` rendered correctly into
+`~/.wezterm.lua`, `wezterm show-keys` listed `Leader: Physical(Backslash) CTRL`,
+and pressing it did nothing. With `debug_key_events` WezTerm logged the key-UP of
+Ctrl+Backslash and never the key-DOWN: another program had registered the chord
+with `RegisterHotKey`, and Windows delivers a registered hotkey's key-down to its
+owner, system-wide, before any window. No WezTerm setting can get it back.
+
+The only test Windows offers is to try registering the chord ourselves: it fails
+with `ERROR_HOTKEY_ALREADY_REGISTERED` (1409) when it is held, and is released at
+once when it succeeds. **There is no API that names the holder**, which is why
+the advice lists likely programs rather than naming one. "Cannot tell" (not
+Windows, or a chord with no key code) returns None and prints nothing, never
+"ok".
+
+The wizard marks a taken chord and confirms rather than refusing it, because the
+user may be about to free it in the other program. The suite stubs the probe in
+`tests/conftest.py`: its answer is the developer's tray, and on a PC where
+Ctrl+Backslash is taken every scripted wizard answer after the leader shifted by
+one.

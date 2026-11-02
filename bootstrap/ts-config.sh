@@ -58,7 +58,10 @@ curapps() { ts_data_get_apps 2>/dev/null || true; }
 finish() {
     echo "==> applying…"
     "$CZ" apply
-    echo "==> done."
+    echo "==> done. Saved and applied: every managed file now matches your settings."
+    echo "    WezTerm reloads by itself (Ctrl+Shift+R forces it); shell, prompt and"
+    echo "    tmux changes show up in a NEW shell or tmux session."
+    echo "    tstack config -h lists every setting; tstack doctor checks the install."
 }
 
 # Install the selected apps for the current platform (idempotent; never uninstalls).

@@ -936,7 +936,7 @@ def _cmd(argv, monkeypatch, answers=None, quit_it=False):
     )
     monkeypatch.setattr(cmd.flow, "collect_apps", lambda console: answers or flow.Answers())
     monkeypatch.setattr(cmd.flow, "review", lambda console, a: None)
-    monkeypatch.setattr(cmd.flow, "confirm", lambda console, a, assume_yes: None if quit_it else a)
+    monkeypatch.setattr(cmd.flow, "confirm", lambda console, a, assume_yes, **kw: None if quit_it else a)
     return cmd.main(argv)
 
 
@@ -1142,7 +1142,7 @@ def test_ts_assume_yes_works_on_the_direct_path_too(monkeypatch, tmp_path):
     seen: list[bool] = []
     monkeypatch.setattr(cmd.flow, "collect", lambda c, ask_terminals=False: flow.Answers(asked=3))
     monkeypatch.setattr(
-        cmd.flow, "confirm", lambda c, a, assume_yes: (seen.append(assume_yes), a)[1]
+        cmd.flow, "confirm", lambda c, a, assume_yes, **kw: (seen.append(assume_yes), a)[1]
     )
     monkeypatch.delenv("TS_ASSUME_YES", raising=False)
     cmd.main([])

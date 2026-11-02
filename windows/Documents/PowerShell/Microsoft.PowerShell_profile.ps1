@@ -1077,6 +1077,76 @@ function Invoke-TsSync([string]$SourceDir) {
     }
 }
 
+# Is the leader chord held by another program's global hotkey? A held chord's
+# key-down never reaches WezTerm, so the leader silently does nothing even though
+# the config is right (found 2026-11-01 with ctrl-backslash). One implementation:
+# tstack/hotkey.py, run as a plain script. Prints its advice and returns $false
+# when taken; $true when free or when it cannot tell.
+function Test-TsLeaderFree([string]$Chord, [string]$SourceDir) {
+    $script = Join-Path $SourceDir 'tstack\hotkey.py'
+    $python = Get-TstackPython
+    if (-not $python -or -not (Test-Path $script)) { return $true }
+    $advice = & $python.Exe @($python.Arguments + @($script, $Chord))
+    if ($LASTEXITCODE -ne 1) { return $true }
+    Write-Host ''
+    foreach ($line in $advice) { Write-Host "  $line" -ForegroundColor Yellow }
+    return $false
+}
+
+# What a `tstack config` change did, and what (if anything) the user must do for
+# it to take effect. Every apply ends here, because "==> done." on its own left
+# people re-running commands that had already worked -- or that never could.
+# POSIX twin: show_next_steps in bootstrap/ts-config.sh.
+function Show-TsNextSteps([string]$What, [string]$Leader) {
+    $lead = ($Leader -split '-' | ForEach-Object {
+            switch ($_) { 'ctrl' { 'Ctrl' } 'alt' { 'Alt' } 'shift' { 'Shift' } 'backslash' { '\' } 'space' { 'Space' } default { $_.ToUpper() } }
+        }) -join '+'
+    Write-Host ''
+    Write-Host '==> Saved and applied.' -ForegroundColor Green
+    Write-Host '    In the sync line above, "unchanged" means a file already matched your'
+    Write-Host '    settings, so there was nothing to rewrite. That is not a failure.'
+    Write-Host ''
+    Write-Host 'What happens now:'
+    switch ($What) {
+        'leader' {
+            Write-Host "  - WezTerm: every open window reloads its config by itself within a second."
+            Write-Host "    Try it: press $lead, let go, then press z (zooms the pane; again to unzoom)."
+            Write-Host "    While the leader is waiting the cursor turns peach and the tab bar says LEADER."
+            Write-Host "  - Nothing happens? Press Ctrl+Shift+R in WezTerm to force a reload, then run"
+            Write-Host "    tstack doctor  - it checks whether another program has taken $lead."
+            Write-Host "  - The leader is WezTerm-only. tmux has its own prefix: tstack config tmux <chord>."
+        }
+        'theme' {
+            Write-Host '  - WezTerm recolours every open window by itself within a second.'
+            Write-Host '  - The prompt and other tools pick the new palette up in a NEW tab.'
+        }
+        'tmux' {
+            Write-Host '  - tmux does not run on Windows, so this only SAVED the value here.'
+            Write-Host '    To change the prefix tmux actually uses, run this inside WSL:'
+            Write-Host '      tstack config tmux <chord>      e.g. ctrl-a'
+        }
+        'apps' {
+            Write-Host '  - Newly installed tools are on PATH in a NEW PowerShell tab, not this one.'
+            Write-Host '  - tstack doctor  lists anything that is still missing.'
+        }
+        'tts' {
+            Write-Host '  - Agents read the voice settings on their next message; nothing to restart.'
+            Write-Host '  - Try it:  tstack config tts test'
+        }
+        'restore' {
+            Write-Host '  - Takes effect the next time you START WezTerm; open windows are unaffected.'
+        }
+        default {
+            Write-Host '  - Every managed file was re-written from your saved settings.'
+            Write-Host '  - WezTerm reloads by itself. If it does not, press Ctrl+Shift+R in it.'
+            Write-Host '  - PowerShell profile changes need a NEW tab (this one keeps the old functions).'
+        }
+    }
+    Write-Host ''
+    Write-Host 'More:  tstack config -h   every setting and how to change it'
+    Write-Host '       tstack doctor      checks the whole install and says how to fix what it finds'
+}
+
 # The branch a runtime clone tracks. Keep in step with tstack/paths.py
 # RELEASE_BRANCH and the installers; tests/test_release_branch.py fails on drift.
 $script:TsReleaseBranch = 'main'
@@ -1366,7 +1436,8 @@ function Set-TerminalStackConfig {
         }
         Invoke-TsSync $src
         Show-TsInstalledApps @($w.Apps)
-        Write-Host '==> done.'
+        Show-TsNextSteps -What all -Leader $w.Leader
+        $null = Test-TsLeaderFree $w.Leader $src
         return $w
     }
 
@@ -1379,7 +1450,7 @@ function Set-TerminalStackConfig {
     $menuLeader = {
         Read-TsChoice -Title 'Leader key (WezTerm) - prefix for pane / tab / workspace commands:' `
             -Default $leader -Options @(
-                @{ Key = 'ctrl-backslash'; Label = 'Ctrl+\'; Note = 'clashes with nothing' },
+                @{ Key = 'ctrl-backslash'; Label = 'Ctrl+\'; Note = 'clashes with no shell or TUI' },
                 @{ Key = 'ctrl-space'; Label = 'Ctrl+Space' },
                 @{ Key = 'ctrl-a';     Label = 'Ctrl+A'; Note = 'tmux muscle memory' },
                 @{ Key = 'ctrl-b';     Label = 'Ctrl+B'; Note = 'tmux default' },
@@ -1393,15 +1464,18 @@ function Set-TerminalStackConfig {
             @{ Key = 'follow'; Label = 'follow OS appearance'; Note = 'WezTerm switches live' })
     }
 
+    # $What names the setting that changed, so the closing message can say what
+    # the user still has to do for THAT change (Show-TsNextSteps).
     $save = {
-        param($Tts = $ccTts)
+        param($Tts = $ccTts, [string]$What = 'all')
         Save-TsConfig -LeaderChord $leader -ThemeMode $theme -TmuxPrefix $tmux -Apps $apps -CcTts $Tts `
             -HeadroomEnabled $headroom -HeadroomCursorMode $headroomCursor `
             -CavemanEnabled $caveman -AgentmemoryEnabled $agentmemory `
             -MemoryBackend $memoryBackend | Out-Null
         Export-CcTtsJson
         Invoke-TsSync $src
-        Write-Host '==> done.'
+        Show-TsNextSteps -What $What -Leader $leader
+        if ($What -in 'leader', 'all') { $null = Test-TsLeaderFree $leader $src }
     }
 
     $agentsShow = {
@@ -1433,21 +1507,22 @@ function Set-TerminalStackConfig {
                 Write-Host "  caveman    : $caveman"
                 Write-Host "  agentmemory: $agentmemory"
                 Write-Host ''
-                Write-Host '  1) leader  2) theme  3) tmux prefix  4) apps  5) re-apply  6) Claude TTS  7) WezTerm mux  8) session restore  9) coding agents  t) WezTerm build  w) re-run wizard  q) quit'
+                Write-Host '  1) leader  2) theme  3) tmux prefix  4) apps  5) re-apply  6) Claude TTS  7) WezTerm mux  8) session restore  9) coding agents  t) WezTerm build  w) re-run wizard  h) help  q) quit'
                 switch (Read-Host 'Choose') {
-                    '1' { $leader = & $menuLeader; & $save }
-                    '2' { $theme  = & $menuTheme;  & $save }
-                    '3' { $t = Read-Host 'tmux prefix chord (e.g. ctrl-a) [ctrl-b]'; $tmux = if ($t) { $t } else { 'ctrl-b' }; & $save }
+                    'h' { Set-TerminalStackConfig help }
+                    '1' { $leader = & $menuLeader; & $save -What leader }
+                    '2' { $theme  = & $menuTheme;  & $save -What theme }
+                    '3' { $t = Read-Host 'tmux prefix chord (e.g. ctrl-a) [ctrl-b]'; $tmux = if ($t) { $t } else { 'ctrl-b' }; & $save -What tmux }
                     '4' {
                         $picked = Invoke-TsWizard -SourceDir $src -Only apps
-                        if ($picked) { $apps = @($picked.Apps); Install-TsApps $apps; Show-TsInstalledApps $apps; & $save }
+                        if ($picked) { $apps = @($picked.Apps); Install-TsApps $apps; Show-TsInstalledApps $apps; & $save -What apps }
                     }
                     '5' { & $save }
                     '6' {
                         Show-CcTtsConfig
                         switch (Read-Host 'TTS: a) on  b) off  c) test  d) daemon status  e) back') {
-                            'a' { $ccTts.enabled = $true; & $save $ccTts }
-                            'b' { $ccTts.enabled = $false; & $save $ccTts }
+                            'a' { $ccTts.enabled = $true; & $save $ccTts tts }
+                            'b' { $ccTts.enabled = $false; & $save $ccTts tts }
                             'c' { Invoke-TsConfigTts -Sub test -Apply $save }
                             'd' { Show-CcTtsDaemonStatus }
                         }
@@ -1467,7 +1542,7 @@ function Set-TerminalStackConfig {
                             -Default (Get-TsProp (Get-TsConfig) weztermRestore 'off') -Options @(
                                 @{ Key = 'off'; Label = 'off'; Note = 'start clean every time' },
                                 @{ Key = 'on';  Label = 'on';  Note = 'reopen the last session' })
-                        Save-TsConfig -WeztermRestore $restore | Out-Null; Invoke-TsSync $src; Write-Host '==> done.'
+                        Save-TsConfig -WeztermRestore $restore | Out-Null; Invoke-TsSync $src; Show-TsNextSteps -What restore -Leader $leader
                     }
                     '9' {
                         & $agentsShow
@@ -1491,6 +1566,46 @@ function Set-TerminalStackConfig {
                 }
             }
         }
+        'help' {
+            Write-Host @'
+tstack config - view and change this machine's saved settings.
+
+  Every change is SAVED, then APPLIED straight away: the managed files are
+  re-written and you are told what (if anything) you still have to do.
+
+Run it with no arguments for the interactive menu, or set one value directly:
+
+  tstack config                    the menu: shows every saved setting, pick one to change
+  tstack config show               print the saved settings and exit
+
+  tstack config leader <chord>     WezTerm leader key: ctrl-backslash, ctrl-a, alt-space ...
+                                   Press it, let go, then a key (h split, z zoom, r reload).
+                                   Open WezTerm windows reload within a second; if the leader
+                                   still does nothing, run `tstack doctor` - another program
+                                   may have taken the chord as a global hotkey.
+  tstack config theme <mode>       dark | light | follow (follow tracks Windows' light/dark)
+  tstack config tmux <chord>       tmux prefix. tmux runs in WSL, so set it from WSL.
+  tstack config apps [list]        pick the optional CLI tools; installs what you tick
+                                   (`recommended`, `all`, `none`, or a comma list)
+  tstack config restore on|off     reopen the last WezTerm session at startup
+  tstack config tts <verb>         agent voice notifications (try: tstack config tts test)
+  tstack config memory <backend>   agentmemory | headroom | none
+  tstack config agents             headroom / caveman / agentmemory wiring
+  tstack config wezterm [verb]     WezTerm build: status | changes | install <stable|nightly> | upgrade
+  tstack config wizard             re-run the WHOLE install questionnaire, then save and apply it
+
+  Not the same as `tstack wizard`, which only PREVIEWS the questions and saves nothing.
+
+  In the menu, "5) re-apply" re-writes every managed file from what is saved.
+  When the sync reports "0 updated ... N unchanged", every file already matched
+  your settings - there was nothing to change, and that is the expected result.
+
+Related:
+  tstack doctor          checks the install and says how to fix each problem it finds
+  tstack mux on|off      WezTerm multiplexer (panes survive a GUI crash)
+  tstack update          pull the latest stack and apply it
+'@
+        }
         'show' {
             Write-Host "leader     : $leader"
             Write-Host "theme      : $theme   (palette $(Get-TsResolvedTheme $theme))"
@@ -1502,9 +1617,9 @@ function Set-TerminalStackConfig {
             Write-Host "caveman    : $caveman"
             Write-Host "agentmemory: $agentmemory"
         }
-        'leader' { if (-not $Value) { Write-Warning 'usage: tstack config leader <chord>'; return }; $leader = $Value; & $save }
-        'theme'  { if (-not $Value) { Write-Warning 'usage: tstack config theme <dark|light|follow>'; return }; $theme = $Value; & $save }
-        'tmux'   { if (-not $Value) { Write-Warning 'usage: tstack config tmux <chord>'; return }; $tmux = $Value; & $save }
+        'leader' { if (-not $Value) { Write-Warning 'usage: tstack config leader <chord>   e.g. ctrl-backslash, ctrl-a, alt-space (tstack config help)'; return }; $leader = $Value; & $save -What leader }
+        'theme'  { if (-not $Value) { Write-Warning 'usage: tstack config theme <dark|light|follow>'; return }; $theme = $Value; & $save -What theme }
+        'tmux'   { if (-not $Value) { Write-Warning 'usage: tstack config tmux <chord>   e.g. ctrl-a (run it in WSL: tmux runs there)'; return }; $tmux = $Value; & $save -What tmux }
         'apps'   {
             if ($Value) {
                 switch ($Value) {
@@ -1520,7 +1635,7 @@ function Set-TerminalStackConfig {
                 if (-not $picked) { return }
                 $apps = @($picked.Apps)
             }
-            Install-TsApps $apps; Show-TsInstalledApps $apps; & $save
+            Install-TsApps $apps; Show-TsInstalledApps $apps; & $save -What apps
         }
         'wezterm' {
             switch ($Value) {
@@ -1551,7 +1666,7 @@ function Set-TerminalStackConfig {
             Invoke-TsConfigTts -Sub $Value -Arg $Rest[0] -Arg2 $Rest[1] -Apply {
                 param($Tts)
                 $ccTts = $Tts
-                & $save $Tts
+                & $save $Tts tts
             }
         }
         # Which memory system runs. ONE slot: AgentMemory and Headroom do the same
@@ -1862,6 +1977,12 @@ function Invoke-Tstack {
     }
 
     if ($impl.StartsWith('@')) {
+        # `-h` splatted into an advanced function is a PARAMETER token, and
+        # Set-TerminalStackConfig has none by that name, so `tstack config -h`
+        # died in the binder. It takes `help` as its Action instead.
+        if ($name -eq 'config' -and $tail.Count -gt 0 -and $tail[0] -in @('-h', '--help')) {
+            $tail[0] = 'help'
+        }
         # Runs in THIS session on purpose: update offers to reload the profile and
         # rollback prompts, neither of which a child process can do for its parent.
         & $impl.Substring(1) @tail
