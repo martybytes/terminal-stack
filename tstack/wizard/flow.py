@@ -253,20 +253,7 @@ def collect(console: Console, ask_terminals: bool = False) -> Answers:
     elif bare:
         leader = "ctrl-backslash"
     else:
-        leader = ask.choose(
-            "Leader key (WezTerm) - prefix for pane / tab / workspace commands:",
-            [
-                ("ctrl-backslash", "Ctrl+\\", "clashes with nothing"),
-                ("ctrl-space", "Ctrl+Space", "macOS and PSReadLine claim it"),
-                ("ctrl-a", "Ctrl+A", "tmux muscle memory"),
-                ("ctrl-b", "Ctrl+B", "tmux default"),
-                ("alt-space", "Alt+Space", ""),
-                ("custom", "custom chord", ""),
-            ],
-            _saved("leaderChord", "ctrl-backslash"),
-        )
-        if leader == "custom":
-            leader = _chord(console, text(console, _CHORD_PROMPT))
+        leader = _leader(ask, console)
 
     # ------------------------------------------------------------- terminals
     terminals: list[str] = []
@@ -466,6 +453,61 @@ _CHORD_PROMPT = "Enter chord (mod-key, e.g. ctrl-x, alt-space, ctrl-backslash): 
 # spell it, rather than refusing an answer that is not wrong so much as
 # unstorable.
 _KEY_SPELLINGS = {"\\": "backslash", " ": "space"}
+
+
+_LEADER_INTRO = """\
+The leader is a key you press FIRST, then let go, then press a second key:
+  leader then h   split the pane          leader then z   zoom the pane
+  leader then t   tab mode                leader then r   reload the config
+  leader then w   pick a workspace        leader then Esc cancel
+While it is waiting, the cursor turns peach and the tab bar shows LEADER.
+Press the leader twice to send the chord itself to the program in the pane.
+It applies to WezTerm only. Open WezTerm windows pick up a change within a
+second on their own; if one does not, press Ctrl+Shift+R in it.
+Change it later with:  tstack config leader <chord>   (e.g. ctrl-a)
+Check it with:         tstack doctor   (says if another program holds it)"""
+
+
+def _leader(ask: Asker, console: Console) -> str:
+    """The leader question, re-asked while the answer is a chord another program holds.
+
+    A held chord never reaches WezTerm (tstack/hotkey.py), so taking it would save
+    a leader that does nothing. It is marked in the menu and confirmed, never
+    refused outright: the user may be about to free it in the other program.
+    """
+    from .. import hotkey
+
+    def note(chord: str, text_: str) -> str:
+        return "TAKEN on this PC by another program" if hotkey.held_elsewhere(chord) else text_
+
+    while True:
+        leader = ask.choose(
+            "Leader key (WezTerm) - prefix for pane / tab / workspace commands:",
+            [
+                (
+                    "ctrl-backslash",
+                    "Ctrl+\\",
+                    note("ctrl-backslash", "clashes with no shell or TUI"),
+                ),
+                ("ctrl-space", "Ctrl+Space", note("ctrl-space", "macOS and PSReadLine claim it")),
+                ("ctrl-a", "Ctrl+A", note("ctrl-a", "tmux muscle memory")),
+                ("ctrl-b", "Ctrl+B", note("ctrl-b", "tmux default")),
+                ("alt-space", "Alt+Space", note("alt-space", "")),
+                ("custom", "custom chord", ""),
+            ],
+            _saved("leaderChord", "ctrl-backslash"),
+            intro=_LEADER_INTRO,
+        )
+        if leader == "custom":
+            leader = _chord(console, text(console, _CHORD_PROMPT))
+        if not hotkey.held_elsewhere(leader) or not console.interactive:
+            return leader
+        console.say()
+        for line in hotkey.advice(leader):
+            console.say(f"  {line}")
+        reply = (text(console, f"  Keep {hotkey.label(leader)} anyway? [y/N]: ") or "").lower()
+        if reply in ("y", "yes"):
+            return leader
 
 
 def _spell(part: str) -> str:
@@ -935,19 +977,32 @@ def review(console: Console, answers: Answers) -> None:
     console.say(f"    Start services   {answers.services}")
 
 
-def confirm(console: Console, answers: Answers, assume_yes: bool) -> Answers | None:
+def confirm(
+    console: Console, answers: Answers, assume_yes: bool, *, preview: bool = False
+) -> Answers | None:
     """Show the review and let it be edited or abandoned. None means quit.
 
     Skipped when nothing was asked: a fully env-driven run has nothing to review
     and must not block on a tty nobody is watching.
+
+    `preview` is a bare `tstack wizard`, which saves nothing. Its prompt must not
+    say "Proceed": that reads as "apply", and a user who pressed it watched the
+    command return to the shell with nothing changed and no word as to why.
     """
     while True:
         review(console, answers)
         if assume_yes or answers.asked == 0 or not console.interactive:
             console.say("  (nothing to review - proceeding)")
             return answers
-        reply = (text(console, "  [P]roceed / [e]dit / [q]uit: ") or "").lower()
-        if reply in ("", "p", "proceed", "y", "yes"):
+        if preview:
+            console.say("  This was a PREVIEW. Pressing Enter saves nothing and changes nothing.")
+        prompt = (
+            "  [D]one / [e]dit answers / [q]uit: "
+            if preview
+            else "  [P]roceed (save and apply) / [e]dit answers / [q]uit: "
+        )
+        reply = (text(console, prompt) or "").lower()
+        if reply in ("", "p", "proceed", "y", "yes", "d", "done"):
             return answers
         if reply in ("q", "quit"):
             console.say("==> quit - nothing was installed or changed.")
@@ -957,5 +1012,6 @@ def confirm(console: Console, answers: Answers, assume_yes: bool) -> Answers | N
             answers = replace(fresh, asked=fresh.asked or answers.asked)
             continue
         console.say(
-            f"  '{reply}' is not one of the choices - Enter to proceed, 'e' to edit, 'q' to quit."
+            f"  '{reply}' is not one of the choices - Enter to "
+            f"{'finish' if preview else 'proceed'}, 'e' to edit, 'q' to quit."
         )

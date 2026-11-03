@@ -6,6 +6,27 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Added
 
+- **A leader key another program has taken is now reported (11/01/2026).**
+  On Windows, a program that registers a chord as a global hotkey gets its
+  key-down before any window does, so a WezTerm leader set to that chord does
+  nothing at all, while the config loads and `wezterm show-keys` lists it.
+  `tstack doctor` now fails the check `leader-hotkey`, the wizard marks a taken
+  chord `TAKEN on this PC` and asks before keeping it, and `tstack config
+  leader` prints the fix. One probe, `tstack/hotkey.py`, for all of them.
+- **Every `tstack config` change says what happens next (11/01/2026).** It used
+  to end in a bare `==> done.`, and a re-apply reporting `0 updated` read as a
+  failure. Each change now says what was applied, what reloads by itself, and
+  what (if anything) the user still has to do. On Windows, `tstack config -h`
+  works and `tstack config help` lists every setting.
+
+### Changed
+
+- **A bare `tstack wizard` says it is a preview (11/01/2026).** It saves nothing,
+  but it ended on `[P]roceed`, so pressing it and seeing nothing change looked
+  like a bug. It now says PREVIEW before the first question and at the end,
+  asks `[D]one` instead, and names `tstack config wizard` as the command that
+  applies.
+
 - **Dead letters are requeued automatically on a free model (10/20/2026).**
   When the LLM provider is down, AgentMemory's jobs fail every retry and
   sit in the dead-letter queue for good. Agent007Memory now watches for the

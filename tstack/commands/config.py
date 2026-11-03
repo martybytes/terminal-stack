@@ -17,7 +17,7 @@ import os
 import subprocess
 import sys
 
-from .. import engine, paths, proc, schema, stacks, store
+from .. import engine, hotkey, paths, proc, schema, stacks, store
 from .. import platform as plat
 
 HELP = """tstack config - view and change saved settings.
@@ -405,11 +405,53 @@ def set_value(key: str, value: str, out: Out, dry_run: bool) -> int:
         out.say(
             "  this renders into the Windows-side .wezterm.lua: run 'tstack update' in PowerShell"
         )
+    if rc == 0:
+        for line in next_steps(key, value):
+            out.say(line)
     return rc
 
 
 # Settings rendered only into the GUI config, which on WSL lives on the Windows side.
 GUI_SIDE_KEYS = frozenset({"leaderChord", "weztermMux", "weztermRestore"})
+
+# What the user still has to do for a change to take effect. "==> done." on its
+# own left people re-running commands that had already worked. Windows twin:
+# Show-TsNextSteps in $PROFILE -- keep what the two say aligned.
+NEXT_STEPS = {
+    "leaderChord": (
+        "WezTerm: every open window reloads its config by itself within a second.",
+        "Try it: press the leader, let go, then press z (zooms the pane; again to unzoom).",
+        "While the leader is waiting the cursor turns peach and the tab bar says LEADER.",
+        "Nothing happens? Press Ctrl+Shift+R in WezTerm to force a reload, then run",
+        "`tstack doctor`. The leader is WezTerm-only; tmux has its own prefix.",
+    ),
+    "themeMode": (
+        "WezTerm recolours every open window by itself within a second.",
+        "The prompt and other tools pick the new palette up in a NEW tab.",
+    ),
+    "tmuxPrefix": (
+        "tmux reads its config only when it starts. In a running tmux, press the OLD",
+        "prefix, then type  :source-file ~/.tmux.conf  and Enter (on Omarchy the file is",
+        "~/.config/tmux/tmux.conf) -- or just start a new tmux session.",
+    ),
+    "weztermRestore": (
+        "Takes effect the next time you START WezTerm; open windows are unaffected.",
+    ),
+    "atuinEnabled": ("Ctrl+R changes in a NEW shell (or run: exec zsh).",),
+    "starshipPreset": ("The new prompt appears in a NEW shell (or run: exec zsh).",),
+}
+
+
+def next_steps(key: str, value: str) -> list[str]:
+    """The "what now" block for one changed setting; empty when there is nothing to say."""
+    steps = NEXT_STEPS.get(key)
+    if not steps:
+        return []
+    lines = ["", "What happens now:"] + [f"  {s}" for s in steps]
+    if key == "leaderChord" and hotkey.held_elsewhere(value):
+        lines += [""] + [f"  {s}" for s in hotkey.advice(value)]
+    lines += ["", "More: tstack config -h (every setting) / tstack doctor (checks the install)"]
+    return lines
 
 
 DELEGATED_HELP = {
