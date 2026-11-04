@@ -34,7 +34,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .. import checks, confirm, engine, headroom_token, herdr, paths, proc, stacks, store
+from .. import checks, confirm, engine, headroom_token, herdr, hotkey, paths, proc, stacks, store
 from .. import platform as plat
 from ..checks import Report
 from . import agents
@@ -350,6 +350,30 @@ def check_prompt(report: Report) -> None:
         )
         return
     report.ok("prompt-preset", f"prompt: {preset}")
+
+
+def check_leader_hotkey(report: Report) -> None:
+    """The WezTerm leader is held by another program's global hotkey (Windows).
+
+    A FAILURE, not a note: the leader is the prefix for every pane, tab and
+    workspace binding, and a held chord means none of them work -- silently,
+    with a config that loads and lists the leader correctly. Silent when the
+    answer cannot be known (not Windows, or a chord with no key code): "cannot
+    tell" must never print as "ok".
+    """
+    chord = store.get("leaderChord", "ctrl-backslash") or "ctrl-backslash"
+    held = hotkey.held_elsewhere(chord)
+    if held is None:
+        return
+    if held:
+        report.fail(
+            "leader-hotkey",
+            f"WezTerm leader {hotkey.label(chord)} is taken by another program's global hotkey, "
+            "so WezTerm never sees it and no leader binding works",
+            hotkey.one_line_fix(),
+        )
+        return
+    report.ok("leader-hotkey", f"WezTerm leader {hotkey.label(chord)}: no other program holds it")
 
 
 def check_herdr(report: Report) -> None:
@@ -1129,6 +1153,7 @@ def collect() -> Report:
     check_config_stores(report)
     check_memory_backend(report)
     check_prompt(report)
+    check_leader_hotkey(report)
     check_herdr(report)
     check_tts(report)
     check_agentmemory_wiring(report, src)

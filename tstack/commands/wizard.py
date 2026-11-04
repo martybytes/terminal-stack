@@ -15,7 +15,18 @@ from pathlib import Path
 from ..wizard import emit, flow
 from ..wizard.console import Console
 
-HELP = """tstack wizard - the install questionnaire.
+HELP = """tstack wizard - PREVIEW the install questionnaire. Saves nothing.
+
+  Run on its own, this asks every install question and shows the review, then
+  exits WITHOUT saving, installing or changing anything. It is for seeing what
+  the questions are and what you would get.
+
+  To answer the questions AND apply them, run one of:
+    tstack config wizard      the same questions, then saves and applies
+    tstack config             the settings menu; press  w  to re-run the wizard
+    tstack config leader ctrl-backslash   change one setting directly
+
+  The options below are how the installers call it; you do not need them.
 
 Usage:
   tstack wizard [--emit sh|json] [--out PATH] [--ask-terminals]
@@ -95,24 +106,52 @@ def main(argv: list[str]) -> int:
     # answer -- and the review is skipped. It used to skip only the review and
     # still ask every question on a terminal.
     console = Console() if assume_yes else Console.open()
+    # No --emit means a person typed `tstack wizard` and nothing will be saved.
+    # It must say so before the first question and again at the end: it used to
+    # end on "[P]roceed", return to the prompt silently, and leave the user
+    # wondering why none of their answers took effect.
+    preview = not emit_as
     try:
+        if preview:
+            _say_preview_banner(console)
         if only == "apps":
             # One question, no review: the caller asked for the picker, not the
             # questionnaire.
             answers = flow.collect_apps(console)
+            if preview:
+                _say_preview_footer(console)
             return _emit(answers, emit_as, out)
         answers = flow.collect(console, ask_terminals=ask_terminals)
         if no_review:
             flow.review(console, answers)
         else:
-            confirmed = flow.confirm(console, answers, assume_yes)
+            confirmed = flow.confirm(console, answers, assume_yes, preview=preview)
             if confirmed is None:
                 return QUIT
             answers = confirmed
+        if preview:
+            _say_preview_footer(console)
     finally:
         console.close()
 
     return _emit(answers, emit_as, out)
+
+
+def _say_preview_banner(console: Console) -> None:
+    console.say()
+    console.say("==> tstack wizard: PREVIEW MODE - nothing you answer here is saved.")
+    console.say("    Answer the questions to see what you would get. To save and apply")
+    console.say("    them, quit (Ctrl+C) and run:  tstack config wizard")
+
+
+def _say_preview_footer(console: Console) -> None:
+    console.say()
+    console.say("==> Preview finished. NOTHING was saved, installed or changed.")
+    console.say("    To save and apply these answers, run:")
+    console.say("      tstack config wizard     the same questions, then saves and applies")
+    console.say("    Or change one setting at a time:")
+    console.say("      tstack config            the settings menu (shows what is saved now)")
+    console.say("      tstack config -h         every setting and the command that changes it")
 
 
 def _emit(answers: flow.Answers, emit_as: str, out: Path | None) -> int:

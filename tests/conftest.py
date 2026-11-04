@@ -20,6 +20,18 @@ def _no_terminal_prompts(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_real_hotkey_probe(monkeypatch):
+    """tstack.hotkey asks Windows whether another program holds a chord, and the
+    answer is the developer's desktop: on a PC where something holds Ctrl+Backslash
+    the wizard asks an extra question and every scripted answer after it shifts.
+    "Cannot tell" is what Linux and macOS CI see, so every test sees that too.
+    tests/test_hotkey.py stubs it per test where the answer matters."""
+    from tstack import hotkey
+
+    monkeypatch.setattr(hotkey, "held_elsewhere", lambda chord: None)
+
+
+@pytest.fixture(autouse=True)
 def _isolated_headroom_token(tmp_path, monkeypatch):
     """The machine's Headroom token lives in %LOCALAPPDATA% or the XDG state dir.
     Anything that seeds a secret or reads a token writes or reads it, so without
