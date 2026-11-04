@@ -1237,6 +1237,13 @@ An unchanged repeated stop should produce a skipped summary job and no new provi
 
 - **Restart policy is `unless-stopped`** — survives Docker Desktop and machine restarts, but won't
   come back if you explicitly stopped it.
+- **The container exits when the `iii` engine dies.** The CLI spawns the engine detached and never
+  respawns it, so a crashed engine used to leave the node worker reconnecting forever: "Up
+  (unhealthy)", nothing captured, and the restart policy never fired. `entrypoint.sh` now watches
+  for the engine process and exits after two missed scans (10 s apart), and the restart policy does
+  the rest. `AGENTMEMORY_ENGINE_WATCH_SECONDS` and `AGENTMEMORY_ENGINE_START_SECONDS` (default 180,
+  the grace before the first engine sighting) tune it. It watches the process, not `livez`: a busy
+  event loop misses `livez` while perfectly healthy.
 - **The container runs as `node`, not root.** `entrypoint.sh` starts as root only to write the
   config, `chown /data`, and handle `.hmac`, then drops privileges via `gosu`. `tini` is PID 1.
 - **`entrypoint.sh` overwrites the npm-bundled `iii-config.yaml` on every start.** Editing that file

@@ -85,6 +85,19 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **AgentMemory recovers when its engine dies (11/02/2026).** The `iii`
+  engine inside `ts-agentmemory-server` died on 10/21 after a
+  `state::set` timeout. The node worker kept the container alive,
+  reconnecting more than 33,000 times, so it sat at "Up (unhealthy)" for 12
+  days. `restart: unless-stopped` never fired, and every hook's capture was
+  dropped with no error. The entrypoint now supervises the CLI and exits when
+  the engine process is gone, so the restart policy brings the server back.
+  Agent007Memory showed this as "UPSTREAM OFFLINE" while the LLM was fine.
+  The engine died because the kernel OOM killer took it at 27.6 GB resident:
+  the entrypoint's config traced every span (`sampling_ratio: 1.0`) with
+  console output on, and the in-memory exporter grew without bound. Both
+  values now match the npm package's own config (`0.1`, `false`).
+
 - **Voice notifications: editor plugins and the idle reminder are quiet
   (10/25/2026).** Obsidian's Claudian plugin runs `claude` through the Agent SDK
   with your user hooks and opens a new session for every chat, so each chat was

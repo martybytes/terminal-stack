@@ -10,8 +10,9 @@
 #   3. Generate the HMAC secret on first boot and persist it to
 #      /data/.hmac (chmod 600) so the secret survives restarts.
 #
-# Then it execs the agentmemory CLI under gosu as the unprivileged
-# `node` user.
+# Then it runs the agentmemory CLI under gosu as the unprivileged
+# `node` user and stays as its supervisor: if the iii engine dies, the
+# script exits so the container's restart policy brings it back.
 
 set -eu
 
@@ -86,11 +87,16 @@ workers:
       enabled: true
       service_name: agentmemory
       exporter: memory
-      sampling_ratio: 1.0
+      sampling_ratio: 0.1
       metrics_enabled: true
       logs_enabled: true
-      logs_console_output: true
+      logs_console_output: false
 EOF
+# The two observability values above match the npm package's own
+# iii-config.yaml (upstream #519). At 1.0 with console output on, the
+# engine's in-memory exporter grew to 27-29 GB and the kernel OOM killer
+# took it three times; agentmemory's own log lines go straight to stderr
+# and do not depend on logs_console_output.
 chown "$RUN_AS" "$III_CONFIG"
 
 if [ ! -s "$HMAC_FILE" ]; then
@@ -123,4 +129,67 @@ if [ -e "$SKIP_RECOVERY_FILE" ]; then
   echo "agentmemory: consumed one-shot startup recovery skip marker"
 fi
 
-exec gosu "$RUN_AS" agentmemory "$@"
+# Supervise rather than exec. The CLI spawns the iii engine detached and never
+# respawns it, so when the engine dies the node worker keeps reconnecting
+# forever: the container stays "Up (unhealthy)", restart: unless-stopped never
+# fires, and every hook's capture is dropped silently. That ran for 12 days.
+# Exiting when the engine is gone hands recovery to the restart policy.
+#
+# Process death only, never livez: a busy node event loop misses livez for
+# whole minutes while healthy (see the healthcheck in docker-compose.yml).
+WATCH_SECONDS="${AGENTMEMORY_ENGINE_WATCH_SECONDS:-10}"
+START_SECONDS="${AGENTMEMORY_ENGINE_START_SECONDS:-180}"
+
+# No procps in node:22-slim, so read /proc. A pid can vanish mid-scan.
+engine_running() {
+  for cmdline in /proc/[0-9]*/cmdline; do
+    case "$({ tr '\0' ' ' < "$cmdline"; } 2>/dev/null || true)" in
+      iii\ --config*|*/iii\ --config*) return 0 ;;
+    esac
+  done
+  return 1
+}
+
+stop_agent() {
+  kill -TERM "$AGENT_PID" 2>/dev/null || true
+  waited=0
+  while kill -0 "$AGENT_PID" 2>/dev/null && [ "$waited" -lt 8 ]; do
+    sleep 1
+    waited=$((waited + 1))
+  done
+  kill -KILL "$AGENT_PID" 2>/dev/null || true
+}
+
+gosu "$RUN_AS" agentmemory "$@" &
+AGENT_PID=$!
+trap 'stop_agent; exit 143' TERM INT
+
+seen=0
+misses=0
+elapsed=0
+while kill -0 "$AGENT_PID" 2>/dev/null; do
+  if engine_running; then
+    seen=1
+    misses=0
+  elif [ "$seen" = 1 ]; then
+    # Two consecutive misses, so a scan racing a respawn is not a death.
+    misses=$((misses + 1))
+    if [ "$misses" -ge 2 ]; then
+      echo "agentmemory: iii engine exited; stopping so the restart policy recovers it" >&2
+      stop_agent
+      exit 1
+    fi
+  elif [ "$elapsed" -ge "$START_SECONDS" ]; then
+    echo "agentmemory: iii engine not running ${START_SECONDS}s after start; stopping" >&2
+    stop_agent
+    exit 1
+  fi
+  # Backgrounded so a TERM interrupts the wait instead of queueing behind it.
+  sleep "$WATCH_SECONDS" &
+  wait $! || true
+  elapsed=$((elapsed + WATCH_SECONDS))
+done
+
+status=0
+wait "$AGENT_PID" || status=$?
+exit "$status"
