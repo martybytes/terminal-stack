@@ -819,6 +819,13 @@ var StateKV = class {
 \t\treturn { status_code: 200, body: { requested: ids.length, discarded: done, failed } };
 \t});
 \tsdk.registerTrigger({ type: "http", function_id: "api::llm-dlq-discard", config: { api_path: "/agentmemory/llm/dlq/discard", http_method: "POST", middleware_function_ids: ["middleware::api-auth"] } });
+\t// A count without the payload. The console used GET /agentmemory/semantic only
+\t// to take .length of it; at 17.8 MB that invocation result is over the engine's
+\t// 16 MiB WebSocket frame limit, and the engine drops the worker's connection
+\t// (close 1006) and every in-flight invocation with it, every time the console
+\t// polled. The list still travels engine -> worker here, which has no such cap.
+\tsdk.registerFunction("api::semantic-count", async () => ({ status_code: 200, body: { count: (await kv.list(KV.semantic)).length } }));
+\tsdk.registerTrigger({ type: "http", function_id: "api::semantic-count", config: { api_path: "/agentmemory/semantic/count", http_method: "GET", middleware_function_ids: ["middleware::api-auth"] } });
 \tsdk.registerFunction("api::graph-migration-start", async () => {
 \t\tconst result = await sdk.trigger({ function_id: "mem::graph-migrate-v2", payload: {}, timeoutMs: 6e5 });
 \t\treturn { status_code: result?.success === false ? 500 : 200, body: result };

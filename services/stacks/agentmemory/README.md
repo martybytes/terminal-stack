@@ -1011,6 +1011,22 @@ recovery queues at most 10 old observations at a time and places the next recove
 wave, so multi-thousand-observation projects cannot monopolize queue admission. Summaries are queued
 after the raw backlog reaches zero.
 
+### No response may exceed the engine's 16 MiB frame
+
+The engine talks to the node worker over one WebSocket, and a single invocation result over 16 MiB
+makes the engine close that socket (code 1006) instead of sending it. Every in-flight invocation
+fails with it, and the SDK logs neither the close code nor the lost jobs: dead letters climb,
+`state::set` times out, and every logged LLM call still says `success`. The console used to poll
+`GET /agentmemory/semantic` (every fact, 17.8 MB at 15,084 facts) only to count it, which dropped
+the socket every 35 seconds. The patch adds a count-only route, and the console uses it:
+
+| Route | Does |
+|---|---|
+| `GET /agentmemory/semantic/count` | `{count}` of semantic facts. The list stays inside the worker. |
+
+Anything that polls a whole-store route can grow into the same failure. Diagnosis is in
+`docs/kb/common/troubleshooting.md` § "Dead letters climb while every logged LLM call succeeds".
+
 ### Dead letters: automatic on a free model, your call on a paid one
 
 A job dead-letters after three queue retries 30 seconds apart. That almost always means the

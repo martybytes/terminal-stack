@@ -97,6 +97,26 @@ A dead-letter count that stays put while compression succeeds is a leftover,
 not a live failure. Check that recent `llm_call` lines show a real
 `providerLatencyMs`, not `0`, and reconcile once the queue `depth` is back to 0.
 
+## Dead letters climb while every logged LLM call succeeds
+
+Look for the worker re-registering on a regular beat:
+
+```sh
+docker logs --since 5m ts-agentmemory-server 2>&1 | grep -E 'attempt 1\)|Worker registered'
+```
+
+One `Reconnecting … (attempt 1)` every half-minute or so means the engine is
+closing the node worker's WebSocket, and each close fails every invocation in
+flight, silently: the SDK logs neither the close code nor the lost jobs. The one
+cause found so far is a single response over the engine's 16 MiB frame limit;
+the engine drops the socket (close 1006) instead of sending it. That was
+`GET /agentmemory/semantic` at 17.8 MB, polled by the console only to count it,
+and the console now uses `/agentmemory/semantic/count`. Any route returning a
+whole store can grow into the same failure. `api::memories` was 4.1 MB on
+11/04/2026.
+
+Resubmitting dead letters before the drops stop just feeds them back in.
+
 ## The console says "UPSTREAM OFFLINE"
 
 It means one thing: the console could not reach AgentMemory's

@@ -85,6 +85,17 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **AgentMemory stops dropping its engine connection every 35 seconds
+  (11/04/2026).** The console's Memory Effectiveness panel fetched
+  `GET /agentmemory/semantic`, every semantic fact, only to count them. At
+  15,084 facts that response is 17.8 MB, over the engine's 16 MiB WebSocket
+  frame limit, so the engine closed the worker's socket (code 1006) on every
+  poll and failed every in-flight invocation with it. Jobs dead-lettered with
+  nothing in the log, `state::set` timed out, and the dead-letter count reached
+  2,745 in a day. The stack's bundle patch adds `GET
+  /agentmemory/semantic/count`, and the console calls that instead. Rebuild
+  both: `tstack services up --build agentmemory agent007memory`.
+
 - **AgentMemory recovers when its engine dies (11/02/2026).** The `iii`
   engine inside `ts-agentmemory-server` died on 10/21 after a
   `state::set` timeout. The node worker kept the container alive,
