@@ -53,7 +53,10 @@ function time(value: unknown): number | null {
 
 async function fetchSignals(): Promise<UpstreamMemorySignals> {
   const [semanticRaw, graphRaw, flagsRaw] = await Promise.all([
-    upstreamJson<unknown>("/agentmemory/semantic", { timeoutMs: 20_000 }),
+    // The count route, never GET /agentmemory/semantic: that returns every fact,
+    // and past 16 MiB the engine drops agentmemory's worker connection and every
+    // in-flight job with it. Added by stacks/agentmemory/patch-agentmemory.mjs.
+    upstreamJson<unknown>("/agentmemory/semantic/count", { timeoutMs: 20_000 }),
     upstreamJson<unknown>("/agentmemory/graph/stats", { timeoutMs: 20_000 }),
     upstreamJson<unknown>("/agentmemory/config/flags", { timeoutMs: 20_000 }),
   ]);
@@ -68,7 +71,7 @@ async function fetchSignals(): Promise<UpstreamMemorySignals> {
   });
   return {
     at: Date.now(),
-    semanticFacts: Array.isArray(semantic?.semantic) ? semantic.semantic.length : null,
+    semanticFacts: number(semantic?.count),
     graphNodes: number(graph?.totalNodes),
     graphEdges: number(graph?.totalEdges),
     graphUpdatedAt: time(graph?.updatedAt),
