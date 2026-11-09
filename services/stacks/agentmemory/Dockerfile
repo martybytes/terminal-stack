@@ -46,6 +46,11 @@ RUN node --input-type=module -e "import { pipeline } from '@huggingface/transfor
 ENV AGENTMEMORY_III_VERSION=${III_VERSION} \
     TINI_SUBREAPER=1
 
+# Offline trim of the mem:insights scope, run by the entrypoint before the
+# engine starts. See the header of compact-insights.mjs. No --chmod: it
+# applies to the directory COPY creates too, and a 0644 directory cannot be
+# entered, so node reports the file as missing.
+COPY compact-insights.mjs /usr/local/lib/agentmemory/compact-insights.mjs
 COPY --chmod=0755 entrypoint.sh /usr/local/bin/agentmemory-entrypoint.sh
 
 EXPOSE 3111 3113

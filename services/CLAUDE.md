@@ -178,6 +178,11 @@ Add a stack and it registers itself by having them.
   a quiet day. Confirm with `promptChars` and a sub-100ms `providerLatencyMs` in
   `llm/telemetry`. Bounds live in `AGENTMEMORY_REFLECT_MAX_*` and
   `AGENTMEMORY_LLM_MAX_INPUT_CHARS`.
+- **The iii engine's memory is the sum of its state files.** It keeps every
+  scope resident, so one runaway scope is an OOM kill. `mem:insights` was the
+  one (1.0 GB, engine 28.5 GB); `compact-insights.mjs` trims it on start, and
+  only on start, because the engine rewrites a scope whole from memory. Never
+  edit a `state_store.db` file under a running engine.
 - **`entrypoint.sh` rewrites the container's `iii-config.yaml` on every start.**
   Editing it inside a running container does nothing — change the heredoc and
   rebuild.
