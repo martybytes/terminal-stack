@@ -97,7 +97,10 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
   Measured here: 1.02 GB to 23.5 MB, engine 17 GB to 2.7 GB. The entrypoint
   also restarts the container when `livez` has been dead for 15 minutes with
   the engine still running (`AGENTMEMORY_ENGINE_HANG_SECONDS`). Rebuild:
-  `tstack services up --build agentmemory`.
+  `tstack services up --build agentmemory`. The troubleshooting page now also
+  says how to tell the legacy graph files, whose dates stop at the
+  `AGENTMEMORY_GRAPH_STORAGE_V2` migration, from a stalled graph, and when to
+  requeue the dead letters an unhealthy engine leaves behind.
 
 - **Ctrl+Enter sends now in Claude Code under WezTerm (11/09/2026).** Claude
   Code's `chat:sendNow` sends a queued message immediately instead of waiting

@@ -132,6 +132,20 @@ trimmed on every start once it passes 64 MB; the log line `insights compaction:`
 reports what happened. A hung engine (process alive, `livez` dead) restarts the
 container after 15 minutes. Detail and tuning: the agentmemory stack README.
 
+An engine in trouble dead-letters the LLM jobs in flight: 455 within ten
+minutes on 11/04/2026, the week the engine was growing towards its OOM kill.
+Once the server is healthy and recent `llm_call` lines succeed with a real
+`providerLatencyMs`, requeue them from the console's Dead letters page; they are
+not bad work.
+
+Large `mem%3Agraph%3Aedges.bin`, `nodes.bin` and `snapshot.bin` files with an
+old date are not a stalled graph. They are the legacy graph scopes that
+`AGENTMEMORY_GRAPH_STORAGE_V2` copied into 64 shards on its first start and left
+untouched for rollback, so their date stops at the migration (08/21/2026 here,
+185 MB). The live graph is the `…%3Av2%3ANN.bin` files; check those dates, and
+`Graph extraction complete` in the log, before suspecting graph extraction. The
+engine still loads the legacy files, so they cost memory, but nothing writes them.
+
 ## The console says "UPSTREAM OFFLINE"
 
 It means one thing: the console could not reach AgentMemory's
