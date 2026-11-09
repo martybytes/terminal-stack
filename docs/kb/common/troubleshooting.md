@@ -117,6 +117,21 @@ whole store can grow into the same failure. `api::memories` was 4.1 MB on
 
 Resubmitting dead letters before the drops stop just feeds them back in.
 
+## The memory server is unhealthy, or the engine was OOM-killed
+
+```sh
+docker stats --no-stream ts-agentmemory-server
+docker exec ts-agentmemory-server sh -c 'ls -laS /data/state_store.db | head -5'
+docker logs ts-agentmemory-server 2>&1 | grep -E 'compaction|hung|engine exited'
+```
+
+The `iii` engine holds every state scope in memory, so its size tracks the
+biggest files in `state_store.db`. The one that grew without bound was
+`mem%3Ainsights.bin` (1.0 GB, engine at 17 GB, OOM-killed at 28.5 GB). It is now
+trimmed on every start once it passes 64 MB; the log line `insights compaction:`
+reports what happened. A hung engine (process alive, `livez` dead) restarts the
+container after 15 minutes. Detail and tuning: the agentmemory stack README.
+
 ## The console says "UPSTREAM OFFLINE"
 
 It means one thing: the console could not reach AgentMemory's

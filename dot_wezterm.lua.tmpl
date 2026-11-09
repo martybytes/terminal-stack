@@ -451,10 +451,37 @@ config.keys = {
   -- default chat:newline). WezTerm doesn't deliver a distinct Shift+Enter to the
   -- app by default, so the app-level keybinding (keybindings.json) alone can't fire.
   { key = 'Enter', mods = 'SHIFT', action = act.SendString '\n' },
-  -- Ctrl+Enter → submit in CLI REPLs (Claude Code): send CR. Without this,
-  -- Ctrl+Enter can reach the app as LF (= Ctrl+J, chat:newline) and insert a
-  -- newline instead of submitting.
-  { key = 'Enter', mods = 'CTRL', action = act.SendString '\r' },
+  -- Ctrl+Enter: Claude Code's chat:sendNow (send queued messages now). WezTerm's
+  -- default encoding can reach the app as LF (= Ctrl+J, chat:newline), and the
+  -- old binding sent CR, which is plain Enter: while Claude works that QUEUES
+  -- the message. So a Claude pane gets the CSI u Ctrl+Enter sequence, ESC [13;5u,
+  -- which Claude Code parses without negotiating the kitty protocol. Every other
+  -- program keeps CR: a shell would print CSI u as junk. Must match the Windows
+  -- config; Ctrl+X Ctrl+S is Claude Code's chord for the same action anywhere.
+  { key = 'Enter', mods = 'CTRL', action = wezterm.action_callback(function(window, pane)
+    -- Walk up from the foreground process: while Claude runs a tool or an MCP
+    -- server, the newest process in the pane is that child (node, bash), not
+    -- Claude, and that is exactly when send-now matters. Stop at WezTerm itself:
+    -- above it is whatever launched the GUI, which is not this pane.
+    local function exe_of(info)
+      return ((info and (info.executable or info.name)) or ''):lower():match('([^/\\]+)$') or ''
+    end
+    local info = pane:get_foreground_process_info()
+    local in_claude = false
+    for _ = 1, 12 do
+      if not info then break end
+      local exe = exe_of(info)
+      if exe == 'claude' or exe == 'claude.exe' then in_claude = true break end
+      if exe:match('^wezterm') then break end
+      if not info.ppid or info.ppid == 0 then break end
+      info = wezterm.procinfo.get_info_for_pid(info.ppid)
+    end
+    if in_claude then
+      window:perform_action(act.SendString '\x1b[13;5u', pane)
+    else
+      window:perform_action(act.SendString '\r', pane)
+    end
+  end) },
 }
 
 -- ── Identity helpers (status bar user@host + path, from the *active pane*) ────

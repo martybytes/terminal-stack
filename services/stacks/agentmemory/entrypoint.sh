@@ -93,9 +93,9 @@ workers:
       logs_console_output: false
 EOF
 # The two observability values above match the npm package's own
-# iii-config.yaml (upstream #519). At 1.0 with console output on, the
-# engine's in-memory exporter grew to 27-29 GB and the kernel OOM killer
-# took it three times; agentmemory's own log lines go straight to stderr
+# iii-config.yaml (upstream #519, a log feedback loop). They were not the
+# cause of the engine's 27-29 GB OOM kills; that was mem:insights, see the
+# compaction step below. agentmemory's own log lines go straight to stderr
 # and do not depend on logs_console_output.
 chown "$RUN_AS" "$III_CONFIG"
 
@@ -117,6 +117,24 @@ fi
 AGENTMEMORY_SECRET="$(cat "$HMAC_FILE")"
 export AGENTMEMORY_SECRET
 
+# Trim oversized insights before the engine loads them. The engine keeps every
+# state scope resident, and agentmemory 0.9.29 stored ~280 KB of unused
+# provenance per insight: mem:insights reached 1.0 GB, the engine idled at
+# 17 GB, hung, and was OOM-killed at 28.5 GB. patch-agentmemory.mjs stops new
+# bloat; this trims what is already on disk. Nothing else has the file open
+# yet, which is the only time it is safe to rewrite. Below the threshold it
+# does nothing; above it, the original is copied to /data first. A failure is
+# logged and the server starts on the untouched file.
+INSIGHTS_FILE="$DATA_DIR/state_store.db/mem%3Ainsights.bin"
+COMPACT_MIN_BYTES=$(( ${AGENTMEMORY_INSIGHTS_COMPACT_MB:-64} * 1024 * 1024 ))
+if [ "$COMPACT_MIN_BYTES" -gt 0 ] && [ -f "$INSIGHTS_FILE" ]; then
+  if gosu "$RUN_AS" node /usr/local/lib/agentmemory/compact-insights.mjs "$INSIGHTS_FILE"       --backup-dir "$DATA_DIR" --min-bytes "$COMPACT_MIN_BYTES"       --max-concepts "${AGENTMEMORY_REFLECT_MAX_CONCEPTS:-60}"       --max-facts "${AGENTMEMORY_REFLECT_MAX_FACTS:-40}"       --max-lessons "${AGENTMEMORY_REFLECT_MAX_LESSONS:-20}" > /tmp/compact-insights.out 2>&1; then
+    echo "agentmemory: insights compaction: $(cat /tmp/compact-insights.out)"
+  else
+    echo "agentmemory: insights compaction failed, starting on the original file: $(cat /tmp/compact-insights.out)" >&2
+  fi
+fi
+
 SKIP_RECOVERY_FILE="/data/.skip-next-llm-recovery"
 if [ -e "$SKIP_RECOVERY_FILE" ]; then
   [ -f "$SKIP_RECOVERY_FILE" ] && [ ! -L "$SKIP_RECOVERY_FILE" ] || {
@@ -135,10 +153,20 @@ fi
 # fires, and every hook's capture is dropped silently. That ran for 12 days.
 # Exiting when the engine is gone hands recovery to the restart policy.
 #
-# Process death only, never livez: a busy node event loop misses livez for
-# whole minutes while healthy (see the healthcheck in docker-compose.yml).
+# Process death is the fast signal. A hung engine is the slow one: on
+# 11/05/2026 it stopped answering at 17 GB with the process still alive, and
+# the container sat unhealthy for four days. So livez counts too, but only
+# after it has answered once and only when it has failed for HANG_SECONDS
+# straight: a busy node event loop misses livez for whole minutes while
+# healthy (see the healthcheck in docker-compose.yml), never for fifteen.
 WATCH_SECONDS="${AGENTMEMORY_ENGINE_WATCH_SECONDS:-10}"
 START_SECONDS="${AGENTMEMORY_ENGINE_START_SECONDS:-180}"
+HANG_SECONDS="${AGENTMEMORY_ENGINE_HANG_SECONDS:-900}"
+PROBE_SECONDS=30
+
+livez_ok() {
+  curl -fsS -o /dev/null --max-time 15 http://127.0.0.1:3111/agentmemory/livez 2>/dev/null
+}
 
 # No procps in node:22-slim, so read /proc. A pid can vanish mid-scan.
 engine_running() {
@@ -167,10 +195,24 @@ trap 'stop_agent; exit 143' TERM INT
 seen=0
 misses=0
 elapsed=0
+answered=0
+last_ok=0
+next_probe=0
 while kill -0 "$AGENT_PID" 2>/dev/null; do
   if engine_running; then
     seen=1
     misses=0
+    if [ "$HANG_SECONDS" -gt 0 ] && [ "$elapsed" -ge "$next_probe" ]; then
+      next_probe=$((elapsed + PROBE_SECONDS))
+      if livez_ok; then
+        answered=1
+        last_ok=$elapsed
+      elif [ "$answered" = 1 ] && [ $((elapsed - last_ok)) -ge "$HANG_SECONDS" ]; then
+        echo "agentmemory: livez has failed for $((elapsed - last_ok))s with the engine still running; treating it as hung and stopping so the restart policy recovers it" >&2
+        stop_agent
+        exit 1
+      fi
+    fi
   elif [ "$seen" = 1 ]; then
     # Two consecutive misses, so a scan racing a respawn is not a death.
     misses=$((misses + 1))

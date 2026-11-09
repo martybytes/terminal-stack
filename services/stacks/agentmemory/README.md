@@ -1258,8 +1258,24 @@ An unchanged repeated stop should produce a skipped summary job and no new provi
   (unhealthy)", nothing captured, and the restart policy never fired. `entrypoint.sh` now watches
   for the engine process and exits after two missed scans (10 s apart), and the restart policy does
   the rest. `AGENTMEMORY_ENGINE_WATCH_SECONDS` and `AGENTMEMORY_ENGINE_START_SECONDS` (default 180,
-  the grace before the first engine sighting) tune it. It watches the process, not `livez`: a busy
-  event loop misses `livez` while perfectly healthy.
+  the grace before the first engine sighting) tune it.
+- **The container also exits when the engine hangs.** On 11/05/2026 the engine stopped answering at
+  17 GB with its process alive, and the container sat unhealthy for four days, because a process
+  check cannot see a hang. The entrypoint now probes `livez` every 30 s and exits once it has failed
+  for `AGENTMEMORY_ENGINE_HANG_SECONDS` (default 900, `0` turns it off) straight. Only after `livez`
+  has answered once, and never for a short miss: a busy event loop misses `livez` for minutes while
+  perfectly healthy.
+- **`mem:insights` is compacted before the engine starts.** The engine keeps every state scope in
+  memory. agentmemory 0.9.29 stored the whole concept cluster (twice) and every matching fact id on
+  each insight, about 280 KB apiece, so the scope reached 1.0 GB for 4,824 insights, the engine
+  idled at 17 GB, hung, and was OOM-killed at 28.5 GB. The bundle patch now stores only what the
+  reflect prompt used (about 5 KB per insight), and `compact-insights.mjs` trims the records written
+  before that: it runs from the entrypoint while nothing has the file open, only when the file is
+  over `AGENTMEMORY_INSIGHTS_COMPACT_MB` (default 64, `0` turns it off), keeps every record, copies
+  the original to `/data/mem%3Ainsights.bin.before-compact-<stamp>` first, and on any failure logs
+  it and starts on the untouched file. On this machine: 1.02 GB to 23.5 MB, engine 17 GB to 2.7 GB.
+  The trimmed records carry `sourceTruncated` with the original counts. Delete the `.before-compact`
+  copy once the server has run cleanly; nothing reads it.
 - **The container runs as `node`, not root.** `entrypoint.sh` starts as root only to write the
   config, `chown /data`, and handle `.hmac`, then drops privileges via `gosu`. `tini` is PID 1.
 - **`entrypoint.sh` overwrites the npm-bundled `iii-config.yaml` on every start.** Editing that file
