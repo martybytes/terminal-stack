@@ -66,7 +66,7 @@ grows the pane right 9 cells.
 | Key | Action |
 |---|---|
 | `Shift+Enter` | send a literal newline (LF) — newline-without-submit in CLI REPLs like Claude Code, whose keybinding alone can't fire because terminals don't deliver a distinct Shift+Enter (`doc common/claude-code`) |
-| `Ctrl+Enter` | send a carriage return (CR), i.e. plain Enter: submits in Claude Code. Left unbound, the Windows console turns it into LF, which Claude Code reads as its newline key |
+| `Ctrl+Enter` | in a pane running Claude Code, send `ESC [13;5u` (Ctrl+Enter in CSI u), which Claude Code reads as **send now**: queued messages go immediately instead of waiting for the turn to end. Anywhere else, send a carriage return (CR), plain Enter. Left unbound, the Windows console turns it into LF, Claude Code's newline key. In a WSL pane use `Ctrl+X Ctrl+S` for send now (`doc common/claude-code`) |
 | `Ctrl+\` `Ctrl+\` | send a real `Ctrl+\` to the app — the escape hatch, since the leader eats the first press. It follows the leader: press whatever yours is, twice. Needed for nvim's `:terminal` exit (`Ctrl+\` `Ctrl+N`) and SIGQUIT |
 
 ## Do panes survive a GUI crash?

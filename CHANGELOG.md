@@ -85,6 +85,30 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **AgentMemory's engine no longer grows to 28 GB (11/09/2026).** The `iii`
+  engine keeps every state scope in memory, and agentmemory 0.9.29 stored the
+  whole concept cluster (twice) and every matching fact id on each insight,
+  about 280 KB apiece. `mem:insights` reached 1.0 GB for 4,824 insights; the
+  engine idled at 17 GB, hung on 11/05 with its process alive (the container
+  sat unhealthy for four days), and was OOM-killed at 28.5 GB. The bundle
+  patch now keeps only what the reflect prompt used (about 5 KB per insight),
+  and the new `compact-insights.mjs` trims existing records on startup, before
+  the engine opens the file, with a backup first and every record kept.
+  Measured here: 1.02 GB to 23.5 MB, engine 17 GB to 2.7 GB. The entrypoint
+  also restarts the container when `livez` has been dead for 15 minutes with
+  the engine still running (`AGENTMEMORY_ENGINE_HANG_SECONDS`). Rebuild:
+  `tstack services up --build agentmemory`.
+
+- **Ctrl+Enter sends now in Claude Code under WezTerm (11/09/2026).** Claude
+  Code's `chat:sendNow` sends a queued message immediately instead of waiting
+  for the turn to end, but WezTerm mapped Ctrl+Enter to a CR, which is plain
+  Enter, so it only queued. A pane running Claude Code now gets `ESC [13;5u`
+  (Ctrl+Enter in CSI u); every other pane still gets a CR. The pane is matched
+  by walking up from its foreground process, because while Claude runs a tool
+  the newest process is that tool. WSL panes cannot be told apart; use
+  `Ctrl+X Ctrl+S` there. Restart WezTerm or let it reload the config after
+  `tstack update`.
+
 - **AgentMemory stops dropping its engine connection every 35 seconds
   (11/04/2026).** The console's Memory Effectiveness panel fetched
   `GET /agentmemory/semantic`, every semantic fact, only to count them. At
@@ -104,10 +128,11 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
   dropped with no error. The entrypoint now supervises the CLI and exits when
   the engine process is gone, so the restart policy brings the server back.
   Agent007Memory showed this as "UPSTREAM OFFLINE" while the LLM was fine.
-  The engine died because the kernel OOM killer took it at 27.6 GB resident:
-  the entrypoint's config traced every span (`sampling_ratio: 1.0`) with
-  console output on, and the in-memory exporter grew without bound. Both
-  values now match the npm package's own config (`0.1`, `false`).
+  The engine died because the kernel OOM killer took it at 27.6 GB resident.
+  This entry first blamed trace sampling (`sampling_ratio: 1.0` with console
+  output on) and set both to the npm package's own values (`0.1`, `false`).
+  That was wrong: the engine still reached 28.5 GB on 11/05. The real cause is
+  the `mem:insights` scope, fixed in the 11/09 entry above.
 
 - **Voice notifications: editor plugins and the idle reminder are quiet
   (10/25/2026).** Obsidian's Claudian plugin runs `claude` through the Agent SDK

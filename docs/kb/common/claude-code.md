@@ -109,8 +109,16 @@ unit (`14m`, `2h`, `2d`).
 terminals never deliver a distinct Shift+Enter to the app, so that binding alone
 can't fire — WezTerm closes the gap by sending a literal LF (`Ctrl+J`, the default
 newline binding) for `Shift+Enter`; see `doc wezterm/panes` § "Literal keys".
-`Ctrl+Enter` is pinned the other way, to a CR, so it submits: unbound, the
-Windows console delivers Ctrl+Enter as LF, which Claude Code reads as newline.
+`Ctrl+Enter` is Claude Code's **send now** (`chat:sendNow`): while Claude is
+working, plain Enter queues your message and Ctrl+Enter sends it, and anything
+already queued, right away. No terminal delivers it unaided here: the Windows
+console turns Ctrl+Enter into LF (newline), and WezTerm used to send a CR, which
+is plain Enter, so it queued. WezTerm now sends the CSI u sequence `ESC [13;5u`
+when the pane is running Claude Code (found by walking up from the pane's
+foreground process, since a running tool or MCP server is the newest process),
+and a CR everywhere else, where CSI u would print as junk. A WSL pane cannot be
+told apart (its foreground process is `wsl.exe`), so there use **`Ctrl+X
+Ctrl+S`**, the same action as a chord that works in any terminal.
 Inside tmux it survives thanks to `extended-keys`/`allow-passthrough` — see
 `doc common/tmux`.
 
