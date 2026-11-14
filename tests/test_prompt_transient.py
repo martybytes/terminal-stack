@@ -245,6 +245,8 @@ def test_a_finished_prompt_collapses_in_a_real_terminal(tmp_path):
         "_ts_agent_shell() { return 1 }\nPROMPT=$'\\nFULL-LINE-ONE\\nFULL> '\n" + _zsh_block(),
         encoding="utf-8",
     )
+    # -d: no /etc/zsh/zshrc. Ubuntu's runs compinit, which stops at an
+    # "insecure directories" question on a CI runner and never reaches the prompt.
     sock = f"tstest{os.getpid()}"
     env = {**os.environ, "HOME": str(tmp_path), "ZDOTDIR": str(tmp_path), "TERM": "xterm-256color"}
     env.pop("TMUX", None)
@@ -272,7 +274,7 @@ def test_a_finished_prompt_collapses_in_a_real_terminal(tmp_path):
         return text
 
     try:
-        tmux("-f", "/dev/null", "new-session", "-d", "-x", "80", "-y", "24", f"{ZSH} -i")
+        tmux("-f", "/dev/null", "new-session", "-d", "-x", "80", "-y", "24", f"{ZSH} -d -i")
         screen_until("FULL> ")
         tmux("send-keys", "echo one-done", "Enter")
         screen_until("one-done\n")
