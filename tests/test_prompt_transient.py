@@ -83,6 +83,8 @@ def fake_store(monkeypatch):
     monkeypatch.setattr(store, "set", lambda key, value: saved.__setitem__(key, value))
     monkeypatch.setattr(config, "_apply", lambda out, dry: 0)
     monkeypatch.setattr(plat, "kind", lambda: plat.LINUX)
+    # A write needs a clone, and a CI container has no runtime clone to find.
+    monkeypatch.setattr(config.paths, "resolve_source_dir", lambda *a, **k: ROOT)
     return saved
 
 
