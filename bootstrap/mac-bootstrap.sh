@@ -213,41 +213,9 @@ else
     git config --global --add include.path "$GIT_INC"
 fi
 
-# 8. Workspace directory for ws/wsp/wspu. Same contract as the Debian-family
-# bootstraps: $WORKSPACE_DIR env skips the prompt; the /dev/tty read survives
-# curl|bash; the answer persists to ~/.zshrc.local only when it differs from
-# the autodetect (the shell-side _ts_workspace() covers the detected case).
-WS_DETECTED=""
-for d in "$HOME/Documents/Workspace" "$HOME/workspace" "$HOME/Workspace"; do
-    [ -d "$d" ] && { WS_DETECTED="$d"; break; }
-done
-WS_CHOICE="${WORKSPACE_DIR:-}"
-if [ -n "$WS_CHOICE" ]; then
-    echo "$INFO WORKSPACE_DIR=$WS_CHOICE (from env; skipping prompt)"
-else
-    if { true > /dev/tty; } 2>/dev/null; then
-        IFS= read -e -r -p "Workspace directory [${WS_DETECTED:-none}]: " WS_CHOICE < /dev/tty || WS_CHOICE=""
-    else WS_CHOICE=""; fi
-    WS_CHOICE="${WS_CHOICE:-$WS_DETECTED}"
-    case "$WS_CHOICE" in "~") WS_CHOICE="$HOME" ;; "~/"*) WS_CHOICE="$HOME/${WS_CHOICE#\~/}" ;; esac
-fi
-if [ -z "$WS_CHOICE" ]; then
-    echo "$WARN No workspace directory found or chosen."
-    echo "    Set one later: export WORKSPACE_DIR=... in ~/.zshrc.local"
-elif [ "$WS_CHOICE" = "$WS_DETECTED" ]; then
-    echo "$INFO Workspace: $WS_CHOICE (autodetected; no override needed)"
-else
-    [ -d "$WS_CHOICE" ] || echo "$WARN $WS_CHOICE does not exist (yet) — ws will warn until it does."
-    RC="$HOME/.zshrc.local"
-    if [ -f "$RC" ] && grep -q '^export WORKSPACE_DIR=' "$RC"; then
-        # BSD sed needs the empty '' backup arg.
-        sed -i '' "s|^export WORKSPACE_DIR=.*|export WORKSPACE_DIR=\"$WS_CHOICE\"|" "$RC"
-        echo "$INFO Updated WORKSPACE_DIR in $RC"
-    else
-        printf 'export WORKSPACE_DIR="%s"\n' "$WS_CHOICE" >> "$RC"
-        echo "$INFO Wrote WORKSPACE_DIR=$WS_CHOICE to $RC"
-    fi
-fi
+# 8. Workspace directory for ws/wsp/wspu. Same question, validation and writer
+# as the Debian-family bootstraps: ts_workspace_config in _config.sh.
+ts_workspace_config
 
 ts_report_installed_apps "$TS_WIZ_APPS"
 # Anything optional that failed is reported here rather than having aborted the
