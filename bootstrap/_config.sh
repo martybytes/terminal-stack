@@ -1135,6 +1135,7 @@ TS_MIRROR_DATA_KEYS="
     ccTtsTemplateWaiting ccTtsVoicePool leaderChord tmuxPrefix windowsUsername
     weztermMux weztermRestore atuinEnabled starshipPreset headroomEnabled headroomCursorMode
     cavemanEnabled agentmemoryEnabled playwrightEnabled memoryBackend herdrConfig herdrShell
+    promptTransient promptTransientStyle promptNewline
 "
 
 ts_data_prefetch() {
@@ -1642,6 +1643,21 @@ ts_refresh_resolved_theme() {
 # NOT on WSL any more. A WSL install is self-contained and owns only its own
 # settings; writing this mirror made WSL's answers overwrite the Windows
 # install's on every save, from a clone that may be at a different commit. The
+# The prompt's behaviour keys, validated against their allowed values so a hand
+# edit cannot reach config.json as garbage. Defaults match tstack/schema.py.
+ts_prompt_setting_get() {
+    local v; v="$(ts_data_get "$1" 2>/dev/null || true)"
+    case "$1:$v" in
+        promptTransient:on|promptTransient:off) echo "$v" ;;
+        promptTransient:*) echo on ;;
+        promptTransientStyle:bare|promptTransientStyle:dir|promptTransientStyle:time|promptTransientStyle:dir-time) echo "$v" ;;
+        promptTransientStyle:*) echo bare ;;
+        promptNewline:on|promptNewline:off) echo "$v" ;;
+        promptNewline:*) echo off ;;
+        *) return 2 ;;
+    esac
+}
+
 # Windows side keeps its own store and writes it from pwsh.
 ts_mirror_windows_config() {
     if [ -r /proc/version ] && grep -qi microsoft /proc/version 2>/dev/null; then
@@ -1705,6 +1721,9 @@ EOF
   "atuinEnabled": "$(ts_atuin_get)",
   "herdrConfig": "$(ts_herdr_get)",
   "starshipPreset": "$(ts_starship_get)",
+  "promptTransient": "$(ts_prompt_setting_get promptTransient)",
+  "promptTransientStyle": "$(ts_prompt_setting_get promptTransientStyle)",
+  "promptNewline": "$(ts_prompt_setting_get promptNewline)",
   "headroomEnabled": "$(ts_agent_get headroomEnabled)",
   "headroomCursorMode": "$(ts_agent_get headroomCursorMode)",
   "cavemanEnabled": "$(ts_agent_get cavemanEnabled)",

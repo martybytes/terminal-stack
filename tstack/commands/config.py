@@ -41,6 +41,10 @@ Usage:
   tstack config memory <backend>   agentmemory | headroom | none | status
   tstack config agents [...]       per-machine agent wiring
   tstack config prompt [...]       status | list | preview | <preset>
+  tstack config prompt transient [on|off|bare|dir|time|dir-time]
+                                   collapse finished prompts (default on, bare)
+  tstack config prompt newline [on|off]
+                                   blank line before each prompt (default off)
   tstack config mux [...]          the WezTerm mux domain
   tstack config wezterm [...]      build info and channel switching
   tstack config ghostty [...]      the managed Ghostty config (macOS)
@@ -211,6 +215,16 @@ def show(out: Out) -> int:
             store.get("starshipPreset", "terminal-stack"),
             "tstack config prompt list",
         )
+    )
+    out.say(
+        _row(
+            "transient",
+            f"{store.get('promptTransient', 'on')} ({store.get('promptTransientStyle', 'bare')})",
+            "tstack config prompt transient",
+        )
+    )
+    out.say(
+        _row("newline", store.get("promptNewline", "off"), "tstack config prompt newline on|off")
     )
     out.say(_row("atuin", store.get("atuinEnabled", "off"), "tstack config atuin on|off"))
     # Every platform, unlike the ghostty row below: herdr runs on all four, so
@@ -439,7 +453,19 @@ NEXT_STEPS = {
     ),
     "atuinEnabled": ("Ctrl+R changes in a NEW shell (or run: exec zsh).",),
     "starshipPreset": ("The new prompt appears in a NEW shell (or run: exec zsh).",),
+    "promptTransient": ("Past prompts change in a NEW shell (or run: exec zsh).",),
+    "promptTransientStyle": ("Past prompts change in a NEW shell (or run: exec zsh).",),
+    "promptNewline": ("The blank line changes in a NEW shell (or run: exec zsh).",),
 }
+
+# What each collapsed style looks like. ">" stands in for the prompt arrow,
+# because CLI output is ASCII-only (tests/test_tstack_cli.py).
+TRANSIENT_STYLES = (
+    ("bare", "> ls", "just the arrow -- the cleanest to copy"),
+    ("dir", "terminal-stack > ls", "the folder it ran in"),
+    ("time", "3:24:06 PM > ls", "when it ran"),
+    ("dir-time", "terminal-stack 3:24:06 PM > ls", "both"),
+)
 
 
 def next_steps(key: str, value: str) -> list[str]:
@@ -447,6 +473,11 @@ def next_steps(key: str, value: str) -> list[str]:
     steps = NEXT_STEPS.get(key)
     if not steps:
         return []
+    if plat.kind() == plat.WINDOWS:
+        # "exec zsh" is meaningless in PowerShell, which is where this runs.
+        steps = tuple(
+            s.replace("a NEW shell (or run: exec zsh)", "a NEW PowerShell tab") for s in steps
+        )
     lines = ["", "What happens now:"] + [f"  {s}" for s in steps]
     if key == "leaderChord" and hotkey.held_elsewhere(value):
         lines += [""] + [f"  {s}" for s in hotkey.advice(value)]
@@ -532,13 +563,25 @@ def _prompt(args: list[str], out: Out, dry_run: bool) -> int:
     sub = args[0] if args else "status"
     current = store.get("starshipPreset", "terminal-stack")
 
+    if sub == "transient":
+        return _prompt_transient(args[1:], out, dry_run)
+    if sub == "newline":
+        return _prompt_newline(args[1:], out, dry_run)
+
     if sub in ("status", "show"):
         out.say(f"prompt: {current}")
         rendered = choices.preview(choices.STARSHIP, current)
         for line in (rendered or "  (starship is not installed yet)").splitlines():
             out.say(line)
+        out.say(
+            f"transient: {store.get('promptTransient', 'on')}"
+            f"  (style: {store.get('promptTransientStyle', 'bare')})"
+        )
+        out.say(f"newline: {store.get('promptNewline', 'off')}")
         out.say("  tstack config prompt list      every option, each one rendered")
         out.say("  tstack config prompt <name>    switch to it")
+        out.say("  tstack config prompt transient on|off|bare|dir|time|dir-time")
+        out.say("  tstack config prompt newline on|off")
         return 0
 
     offered = choices.options(choices.STARSHIP)
@@ -582,6 +625,81 @@ def _prompt(args: list[str], out: Out, dry_run: bool) -> int:
     for line in (rendered or "").splitlines():
         out.say(line)
     return 0
+
+
+def _save_prompt_keys(pairs: list[tuple[str, str]], out: Out, dry_run: bool) -> int:
+    """Save one or more prompt-behaviour keys, apply once, and say what now."""
+    changed = [(k, v) for k, v in pairs if store.get(k) != v]
+    if not changed:
+        for key, value in pairs:
+            out.say(f"==> {key} is already {value}; nothing to change.")
+        return 0
+    if dry_run:
+        for key, value in changed:
+            out.say(f"==> would set {key} = {value}")
+        return 0
+    for key, value in changed:
+        store.set(key, value)
+        out.say(f"saved: {key} = {value}")
+    rc = _apply(out, dry_run)
+    if rc == 0:
+        for line in next_steps(changed[-1][0], changed[-1][1]):
+            out.say(line)
+    return rc
+
+
+def _transient_status(out: Out) -> int:
+    state = store.get("promptTransient", "on")
+    style = store.get("promptTransientStyle", "bare")
+    out.say(f"transient: {state}   style: {style}")
+    out.say("  on: once you press Enter, the full prompt collapses to a short one, so")
+    out.say("  scrollback copies cleanly. The live prompt is always the full one.")
+    out.say("")
+    for name, sample, what in TRANSIENT_STYLES:
+        mark = "*" if name == style else " "
+        out.say(f"  {mark} {name:<9} {sample:<34} {what}")
+    out.say("")
+    out.say("  tstack config prompt transient on|off")
+    out.say("  tstack config prompt transient <style>    (also turns it on)")
+    out.say("  One shell only: export TS_PROMPT_TRANSIENT=off / TS_PROMPT_TRANSIENT_STYLE=dir")
+    return 0
+
+
+def _prompt_transient(args: list[str], out: Out, dry_run: bool) -> int:
+    """Collapse each finished prompt to a short one (zsh widget / pwsh starship)."""
+    if not args or args[0] in ("status", "show"):
+        return _transient_status(out)
+    value = args[0]
+    if value == "style":
+        if len(args) < 2:
+            return _usage("usage: tstack config prompt transient style bare|dir|time|dir-time")
+        value = args[1]
+    styles = tuple(name for name, _, _ in TRANSIENT_STYLES)
+    if value in ("on", "off"):
+        return _save_prompt_keys([("promptTransient", value)], out, dry_run)
+    if value in styles:
+        # Choosing a look is choosing to have it: a style on an "off" switch
+        # would save and change nothing, which reads as a broken command.
+        return _save_prompt_keys(
+            [("promptTransientStyle", value), ("promptTransient", "on")], out, dry_run
+        )
+    return _usage(
+        f"tstack config: '{value}' is not on, off or a style ({', '.join(styles)})\n"
+        "  usage: tstack config prompt transient [on|off|<style>]"
+    )
+
+
+def _prompt_newline(args: list[str], out: Out, dry_run: bool) -> int:
+    """The blank line before each prompt (starship's add_newline)."""
+    if not args or args[0] in ("status", "show"):
+        out.say(f"newline: {store.get('promptNewline', 'off')}")
+        out.say("  on: a blank line before every prompt. off (default): none, so")
+        out.say("  output and the next prompt sit together.")
+        out.say("  tstack config prompt newline on|off")
+        return 0
+    if args[0] not in ("on", "off"):
+        return _usage("usage: tstack config prompt newline on|off")
+    return _save_prompt_keys([("promptNewline", args[0])], out, dry_run)
 
 
 def set_memory(backend: str, out: Out, dry_run: bool) -> int:

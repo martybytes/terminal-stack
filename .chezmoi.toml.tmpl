@@ -129,6 +129,14 @@ atuinEnabled = {{ index . "atuinEnabled" | default "off" | quote }}
        back to ours when starship is not on PATH, so a machine mid-bootstrap
        still gets a working prompt. `tstack config prompt <name>`. */}}
 starshipPreset = {{ index . "starshipPreset" | default "terminal-stack" | quote }}
+{{- /* The prompt's behaviour, for whichever prompt is chosen above.
+       promptTransient (default "on") collapses each finished prompt to a short
+       one, in promptTransientStyle (bare|dir|time|dir-time, default "bare");
+       rendered into ~/.config/terminal-stack/prompt.zsh. promptNewline (default
+       "off") is starship's add_newline. `tstack config prompt transient|newline`. */}}
+promptTransient = {{ index . "promptTransient" | default "on" | quote }}
+promptTransientStyle = {{ index . "promptTransientStyle" | default "bare" | quote }}
+promptNewline = {{ index . "promptNewline" | default "off" | quote }}
 {{- /* Ghostty config, macOS only. "off" makes .chezmoiignore drop it so apply
        stops re-rendering; `tstack config ghostty off` also removes/restores the
        deployed files. Default on. */}}

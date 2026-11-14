@@ -237,6 +237,7 @@ an apply.
 ```sh
 tstack config theme follow      # dark / light / follow the OS
 tstack config prompt list       # every Starship prompt, rendered, then pick one
+tstack config prompt transient dir   # past prompts collapse to "folder ❯ cmd" (default: "❯ cmd")
 tstack agents llm               # which AgentMemory features a chat model switches on
 tstack config leader ctrl-a     # the WezTerm leader key
 tstack config apps              # re-open the CLI tool picker

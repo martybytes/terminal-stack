@@ -4308,3 +4308,44 @@ user may be about to free it in the other program. The suite stubs the probe in
 `tests/conftest.py`: its answer is the developer's tray, and on a PC where
 Ctrl+Backslash is taken every scripted wizard answer after the leader shifted by
 one.
+
+## Why the transient prompt is on by default, and how each shell does it
+
+The two-line prompt is the right thing to look at while typing and the wrong
+thing to copy: every command in a pasted transcript dragged a line of chrome and
+a blank line with it. So once Enter is pressed, the finished line is redrawn
+with a short prompt (`❯ ls`), and only the live prompt is the full one. Three
+saved settings: `promptTransient` (`on`), `promptTransientStyle` (`bare` |
+`dir` | `time` | `dir-time`) and `promptNewline` (`off`). On by default because
+nothing is lost -- the full prompt is still there for the line being typed --
+and `tstack config prompt transient off` is one command.
+
+**They are read by the shell, not baked into `starship.toml`**, so they hold
+for every preset and a new tab is all a change needs: zsh sources the rendered
+`~/.config/terminal-stack/prompt.zsh`, pwsh reads `config.json` once at startup
+(never per prompt -- the handler runs on every Enter). `promptNewline` is the
+exception, because the blank line *is* starship's `add_newline`: it is written
+into `starship.toml` on both sides, replacing a preset's own value or prepended
+when the preset has none (starship's default is `true`).
+
+**zsh: `zle-line-init` + `recursive-edit`.** Starship has no zsh transience. The
+obvious hook, `zle-line-finish`, does not fire usefully for a line abandoned
+with Ctrl+C, so the widget runs the whole edit inside `recursive-edit`, swaps
+`PROMPT`, `reset-prompt`s and then accepts or sends the break itself -- and
+treats Ctrl+D on an empty line as exit, as zsh would. It **chains** whatever
+`zle-line-init` already exists: oh-my-zsh installs one for `smkx`, and dropping
+it breaks Home/End and the arrows on terminals that need keypad mode. Measured
+in a real terminal (tmux): the redraw also removes the blank line above each
+finished prompt, so with `promptNewline on` only the live prompt is spaced.
+
+**pwsh: starship's own `Enable-TransientPrompt`.** It exists only after
+`starship init powershell` ran -- it was never PSReadLine's, which is what the
+old `Get-Command` guard's comment claimed -- and it calls
+`Invoke-Starship-TransientFunction` when one is defined, which is where the
+style lives. Its handler is bound to Enter only and its state is private to its
+module, so a Ctrl+C'd line keeps the full prompt on Windows. Accepted rather
+than reimplementing starship's handler. Tested on PSReadLine 2.4.5.
+
+`tstack config prompt` on Windows now re-runs the sync after a change, because
+the Python half only saves `config.json`; a preset or newline change used to
+wait for the next `tstack update`.

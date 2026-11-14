@@ -213,6 +213,20 @@ TS_STARSHIP_BODY
 )
 {{ end -}}
 
+# The blank line before each prompt is a SAVED setting (promptNewline, default
+# off), applied to whichever prompt was chosen above -- a preset sets its own
+# add_newline or inherits starship's default (true), so it is replaced or
+# prepended rather than left to the preset. Top-level keys must precede the
+# first [table], which the very top of the file always does.
+# `tstack config prompt newline on|off`.
+nl={{ if eq (index . "promptNewline" | default "off") "on" }}true{{ else }}false{{ end }}
+if printf '%s\n' "$config" | grep -q '^add_newline[[:space:]]*='; then
+    config="$(printf '%s\n' "$config" | sed "s/^add_newline[[:space:]]*=.*/add_newline = $nl/")"
+else
+    config="add_newline = $nl
+$config"
+fi
+
 # The preserved block. Reused if we have already taken it, captured if not.
 if printf '%s\n' "$current" | grep -qF -- "$MARK_START"; then
     # Ours already. Take the block back out unchanged -- re-commenting it would

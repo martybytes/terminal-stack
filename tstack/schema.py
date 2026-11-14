@@ -161,6 +161,39 @@ SETTINGS: tuple[Setting, ...] = (
         choices="starship-presets",
         flags=frozenset({SHELL}),
     ),
+    # Read by the SHELL at startup (zsh: ~/.config/terminal-stack/prompt.zsh;
+    # pwsh: config.json), not baked into starship.toml, so they hold for every
+    # preset and a new tab is all a change needs. `tstack config prompt transient`.
+    Setting(
+        "promptTransient",
+        "Compact past prompts",
+        "choice",
+        "appearance",
+        "on",
+        options=("on", "off"),
+        note="on: once you press Enter, the full prompt collapses to a short one",
+        flags=frozenset({STANDALONE, SHELL}),
+    ),
+    Setting(
+        "promptTransientStyle",
+        "Past prompt style",
+        "choice",
+        "appearance",
+        "bare",
+        options=("bare", "dir", "time", "dir-time"),
+        note="bare = just the arrow; dir/time add the folder and/or the clock",
+        flags=frozenset({STANDALONE, SHELL}),
+    ),
+    # Baked into starship.toml (add_newline), for our prompt and for presets.
+    Setting(
+        "promptNewline",
+        "Blank line before the prompt",
+        "choice",
+        "appearance",
+        "off",
+        options=("on", "off"),
+        flags=frozenset({STANDALONE, SHELL}),
+    ),
     Setting(
         "atuinEnabled",
         "atuin owns Ctrl+R",

@@ -413,12 +413,32 @@ menu_on_off() {
     ts_prompt_choice "$(cur "$1" off)" "$2" '' "off|off|$3" "on|on|$4"
 }
 
+# The prompt's behaviour. One Python writer (`tstack config prompt`); this only asks.
+menu_prompt() {
+    local v
+    v="$(ts_prompt_choice "$(cur promptTransient on)" 'Past prompts, once you press Enter:' '' \
+        'on|compact|collapse to a short prompt - scrollback copies cleanly' \
+        'off|full|keep the full prompt on every line')"
+    if [ "$v" = on ]; then
+        v="$(ts_prompt_choice "$(cur promptTransientStyle bare)" 'Compact style:' '' \
+            'bare|> ls|just the arrow' \
+            'dir|terminal-stack > ls|the folder it ran in' \
+            'time|3:24:06 PM > ls|when it ran' \
+            'dir-time|terminal-stack 3:24:06 PM > ls|both')"
+    fi
+    run_py config prompt transient "$v" || return $?
+    v="$(ts_prompt_choice "$(cur promptNewline off)" 'Blank line before each prompt:' '' \
+        'off|off|output and the next prompt sit together' \
+        'on|on|a blank line between commands')"
+    run_py config prompt newline "$v"
+}
+
 menu() {
     while true; do
         echo
         show
         echo
-        echo "  1) leader key   2) theme   3) tmux prefix   4) apps   5) re-apply   6) Claude TTS   7) WezTerm mux   8) session restore   9) coding agents   a) atuin   g) ghostty   t) WezTerm build   w) re-run wizard   q) quit"
+        echo "  1) leader key   2) theme   3) tmux prefix   4) apps   5) re-apply   6) Claude TTS   7) WezTerm mux   8) session restore   9) coding agents   a) atuin   p) prompt   g) ghostty   t) WezTerm build   w) re-run wizard   q) quit"
         local c; c="$(ts_tty_prompt 'Choose: ')"
         case "$c" in
             1) set_leader "$(menu_leader)" ;;
@@ -431,6 +451,7 @@ menu() {
             8) set_restore "$(menu_on_off weztermRestore 'WezTerm session restore (reopen the last session at startup):' 'start clean every time' 'reopen the last session')" ;;
             9) agents_menu ;;
             a|A) set_atuin "$(menu_on_off atuinEnabled 'atuin shell history (replaces Ctrl+R):' 'keep fzf on Ctrl+R' 'atuin owns Ctrl+R')" ;;
+            p|P) menu_prompt ;;
             g|G) run_ghostty status ;;
             t|T) run_wezterm status ;;
             w|W) run_wizard ;;
@@ -503,6 +524,8 @@ case "${1:-}" in
         echo "  restore on|off   reopen the last WezTerm session at startup"
         echo "  atuin on|off     atuin shell history; when on it owns Ctrl+R (fzf keeps Ctrl+T/Alt+C)"
         echo "  prompt [status|list|<name>|preview <name>]   which Starship prompt; list renders every option"
+        echo "  prompt transient [on|off|bare|dir|time|dir-time]   collapse finished prompts (default on, bare)"
+        echo "  prompt newline [on|off]   blank line before each prompt (default off)"
         echo "  ghostty [on|off|status|diff]   managed Ghostty config (macOS/Windows; off restores your backup)"
         echo "  memory [agentmemory|headroom|none|status]   which memory system runs — only ever one"
         echo "  agents [show|<headroom|caveman|agentmemory> on|off|status|repair|uninstall]"

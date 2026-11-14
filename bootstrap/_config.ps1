@@ -407,6 +407,7 @@ function Get-TsConfig {
         memoryBackend = 'agentmemory'
         starshipPreset = 'terminal-stack'; atuinEnabled = 'off'
         herdrConfig = 'off'; herdrShell = 'auto'
+        promptTransient = 'on'; promptTransientStyle = 'bare'; promptNewline = 'off'
     }
 }
 
@@ -483,7 +484,13 @@ function Save-TsConfig {
         # has. bootstrap/_config.sh's ts_starship_set asks starship instead.
         [string]$StarshipPreset = 'terminal-stack',
         [ValidateSet('on','off')][string]$AtuinEnabled = 'off',
-        [ValidateSet('on','off')][string]$HerdrConfig = 'off'
+        [ValidateSet('on','off')][string]$HerdrConfig = 'off',
+        # The prompt's behaviour. Written by `tstack config prompt transient|newline`
+        # (Python, straight into this file) and only ever carried forward here --
+        # without these three, any Windows-side save stripped them from config.json.
+        [ValidateSet('on','off')][string]$PromptTransient = 'on',
+        [ValidateSet('bare','dir','time','dir-time')][string]$PromptTransientStyle = 'bare',
+        [ValidateSet('on','off')][string]$PromptNewline = 'off'
     )
     $l = ConvertTo-TsLeader $LeaderChord
     $existing = Get-TsConfig
@@ -525,7 +532,10 @@ function Save-TsConfig {
         # one to find.
         @{ Param = 'StarshipPreset'; Name = 'starshipPreset'; Default = 'terminal-stack' },
         @{ Param = 'AtuinEnabled'; Name = 'atuinEnabled'; Default = 'off' },
-        @{ Param = 'HerdrConfig'; Name = 'herdrConfig'; Default = 'off' }
+        @{ Param = 'HerdrConfig'; Name = 'herdrConfig'; Default = 'off' },
+        @{ Param = 'PromptTransient'; Name = 'promptTransient'; Default = 'on' },
+        @{ Param = 'PromptTransientStyle'; Name = 'promptTransientStyle'; Default = 'bare' },
+        @{ Param = 'PromptNewline'; Name = 'promptNewline'; Default = 'off' }
     )) {
         if (-not $PSBoundParameters.ContainsKey($pair.Param)) {
             Set-Variable -Name $pair.Param -Value (Get-TsProp $existing $pair.Name $pair.Default)
@@ -553,6 +563,9 @@ function Save-TsConfig {
         starshipPreset     = $StarshipPreset
         atuinEnabled       = $AtuinEnabled
         herdrConfig        = $HerdrConfig
+        promptTransient    = $PromptTransient
+        promptTransientStyle = $PromptTransientStyle
+        promptNewline      = $PromptNewline
     }
     $p = Get-TsConfigPath
     # No Windows side means nowhere to mirror to. Return the object anyway --

@@ -6,6 +6,17 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Added
 
+- **Finished prompts collapse to `❯ cmd`, with no blank line (11/14/2026).**
+  The two-line prompt stays on the line you are typing; once you press Enter it
+  is redrawn as just the arrow, so scrollback copies cleanly. On by default, on
+  zsh and PowerShell, for every prompt including presets. Three saved settings:
+  `tstack config prompt transient on|off|bare|dir|time|dir-time` (the styles add
+  the folder and/or the clock) and `tstack config prompt newline on|off`, also
+  under `p) prompt` in the `tstack config` menu; `TS_PROMPT_TRANSIENT` /
+  `TS_PROMPT_TRANSIENT_STYLE` override them for one shell. On Windows,
+  `tstack config prompt` now re-syncs after a change instead of waiting for the
+  next `tstack update`. `doc common/tools/starship`.
+
 - **A leader key another program has taken is now reported (11/01/2026).**
   On Windows, a program that registers a chord as a global hotkey gets its
   key-down before any window does, so a WezTerm leader set to that chord does

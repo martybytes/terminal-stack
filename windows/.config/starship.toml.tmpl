@@ -15,7 +15,9 @@
 # (themeMode/resolvedTheme); change it with `tstack config theme <dark|light|follow>`.
 palette = "__THEME_RESOLVED__"
 
-add_newline      = true
+# __PROMPT_NEWLINE__ is the saved promptNewline (on -> true, default off -> false):
+# the blank line before each prompt. `tstack config prompt newline on|off`.
+add_newline      = __PROMPT_NEWLINE__
 command_timeout  = 1000
 
 format = """
