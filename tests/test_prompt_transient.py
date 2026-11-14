@@ -274,7 +274,33 @@ def test_a_finished_prompt_collapses_in_a_real_terminal(tmp_path):
         return text
 
     try:
-        tmux("-f", "/dev/null", "new-session", "-d", "-x", "80", "-y", "24", f"{ZSH} -d -i")
+        started = subprocess.run(
+            [
+                TMUX,
+                "-L",
+                sock,
+                "-f",
+                "/dev/null",
+                "new-session",
+                "-d",
+                "-x",
+                "80",
+                "-y",
+                "24",
+                f"{ZSH} -d -i",
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=env,
+            timeout=30,
+            check=False,
+            start_new_session=True,
+        )
+        if started.returncode != 0:
+            # A runner that cannot host a tmux server (WSL's CI image) cannot
+            # run this test; that is an environment fact, not a prompt bug.
+            pytest.skip(f"tmux could not start a session: {started.stderr.strip()}")
         screen_until("FULL> ")
         tmux("send-keys", "echo one-done", "Enter")
         screen_until("one-done\n")
