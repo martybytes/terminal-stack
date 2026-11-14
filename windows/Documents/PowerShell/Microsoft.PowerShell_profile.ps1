@@ -748,7 +748,44 @@ if (-not (Test-TsAgentShell)) {
         }
         if ($tsInit.Path) { . $tsInit.Path } elseif ($tsInit.Text) { Invoke-Expression $tsInit.Text }
     }
-    if (Get-Command Enable-TransientPrompt -ErrorAction SilentlyContinue) { Enable-TransientPrompt }
+    # Transient prompt: once Enter is pressed, the finished line is redrawn with a
+    # short prompt (`❯ ls`), so scrollback copies cleanly. Enable-TransientPrompt
+    # is STARSHIP's (defined by its init above, not PSReadLine's -- see
+    # docs/powershell-quirks.md), and it calls Invoke-Starship-TransientFunction
+    # when one exists. Settings: promptTransient / promptTransientStyle in
+    # config.json (`tstack config prompt transient ...`); $env:TS_PROMPT_TRANSIENT
+    # and $env:TS_PROMPT_TRANSIENT_STYLE win for one session. zsh twin:
+    # _ts_transient_line_init in dot_zshrc. Read once per shell, never per prompt:
+    # this runs on every Enter, and a spawn per keypress is what the init cache
+    # above exists to avoid.
+    $tsPromptCfg = $null
+    try {
+        $tsPromptCfg = Get-Content -LiteralPath (Join-Path $env:LOCALAPPDATA 'terminal-stack\config.json') -Raw -ErrorAction Stop |
+            ConvertFrom-Json -ErrorAction Stop
+    } catch {}
+    $tsTransient = if ($env:TS_PROMPT_TRANSIENT) { $env:TS_PROMPT_TRANSIENT }
+        elseif ($tsPromptCfg -and $tsPromptCfg.PSObject.Properties['promptTransient']) { [string]$tsPromptCfg.promptTransient }
+        else { 'on' }
+    $global:TsPromptTransientStyle = if ($env:TS_PROMPT_TRANSIENT_STYLE) { $env:TS_PROMPT_TRANSIENT_STYLE }
+        elseif ($tsPromptCfg -and $tsPromptCfg.PSObject.Properties['promptTransientStyle']) { [string]$tsPromptCfg.promptTransientStyle }
+        else { 'bare' }
+    if ($tsTransient -eq 'on' -and (Get-Command Enable-TransientPrompt -ErrorAction SilentlyContinue)) {
+        function global:Invoke-Starship-TransientFunction {
+            $esc = [char]0x1b
+            $mark = "$esc[1;34m$([char]0x276F)$esc[0m "
+            $here = $executionContext.SessionState.Path.CurrentLocation.Path
+            $leaf = if ($here -eq $HOME) { '~' } else { Split-Path -Leaf $here }
+            if (-not $leaf) { $leaf = $here }
+            $now = (Get-Date).ToString('h:mm:ss tt')
+            switch ($global:TsPromptTransientStyle) {
+                'dir'      { "$esc[34m$leaf$esc[0m $mark" }
+                'time'     { "$esc[90m$now$esc[0m $mark" }
+                'dir-time' { "$esc[34m$leaf$esc[0m $esc[90m$now$esc[0m $mark" }
+                default    { $mark }
+            }
+        }
+        Enable-TransientPrompt
+    }
 
     function Invoke-Starship-PreCommand {
         if ([Native.ConsoleCP]::GetConsoleOutputCP() -ne 65001) {
@@ -1502,14 +1539,36 @@ function Set-TerminalStackConfig {
                 Write-Host "  cc-tts     : $(if ($ccTts.enabled) { 'on' } else { 'off' })"
                 Write-Host "  wezmux     : $(Get-TsWeztermMux)"
                 Write-Host "  wezrestore : $(Get-TsWeztermRestore)"
+                $pc = Get-TsConfig
+                Write-Host "  prompt     : compact $(Get-TsProp $pc promptTransient 'on') ($(Get-TsProp $pc promptTransientStyle 'bare')), blank line $(Get-TsProp $pc promptNewline 'off')"
                 Write-Host "  wezterm    : $(Get-TsWezChannel)   (tstack config wezterm)"
                 Write-Host "  headroom   : $headroom   (Cursor: $headroomCursor)"
                 Write-Host "  caveman    : $caveman"
                 Write-Host "  agentmemory: $agentmemory"
                 Write-Host ''
-                Write-Host '  1) leader  2) theme  3) tmux prefix  4) apps  5) re-apply  6) Claude TTS  7) WezTerm mux  8) session restore  9) coding agents  t) WezTerm build  w) re-run wizard  h) help  q) quit'
+                Write-Host '  1) leader  2) theme  3) tmux prefix  4) apps  5) re-apply  6) Claude TTS  7) WezTerm mux  8) session restore  9) coding agents  p) prompt  t) WezTerm build  w) re-run wizard  h) help  q) quit'
                 switch (Read-Host 'Choose') {
                     'h' { Set-TerminalStackConfig help }
+                    'p' {
+                        # One Python writer (`tstack config prompt`); this only asks.
+                        $cfgNow = Get-TsConfig
+                        $tr = Read-TsChoice -Title 'Past prompts, once you press Enter:' -Default (Get-TsProp $cfgNow promptTransient 'on') -Options @(
+                            @{ Key = 'on';  Label = 'compact'; Note = 'collapse to a short prompt - scrollback copies cleanly' },
+                            @{ Key = 'off'; Label = 'full';    Note = 'keep the full prompt on every line' })
+                        if ($tr -eq 'on') {
+                            $tr = Read-TsChoice -Title 'Compact style:' -Default (Get-TsProp $cfgNow promptTransientStyle 'bare') -Options @(
+                                @{ Key = 'bare';     Label = '> ls';                           Note = 'just the arrow' },
+                                @{ Key = 'dir';      Label = 'terminal-stack > ls';            Note = 'the folder it ran in' },
+                                @{ Key = 'time';     Label = '3:24:06 PM > ls';                Note = 'when it ran' },
+                                @{ Key = 'dir-time'; Label = 'terminal-stack 3:24:06 PM > ls'; Note = 'both' })
+                        }
+                        Invoke-TstackSub -Name 'config' -Forwarded @('prompt', 'transient', $tr)
+                        $nl = Read-TsChoice -Title 'Blank line before each prompt:' -Default (Get-TsProp $cfgNow promptNewline 'off') -Options @(
+                            @{ Key = 'off'; Label = 'off'; Note = 'output and the next prompt sit together' },
+                            @{ Key = 'on';  Label = 'on';  Note = 'a blank line between commands' })
+                        Invoke-TstackSub -Name 'config' -Forwarded @('prompt', 'newline', $nl)
+                        Invoke-TsSync $src
+                    }
                     '1' { $leader = & $menuLeader; & $save -What leader }
                     '2' { $theme  = & $menuTheme;  & $save -What theme }
                     '3' { $t = Read-Host 'tmux prefix chord (e.g. ctrl-a) [ctrl-b]'; $tmux = if ($t) { $t } else { 'ctrl-b' }; & $save -What tmux }
@@ -1588,6 +1647,11 @@ Run it with no arguments for the interactive menu, or set one value directly:
   tstack config apps [list]        pick the optional CLI tools; installs what you tick
                                    (`recommended`, `all`, `none`, or a comma list)
   tstack config restore on|off     reopen the last WezTerm session at startup
+  tstack config prompt [name]      which Starship prompt (`list` renders every option)
+  tstack config prompt transient [on|off|bare|dir|time|dir-time]
+                                   collapse each finished prompt to a short one, so
+                                   scrollback copies cleanly (default: on, bare)
+  tstack config prompt newline on|off   blank line before each prompt (default: off)
   tstack config tts <verb>         agent voice notifications (try: tstack config tts test)
   tstack config memory <backend>   agentmemory | headroom | none
   tstack config agents             headroom / caveman / agentmemory wiring
@@ -1805,6 +1869,16 @@ Related:
         }
         'prompt' {
             Invoke-TstackSub -Name 'config' -Forwarded (@('prompt') + @($Value) + @($Rest) | Where-Object { $_ })
+            # The Python half SAVES to config.json, but on Windows nothing then
+            # re-rendered starship.toml: a preset or newline change waited for the
+            # next `tstack update`. Read-only verbs (and transient, which this
+            # profile reads at startup) need no sync.
+            $readOnly = @('', 'status', 'show', 'list', 'preview', 'help', '-h', '--help')
+            $isTransient = $Value -eq 'transient'
+            $isNewlineRead = $Value -eq 'newline' -and -not ($Rest | Where-Object { $_ -in 'on', 'off' })
+            if ($LASTEXITCODE -eq 0 -and $Value -notin $readOnly -and -not $isTransient -and -not $isNewlineRead) {
+                Invoke-TsSync $src
+            }
         }
         'atuin' {
             if ($Value -notin 'on', 'off') { Write-Warning 'usage: tstack config atuin <on|off>'; return }

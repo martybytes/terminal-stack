@@ -76,17 +76,18 @@ Do not remove the `.gitattributes` to "match the user's git config" — it inten
 
 **Symptom.** Fresh pwsh shows `Enable-TransientPrompt : The term 'Enable-TransientPrompt' is not recognized...` when sourcing `$PROFILE`.
 
-**Cause.** PSReadLine documents `Enable-TransientPrompt`, but version **2.4.5** (the latest stable PSReadLine on Windows as of this stack's deployment) doesn't actually export the cmdlet. Only six commands are exported from the module: `Get-PSReadLineKeyHandler`, `Get-PSReadLineOption`, `PSConsoleHostReadLine`, `Remove-PSReadLineKeyHandler`, `Set-PSReadLineKeyHandler`, `Set-PSReadLineOption`. `Enable-TransientPrompt` may exist as an internal function in some PSReadLine builds, but not in 2.4.5.
+**Cause.** `Enable-TransientPrompt` is **Starship's**, not PSReadLine's: `starship init powershell` defines it (and `Disable-TransientPrompt`), binding Enter to a handler that redraws the finished line through `Invoke-Starship-TransientFunction`. PSReadLine 2.4.5 exports only six commands and never had it. So the name exists only after the starship init ran — not in an agent shell (`Test-TsAgentShell`), and not on a machine without starship.
 
-**Fix.** Wrap the call in `Get-Command`:
+**Fix.** Keep the `Get-Command` guard; the call is also gated on the saved `promptTransient` setting:
 
 ```powershell
-if (Get-Command Enable-TransientPrompt -ErrorAction SilentlyContinue) {
+if ($tsTransient -eq 'on' -and (Get-Command Enable-TransientPrompt -ErrorAction SilentlyContinue)) {
+    function global:Invoke-Starship-TransientFunction { ... }
     Enable-TransientPrompt
 }
 ```
 
-Future PSReadLine versions that do export it will pick it up automatically; older versions skip gracefully.
+**Known gap.** Starship's handler is bound to Enter only, and its state lives in its own module scope, so a line abandoned with **Ctrl+C** keeps the full prompt on Windows. zsh collapses that case too (`_ts_transient_line_init` in `dot_zshrc`). Tested on PSReadLine 2.4.5 with the two-line prompt.
 
 ## Backslashes in JSON paths get stripped twice
 

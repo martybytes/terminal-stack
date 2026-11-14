@@ -71,7 +71,7 @@ And `wso` blocks migration of **any** un-tiered terminal-stack clone, not merely
 
 **Wizard recommendations and readiness probing.** Every behaviour question opens with a `RECOMMENDATION:` saying which way to go *and what it costs* (mux **off**, restore **off**, atuin **on**). The **agent toggles are probed, not guessed** — a machine wired to a service that is not running captures nothing and reports nothing, silently. **"Answering" is the test, never a 2xx**: `ts_probe_http` accepts any HTTP status (AgentMemory answers 404 and 401 on the obvious paths) and only a refused connection counts as down; `ts_probe_http_ok` is the strict variant for real readiness endpoints. `docs/decisions.md` § "Why every wizard question carries a recommendation". `ts_app_installable` keeps platform-impossible ids (`nvtop` on macOS) out of `ts_apps_pending`, which otherwise nags forever and can never succeed.
 
-**Which prompt (`starshipPreset`).** `terminal-stack` (**default**) is this repo's own prompt; anything else is a Starship built-in preset, and `tstack config prompt list` **renders every option live**. **Not vendored**: `modify_starship.toml.tmpl` runs `starship preset` at apply time behind `lookPath` — a bootstrap can render it before starship exists, and `output` on a missing binary aborts the *whole* apply. Both syncs cover the Windows side or a combined machine shows two prompts. Traps: `-o` refuses to overwrite the file `mktemp` just made; `STARSHIP_SHELL` must be **empty, not unset**; an unknown name renders an **empty** config, so check it against `starship preset --list` before saving.
+**Which prompt (`starshipPreset`).** `terminal-stack` (**default**) is this repo's own prompt; anything else is a Starship built-in preset, and `tstack config prompt list` **renders every option live**. **Not vendored**: `modify_starship.toml.tmpl` runs `starship preset` at apply time behind `lookPath` — a bootstrap can render it before starship exists, and `output` on a missing binary aborts the *whole* apply. Both syncs cover the Windows side or a combined machine shows two prompts. Traps: `-o` refuses to overwrite the file `mktemp` just made; `STARSHIP_SHELL` must be **empty, not unset**; an unknown name renders an **empty** config, so check it against `starship preset --list` before saving. `prompt*` keys hold for every preset.
 
 **The install questionnaire is `tstack/wizard/`**, one Python implementation; `bootstrap/_wizard.sh` is a ~50-line shim and the pwsh `Read-Ts*` are deleted. **Answers travel in a FILE the caller sources**, never stdout — no `$( )` boundary, so a stray line cannot corrupt one. Every variable is emitted unconditionally (callers read some unguarded under `set -u`), as **`export`**, written whole then renamed. Windows gets JSON keyed by the old hashtable's PascalCase names. **Exit 3 = the user quit.** `docs/decisions.md` § "Why the wizard's answers travel in a file".
 
@@ -143,7 +143,7 @@ These are written up at length in `docs/powershell-quirks.md`; the short version
 - **Never auto-restart `wezterm-mux-server`.** It loads its own copy of `.wezterm.lua`, so a config change doesn't reach it — but restarting it kills every live pane. The sync scripts print a reminder instead (only when `weztermMux` is `on`); `tstack mux restart` is the deliberate, confirmed path.
 - **No pwsh local may share a parameter's name, whatever the casing.** Names are case-insensitive, so a local `$foo` in a function taking `$Foo` *is* that parameter, and a typed one keeps its converter, silently mangling the value. It parses cleanly, so `ParseFile` cannot see it. Gated by `test_no_pwsh_local_shadows_a_typed_parameter`; rationale in `docs/decisions.md`.
 - **The exclusive-group collapse fires only for a member of the group.** `$keep` is the index just ticked; outside the group no member equals it, so all of them get cleared — ticking Ghostty silently deselected WezTerm on macOS. Both twins guard inside the helper, leaving the `-1` normalisation path unchanged.
-- **`Enable-TransientPrompt` is guarded with `Get-Command`**: PSReadLine 2.4.5 doesn't export it. Keep the guard.
+- **`Enable-TransientPrompt` is starship's**, not PSReadLine's: keep the `Get-Command` guard. zsh's twin must stay `zle-line-init` + `recursive-edit`, chaining the old widget.
 - **Never pipe `Where-Object` straight into `Set-Content`.** An empty pipeline gives it no value to write, so the file is left untouched, silently — filtering a file down to nothing *keeps* the line you meant to remove. Collect into an array and pass `-Value` (`@()` truncates as intended). A `-replace` pipeline can't go empty and is safe.
 - **A captured child process must name `encoding="utf-8"`.** `text=True` alone decodes with the locale codec (cp1252 on Windows), and the `UnicodeDecodeError` lands in subprocess's reader thread: `run()` returns `returncode=0` with `stdout=None`, and the caller dies on `.strip()`. `tstack/proc.py` decides it once, pinned by an AST test. `docs/powershell-quirks.md` also has the winget-shim-over-ssh block.
 - **`doc`'s alt-e edit binding can't hard-code fzf's `become(...)` action.** It needs fzf 0.42.0+; on older fzf the unknown action makes fzf **refuse to start at all**. `_doc_edit_bind` version-checks and falls back. Detail in `docs/decisions.md`.
@@ -152,14 +152,14 @@ These are written up at length in `docs/powershell-quirks.md`; the short version
 
 ## Where to look
 
-- `README.md` — what the stack delivers; top-level layout
-- `ARCHITECTURE.md` — the cross-side problem and our solution in 30s; backup discipline
+- `README.md` — what the stack delivers
+- `ARCHITECTURE.md` — the cross-side problem in 30s; backup discipline
 - `INSTALL.md` — scripted (Phase 0 → 10) and manual installs
 - `CHANGELOG.md` — curated history; `git log` is authoritative
 - `docs/cross-side-chezmoi.md` — the chezmoi + run_after mechanism in depth
-- `docs/developing-wezterm.md` — edit → sync/apply → reload loop for WezTerm config
-- `docs/powershell-quirks.md` — every Windows-side workaround, with cause and fix
-- `docs/verifying-changes.md` — checking a change before committing; `tests/parity/run.sh`
+- `docs/developing-wezterm.md` — the WezTerm edit/reload loop
+- `docs/powershell-quirks.md` — every Windows workaround, cause and fix
+- `docs/verifying-changes.md` — checking a change; `tests/parity/run.sh`
 - `docs/decisions.md` — design choices not obvious from the code
 
 ## Personal-path note

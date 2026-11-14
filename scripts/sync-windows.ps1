@@ -160,6 +160,8 @@ $tok = @{
     '__TMUX_PREFIX__'            = if ($tsCfg.tmuxPrefixResolved) { $tsCfg.tmuxPrefixResolved } else { 'C-b' }
     '__WEZ_MUX__'                = if ($tsCfg.weztermMux)         { $tsCfg.weztermMux }         else { 'off' }
     '__WEZ_RESTORE__'            = if ($tsCfg.weztermRestore)     { $tsCfg.weztermRestore }     else { 'off' }
+    # starship's add_newline: the blank line before each prompt. Default off.
+    '__PROMPT_NEWLINE__'         = if ($tsCfg.promptNewline -eq 'on') { 'true' } else { 'false' }
     '__CC_TTS_STOP_HOOK__'       = $ccTtsStopHook
     '__CC_TTS_STOPFAILURE_HOOK__'= $ccTtsStopFailureHook
     '__CC_TTS_CURSOR_HOOKS__'    = $ccTtsCursorHooks
@@ -331,7 +333,15 @@ if ($preset -ne 'terminal-stack') {
         if ($LASTEXITCODE -ne 0 -or -not $body) {
             Write-Warning "starship has no preset named '$preset'; kept this stack's prompt."
         } else {
-            $text = ($body -join "`n") + "`n"
+            # promptNewline holds for a preset too: replace its add_newline, or prepend one.
+            $nl = $tok['__PROMPT_NEWLINE__']
+            $lines = @($body)
+            if ($lines -match '^add_newline\s*=') {
+                $lines = @($lines -replace '^add_newline\s*=.*', "add_newline = $nl")
+            } else {
+                $lines = @("add_newline = $nl") + $lines
+            }
+            $text = ($lines -join "`n") + "`n"
             $current = if (Test-Path -LiteralPath $starDst) {
                 Get-Content -LiteralPath $starDst -Raw
             } else { $null }

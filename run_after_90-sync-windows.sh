@@ -33,6 +33,7 @@
 #   __TMUX_PREFIX__     tmux prefix spec     (from tmuxPrefixResolved)
 #   __WEZ_MUX__         on|off WezTerm mux domain (from weztermMux; see tstack mux)
 #   __WEZ_RESTORE__     on|off reopen last session (from weztermRestore)
+#   __PROMPT_NEWLINE__  true|false starship add_newline (from promptNewline)
 #   __CC_TTS_STOP_HOOK__ / __CC_TTS_STOPFAILURE_HOOK__ / __CC_TTS_CURSOR_HOOKS__ /
 #   __CC_TTS_PRETOOLUSE_TTS__ / __CC_TTS_INPUT_HOOKS__  optional cc-speak hooks (when ccTtsEnabled)
 #
@@ -131,6 +132,7 @@ TMUX_PREFIX="$(cfg tmuxPrefixResolved 'C-b')"
 WEZ_MUX="$(cfg weztermMux 'off')"
 WEZ_RESTORE="$(cfg weztermRestore 'off')"
 STARSHIP_PRESET="$(cfg starshipPreset 'terminal-stack')"
+if [ "$(cfg promptNewline off)" = on ]; then PROMPT_NEWLINE=true; else PROMPT_NEWLINE=false; fi
 CC_TTS_ENABLED="$(cfg ccTtsEnabled false)"
 HEADROOM_ENABLED="$(cfg headroomEnabled off)"
 HEADROOM_CURSOR_MODE="$(cfg headroomCursorMode mcp)"
@@ -344,7 +346,7 @@ sync_tree() {
       if command -v python3 >/dev/null 2>&1; then
         WIN_USER="$WIN_USER" WIN_HOME="$WIN_HOME" LEADER_KEY="$LEADER_KEY" LEADER_MODS="$LEADER_MODS" \
         THEME_MODE="$THEME_MODE" THEME_RESOLVED="$THEME_RESOLVED" TMUX_PREFIX="$TMUX_PREFIX" \
-        WEZ_MUX="$WEZ_MUX" WEZ_RESTORE="$WEZ_RESTORE" \
+        WEZ_MUX="$WEZ_MUX" WEZ_RESTORE="$WEZ_RESTORE" PROMPT_NEWLINE="$PROMPT_NEWLINE" \
         CC_TTS_STOP_HOOK="$CC_TTS_STOP_HOOK" CC_TTS_STOPFAILURE_HOOK="$CC_TTS_STOPFAILURE_HOOK" \
         CC_TTS_CURSOR_HOOKS="$CC_TTS_CURSOR_HOOKS" CC_TTS_PRETOOLUSE_TTS="$CC_TTS_PRETOOLUSE_TTS" \
         CC_TTS_INPUT_HOOKS="$CC_TTS_INPUT_HOOKS" \
@@ -361,6 +363,7 @@ repl = {
     "__TMUX_PREFIX__": os.environ.get("TMUX_PREFIX", ""),
     "__WEZ_MUX__": os.environ.get("WEZ_MUX", "off"),
     "__WEZ_RESTORE__": os.environ.get("WEZ_RESTORE", "off"),
+    "__PROMPT_NEWLINE__": os.environ.get("PROMPT_NEWLINE", "false"),
     "__CC_TTS_STOP_HOOK__": os.environ.get("CC_TTS_STOP_HOOK", ""),
     "__CC_TTS_STOPFAILURE_HOOK__": os.environ.get("CC_TTS_STOPFAILURE_HOOK", ""),
     "__CC_TTS_CURSOR_HOOKS__": os.environ.get("CC_TTS_CURSOR_HOOKS", "{}"),
@@ -484,6 +487,12 @@ preset="$STARSHIP_PRESET"
 if [ -n "$preset" ] && [ "$preset" != terminal-stack ] && command -v starship >/dev/null 2>&1; then
   star_dst="$dst_home/.config/starship.toml"
   if starship preset "$preset" > "$rendered" 2>/dev/null && [ -s "$rendered" ]; then
+    # promptNewline holds for a preset too: replace its add_newline, or prepend one.
+    if grep -q '^add_newline[[:space:]]*=' "$rendered"; then
+      sed -i.tsbak "s/^add_newline[[:space:]]*=.*/add_newline = $PROMPT_NEWLINE/" "$rendered" && rm -f "$rendered.tsbak"
+    else
+      { printf 'add_newline = %s\n' "$PROMPT_NEWLINE"; cat "$rendered"; } > "$rendered.tsnl" && mv "$rendered.tsnl" "$rendered"
+    fi
     if [ -e "$star_dst" ] && cmp -s "$rendered" "$star_dst"; then
       : # unchanged
     else

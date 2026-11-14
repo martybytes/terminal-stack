@@ -635,6 +635,55 @@ _ts_agent_shell() {
 if ! _ts_agent_shell; then
   eval "$(starship init zsh)"
 fi
+
+# Transient prompt: once Enter is pressed, the finished line is redrawn with a
+# short prompt (`❯ ls`), so scrollback copies cleanly and only the live prompt
+# carries the full two lines. Starship has no zsh transience of its own, so
+# this is the zle-line-init + recursive-edit pattern -- the only form that also
+# collapses a line abandoned with Ctrl+C and still exits on Ctrl+D. Settings:
+# `tstack config prompt transient ...`, rendered into the fragment sourced here
+# (no fragment yet = the schema defaults). pwsh twin: Invoke-Starship-
+# TransientFunction in $PROFILE.
+#
+# Any zle-line-init that already exists (oh-my-zsh's smkx one) is chained, not
+# replaced: dropping it breaks Home/End and the arrows on some terminals.
+[[ -r "$HOME/.config/terminal-stack/prompt.zsh" ]] && source "$HOME/.config/terminal-stack/prompt.zsh"
+_ts_transient_prompt() {
+  # Plain-text shape: what a copy of the scrollback gets is `❯ cmd`.
+  local mark='%B%F{blue}❯%f%b '
+  case "${TS_PROMPT_TRANSIENT_STYLE:-bare}" in
+    dir)      REPLY="%F{blue}%1~%f $mark" ;;
+    time)     REPLY="%F{8}%D{%L:%M:%S %p}%f $mark" ;;
+    dir-time) REPLY="%F{blue}%1~%f %F{8}%D{%L:%M:%S %p}%f $mark" ;;
+    *)        REPLY="$mark" ;;
+  esac
+}
+_ts_transient_line_init() {
+  emulate -L zsh
+  (( ${+widgets[_ts_transient_prev_line_init]} )) && zle _ts_transient_prev_line_init -- "$@"
+  [[ $CONTEXT == start ]] || return 0
+  local -i ret
+  while true; do
+    zle .recursive-edit
+    ret=$?
+    # Ctrl+D on an empty line: exit, as it would without this widget.
+    [[ $ret == 0 && $KEYS == $'\4' ]] || break
+    [[ -o ignore_eof ]] || exit 0
+  done
+  local saved_prompt=$PROMPT saved_rprompt=$RPROMPT REPLY
+  _ts_transient_prompt
+  PROMPT=$REPLY RPROMPT=''
+  zle .reset-prompt
+  PROMPT=$saved_prompt RPROMPT=$saved_rprompt
+  if (( ret )); then zle .send-break; else zle .accept-line; fi
+  return ret
+}
+if ! _ts_agent_shell && [[ "${TS_PROMPT_TRANSIENT:-on}" == on && -o zle ]]; then
+  if (( ${+widgets[zle-line-init]} )) && [[ ${widgets[zle-line-init]} != user:_ts_transient_line_init ]]; then
+    zle -A zle-line-init _ts_transient_prev_line_init
+  fi
+  zle -N zle-line-init _ts_transient_line_init
+fi
 # ---- starship-stack-end ----
 
 # ---- terminal-stack-helpers-start ----
