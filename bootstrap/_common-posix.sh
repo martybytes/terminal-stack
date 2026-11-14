@@ -139,53 +139,11 @@ common_tty_prompt() {
     echo "$answer"
 }
 
-# Workspace directory for the ws/wsp/wspu shell functions.
-# $WORKSPACE_DIR env → use without prompting (scripted installs). Otherwise
-# prompt on /dev/tty with the autodetected candidate as default. The answer is
-# persisted to ~/.zshrc.local ONLY when it differs from the autodetect — the
-# shell-side _ts_workspace() covers the detected case on its own.
+# Workspace directory for the ws/wsp/wspu shell functions. The question, its
+# validation and the write are shared with mac-bootstrap.sh: ts_workspace_config
+# in _config.sh.
 common_workspace_config() {
-    local detected="" d choice
-# /mnt/c/DATA/Workspace is deliberately NOT a candidate any more. It was probed
-# FIRST, so on WSL `ws` landed on the Windows workspace over drvfs no matter
-# what existed in $HOME -- the same tax the runtime clone move fixes. A WSL
-# install keeps its workspace on the Linux filesystem; set WORKSPACE_DIR in
-# ~/.zshrc.local to point at the Windows one deliberately.
-    for d in "$HOME/Documents/Workspace" "$HOME/workspace" "$HOME/Workspace"; do
-        [ -d "$d" ] && { detected="$d"; break; }
-    done
-
-    choice="${WORKSPACE_DIR:-}"
-    if [ -n "$choice" ]; then
-        echo "$INFO WORKSPACE_DIR=$choice (from env; skipping prompt)"
-    else
-        choice="$(common_tty_prompt "Workspace directory [${detected:-none}]: ")"
-        choice="${choice:-$detected}"
-        # Expand a leading ~ — it's read as a literal here, so it would land in
-        # ~/.zshrc.local as export WORKSPACE_DIR="~/foo" (unexpanded) and break ws.
-        case "$choice" in "~") choice="$HOME" ;; "~/"*) choice="$HOME/${choice#\~/}" ;; esac
-    fi
-
-    if [ -z "$choice" ]; then
-        echo "$WARN No workspace directory found or chosen."
-        echo "    Set one later: export WORKSPACE_DIR=... in ~/.zshrc.local"
-        return 0
-    fi
-    [ -d "$choice" ] || echo "$WARN $choice does not exist (yet) — ws will warn until it does."
-
-    if [ "$choice" = "$detected" ]; then
-        echo "$INFO Workspace: $choice (autodetected; no override needed)"
-        return 0
-    fi
-
-    local rc="$HOME/.zshrc.local"
-    if [ -f "$rc" ] && grep -q '^export WORKSPACE_DIR=' "$rc"; then
-        sed -i "s|^export WORKSPACE_DIR=.*|export WORKSPACE_DIR=\"$choice\"|" "$rc"
-        echo "$INFO Updated WORKSPACE_DIR in $rc"
-    else
-        printf 'export WORKSPACE_DIR="%s"\n' "$choice" >> "$rc"
-        echo "$INFO Wrote WORKSPACE_DIR=$choice to $rc"
-    fi
+    ts_workspace_config
 }
 
 # Hook the stack's git aliases + delta config into the global gitconfig.

@@ -85,6 +85,18 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **The install's workspace question only saves a real directory (11/14/2026).**
+  It saved any answer verbatim, so text typed ahead while the install was still
+  running landed in `~/.zshrc.local` as `export WORKSPACE_DIR="tstack services"`
+  and broke `ws`, `wsmb` and `wso`. Because that file exports it, the next
+  install read it back "from env" and wrote it again. Every input (the prompt,
+  `$WORKSPACE_DIR`, the saved line) must now be an absolute path to an existing
+  directory: a bad answer is asked again, a bad env value is ignored, and a bad
+  saved line is offered for replacement and removed when you take the default.
+  The default is now what `ws` resolves to today, so a rerun keeps a valid pin.
+  The macOS installer's own copy of the question is gone (one shared
+  `ts_workspace_config`), and the write goes through `tstack workspace`.
+
 - **AgentMemory's engine no longer grows to 28 GB (11/09/2026).** The `iii`
   engine keeps every state scope in memory, and agentmemory 0.9.29 stored the
   whole concept cluster (twice) and every matching fact id on each insight,
