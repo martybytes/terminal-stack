@@ -37,6 +37,12 @@ sourced at the *end* of `.zshrc`, so anything resolved earlier would miss it):
    install keeps its files on the Linux filesystem; set `WORKSPACE_DIR` in
    `~/.zshrc.local` if you want the Windows one anyway.
 
+**What the installer saves.** The install's `Workspace directory [...]:` question
+accepts only an absolute path to an existing directory (`~/` is expanded); anything
+else is asked again. It ignores a `$WORKSPACE_DIR` that is not one, and offers to
+replace a saved line that is not one — so `ws` saying "no workspace found" after an
+install is fixed by rerunning it and pressing Enter, or by `tstack workspace reset`.
+
 ### The local root
 
 Some repos cannot live on the main root. A workspace on a mounted data volume is the

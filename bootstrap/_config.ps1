@@ -1203,17 +1203,51 @@ function Invoke-TsWizard {
     }
 }
 
+# <answer> -> the normalised path, or $null with the reason in -Reason. Accepted:
+# a fully-qualified path (drive + separator, or UNC; a leading ~ is expanded) to a
+# directory that exists. A relative word -- or text typed ahead while the install
+# was still running -- used to be saved verbatim and broke ws on the next shell.
+# bash twin: ts_workspace_check in _config.sh.
+function Test-TsWorkspaceChoice {
+    param([string]$Answer, [ref]$Reason)
+    $value = $Answer.Trim()
+    if ($value -eq '~') { $value = $env:USERPROFILE }
+    elseif ($value -match '^~[\\/]') { $value = Join-Path $env:USERPROFILE $value.Substring(2) }
+    if ($value -notmatch '^[A-Za-z]:[\\/]' -and $value -notmatch '^\\\\') {
+        if ($Reason) { $Reason.Value = 'not an absolute path' }
+        return $null
+    }
+    if (-not (Test-Path -LiteralPath $value -PathType Container)) {
+        if ($Reason) { $Reason.Value = 'no such directory' }
+        return $null
+    }
+    if ($value.Length -gt 3) { $value = $value.TrimEnd('\', '/') }
+    return $value
+}
+
 function Read-TsWorkspaceDir {
+    $why = ''
     if ($env:WORKSPACE_DIR) {
-        Write-Host "==> WORKSPACE_DIR=$($env:WORKSPACE_DIR) (from env; skipping prompt)"
-        return $env:WORKSPACE_DIR
+        $fromEnv = Test-TsWorkspaceChoice $env:WORKSPACE_DIR ([ref]$why)
+        if ($fromEnv) {
+            Write-Host "==> WORKSPACE_DIR=$fromEnv (from env; skipping prompt)"
+            return $fromEnv
+        }
+        Write-Warning "Ignoring WORKSPACE_DIR='$($env:WORKSPACE_DIR)' from the environment: $why."
     }
     $detected = Get-TsDetectedWorkspace
     $promptDefault = if ($detected) { $detected } else { 'none' }
     if (-not (Test-TsInteractive)) { return $detected }
     Write-Host ''
-    $answer = Read-Host "Workspace directory [$promptDefault]"
-    if ($answer) { $answer.Trim() } else { $detected }
+    for ($try = 0; $try -lt 3; $try++) {
+        $answer = Read-Host "Workspace directory [$promptDefault]"
+        if (-not $answer -or -not $answer.Trim()) { return $detected }
+        $picked = Test-TsWorkspaceChoice $answer ([ref]$why)
+        if ($picked) { return $picked }
+        Write-Warning "'$answer': $why. Type a full path to an existing folder, or press Enter for $promptDefault."
+    }
+    Write-Warning "Three invalid answers - keeping $promptDefault."
+    return $detected
 }
 
 # Persist a workspace answer that differs from the autodetect. Lives here, not in
@@ -1231,7 +1265,11 @@ function Save-TsWorkspaceOverride {
         Write-Host "==> Workspace: $Choice (autodetected; no override needed)"
         return
     }
-    if (-not (Test-Path $Choice)) { Write-Warning "$Choice does not exist (yet) — ws will warn until it does." }
+    $why = ''
+    if (-not (Test-TsWorkspaceChoice $Choice ([ref]$why))) {
+        Write-Warning "Not saving WORKSPACE_DIR='$Choice': $why. Set one later in profile.local.ps1."
+        return
+    }
     # pwsh 7's $PROFILE is Documents\PowerShell\...; resolve via MyDocuments so
     # this works even when the caller runs under Windows PowerShell 5.
     $localProfile = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'PowerShell\profile.local.ps1'

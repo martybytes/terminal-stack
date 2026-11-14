@@ -1009,6 +1009,118 @@ ts_python() {
     return 1
 }
 
+# ── The installers' workspace question ─────────────────────────────────────────
+# ONE copy for linux-bootstrap.sh, wsl-bootstrap.sh and mac-bootstrap.sh; the mac
+# one used to carry its own, and both persisted ANY answer -- a relative word, a
+# typo, text typed ahead while the install was still running. One machine ended
+# up with `export WORKSPACE_DIR="tstack services"`, which broke ws/wsmb/wso, and
+# because ~/.zshrc.local exports it, the next install run read it back "from env"
+# and wrote it again. So every input -- env, prompt, the saved pin -- goes through
+# ts_workspace_check, and the write goes through the one writer, tstack/workspace.py.
+# pwsh twin: Test-TsWorkspaceChoice / Read-TsWorkspaceDir in _config.ps1.
+
+# Resolved while the file is being sourced: bash 3.2 (macOS) leaves BASH_SOURCE
+# unset inside a function called from `bash -c`, and `set -u` then aborts.
+_TS_CONFIG_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd -P)" || _TS_CONFIG_ROOT=""
+
+# POSIX autodetect order; mirrors _ts_workspace (dot_zshrc) and POSIX_CANDIDATES.
+ts_workspace_detect() {
+    local d
+    for d in "$HOME/Documents/Workspace" "$HOME/workspace" "$HOME/Workspace"; do
+        [ -d "$d" ] && { printf '%s\n' "$d"; return 0; }
+    done
+    return 1
+}
+
+# The value ~/.zshrc.local pins, if any (last line wins, as in the shell).
+ts_workspace_pinned() {
+    local rc="$HOME/.zshrc.local" v
+    [ -f "$rc" ] || return 1
+    v="$(sed -n 's/^[[:space:]]*export[[:space:]][[:space:]]*WORKSPACE_DIR=//p' "$rc" | tail -n 1)"
+    case "$v" in \"*\") v="${v#\"}"; v="${v%\"}" ;; \'*\') v="${v#\'}"; v="${v%\'}" ;; esac
+    [ -n "$v" ] || return 1
+    printf '%s\n' "$v"
+}
+
+# <answer> -> the normalised path on stdout and 0, or the reason on stdout and 1.
+# Accepted: an absolute path (a leading ~ is expanded) to a directory that exists.
+ts_workspace_check() {
+    local v="$1"
+    case "$v" in "~") v="$HOME" ;; "~/"*) v="$HOME/${v#\~/}" ;; esac
+    [ "$v" = / ] || v="${v%/}"
+    case "$v" in
+        /*) ;;
+        *) echo "not an absolute path"; return 1 ;;
+    esac
+    [ -d "$v" ] || { echo "no such directory"; return 1; }
+    printf '%s\n' "$v"
+}
+
+ts_workspace_config() {
+    local detected pinned current choice="" answer out tries=0 py entry
+    detected="$(ts_workspace_detect)" || detected=""
+    pinned="$(ts_workspace_pinned)" || pinned=""
+    # The default is what `ws` resolves to today, so a rerun keeps a valid pin --
+    # and a broken pin is never offered, so taking the default repairs it.
+    current="$detected"
+    if [ -n "$pinned" ]; then
+        if out="$(ts_workspace_check "$pinned")"; then
+            current="$out"
+        else
+            echo "$WARN ~/.zshrc.local pins WORKSPACE_DIR=\"$pinned\": $out. It will be replaced."
+        fi
+    fi
+
+    if [ -n "${WORKSPACE_DIR:-}" ] && [ "${WORKSPACE_DIR}" != "$pinned" ]; then
+        if out="$(ts_workspace_check "$WORKSPACE_DIR")"; then
+            choice="$out"
+            echo "$INFO WORKSPACE_DIR=$choice (from env; skipping prompt)"
+        else
+            echo "$WARN Ignoring WORKSPACE_DIR=\"$WORKSPACE_DIR\" from the environment: $out."
+        fi
+    fi
+
+    if [ -z "$choice" ] && ts_is_interactive; then
+        while [ "$tries" -lt 3 ]; do
+            answer="$(ts_tty_prompt "Workspace directory [${current:-none}]: ")"
+            [ -n "$answer" ] || break
+            if out="$(ts_workspace_check "$answer")"; then
+                choice="$out"
+                break
+            fi
+            echo "$WARN \"$answer\": $out. Type an absolute path to an existing directory, or press Enter for ${current:-none}."
+            tries=$((tries + 1))
+        done
+        [ "$tries" -lt 3 ] || echo "$WARN Three invalid answers - keeping ${current:-none}."
+    fi
+    choice="${choice:-$current}"
+
+    if [ -z "$choice" ]; then
+        echo "$WARN No workspace directory found or chosen."
+        echo "    Set one later: tstack workspace set <dir>"
+        return 0
+    fi
+
+    entry="$_TS_CONFIG_ROOT/tstack/main.py"
+    py="$(ts_python)" || py=""
+    if [ "$choice" = "$detected" ]; then
+        echo "$INFO Workspace: $choice (autodetected; no override needed)"
+        # A pin that disagrees -- the broken one above, typically -- would shadow it.
+        [ -n "$pinned" ] || return 0
+        if [ -n "$py" ] && [ -f "$entry" ] && "$py" "$entry" workspace reset; then
+            return 0
+        fi
+        echo "$WARN Could not clear the WORKSPACE_DIR pin; run: tstack workspace reset"
+        return 0
+    fi
+    [ "$choice" != "$pinned" ] || { echo "$INFO Workspace: $choice (already pinned)"; return 0; }
+    if [ -n "$py" ] && [ -f "$entry" ] && "$py" "$entry" workspace set "$choice" >/dev/null; then
+        echo "$INFO Pinned WORKSPACE_DIR=$choice in ~/.zshrc.local"
+        return 0
+    fi
+    echo "$WARN Could not save the workspace; run: tstack workspace set $choice"
+}
+
 # core.hooksPath is per-clone config, so it has to be set per clone. Safe to run
 # on a runtime clone too: the hooks only fire on commit or push, which nothing
 # does there. Twin: Install-TsGitHooks in bootstrap/_config.ps1.
