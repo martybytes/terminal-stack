@@ -221,9 +221,13 @@ def test_arch_installs_appimages_with_a_launcher_entry(tmp_path):
     assert "T3-Code-0.1.9-arm64.AppImage" in calls
     for app_id in ("orca", "t3code"):
         img = share / f"terminal-stack/apps/{app_id}.AppImage"
-        assert img.is_file() and img.stat().st_mode & 0o111
+        assert img.is_file()
+        # NTFS has no exec bit: under Git Bash `chmod +x` succeeds and changes nothing.
+        if sys.platform != "win32":
+            assert img.stat().st_mode & 0o111
         entry = (share / f"applications/{app_id}.desktop").read_text()
-        assert f'Exec="{img}" %U' in entry
+        # as_posix on both sides: on Windows HOME is backslashed and the script appends with "/".
+        assert f'Exec="{img.as_posix()}" %U' in entry.replace("\\", "/")
     # Now present: a second run downloads nothing.
     (tmp_path / "calls.log").write_text("")
     again = _run(tmp_path, bin_dir, 'ts_install_desktops "orca t3code"')

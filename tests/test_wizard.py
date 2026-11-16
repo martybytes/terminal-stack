@@ -927,10 +927,19 @@ def test_a_console_write_that_fails_does_not_take_the_wizard_down(tmp_path):
 # ------------------------------------------------------------- the entry point
 
 
+def _no_terminal(monkeypatch, cmd):
+    """Never the real terminal. On Windows Console.open() gets CONIN$ whenever a
+    console is attached, which turns on the arrow-key review: a quit stub on
+    `confirm` is never reached and an unstubbed review waits for a key forever.
+    A CI runner has no console, so only a local run saw it."""
+    monkeypatch.setattr(cmd.Console, "open", classmethod(lambda cls, tty="/dev/tty": cls()))
+
+
 def _cmd(argv, monkeypatch, answers=None, quit_it=False):
     """Run the command with the questions stubbed out."""
     from tstack.commands import wizard as cmd
 
+    _no_terminal(monkeypatch, cmd)
     monkeypatch.setattr(
         cmd.flow,
         "collect",
@@ -983,6 +992,7 @@ def test_only_apps_skips_the_review_entirely(monkeypatch, tmp_path):
     from tstack.commands import wizard as cmd
 
     reviewed: list[int] = []
+    _no_terminal(monkeypatch, cmd)
     monkeypatch.setattr(cmd.flow, "collect_apps", lambda console, ask=None: flow.Answers(apps=["eza"]))
     monkeypatch.setattr(cmd.flow, "confirm", lambda *a, **k: reviewed.append(1))
     out = tmp_path / "a.sh"
@@ -999,6 +1009,7 @@ def test_an_unwritable_destination_is_reported_not_swallowed(monkeypatch, tmp_pa
 def test_no_review_skips_the_confirm_loop(monkeypatch, tmp_path):
     from tstack.commands import wizard as cmd
 
+    _no_terminal(monkeypatch, cmd)
     confirmed: list[int] = []
     monkeypatch.setattr(cmd.flow, "collect", lambda c, ask_terminals=False, ask=None: flow.Answers())
     monkeypatch.setattr(cmd.flow, "review", lambda c, a: None)
@@ -1144,6 +1155,7 @@ def test_ts_assume_yes_works_on_the_direct_path_too(monkeypatch, tmp_path):
     from tstack.commands import wizard as cmd
 
     seen: list[bool] = []
+    _no_terminal(monkeypatch, cmd)
     monkeypatch.setattr(cmd.flow, "collect", lambda c, ask_terminals=False, ask=None: flow.Answers(asked=3))
     monkeypatch.setattr(
         cmd.flow, "confirm", lambda c, a, assume_yes, **kw: (seen.append(assume_yes), a)[1]
