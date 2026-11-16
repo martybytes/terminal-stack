@@ -6,6 +6,19 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Added
 
+- **`tstack services repair` fixes Docker Desktop's "waiting 1m0s for the
+  backend socket" (11/16/2026).** After a Docker Desktop update the WSL VM keeps
+  running, the new backend never republishes its socket into it, and docker
+  disappears inside WSL; the dialog's Restart button fails the same way every
+  time. The repair (Windows, from PowerShell) stops Docker, runs `wsl --shutdown`,
+  starts Docker, checks docker inside each integrated distro, recycles once more
+  if needed, and restarts the containers that were running. `--update` pauses
+  while you click "Update version" first. It also catches a Docker WSL disk the
+  elevated installer re-owned (`MountDisk E_ACCESSDENIED`) and prints the
+  elevated `icacls` fix. `tstack doctor` reports the fault as
+  `docker-integration`, and the installer offers the repair when it finds it
+  after starting Docker. The KB's old advice (`docker desktop restart`) did not
+  work and is gone. `doc windows/docker-desktop`.
 - **Finished prompts collapse to `❯ cmd`, with no blank line (11/14/2026).**
   The two-line prompt stays on the line you are typing; once you press Enter it
   is redrawn as just the arrow, so scrollback copies cleanly. On by default, on

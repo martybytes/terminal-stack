@@ -1316,6 +1316,13 @@ def offer(tree, monkeypatch):
 
     monkeypatch.setattr(services, "launch_engine", launch)
     monkeypatch.setattr(services, "main", fake_main)
+    # The integration check asks wsl.exe on a Windows host; recorded, not run.
+    state["integration"] = []
+    monkeypatch.setattr(
+        services,
+        "offer_integration_repair",
+        lambda ask, say, wait=0: state["integration"].append(wait),
+    )
     said: list[str] = []
 
     def run(answers):
@@ -1332,6 +1339,11 @@ def offer(tree, monkeypatch):
     state["run"] = run
     state["said"] = said
     return state
+
+
+def test_offer_start_runs_the_integration_check(offer):
+    offer["run"](["y", "y"])
+    assert offer["integration"] == [75]  # we started Docker, so it gets its minute
 
 
 def test_offer_does_nothing_when_the_stack_already_answers(offer):

@@ -42,17 +42,46 @@ land after your stack was already stopped.
 ### After a Docker Desktop upgrade: "waiting 1m0s for the backend socket"
 
 ```
+WSL integration with distro 'Ubuntu' unexpectedly stopped. Do you want to restart it?
 running wsl distro proxy in Ubuntu distro: waiting 1m0s for the backend socket
 ... test -s /mnt/wsl/docker-desktop/shared-sockets/host-services/backend.sock: exit status 1
 ```
 
-The upgrade restarts the `docker-desktop` distro, but the shared-socket
-bind mounts into `/mnt/wsl` are not re-made, so the integration agent for
-your distro gives up. Nothing in the distro is wrong. Fix:
+`docker` on Windows works and containers run; inside WSL docker is gone. The
+shared directory under `/mnt/wsl` belongs to the **WSL utility VM**, not to Docker
+Desktop. The upgrade restarts Docker's backend but the VM keeps running, so the
+new backend never republishes `backend.sock` into the old VM. **The dialog's
+Restart button only re-runs the one-minute wait and fails the same way**, and so
+does `docker desktop restart`. The fix is a fresh VM:
 
 ```powershell
-docker desktop restart     # or: Troubleshoot -> Restart, NOT "Skip WSL distro integration"
+tstack services repair            # from PowerShell, never from WSL
+tstack services repair --update   # before updating: pauses while you click "Update version"
 ```
+
+It snapshots the running containers, then `docker desktop stop` →
+`wsl --shutdown` → `docker desktop start`, waits for the engine, checks `docker`
+**inside** each integrated distro, recycles once more if that failed, runs
+`hello-world`, and starts any container that was running before and did not come
+back. It asks first (`-y` skips that): `wsl --shutdown` closes every WSL terminal.
+Afterwards, close a leftover dialog with its X, and reconnect agents' container
+MCP servers (`/mcp` in Claude Code).
+
+`tstack doctor` fails `docker-integration` while this is happening, and when the
+installer starts Docker for you it checks for it and offers the repair
+(default no). Both only ask a distro that is already running: with every
+integrated distro stopped the shared directory is empty by design, and that is
+not reported.
+
+The repair also checks the one other post-upgrade fault: the elevated installer
+can recreate the Docker WSL disk owned by `Administrators` (common when
+`%LOCALAPPDATA%\Docker\wsl` is a junction to another drive), and the engine then
+never starts (`MountDisk/HCS/E_ACCESSDENIED`, shown as a misleading
+"vpnkit-bridge ... bad magic string"). It prints the two `icacls` lines to run
+from an **elevated** PowerShell and waits; it never elevates itself.
+
+**Never** reset to factory defaults or `wsl --unregister docker-desktop` for
+this: both destroy every image and volume, and neither fixes it.
 
 Then check that the stacks came back from the right clone. On a combined
 Windows + WSL machine only one clone holds the AgentMemory LLM settings;
