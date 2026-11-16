@@ -20,6 +20,25 @@ def _no_terminal_prompts(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_real_console(monkeypatch):
+    """The wizard's Console.open() with no argument is the developer's real
+    terminal: /dev/tty, or CONIN$ on Windows. Wherever one exists (a local run,
+    and evidently the macOS runner) the arrow-key review comes up and waits for
+    a key forever, and the whole suite hangs with no output. A test that wants a
+    terminal hands Console.open its own pty; the real one is
+    `Console._unguarded_open`."""
+    from tstack.wizard.console import Console
+
+    real = Console.open
+    monkeypatch.setattr(Console, "_unguarded_open", real, raising=False)
+
+    def guarded(cls, tty=None):
+        return cls() if tty is None else real.__func__(cls, tty)
+
+    monkeypatch.setattr(Console, "open", classmethod(guarded))
+
+
+@pytest.fixture(autouse=True)
 def _no_real_hotkey_probe(monkeypatch):
     """tstack.hotkey asks Windows whether another program holds a chord, and the
     answer is the developer's desktop: on a PC where something holds Ctrl+Backslash

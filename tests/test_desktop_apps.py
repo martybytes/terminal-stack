@@ -146,7 +146,9 @@ def _stubs(
         scripts["pacman"] = f'echo "pacman $*" >> "{log}"'
     for name, body in scripts.items():
         p = bin_dir / name
-        p.write_text("#!/bin/sh\n" + body + "\n")
+        # LF on Windows too: a CRLF shebang is /bin/sh\r, and bash falls through
+        # to the real tool further down PATH.
+        p.write_text("#!/bin/sh\n" + body + "\n", newline="\n")
         p.chmod(0o755)
     log.touch()
     return bin_dir

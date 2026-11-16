@@ -883,7 +883,7 @@ def test_the_console_survives_a_terminal_it_cannot_open(monkeypatch):
         return real(path, *a, **k)
 
     monkeypatch.setattr(builtins, "open", refuse)
-    console = Console.open()
+    console = Console._unguarded_open()  # conftest guards Console.open itself
     assert not console.interactive
     console.close()
 
