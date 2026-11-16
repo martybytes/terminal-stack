@@ -12,6 +12,7 @@ import os
 import sys
 from pathlib import Path
 
+from ..wizard import answers as answers_file
 from ..wizard import emit, flow
 from ..wizard.console import Console
 
@@ -29,13 +30,20 @@ HELP = """tstack wizard - PREVIEW the install questionnaire. Saves nothing.
   The options below are how the installers call it; you do not need them.
 
 Usage:
-  tstack wizard [--emit sh|json] [--out PATH] [--ask-terminals]
-                [--assume-yes] [--no-review]
+  tstack wizard [--emit sh|json] [--out PATH] [--answers FILE]
+                [--ask-terminals] [--assume-yes] [--no-review]
+
+  Keys: up/down move, space ticks, enter continues, left (or b) goes BACK a
+  step, q quits. The review can jump to any step and change just that answer.
+  TS_WIZ_PLAIN=1 uses numbered prompts instead (type < to go back).
 
   --emit sh       shell `export NAME=value` lines, for a bootstrap to source
   --emit json     one object, for the PowerShell bootstrap
   --out PATH      where to write them (required with --emit)
   --only apps     just the CLI tool picker, no review
+  --answers FILE  answers from a JSON file (the shape --emit json writes);
+                  questions it answers are skipped, the rest are asked.
+                  TS_WIZ_ANSWERS=FILE does the same through an installer.
   --ask-terminals include the terminal-emulator question
   --assume-yes    accept the review without showing the prompt
   --no-review     skip the review screen entirely
@@ -60,6 +68,11 @@ def main(argv: list[str]) -> int:
     ask_terminals = False
     assume_yes = False
     no_review = False
+    # TS_WIZ_ANSWERS is the same thing through the environment, which is how it
+    # reaches the wizard through an installer (`TS_WIZ_ANSWERS=a.json
+    # ./install-mac.sh`) without either shim growing a flag.
+    env_answers = os.environ.get("TS_WIZ_ANSWERS", "").strip()
+    answers_path: Path | None = Path(env_answers) if env_answers else None
 
     rest = list(argv)
     while rest:
@@ -79,6 +92,11 @@ def main(argv: list[str]) -> int:
                 print("tstack wizard: --only takes apps", file=sys.stderr)
                 return 2
             only = rest.pop(0)
+        elif item == "--answers":
+            if not rest:
+                print("tstack wizard: --answers needs a file", file=sys.stderr)
+                return 2
+            answers_path = Path(rest.pop(0))
         elif item == "--ask-terminals":
             ask_terminals = True
         elif item == "--assume-yes":
@@ -92,6 +110,17 @@ def main(argv: list[str]) -> int:
     if emit_as and out is None:
         print("tstack wizard: --emit needs --out", file=sys.stderr)
         return 2
+
+    if answers_path is not None:
+        try:
+            preset = answers_file.load(answers_path)
+        except answers_file.AnswersError as exc:
+            print(f"tstack wizard: --answers: {exc}", file=sys.stderr)
+            return 2
+        # The variables each question already honours. An explicit TS_* in the
+        # environment wins over the file: it is the more deliberate act.
+        for name, value in preset.items():
+            os.environ.setdefault(name, value)
 
     # Documented everywhere as "takes every default without prompting", and the
     # shell shim passes --assume-yes when it is set. Reading it here too means
@@ -117,18 +146,24 @@ def main(argv: list[str]) -> int:
         if only == "apps":
             # One question, no review: the caller asked for the picker, not the
             # questionnaire.
-            answers = flow.collect_apps(console)
+            picked = flow.run(console, only_apps=True, preview=preview)
+            if picked is None:
+                return QUIT
             if preview:
                 _say_preview_footer(console)
-            return _emit(answers, emit_as, out)
-        answers = flow.collect(console, ask_terminals=ask_terminals)
+            return _emit(picked, emit_as, out)
+        confirmed = flow.run(
+            console,
+            ask_terminals=ask_terminals,
+            assume_yes=assume_yes,
+            preview=preview,
+            review_screen=not no_review,
+        )
+        if confirmed is None:
+            return QUIT
+        answers = confirmed
         if no_review:
             flow.review(console, answers)
-        else:
-            confirmed = flow.confirm(console, answers, assume_yes, preview=preview)
-            if confirmed is None:
-                return QUIT
-            answers = confirmed
         if preview:
             _say_preview_footer(console)
     finally:

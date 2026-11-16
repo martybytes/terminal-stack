@@ -704,6 +704,63 @@ of those reported btop missing forever, once in each direction.
 `Get-TsAppBin` (plus `$TsAppBinAlternates`) must name what actually lands on PATH — confirm with `Get-Command` after a real install, and
 confirm `Get-TsAppsPending` then stops listing it.
 
+## 4f. Desktop agent apps and the arrow-key wizard — per platform
+
+macOS was verified on the machine that wrote them (Apple Silicon: Orca installed
+from Stably's tap; a hand-installed `Herdr.app` and `T3 Code (Beta).app` were
+detected and left alone; a second run did nothing). The other three platforms
+are checked by hand after `tstack update` pulls the branch.
+
+**Windows** (PowerShell, in Windows Terminal):
+
+```powershell
+tstack update
+python -m pytest tests -m pwsh -q          # from the dev clone: the pwsh catalog reader
+tstack wizard --only apps                  # preview: arrows, space, left = back, q quits
+tstack config apps                         # tick herdr-app, orca, t3code
+winget list --id StablyAI.Orca; winget list --id T3Tools.T3Code
+Get-Command herdr-app                      # the herdr.dev app installer adds it to PATH
+tstack update                              # must NOT list the three as pending
+```
+
+If `tstack update` still lists `orca` or `t3code` as pending after they are
+installed, the install folder differs from the candidates in
+`$TsAppFixedPaths` (`bootstrap/_config.ps1`): `Get-ChildItem
+"$env:LOCALAPPDATA\Programs"` shows the real one; add it there.
+
+**Ubuntu** (a desktop session, not ssh):
+
+```sh
+tstack update
+tstack wizard --only apps                  # the "Desktop agent apps" step is offered
+tstack config apps                         # tick the three
+dpkg -l | grep -iE 'orca-ide|t3-code'      # both .debs installed through apt
+command -v herdr-app                       # ~/.local/bin/herdr-app
+ls ~/.local/share/applications /usr/share/applications | grep -iE 'herdr|orca|t3'
+tstack update                              # must NOT list them as pending
+tests/parity/run.sh                        # the Linux containers still pass
+```
+
+**Omarchy / Arch:**
+
+```sh
+tstack update
+tstack config apps                         # tick the three; also tick herdr (the TUI),
+                                           # which the Arch path used to skip silently
+ls ~/.local/share/terminal-stack/apps/     # orca.AppImage, t3code.AppImage
+ls ~/.local/share/applications/            # orca.desktop, t3code.desktop, herdr-app.desktop
+# Super+Space: Orca, T3 Code and Herdr appear in the launcher and start.
+pacman -Q fuse2 || sudo pacman -S fuse2    # AppImages need FUSE 2
+tests/parity/run.sh bootstrap              # opt-in: RUNS the installer in containers
+```
+
+No `yay` may have run: the transcript shows `downloading orca-linux.AppImage`,
+never an AUR build.
+
+**Everywhere:** over ssh, or with `TS_HEADLESS=1`, the desktop step is not
+offered and nothing GUI is installed; on WSL it is not offered either. In a
+terminal that mangles the redraw, `TS_WIZ_PLAIN=1` gives the numbered prompts.
+
 ## 5. What you cannot verify from a dev clone
 
 `chezmoi source-path` points at the **runtime** clone

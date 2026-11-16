@@ -288,6 +288,26 @@ questionnaire plus the consequences; `-h` on either one says which you have.
 the per-question `TS_*` env vars still skip individual prompts
 (`TS_LEADER`, `TS_THEME`, `TS_ATUIN`, `TS_TERMINALS`, `TS_CC_TTS`, …).
 
+**Keys.** In a real terminal the wizard is arrow-driven: up/down to move, space
+to tick, Enter to continue, left (or `b`) to go **back** a step, `q` to quit.
+The tools, the AI agent CLIs and the desktop agent apps
+(`doc desktop-agent-apps`) are three tick-lists. The review can jump to any
+step, change just that answer, and come back. `TS_WIZ_PLAIN=1` keeps the old
+numbered prompts (type `<` there to go back); a dumb terminal gets them anyway.
+
+**Answers from a file.** `tstack wizard --answers a.json` (or
+`TS_WIZ_ANSWERS=a.json` in front of an installer) answers the questions the file
+names and asks the rest. The file is what `--emit json` writes, so one run can
+be replayed on another machine:
+
+```sh
+tstack wizard --emit json --out ~/answers.json      # record (saves nothing)
+TS_WIZ_ANSWERS=~/answers.json ./install-linux.sh    # replay on a new box
+```
+
+An unknown key or impossible value is refused, naming the key, before anything
+is asked.
+
 Answers are saved **before** anything is installed, so a package that fails to
 install can no longer cost you the answers you just gave. Anything optional that
 fails is collected and reported at the end instead of aborting the run.

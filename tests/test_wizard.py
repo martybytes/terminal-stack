@@ -932,9 +932,13 @@ def _cmd(argv, monkeypatch, answers=None, quit_it=False):
     from tstack.commands import wizard as cmd
 
     monkeypatch.setattr(
-        cmd.flow, "collect", lambda console, ask_terminals=False: answers or flow.Answers()
+        cmd.flow,
+        "collect",
+        lambda console, ask_terminals=False, ask=None: answers or flow.Answers(),
     )
-    monkeypatch.setattr(cmd.flow, "collect_apps", lambda console: answers or flow.Answers())
+    monkeypatch.setattr(
+        cmd.flow, "collect_apps", lambda console, ask=None: answers or flow.Answers()
+    )
     monkeypatch.setattr(cmd.flow, "review", lambda console, a: None)
     monkeypatch.setattr(cmd.flow, "confirm", lambda console, a, assume_yes, **kw: None if quit_it else a)
     return cmd.main(argv)
@@ -979,7 +983,7 @@ def test_only_apps_skips_the_review_entirely(monkeypatch, tmp_path):
     from tstack.commands import wizard as cmd
 
     reviewed: list[int] = []
-    monkeypatch.setattr(cmd.flow, "collect_apps", lambda console: flow.Answers(apps=["eza"]))
+    monkeypatch.setattr(cmd.flow, "collect_apps", lambda console, ask=None: flow.Answers(apps=["eza"]))
     monkeypatch.setattr(cmd.flow, "confirm", lambda *a, **k: reviewed.append(1))
     out = tmp_path / "a.sh"
     assert cmd.main(["--only", "apps", "--emit", "sh", "--out", str(out)]) == 0
@@ -996,7 +1000,7 @@ def test_no_review_skips_the_confirm_loop(monkeypatch, tmp_path):
     from tstack.commands import wizard as cmd
 
     confirmed: list[int] = []
-    monkeypatch.setattr(cmd.flow, "collect", lambda c, ask_terminals=False: flow.Answers())
+    monkeypatch.setattr(cmd.flow, "collect", lambda c, ask_terminals=False, ask=None: flow.Answers())
     monkeypatch.setattr(cmd.flow, "review", lambda c, a: None)
     monkeypatch.setattr(cmd.flow, "confirm", lambda *a, **k: confirmed.append(1))
     assert cmd.main(["--no-review"]) == 0
@@ -1140,7 +1144,7 @@ def test_ts_assume_yes_works_on_the_direct_path_too(monkeypatch, tmp_path):
     from tstack.commands import wizard as cmd
 
     seen: list[bool] = []
-    monkeypatch.setattr(cmd.flow, "collect", lambda c, ask_terminals=False: flow.Answers(asked=3))
+    monkeypatch.setattr(cmd.flow, "collect", lambda c, ask_terminals=False, ask=None: flow.Answers(asked=3))
     monkeypatch.setattr(
         cmd.flow, "confirm", lambda c, a, assume_yes, **kw: (seen.append(assume_yes), a)[1]
     )

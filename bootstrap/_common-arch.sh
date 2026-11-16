@@ -98,9 +98,14 @@ common_install_selected_apps() {
 
     local pkgs="" id pkg
     for id in $apps; do
-        # The AI CLIs are an install ROUTE, not a package: ts_install_ai_clis
-        # below handles them and no package manager has any of them.
+        # The AI CLIs, herdr, docker and the desktop apps are install ROUTES,
+        # not packages: each has its own shared installer below (docker's runs
+        # from common_install_all). herdr used to fall through to ts_arch_pkg
+        # here, print "no Arch package mapping" and never install at all.
         ts_app_is_ai "$id" && continue
+        ts_app_is_herdr "$id" && continue
+        ts_app_is_docker "$id" && continue
+        ts_app_is_desktop "$id" && continue
 
         # Runtime managers. Omarchy standardises on mise (mise-bin is in its
         # base package set, `omarchy install dev-env <lang>` is entirely
@@ -151,6 +156,10 @@ common_install_selected_apps() {
     esac
 
     ts_install_ai_clis "$apps"
+    ts_install_herdrs "$apps"
+    # Herdr app / Orca / T3 Code: AUR-only here, so vendor builds (AppImage),
+    # never an AUR helper. One shared route in _config.sh.
+    ts_install_desktops "$apps"
 }
 
 common_install_terminals() {
