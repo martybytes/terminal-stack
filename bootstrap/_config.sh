@@ -1042,7 +1042,11 @@ ts_install_desktop_app() {
             || ts_note_failure "herdr-app" "see https://herdr.dev/download/"
         return 0
     fi
-    if command -v apt-get >/dev/null 2>&1; then
+    # pacman first: Arch is the AppImage route by design, and asking for apt-get
+    # alone sends an Arch box that happens to carry it down the .deb path.
+    if command -v pacman >/dev/null 2>&1; then
+        _ts_desktop_install_appimage "$id"
+    elif command -v apt-get >/dev/null 2>&1; then
         _ts_desktop_install_deb "$id"
     else
         _ts_desktop_install_appimage "$id"

@@ -21,7 +21,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from tests.shell_support import BASH  # noqa: E402
+from tests.shell_support import BASH, bash_path  # noqa: E402
 from tstack import apps  # noqa: E402
 from tstack import platform as plat  # noqa: E402
 
@@ -100,7 +100,9 @@ def test_neither_distro_half_defines_the_desktop_route():
 # ------------------------------------------------------------------ behaviour
 
 
-def _stubs(tmp: Path, *, os_name: str, machine: str, apt: bool = False) -> Path:
+def _stubs(
+    tmp: Path, *, os_name: str, machine: str, apt: bool = False, pacman: bool = False
+) -> Path:
     """A PATH dir with uname/brew/curl/sudo/apt-get stubs that log to calls.log."""
     bin_dir = tmp / "bin"
     bin_dir.mkdir()
@@ -139,6 +141,9 @@ def _stubs(tmp: Path, *, os_name: str, machine: str, apt: bool = False) -> Path:
     }
     if apt:
         scripts["apt-get"] = f'echo "apt-get $*" >> "{log}"'
+    if pacman:
+        # Arch is told apart by pacman: a CI runner has a real apt-get on PATH.
+        scripts["pacman"] = f'echo "pacman $*" >> "{log}"'
     for name, body in scripts.items():
         p = bin_dir / name
         p.write_text("#!/bin/sh\n" + body + "\n")
@@ -149,7 +154,8 @@ def _stubs(tmp: Path, *, os_name: str, machine: str, apt: bool = False) -> Path:
 
 def _run(tmp: Path, bin_dir: Path, body: str, **env: str) -> subprocess.CompletedProcess:
     base = {
-        "PATH": f"{bin_dir}:/usr/bin:/bin",
+        # bash_path: a raw C:\ path splits on its colon, and the stubs never run.
+        "PATH": f"{bash_path(bin_dir)}:/usr/bin:/bin",
         "HOME": str(tmp / "home"),
         "XDG_DATA_HOME": str(tmp / "home/.local/share"),
         "TS_HEADLESS_RESOLVED": "0",
@@ -213,7 +219,7 @@ def test_debian_installs_the_matching_deb_through_apt(tmp_path):
 
 @pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
 def test_arch_installs_appimages_with_a_launcher_entry(tmp_path):
-    bin_dir = _stubs(tmp_path, os_name="Linux", machine="aarch64")
+    bin_dir = _stubs(tmp_path, os_name="Linux", machine="aarch64", pacman=True)
     got = _run(tmp_path, bin_dir, 'ts_install_desktops "orca t3code"')
     share = tmp_path / "home/.local/share"
     calls = (tmp_path / "calls.log").read_text()
