@@ -22,11 +22,14 @@ interactive terminals".
 
 ## Who owns `~/.claude/settings.json`
 
-Shared file. The stack renders `statusLine`, `hooks` and `theme`; **Claude Code owns
-everything else** — `model` (from `/model`), `enabledPlugins` and
-`extraKnownMarketplaces` (from `/plugin`), `permissions`, `env`.
+Shared file. The stack renders `statusLine`, `theme` and **its own entries** in
+`hooks`; **Claude Code owns everything else** — `model` (from `/model`),
+`enabledPlugins` and `extraKnownMarketplaces` (from `/plugin`), `permissions`, `env`.
+Other tools' hooks in `hooks` are theirs too: `herdr integration install claude` adds
+entries there, and an apply keeps them. An entry is the stack's if its command names
+`wez-tab-status`, `cc-speak`, `cc-tts` or `terminal-stack-tts`.
 
-On Windows the sync splices its three keys in and leaves the rest byte-for-byte
+On Windows the sync splices its part in and leaves the rest byte-for-byte
 (`bootstrap/_merge_cursor_hooks.ps1` does the same for `~/.cursor/hooks.json`, per hook
 entry); on WSL/macOS/Linux the chezmoi `modify_` scripts in `dot_claude/` and
 `dot_cursor/` do the same job. So installing a plugin, switching model, or allowing an MCP tool survives an

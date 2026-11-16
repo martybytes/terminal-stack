@@ -26,6 +26,20 @@ light/dark token written over the top of that flaps between the two on every
 apply and every `omarchy theme set`, with nothing to explain it. statusLine and
 hooks stay ours on every platform; only this one key is ceded.
 
+`hooks` is owned per ENTRY, not per key. Other tools write their own hooks into
+this same object: `herdr integration install claude` adds SessionStart,
+PreToolUse, Stop and friends calling ~/.claude/hooks/herdr-agent-state.sh, and
+that is all herdr's agents panel has to go on. Splicing the `hooks` VALUE
+wholesale deleted them on every `tstack update` -- the panel went empty, with
+nothing in the diff to say why. So each event array is rebuilt as *our rendered
+groups, then every group that was already there with our hooks taken out*. An
+inner hook is ours if its command references one of MARKERS, or if it is
+identical to one we render now; a group someone else appended into keeps their
+hook. An event that ends up empty disappears, which is how turning TTS off still
+removes ours. Same rule as dot_cursor/modify_hooks.json.tmpl, one level deeper
+because Claude nests `{matcher, hooks: [...]}`. docs/decisions.md § "Why
+`~/.claude/settings.json` is spliced, not copied".
+
 Keep the rationale HERE rather than as a `{{/* … */}}` comment inside the JSON
 fragment: tests/test_agent_tools.py renders this template crudely (strip the
 `if`/`end` directives, substitute the rest) and a template comment came back as
@@ -133,6 +147,76 @@ FRAGMENT = r"""
 """
 
 
+# Every command this stack has ever written into the `hooks` object, on any
+# platform. Same list as bootstrap/_merge_claude_settings.ps1. Never `.claude/hooks/`
+# on its own: herdr's herdr-agent-state.sh lives in that directory too.
+MARKERS = (
+    "wez-tab-status",  # .claude/hooks/wez-tab-status.sh / .ps1
+    "cc-speak",  # .claude/hooks/cc-speak.sh, cc-speak-input.sh
+    "cc-tts",  # .claude/hooks/cc-tts-*.sh
+    "terminal-stack-tts",  # Windows: tts-daemon/terminal-stack-tts.exe hook ...
+)
+
+
+def canonical(value):
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
+def is_ours(hook, rendered):
+    command = hook.get("command", "") if isinstance(hook, dict) else ""
+    if not isinstance(command, str):
+        command = ""
+    if any(marker in command for marker in MARKERS):
+        return True
+    canon = canonical(hook)
+    return any(canonical(r) == canon for r in rendered)
+
+
+def inner_hooks(groups):
+    out = []
+    for group in groups:
+        if isinstance(group, dict) and isinstance(group.get("hooks"), list):
+            out.extend(group["hooks"])
+    return out
+
+
+def as_list(value):
+    if value is None:
+        return []
+    return value if isinstance(value, list) else [value]
+
+
+def merge_hooks(live_hooks, rendered_hooks):
+    if not isinstance(rendered_hooks, dict):
+        rendered_hooks = OrderedDict()
+    if not isinstance(live_hooks, dict):
+        live_hooks = OrderedDict()
+    events = list(live_hooks.keys())
+    events += [ev for ev in rendered_hooks if ev not in live_hooks]
+    result = OrderedDict()
+    for event in events:
+        ours = as_list(rendered_hooks.get(event))
+        rendered_inner = inner_hooks(ours)
+        foreign = []
+        for group in as_list(live_hooks.get(event)):
+            if not isinstance(group, dict) or not isinstance(group.get("hooks"), list):
+                # Not a shape we write; leave it exactly as found.
+                foreign.append(group)
+                continue
+            kept = [h for h in group["hooks"] if not is_ours(h, rendered_inner)]
+            if len(kept) == len(group["hooks"]):
+                foreign.append(group)
+            elif kept:
+                # Someone appended into a group we wrote: theirs survives.
+                trimmed = OrderedDict(group)
+                trimmed["hooks"] = kept
+                foreign.append(trimmed)
+        entries = list(ours) + foreign
+        if entries:
+            result[event] = entries
+    return result
+
+
 def emit(text):
     # Binary, not sys.stdout.write: text mode translates \n on the way out, so
     # on a CRLF host every apply adds a \r that the next apply reads back and
@@ -168,9 +252,13 @@ if not isinstance(live, dict):
     emit(live_raw)
 
 # Splice: overwrite the keys the fragment renders, in place, and append any it
-# adds. Every other key — and the live file's key order — is preserved.
+# adds -- except `hooks`, merged per entry below. Every other key, and the live
+# file's key order, is preserved.
 merged = OrderedDict(live)
 for key, value in fragment.items():
-    merged[key] = value
+    if key == "hooks":
+        merged[key] = merge_hooks(live.get("hooks"), value)
+    else:
+        merged[key] = value
 
 emit(json.dumps(merged, indent=2) + "\n")

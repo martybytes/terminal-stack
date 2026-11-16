@@ -3,7 +3,7 @@
 # instead of replacing the file. Invoked by scripts\sync-windows.ps1 and
 # run_after_90-sync-windows.sh; the top-level splice engine is _merge_json_settings.ps1.
 #
-# Why this needs more than the key-splice _merge_claude_settings.ps1 does: everything
+# Why this needs more than a top-level key splice: everything
 # in this file lives under ONE top-level `hooks` key, and other tools put their
 # entries in the same event arrays we use. agentmemory's Cursor wiring
 # (the agentmemory plugin's Cursor installer) adds seven hooks, two of
