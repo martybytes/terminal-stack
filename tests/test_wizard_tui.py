@@ -323,11 +323,17 @@ def test_the_terminal_is_restored_even_when_a_read_fails(monkeypatch):
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX termios")
 def test_arrow_keys_decode_from_a_real_pty():
     import pty
+    import termios
+    import tty
 
     from tstack.wizard import console as console_mod
 
     master, slave = pty.openpty()
     try:
+        # Non-canonical BEFORE the bytes arrive. Written into a canonical pty,
+        # a partial line with no newline is never handed to read() on macOS
+        # once the mode flips, and the read blocks until CI cancels the job.
+        tty.setcbreak(slave, termios.TCSANOW)
         for raw, want in ((b"\x1b[A", UP), (b"\x1b[B", DOWN), (b" ", SPACE), (b"\r", ENTER)):
             os.write(master, raw)
             assert console_mod._posix_key(slave) == want

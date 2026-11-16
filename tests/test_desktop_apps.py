@@ -155,9 +155,10 @@ def _stubs(
 
 
 def _run(tmp: Path, bin_dir: Path, body: str, **env: str) -> subprocess.CompletedProcess:
+    stubs = bash_path(bin_dir)
     base = {
         # bash_path: a raw C:\ path splits on its colon, and the stubs never run.
-        "PATH": f"{bash_path(bin_dir)}:/usr/bin:/bin",
+        "PATH": f"{stubs}:/usr/bin:/bin",
         "HOME": str(tmp / "home"),
         "XDG_DATA_HOME": str(tmp / "home/.local/share"),
         "TS_HEADLESS_RESOLVED": "0",
@@ -165,7 +166,9 @@ def _run(tmp: Path, bin_dir: Path, body: str, **env: str) -> subprocess.Complete
     base.update(env)
     (tmp / "home").mkdir(exist_ok=True)
     return subprocess.run(
-        [BASH, "-c", ". bootstrap/_config.sh >/dev/null 2>&1; " + body],
+        # PATH again INSIDE bash: Git's bin/bash.exe launcher (what CI resolves)
+        # puts /usr/bin in front of the inherited PATH, hiding every stub.
+        [BASH, "-c", f'PATH="{stubs}:$PATH"; . bootstrap/_config.sh >/dev/null 2>&1; ' + body],
         cwd=ROOT,
         start_new_session=True,
         capture_output=True,
