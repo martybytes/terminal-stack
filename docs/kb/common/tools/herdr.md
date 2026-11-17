@@ -178,6 +178,17 @@ one is authoritative — the Windows one is reached through interop (`herdr.exe`
 never `pgrep`, which finds nothing inside WSL while a healthy Windows server runs
 on the same machine.
 
+## The agents panel
+
+herdr knows an agent is running because the agent's own hooks report to it. Install
+them once per machine with `herdr integration install claude` (or `codex`,
+`cursor`, ...), and check them with `herdr integration status`. The Claude hooks live
+in `~/.claude/settings.json`, a file the stack also writes. Until 11/16/2026 every
+`tstack update` replaced the whole `hooks` section there and deleted herdr's entries,
+so the panel went empty after each update. The stack now replaces only its own
+entries. If the panel is empty, run `herdr integration status`. If an agent shows
+`not installed`, install it again.
+
 ## Updates
 
 herdr self-updates with `herdr update`, and checks for new versions in the

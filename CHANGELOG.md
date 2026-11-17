@@ -73,6 +73,19 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
   status line instead of freezing the screen for the length of a `chezmoi
   apply`; so do the doctor and the engine probes. `tstack services status`
   gained the structured read model the dashboard uses (`status_rows`).
+### Fixed
+
+- **`tstack update` no longer empties herdr's agents panel (11/16/2026).**
+  `herdr integration install claude` adds its own hooks to
+  `~/.claude/settings.json`, and the stack's splice replaced the whole `hooks`
+  key on every apply, deleting them silently. On every platform, both splices
+  (`dot_claude/modify_settings.json.tmpl` and
+  `bootstrap/_merge_claude_settings.ps1`) now own only our own hook entries,
+  matched by command, and keep everyone else's, including a hook appended into
+  one of our groups. Run `herdr integration install claude` once more after
+  updating; it now survives. `docs/decisions.md` § "Why
+  `~/.claude/settings.json` is spliced, not copied".
+
 ### Added
 
 - **`tstack docs`: the knowledge base in your browser (09/30/2026).** `tstack
