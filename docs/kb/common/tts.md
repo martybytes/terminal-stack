@@ -55,8 +55,9 @@ save happily on a Mac and do nothing.
 - **`self`** — the agent writes its own one-liner, so you hear *"Migrated the
   parser and all tests pass."* **No extra model call and no added latency**: the
   agent appends a hidden `<!-- speak: … -->` marker to its final message and the
-  hook reads it. If there is no marker, the first prose sentence is used instead,
-  capped at 15 words.
+  hook reads it. The marker is spoken whole, never cut to `maxChars`. If there is
+  no marker, the first prose sentence is used instead, capped at 15 words and at
+  `maxChars`, ending on a whole word.
 - **`hook`** — reads the agent's last message out raw, truncated to `maxChars`.
   Blunt, but needs no instruction block.
 
@@ -169,6 +170,13 @@ a fallback — Kokoro is probably down. A once-a-day notice says so.
   notification used to become a question, so one turn was announced twice:
   *"finished"*, then *"I have a question for you"*. It is dropped now. Other
   notifications, such as a permission prompt, still speak.
+- **Turns a background task started.** When a background task or agent finishes,
+  Claude opens a new turn to tell the session, and that turn's Stop used to be
+  announced like an answer to you: "waiting on the suite", then "the suite
+  passed", for one prompt. It was 43% of everything spoken. Only the turns you
+  start announce themselves now; an error from a background turn still speaks.
+  Set `sources.claude.speakBackground` to `true` in `~/.claude/tts/local.json` to
+  hear them again.
 
 ## It went quiet
 

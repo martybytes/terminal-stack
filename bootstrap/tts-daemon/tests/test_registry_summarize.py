@@ -106,11 +106,36 @@ def test_coalesced_line():
     assert line == "Three sessions finished: alpha, beta, and gamma."
 
 
-def test_clamp_max_chars():
+def test_clamp_max_chars_on_text_without_a_marker():
     s = Summarizer(DictCfg({"maxChars": 50, "summarize": {"mode": "self"}}))
     line = s.line_for_batch(
-        [ev(text="<!-- speak: " + "word " * 40 + "-->")], Registry())
+        [ev(text="Rebuilt the parser and every caller now passes. " * 3)], Registry())
     assert len(line) <= 50
+    assert line.endswith("…")
+
+
+def test_clamp_ends_on_a_whole_word():
+    """Row 2573 was spoken as "...the other gathers" plus a clipped word."""
+    s = Summarizer(DictCfg({"maxChars": 50}))
+    line = s.line_for_batch([ev(state="error", project="terminal-stack-extraordinarily")],
+                            Registry())
+    assert len(line) <= 50
+    words = line.rstrip("…").split()
+    full = "Claude. Error in terminal-stack-extraordinarily. You may want to look."
+    full = full.split(" ")
+    assert words == full[: len(words)]
+
+
+def test_speak_marker_is_spoken_whole_past_max_chars():
+    """The lead-in ate a third of maxChars, so a 15-word marker was clipped mid-word."""
+    sentence = ("Two read-only investigations are running: one traces the code path, "
+                "the other gathers runtime evidence.")
+    s = Summarizer(DictCfg({"maxChars": 120, "summarize": {"mode": "self"}}))
+    line = s.line_for_batch(
+        [ev(project="terminal-stack", text=f"Body.\n<!-- speak: {sentence} -->")],
+        Registry())
+    assert len(line) > 120
+    assert line.endswith(sentence)
 
 
 def test_codex_source_parses_and_uses_prefix():

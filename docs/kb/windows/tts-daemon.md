@@ -235,7 +235,16 @@ If duplicates *are* showing up:
   hear them on purpose, set `sources.claude.speakSdk` to `true` in `local.json`.
 - **"Finished", then "I have a question for you" a minute later** — that was
   Claude's `idle_prompt` reminder, and an exe from before 10/25/2026 still
-  speaks it.
+  speaks it. `tstack update` now rebuilds the exe whenever daemon source changed
+  since its build; before that it was installed only when missing, so an old
+  build could run for weeks.
+- **An announcement for every background task**: "waiting on the suite", then
+  "the suite passed". Turns a background task started are silent now
+  (`sources.claude.speakBackground` turns them back on).
+- **Lines that stop mid-word**: `maxChars` (default 120) clipped every line,
+  and the "Claude. project finished." lead-in used a third of it. A
+  `<!-- speak: -->` marker is now spoken whole, and other text ends on a whole
+  word.
 - **`tstack config tts daemon status` first.** While the daemon is down each hook speaks from
   its own detached process. They still take turns (a lock file serialises them) and still
   deduplicate through the shared history, but the daemon is the path that also coalesces —

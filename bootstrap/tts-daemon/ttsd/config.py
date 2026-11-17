@@ -33,7 +33,11 @@ DEFAULTS: dict[str, Any] = {
         # Obsidian's Claudian, a script) loads the same user hooks as a terminal session
         # and opens a new session per chat, so each one arrived with its own ordinal and
         # voice. Off unless asked for; CLAUDE_CODE_ENTRYPOINT tells the two apart.
-        "claude": {"prefixEnabled": True, "prefix": "Claude", "speakSdk": False},
+        # speakBackground: a background task or agent finishing opens a turn of its own,
+        # and that turn's Stop spoke like an answer to you (43% of all lines spoken).
+        # Off: only turns you started announce themselves. Errors still speak.
+        "claude": {"prefixEnabled": True, "prefix": "Claude", "speakSdk": False,
+                   "speakBackground": False},
         "cursor": {"prefixEnabled": True, "prefix": "Cursor"},
         "codex": {"prefixEnabled": True, "prefix": "Codex"},
     },

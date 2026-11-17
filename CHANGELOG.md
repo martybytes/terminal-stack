@@ -4,6 +4,18 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+### Fixed
+
+- **Voice notifications: no more background-task chatter, cut-off lines, or
+  stale builds (11/16/2026).** A finished background task or agent opens a turn
+  of its own, and its Stop was spoken like an answer to you: 43% of everything
+  said. Those turns are silent now; errors still speak, and
+  `sources.claude.speakBackground` brings them back. A `<!-- speak: -->` line is
+  spoken whole instead of cut mid-word at `maxChars`, and other text ends on a
+  whole word. `tstack update` rebuilds the TTS exe when daemon source changed
+  since its build; it was only installed when missing, which left one machine
+  speaking the idle reminder a month after the fix. `doc common/tts`.
+
 ### Added
 
 - **`tstack services repair` fixes Docker Desktop's "waiting 1m0s for the

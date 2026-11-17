@@ -79,6 +79,9 @@ FIELDS: tuple[dict, ...] = tuple(
         ("sources.claude.speakSdk", "Speak SDK-driven Claude sessions", "bool", None,
          "Wording", "Editor plugins (Obsidian's Claudian) and scripts that run Claude "
          "through the Agent SDK. Off: only terminal sessions speak.", ()),
+        ("sources.claude.speakBackground", "Speak turns a background task started", "bool",
+         None, "Wording", "A finished background task or agent opens a turn of its own. "
+         "Off: only turns you started speak; errors and questions always do.", ()),
         ("sources.cursor.prefix", "Cursor prefix", "str", None, "Wording", "", ()),
         ("sources.cursor.prefixEnabled", "Say the Cursor prefix", "bool", None, "Wording",
          "", ()),

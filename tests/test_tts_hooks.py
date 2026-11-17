@@ -178,3 +178,73 @@ def test_the_idle_reminder_leaves_no_state(tmp_path):
     show = 'cc_tts_parse_input_state "$IN" notification; printf "[%s]" "$CC_TTS_PARSED_STATE"'
     assert _lib(tmp_path, {}, show, IN=idle).stdout == "[]"
     assert _lib(tmp_path, {}, show, IN=perm).stdout == "[question]"
+
+
+def _transcript(tmp_path: Path, *kinds: str) -> str:
+    """A transcript whose user entries were opened by each kind, in order."""
+    rows = []
+    for kind in kinds:
+        content = "<task-notification>\n<task-id>b1</task-id>" if kind == "task" else "hi"
+        rows.append({"type": "user", "message": {"content": content},
+                     "origin": {"kind": "task-notification" if kind == "task" else "human"}})
+        rows.append({"type": "assistant", "message": {"content": []}})
+    path = tmp_path / "session.jsonl"
+    path.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+    return path.as_posix()
+
+
+@needs_bash
+@pytest.mark.parametrize("kinds,speak_background,source,silenced", [
+    (("human", "task"), None, "claude", True),
+    (("task", "human"), None, "claude", False),
+    (("human", "task"), True, "claude", False),
+    (("human", "task"), None, "cursor", False),
+])
+def test_turns_a_background_task_started_are_silenced(tmp_path, kinds, speak_background,
+                                                      source, silenced):
+    """A finished background task opens a turn whose Stop sounded like an answer to you.
+    Twin of turn_started_by_background in ttsd/hooks.py."""
+    cfg: dict = {"enabled": True}
+    if speak_background is not None:
+        cfg["sources"] = {"claude": {"speakBackground": speak_background}}
+    hook = json.dumps({"transcript_path": _transcript(tmp_path, *kinds)})
+    got = _lib(tmp_path, cfg, f'cc_tts_background_silenced {source} "$IN"', IN=hook)
+    assert (got.returncode == 0) is silenced, got.stderr
+
+
+@needs_bash
+def test_background_detection_fails_open(tmp_path):
+    for hook in ("{}", json.dumps({"transcript_path": (tmp_path / "gone").as_posix()}), "x"):
+        got = _lib(tmp_path, {"enabled": True}, 'cc_tts_background_silenced claude "$IN"',
+                   IN=hook)
+        assert got.returncode != 0, hook
+
+
+def test_the_stop_hook_checks_the_background_gate_before_handing_off():
+    """From WSL the exe cannot read a /home transcript, so the script decides first."""
+    src = (ROOT / "dot_claude" / "hooks" / "executable_cc-speak.sh").read_text(
+        encoding="utf-8")
+    gate = src.index('cc_tts_background_silenced "$source" "$input" && exit 0')
+    assert gate < src.index("cc_tts_windows_hook ")
+
+
+@needs_bash
+def test_a_speak_marker_is_spoken_whole_and_other_text_ends_on_a_word(tmp_path):
+    """maxChars clipped the marker mid-word; the lead-in took a third of the budget."""
+    sentence = ("Two read-only investigations are running: one traces the code path, "
+                "the other gathers runtime evidence.")
+    cfg = {"enabled": True, "maxChars": 60, "summarize": {"mode": "self"},
+           "announce": {"includeProject": True}}
+    hook = json.dumps({"last_assistant_message": f"Body.\n<!-- speak: {sentence} -->"})
+    got = _lib(tmp_path, cfg, 'cc_tts_build_speech claude waiting terminal-stack',
+               CC_TTS_HOOK_JSON=hook)
+    assert got.stdout.endswith(sentence), got.stdout + got.stderr
+
+    long_text = "Rebuilt the parser and every caller now passes its own tests cleanly."
+    got = _lib(tmp_path, {"enabled": True, "maxChars": 40,
+                          "announce": {"templates": {"waiting": long_text}}},
+               "cc_tts_build_speech claude waiting terminal-stack")
+    assert got.stdout.endswith("…"), got.stdout
+    assert len(got.stdout) <= 40
+    words = got.stdout.rstrip("…").split()[1:]  # drop the "claude." prefix
+    assert words == long_text.split()[: len(words)]
