@@ -250,6 +250,11 @@ class Console:
 
 
 def _posix_key(fd: int) -> str:
+    # sys.platform, not a `type: ignore`: mypy checks for the HOST platform, so an
+    # ignore needed on Windows (no termios) is an unused ignore on Linux CI, and
+    # the reverse for msvcrt/windll below. A platform check is right on both.
+    if sys.platform == "win32":
+        raise OSError("no termios on Windows")
     import select
     import termios
     import tty
@@ -292,11 +297,13 @@ def _posix_key(fd: int) -> str:
 
 
 def _win_key() -> str:  # pragma: no cover - Windows only
+    if sys.platform != "win32":
+        raise OSError("msvcrt is Windows only")
     import msvcrt
 
-    ch = msvcrt.getwch()  # type: ignore[attr-defined]
+    ch = msvcrt.getwch()
     if ch in ("\x00", "\xe0"):
-        return _WIN_SCAN.get(msvcrt.getwch(), ESC)  # type: ignore[attr-defined]
+        return _WIN_SCAN.get(msvcrt.getwch(), ESC)
     if ch == "\r":
         return ENTER
     if ch == " ":
@@ -313,10 +320,12 @@ def _win_key() -> str:  # pragma: no cover - Windows only
 def _enable_vt() -> bool:  # pragma: no cover - Windows only
     """Turn on ANSI processing for the console. False on a console that cannot,
     which is the old conhost: the numbered prompts are used there instead."""
+    if sys.platform != "win32":
+        return False
     try:
         import ctypes
 
-        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        kernel32 = ctypes.windll.kernel32
         kernel32.CreateFileW.restype = ctypes.c_void_p
         # CONOUT$ itself, not STD_OUTPUT: the installers may capture stdout,
         # and the wizard draws on the console whatever stdout is.

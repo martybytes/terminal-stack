@@ -6,6 +6,13 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **Windows ssh ignored every key in `~\.ssh` once Codex was installed (11/16/2026).**
+  Codex's sandbox adds `CodexSandboxUsers:(RX)` to the profile root, `~\.ssh` inherits
+  it, and Windows OpenSSH refuses a key anyone else can open ("bad permissions", then
+  `Permission denied (publickey)`). `tstack doctor` now checks it (`ssh-key-acl`),
+  `tstack doctor --repair` makes `~\.ssh` private after you confirm, and `tstack ssh`
+  warns before its key-login proof. This is a doctor check rather than an install step,
+  because the ACE arrives whenever Codex is installed or updated.
 - **`tstack ssh setup` failed on its first real run (11/16/2026).** Four bugs:
   - Windows sshd answered on both 22 and the old 2222. Every `Port` line adds a listener, so the managed block's "first value wins" did not cover it. The other `Port` lines are now commented out, tagged.
   - The WSL sshd was configured before Windows let go of 2222, and under mirrored networking it could not bind ("Address already in use"). The admin part now runs first, and a WSL port still held on Windows is refused, naming the process.

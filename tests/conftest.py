@@ -80,3 +80,14 @@ def _isolated_headroom_token(tmp_path, monkeypatch):
     this the suite would overwrite the developer's real one -- or, worse, pass
     because it happened to find it."""
     monkeypatch.setattr(headroom_token, "path", lambda: tmp_path / "machine-headroom-token")
+
+
+@pytest.fixture(autouse=True)
+def _no_real_icacls(monkeypatch):
+    """tstack.ssh_acl reads the developer's real ~/.ssh ACLs through icacls, so
+    `tstack doctor` on a Windows dev box would fail or pass depending on that
+    machine. "Could not run" makes every file look unreadable, which the check
+    reports as clean; tests/test_ssh_acl.py hands in its own runner."""
+    from tstack import ssh_acl
+
+    monkeypatch.setattr(ssh_acl, "_icacls", lambda argv: None)

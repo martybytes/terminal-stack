@@ -11,7 +11,7 @@ import sys
 from typing import TYPE_CHECKING
 
 from .. import platform as plat
-from .. import ssh
+from .. import ssh, ssh_acl
 
 if TYPE_CHECKING:
     from ..wizard.flow import Asker
@@ -268,6 +268,10 @@ def apply(values: dict[str, str], chosen: list[ssh.Key], ask: Asker, *, dry: boo
             "    passwords: off "
             + ("now" if force_off else "once a key login is verified on each side")
         )
+    exposed = ssh_acl.exposed(ssh.ssh_dir())
+    if exposed:
+        say(f"    WARNING: {ssh_acl.summary(exposed)}.")
+        say("    The key-login proof will fail until that is fixed: tstack doctor --repair")
     if dry:
         say("==> dry run: nothing changed.")
         return 0

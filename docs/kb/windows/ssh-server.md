@@ -92,6 +92,19 @@ A computer that used another port before (the old 2222 for Windows, for example)
 
 ## Troubleshooting
 
+- **`Bad permissions. Try removing permissions for user: ...CodexSandboxUsers` / `UNPROTECTED PRIVATE KEY FILE`**:
+  Windows OpenSSH skips any key that someone other than you, SYSTEM or Administrators
+  can open, and the server then answers `Permission denied (publickey)`. Codex's sandbox
+  adds a `CodexSandboxUsers` ACE to your profile root, and `~\.ssh` inherits it.
+  `tstack doctor` reports it (`ssh-key-acl`) and `tstack doctor --repair` makes `~\.ssh`
+  private: inheritance off, then you, SYSTEM and Administrators only. No admin needed. By hand:
+
+  ```powershell
+  icacls "$HOME\.ssh" /inheritance:r /grant:r "${env:USERNAME}:(OI)(CI)F" "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F"
+  icacls "$HOME\.ssh\*" /reset /T /C /Q
+  ```
+
+  A Codex sandbox session can no longer read your keys after this, which is the point.
 - **`Permission denied (publickey)` on port 22, as an admin**: check which keys file is in force (`tstack ssh` shows it). The admin file is ignored unless its ACL is SYSTEM and Administrators only. Setup fixes that ACL.
 - **WSL: `ssh.socket` fails with "Address already in use"**: under mirrored networking WSL shares the Windows port space. Something on Windows holds the WSL port, often an older Windows sshd still listening on it. Setup checks this first and names the process.
 - **Port 2222 refuses from another computer but works locally**: WSL is not mirrored yet. Run `wsl --shutdown` and reconnect.

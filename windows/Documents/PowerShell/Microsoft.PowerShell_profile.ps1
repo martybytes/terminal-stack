@@ -863,6 +863,10 @@ if (Get-Command fnm -ErrorAction SilentlyContinue) {
         $tsFnmEnv = fnm env --use-on-cd --resolve-engines=false --shell powershell 2>$null | Out-String
         if (-not "$tsFnmEnv".Trim()) { $tsFnmEnv = fnm env --use-on-cd --shell powershell 2>$null | Out-String }
         if ("$tsFnmEnv".Trim()) { Invoke-Expression $tsFnmEnv }
+    } catch {
+        # "Program 'fnm.exe' failed to run" is a TERMINATING error (the process
+        # never started), so SilentlyContinue does not stop it; only a catch does.
+        # The ssh-symlink notice further down names the machine-side fix.
     } finally { $ErrorActionPreference = $tsFnmEap }
 }
 

@@ -44,6 +44,8 @@ from .. import (
     hotkey,
     paths,
     proc,
+    ssh,
+    ssh_acl,
     stacks,
     store,
 )
@@ -1175,6 +1177,22 @@ def check_git_ssh_command(report: Report) -> None:
     report.ok("git-ssh-command", "git uses Windows OpenSSH, so the agent works")
 
 
+def check_ssh_key_acl(report: Report) -> None:
+    """Private keys in ~/.ssh that someone else can open, so Windows OpenSSH skips them.
+
+    The failure is silent from the user's side: ssh prints "bad permissions",
+    skips the key, and the server answers `Permission denied (publickey)`. Seen
+    first with the Codex sandbox's profile-wide ACE. Rationale in tstack/ssh_acl.py.
+    """
+    if plat.kind() != plat.WINDOWS:
+        return
+    found = ssh_acl.exposed(ssh.ssh_dir())
+    if found:
+        report.fail("ssh-key-acl", ssh_acl.summary(found), "repair: tstack doctor --repair")
+        return
+    report.ok("ssh-key-acl", "~/.ssh is private to you, so ssh will use its keys")
+
+
 def collect() -> Report:
     report = Report()
     chezmoi = check_chezmoi(report)
@@ -1198,6 +1216,7 @@ def collect() -> Report:
     check_other_clones(report, src)
     check_git_hooks(report, src)
     check_git_ssh_command(report)
+    check_ssh_key_acl(report)
     check_wsl_docker_shim(report, src)
     check_docker_integration(report)
     return report
@@ -1241,6 +1260,7 @@ def repair(src: Path | None) -> int:
     rc = 0
     rc |= repair_clone_branch(src)
     rc |= repair_headroom_token()
+    rc |= repair_ssh_key_acl()
     rc |= repair_clone_location(src)
     cleanup = src / "bootstrap" / ("_cleanup.ps1" if plat.kind() == plat.WINDOWS else "_cleanup.sh")
     if not cleanup.is_file():
@@ -1315,6 +1335,35 @@ def repair_clone_location(src: Path) -> int:
         print(f"  !! {cleanup} not found; cannot move the clone.", file=sys.stderr)
         return 1
     return _run_attached(_cleanup_argv(cleanup, "move", src, canon))
+
+
+def repair_ssh_key_acl() -> int:
+    """Make ~/.ssh private again: break inheritance there, children follow it.
+
+    Confirmed, because it rewrites a DACL. Afterwards it checks again rather than
+    trusting icacls's exit code, since a key that is still exposed is the one
+    thing the user needs to hear about.
+    """
+    if plat.kind() != plat.WINDOWS:
+        return 0
+    d = ssh.ssh_dir()
+    found = ssh_acl.exposed(d)
+    if not found:
+        return 0
+    print(f"  ssh keys: {ssh_acl.summary(found)}")
+    if not confirm.confirm(
+        f"  make {d} private (you, SYSTEM, Administrators only)", tool="tstack doctor"
+    ):
+        for line in ssh_acl.manual_fix(d):
+            print(f"    {line}")
+        return 0
+    if not ssh_acl.fix(d) or ssh_acl.exposed(d):
+        print("  !! ~/.ssh is still readable by others. Run by hand:", file=sys.stderr)
+        for line in ssh_acl.manual_fix(d):
+            print(f"    {line}", file=sys.stderr)
+        return 1
+    print("  ssh keys: ~/.ssh is now private")
+    return 0
 
 
 def repair_clone_branch(src: Path) -> int:
