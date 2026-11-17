@@ -6,6 +6,12 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **Claude sessions started with `cc*` now show in herdr's agents list (11/17/2026).** The
+  wrappers set `CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1` to keep their tab title, and Claude Code
+  also reads that variable as "don't report agent status" (OSC 7501), which is the only way
+  herdr knows a terminal is an agent. The variable is now set only where the wrapper's title is
+  a plain OSC 2 (Ghostty, Terminal.app and similar), never in WezTerm, tmux or herdr.
+
 - **Windows ssh ignored every key in `~\.ssh` once Codex was installed (11/16/2026).**
   Codex's sandbox adds `CodexSandboxUsers:(RX)` to the profile root, `~\.ssh` inherits
   it, and Windows OpenSSH refuses a key anyone else can open ("bad permissions", then

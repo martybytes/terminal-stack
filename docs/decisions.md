@@ -1537,6 +1537,16 @@ test pins them together: the wrapper's `OSC 2` without the env var is overwritte
 seconds, and the env var without the `OSC 2` just leaves whatever the shell last set. The
 before/after is exact — `terminal-stack` then `✳ Claude Code`, versus `terminal-stack` alone.
 
+**The variable is set only where the OSC 2 title needs it (found 11/17/2026).** Claude Code
+reads it as "no terminal chrome" and also stops sending OSC 7501, its agent-status report:
+its `--debug` log says `programStatus=no (env: CLAUDE_CODE_DISABLE_TERMINAL_TITLE)`. herdr
+lists a terminal as an agent only from that report, so every `cc*` session inside herdr was
+invisible in its agents list while a bare `claude` showed up. WezTerm's tab title is sticky,
+tmux owns the title, and herdr names its own tabs, so none of the three needs the variable;
+`_ts_claude_titled` / `Invoke-TsClaudeTitled` set it only outside all three. herdr is
+detected by `HC_TERMINAL_ID` (herdr-core) or `HERDR_ENV` (the TUI), never `TERM_PROGRAM`,
+which herdr-core sets to `ghostty`.
+
 `claude --name <name>` is the documented alternative and produces `✳ <name>`; `ccs` uses it
 because a tmux session needs a name regardless. The `cc*` wrappers prefer the env var because
 it leaves the title entirely to the stack, so the tab reads `terminal-stack` rather than

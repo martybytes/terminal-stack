@@ -204,6 +204,13 @@ conversation slug — which would overwrite that. The wrappers therefore run it
 with **`CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1`**, so the title the wrapper set is
 the one that stays. Both halves are needed; either alone does nothing useful.
 
+**Only where that title is a plain OSC 2.** The variable has a side effect:
+Claude also stops sending OSC 7501, its agent-status report, so under herdr a
+`cc*` session never showed in the agents list (the debug log says
+`programStatus=no (env: CLAUDE_CODE_DISABLE_TERMINAL_TITLE)`). The wrappers
+therefore skip it in WezTerm, inside tmux and inside herdr (`HC_TERMINAL_ID` or
+`HERDR_ENV`), none of which needs it: `_ts_claude_titled` / `Invoke-TsClaudeTitled`.
+
 Three mechanisms, because only one terminal has a sticky tab title a script can
 set:
 
