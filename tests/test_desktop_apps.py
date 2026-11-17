@@ -282,3 +282,37 @@ def test_pending_uses_presence_not_path_for_desktop_apps(tmp_path):
     pending = got.stdout.split()
     assert "orca" not in pending
     assert "t3code" in pending
+
+
+def test_t3code_presence_covers_where_winget_puts_it():
+    """winget installs T3 Code (Beta).exe under a t3code folder; that pair was missing,
+    so a working install read as NOT FOUND and update would nag for it forever."""
+    ps = (ROOT / "bootstrap/_config.ps1").read_text(encoding="utf-8")
+    table = ps.split("$script:TsAppFixedPaths = @{", 1)[1].split("\n}", 1)[0]
+    assert r'"$env:LOCALAPPDATA\Programs\t3code\T3 Code (Beta).exe"' in table
+
+
+_PWSH = __import__("shutil").which("pwsh")
+
+
+@pytest.mark.skipif(sys.platform != "win32" or _PWSH is None, reason="Windows pwsh")
+def test_the_pwsh_summary_never_probes_a_desktop_app(tmp_path):
+    """Twin of the bash summary: herdr-app is on the PATH and got --version and -V,
+    which a GUI app may answer by opening its window."""
+    script = (
+        f". '{ROOT / 'bootstrap' / '_config.ps1'}'\n"
+        "function Get-TsAppVersionLine { throw \"probed $args\" }\n"
+        "function Test-TsAppInstalled([string]$id) { $id -eq 'orca' }\n"
+        "Show-TsInstalledApps @('herdr-app', 'orca', 't3code')\n"
+    )
+    got = subprocess.run(
+        [_PWSH, "-NoProfile", "-NonInteractive", "-Command", script],  # type: ignore[list-item]
+        capture_output=True, text=True, encoding="utf-8", timeout=120, check=False,
+        start_new_session=True,
+    )
+    assert "probed" not in got.stdout + got.stderr
+    lines = {ln.split()[0]: " ".join(ln.split()[1:]) for ln in got.stdout.splitlines()
+             if ln.startswith("    ")}
+    assert lines == {"herdr-app": "NOT FOUND (desktop app)",
+                     "orca": "installed (desktop app)",
+                     "t3code": "NOT FOUND (desktop app)"}, got.stdout + got.stderr
