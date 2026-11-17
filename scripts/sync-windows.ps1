@@ -56,6 +56,13 @@ if (Test-Path -LiteralPath $cfgHelper) { . $cfgHelper }
 $tsCfg = if (Get-Command Get-TsConfig -ErrorAction SilentlyContinue) { Get-TsConfig } else { $null }
 $ccTtsEnabled = $false
 if ($tsCfg -and $tsCfg.ccTts -and $tsCfg.ccTts.enabled) { $ccTtsEnabled = $true }
+# Splat as a HASHTABLE. An `if` that yields @() assigns $null, and splatting that
+# passed a positional $null the installer refused; an array of '-NoStart' strings binds
+# no switch at all. Both broke the rebuild on the first machine that needed it.
+function Get-TsTtsInstallArgs([bool]$DaemonEnabled) {
+    if ($DaemonEnabled) { return @{} }
+    return @{ NoStart = $true; NoAutostart = $true }
+}
 if ($ccTtsEnabled) {
     $ttsExe = Join-Path $localApp 'terminal-stack\tts-daemon\terminal-stack-tts.exe'
     if (-not (Test-Path -LiteralPath $ttsExe)) {
@@ -64,7 +71,7 @@ if ($ccTtsEnabled) {
             throw "sync-windows: TTS is enabled but installer is missing: $installer"
         }
         $daemonEnabled = [bool]($tsCfg.ccTts.daemon -and $tsCfg.ccTts.daemon.enabled)
-        $installArgs = if ($daemonEnabled) { @() } else { @('-NoStart', '-NoAutostart') }
+        $installArgs = Get-TsTtsInstallArgs $daemonEnabled
         & $installer @installArgs
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $ttsExe)) {
             throw 'sync-windows: failed to install terminal-stack-tts.exe'
@@ -84,7 +91,7 @@ if ($ccTtsEnabled) {
                 Write-Host "sync-windows: TTS daemon source changed since build $($built.Substring(0, 7)); rebuilding"
                 $installer = Join-Path $SourceDir 'bootstrap\install-tts-daemon.ps1'
                 $daemonEnabled = [bool]($tsCfg.ccTts.daemon -and $tsCfg.ccTts.daemon.enabled)
-                $installArgs = if ($daemonEnabled) { @() } else { @('-NoStart', '-NoAutostart') }
+                $installArgs = Get-TsTtsInstallArgs $daemonEnabled
                 try {
                     & $installer @installArgs
                 } catch {

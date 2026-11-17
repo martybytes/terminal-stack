@@ -248,3 +248,36 @@ def test_a_speak_marker_is_spoken_whole_and_other_text_ends_on_a_word(tmp_path):
     assert len(got.stdout) <= 40
     words = got.stdout.rstrip("…").split()[1:]  # drop the "claude." prefix
     assert words == long_text.split()[: len(words)]
+
+
+# Native pwsh only: from WSL, Windows pwsh.exe gets none of these environment
+# variables and cannot open a /home path anyway.
+_PWSH = shutil.which("pwsh")
+
+_SPLAT_CHECK = r"""
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($env:TS_SYNC, [ref]$null, [ref]$null)
+$fn = $ast.Find({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] `
+    -and $args[0].Name -eq 'Get-TsTtsInstallArgs' }, $true)
+. ([scriptblock]::Create($fn.Extent.Text))
+$inst = Join-Path $env:TS_TMP 'inst.ps1'
+Set-Content -LiteralPath $inst -Value @(
+    '[CmdletBinding()]',
+    'param([switch]$Uninstall, [switch]$Purge, [switch]$NoStart, [switch]$NoAutostart)',
+    '"$NoStart/$NoAutostart"')
+foreach ($on in $true, $false) { $a = Get-TsTtsInstallArgs $on; & $inst @a }
+"""
+
+
+@pytest.mark.skipif(_PWSH is None, reason="needs pwsh")
+def test_the_sync_passes_the_tts_installer_arguments_it_binds(tmp_path):
+    """An `if` yielding @() assigned $null and splatting it failed with "cannot be found
+    that accepts argument '$null'"; '-NoStart' strings in an array bound no switch."""
+    got = subprocess.run(
+        [_PWSH, "-NoProfile", "-NonInteractive", "-Command", _SPLAT_CHECK],  # type: ignore[list-item]
+        env={**os.environ, "TS_SYNC": str(ROOT / "scripts" / "sync-windows.ps1"),
+             "TS_TMP": str(tmp_path)},
+        capture_output=True, text=True, encoding="utf-8", timeout=60, check=False,
+        start_new_session=True)
+    assert got.stdout.split() == ["False/False", "True/True"], got.stdout + got.stderr
+    sync = (ROOT / "scripts" / "sync-windows.ps1").read_text(encoding="utf-8")
+    assert "@('-NoStart', '-NoAutostart')" not in sync
