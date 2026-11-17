@@ -35,7 +35,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from . import platform as plat
-from . import proc, store
+from . import proc, ssh_acl, store
 
 DEFAULTS: dict[str, str] = {
     "sshServer": "off",
@@ -845,6 +845,15 @@ def windows_status(s: dict[str, str]) -> Status:
         else []
     )
     st.add("info", "Authorized keys", f"{len(keys)} in ~/.ssh/authorized_keys")
+    # A key other users can open is skipped by ssh, and an authorized_keys file
+    # they can open is refused by sshd -- either one fails the key-login proof
+    # for a reason that has nothing to do with the server.
+    exposed = ssh_acl.exposed(ssh_dir())
+    st.add(
+        "warn" if exposed else "ok",
+        "~/.ssh permissions",
+        ssh_acl.summary(exposed) + "; fix: tstack doctor --repair" if exposed else "private",
+    )
     return st
 
 
