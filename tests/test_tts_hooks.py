@@ -250,7 +250,9 @@ def test_a_speak_marker_is_spoken_whole_and_other_text_ends_on_a_word(tmp_path):
     assert words == long_text.split()[: len(words)]
 
 
-_PWSH = shutil.which("pwsh") or shutil.which("pwsh.exe")
+# Native pwsh only: from WSL, Windows pwsh.exe gets none of these environment
+# variables and cannot open a /home path anyway.
+_PWSH = shutil.which("pwsh")
 
 _SPLAT_CHECK = r"""
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($env:TS_SYNC, [ref]$null, [ref]$null)
@@ -274,7 +276,8 @@ def test_the_sync_passes_the_tts_installer_arguments_it_binds(tmp_path):
         [_PWSH, "-NoProfile", "-NonInteractive", "-Command", _SPLAT_CHECK],  # type: ignore[list-item]
         env={**os.environ, "TS_SYNC": str(ROOT / "scripts" / "sync-windows.ps1"),
              "TS_TMP": str(tmp_path)},
-        capture_output=True, text=True, encoding="utf-8", timeout=60, check=False)
+        capture_output=True, text=True, encoding="utf-8", timeout=60, check=False,
+        start_new_session=True)
     assert got.stdout.split() == ["False/False", "True/True"], got.stdout + got.stderr
     sync = (ROOT / "scripts" / "sync-windows.ps1").read_text(encoding="utf-8")
     assert "@('-NoStart', '-NoAutostart')" not in sync
