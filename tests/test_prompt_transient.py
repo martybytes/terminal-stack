@@ -350,6 +350,10 @@ def test_the_pwsh_hook_follows_config_json(tmp_path, saved, env_style, expected)
     here = tmp_path / "here"
     here.mkdir()
     command = (
+        # pwsh writes a redirected stdout in the console's OEM code page (437 on
+        # a US Windows box), which turns the prompt glyph into "?". CI runners
+        # happen to be UTF-8; a developer's PC is not.
+        "[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)\n"
         "$global:TsEnabled = 'not-enabled'\n"
         "function Enable-TransientPrompt { $global:TsEnabled = 'enabled' }\n"
         + _pwsh_block()
