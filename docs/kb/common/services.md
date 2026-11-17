@@ -38,6 +38,7 @@ Everything binds `127.0.0.1` only — none of these services authenticate.
 | `tstack services doctor` | engine, `.env` files, health, ports, toggle drift |
 | `tstack services test` | take it all down, bring it back up, prove the chain works |
 | `tstack services backup` | cold tar of every data volume, with a manifest |
+| `tstack services repair` | Windows: Docker Desktop's WSL integration died after an update ("waiting 1m0s for the backend socket"). Stop, `wsl --shutdown`, start, verify, restart containers. `doc windows/docker-desktop` |
 | `tstack services --dry-run <verb>` | print the exact docker argv and change nothing |
 
 ## What the install already did

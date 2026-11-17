@@ -48,6 +48,8 @@ Usage:
   tstack services backup [<stack>]    cold tar of every data volume, with a manifest
   tstack services reset [<stack>]     containers and locally built images, back to clean
   tstack services migrate-volumes     the one-time rename to the ts- volume names
+  tstack services repair              Windows: fix a stale Docker Desktop WSL integration
+                                      (stop Docker, wsl --shutdown, start, verify, restore)
   tstack services -h                  this help
 
   --dry-run          print the exact docker argv and change nothing
@@ -59,6 +61,9 @@ Usage:
   -y, --yes          skip the migrate-volumes confirmation (NOT the destructive ones)
   --destroy-data     test/reset: also destroy volumes   [BACKS UP FIRST]
   --purge            reset: also the two memory volumes [EVERY MEMORY YOU HAVE]
+  --update           repair: pause while you click "Update version", then repair
+  --distro <name>    repair: verify this WSL distro (repeatable; default: Docker's own list)
+  --no-hello-world   repair: skip the `docker run hello-world` smoke test
   --no-colour
 
 A stack is any directory under services/stacks/ holding a docker-compose.yml -
@@ -85,6 +90,7 @@ VERBS = (
     "test",
     "backup",
     "reset",
+    "repair",
 )
 
 # Verbs that need the engine to do anything at all. `status` is deliberately not
@@ -185,6 +191,9 @@ class Args:
         self.assume_yes = False
         self.dry_run = os.environ.get("TS_STACK_DRY_RUN", "0") == "1"
         self.no_colour = False
+        self.update = False
+        self.distros: list[str] = []
+        self.hello_world = True
 
 
 class Usage(Exception):
@@ -224,6 +233,14 @@ def parse(argv: list[str]) -> Args:
             args.destroy_data = True
         elif item in ("--no-colour", "--no-color"):
             args.no_colour = True
+        elif item == "--update":
+            args.update = True
+        elif item == "--no-hello-world":
+            args.hello_world = False
+        elif item == "--distro":
+            if not rest:
+                raise Usage("tstack services: --distro needs a value")
+            args.distros.append(rest.pop(0))
         elif item == "--stack":
             if not rest:
                 raise Usage("tstack services: --stack needs a value")
@@ -1379,6 +1396,9 @@ _HANDLERS = {
     "backup": cmd_backup,
     "reset": cmd_reset,
     "doctor": cmd_doctor,
+    # main() runs repair before any stack is resolved; this entry is for the
+    # one-handler-per-verb rule, and for a caller that builds a Services itself.
+    "repair": lambda svc: sys.exit(cmd_repair(svc.args)),
 }
 
 
@@ -1394,6 +1414,14 @@ def main(argv: list[str]) -> int:
     except Usage as exc:
         print(str(exc), file=sys.stderr)
         return 2
+
+    # `repair` is about Docker Desktop and WSL, not about any stack: it must work
+    # on a machine where the clone or the stack tree is the thing that is missing.
+    if args.cmd == "repair":
+        if args.stack:
+            print("tstack services: repair takes no stack name", file=sys.stderr)
+            return 2
+        return cmd_repair(args)
 
     try:
         source = paths.resolve_source_dir()
@@ -1474,6 +1502,48 @@ def main(argv: list[str]) -> int:
     if args.dry_run:
         print("\nNothing changed (--dry-run).")
     return 0
+
+
+def cmd_repair(args: Args) -> int:
+    """Recycle Docker Desktop on a fresh WSL VM. See tstack/docker_desktop.py."""
+    from .. import docker_desktop
+
+    return docker_desktop.Repair(
+        say=lambda line: print(line, flush=True),
+        ask=confirm.ask,
+        assume_yes=args.assume_yes,
+        update=args.update,
+        hello_world=args.hello_world,
+        distros=args.distros,
+    ).run()
+
+
+def offer_integration_repair(
+    ask: Callable[[str], str | None], say: Callable[[str], None] = print, wait: int = 75
+) -> None:
+    """After the engine answers on Windows: catch the stale-integration fault now.
+
+    It is the one Docker fault the engine probe cannot see -- `docker` on Windows
+    works and containers run, while every WSL distro loses its docker -- and it
+    surfaces as a Docker Desktop dialog whose Restart button cannot fix it. The
+    repair closes every WSL shell, so it defaults to NO, and nobody at the
+    terminal declines.
+    """
+    from .. import docker_desktop
+
+    if engine.os_name() != engine.WINDOWS:
+        return
+    status, distros = docker_desktop.wait_status(docker_desktop.Host(), wait)
+    if status != docker_desktop.STALE:
+        return
+    say(f"  {docker_desktop.STALE_ADVICE} ({', '.join(distros)}).")
+    say("  The repair stops Docker, runs `wsl --shutdown` (closing every WSL shell), starts")
+    say("  Docker again and restarts the containers that were running.")
+    answer = ask("  Repair it now? [y/N] ")
+    if answer is None or answer.strip().lower() not in ("y", "yes"):
+        say("  Skipped. Later: tstack services repair")
+        return
+    docker_desktop.Repair(say=say, ask=ask, assume_yes=True).run()
 
 
 def docker_desktop_exe(kind: str) -> str | None:
@@ -1596,7 +1666,9 @@ def offer_start(
         for line in engine.engine_advice(engine.os_name(), kind):
             say(f"  {line}")
         return False
+    started = False
     if not engine.is_up(kind):
+        started = True
         if not _yes(ask, "  Docker is not running. Start it now? [Y/n] "):
             return False
         launched = launch_engine(kind)
@@ -1608,6 +1680,9 @@ def offer_start(
         if not wait_for(lambda: engine.is_up(kind), engine_wait, dots=True):
             say("  Docker did not answer in time.")
             return False
+    # A just-started backend publishes its sockets within about a minute; one
+    # that was already up has had its chance.
+    offer_integration_repair(ask, say, wait=75 if started else 0)
     directory = stacks.stack_root(source) / name
     if not (directory / "docker-compose.yml").is_file():
         say(f"  This clone has no {name} stack (services/stacks/{name}).")

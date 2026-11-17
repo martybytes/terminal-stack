@@ -1121,6 +1121,161 @@ def test_claude_settings_splice_preserves_foreign_keys(tmp_path):
     assert result.stdout == broken
 
 
+# --- ~/.claude/settings.json `hooks`: owned per entry ---------------------------
+# `herdr integration install claude` writes its own hooks into the same `hooks`
+# object, and they are all its agents panel has to go on. A key-level splice of
+# `hooks` deleted them on every `tstack update`. These pin the per-entry rule.
+
+_HERDR = "/home/test/.claude/hooks/herdr-agent-state.sh"
+
+
+def _herdr_group(event, matcher=None):
+    group = {"hooks": [{"type": "command", "command": f"{_HERDR} {event}"}]}
+    if matcher is not None:
+        group = {"matcher": matcher, **group}
+    return group
+
+
+def _render_claude_splice(tmp_path, tts=True):
+    src = (ROOT / "dot_claude/modify_settings.json.tmpl").read_text(encoding="utf-8")
+    if not tts:
+        src = re.sub(
+            r'\{\{ if eq \(index \. "ccTtsEnabled"[^}]*\}\}.*?\{\{ end \}\}', "", src, flags=re.S
+        )
+    rendered = re.sub(r"\{\{ if [^}]*\}\}|\{\{ end \}\}", "", src)
+    rendered = re.sub(r"\{\{[^}]*\}\}", "/home/test", rendered)
+    script = tmp_path / ("modify-tts.py" if tts else "modify-notts.py")
+    script.write_text(rendered, encoding="utf-8")
+    return script, rendered
+
+
+def _run_claude_splice(script, live_text):
+    result = subprocess.run(
+        [sys.executable, str(script)],
+        input=live_text,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=300,
+        start_new_session=True,
+    )
+    assert result.returncode == 0, result.stderr
+    return result.stdout
+
+
+def _commands(hooks, event):
+    return [h["command"] for g in hooks.get(event, []) for h in g.get("hooks", [])]
+
+
+def _herdr_live():
+    return {
+        "model": "claude-opus-5",
+        "hooks": {
+            "SessionStart": [_herdr_group("session_start")],
+            "Stop": [
+                {
+                    "matcher": "*",
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": "/home/test/.claude/hooks/wez-tab-status.sh waiting",
+                        },
+                        {
+                            "type": "command",
+                            "command": "/home/test/.claude/hooks/cc-speak.sh waiting",
+                        },
+                    ],
+                },
+                _herdr_group("stop"),
+            ],
+            # herdr appended into the group WE wrote: its hook must survive, ours
+            # must not be duplicated.
+            "PreToolUse": [
+                {
+                    "matcher": "*",
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": "/home/test/.claude/hooks/wez-tab-status.sh working",
+                        },
+                        {"type": "command", "command": f"{_HERDR} pre_tool_use"},
+                    ],
+                }
+            ],
+        },
+    }
+
+
+@pytest.mark.skipif(not shutil.which("python3"), reason="python3 is unavailable")
+def test_claude_settings_splice_keeps_herdr_hooks(tmp_path):
+    script, _ = _render_claude_splice(tmp_path)
+    out = json.loads(_run_claude_splice(script, json.dumps(_herdr_live())))
+    hooks = out["hooks"]
+    assert out["model"] == "claude-opus-5"
+    # herdr's own events and groups survive.
+    assert _commands(hooks, "SessionStart") == [f"{_HERDR} session_start"]
+    assert f"{_HERDR} stop" in _commands(hooks, "Stop")
+    assert f"{_HERDR} pre_tool_use" in _commands(hooks, "PreToolUse")
+    # Ours are present exactly once, and first.
+    stop = _commands(hooks, "Stop")
+    assert stop.count("/home/test/.claude/hooks/wez-tab-status.sh waiting") == 1
+    assert stop[0] == "/home/test/.claude/hooks/wez-tab-status.sh waiting"
+    pre = _commands(hooks, "PreToolUse")
+    assert pre.count("/home/test/.claude/hooks/wez-tab-status.sh working") == 1
+
+
+@pytest.mark.skipif(not shutil.which("python3"), reason="python3 is unavailable")
+def test_claude_settings_splice_is_idempotent_with_foreign_hooks(tmp_path):
+    """A second apply must be a no-op, or every update rewrites the file and
+    fights herdr re-installing itself."""
+    script, _ = _render_claude_splice(tmp_path)
+    once = _run_claude_splice(script, json.dumps(_herdr_live()))
+    twice = _run_claude_splice(script, once)
+    assert once == twice
+
+
+@pytest.mark.skipif(not shutil.which("python3"), reason="python3 is unavailable")
+def test_claude_settings_tts_off_removes_ours_and_keeps_theirs(tmp_path):
+    on, _ = _render_claude_splice(tmp_path, tts=True)
+    off, _ = _render_claude_splice(tmp_path, tts=False)
+    applied = _run_claude_splice(on, json.dumps(_herdr_live()))
+    hooks = json.loads(_run_claude_splice(off, applied))["hooks"]
+    every = [c for ev in hooks for c in _commands(hooks, ev)]
+    assert not [c for c in every if "cc-speak" in c], "TTS off left a TTS hook behind"
+    assert "Notification" not in hooks, "an event only TTS used must disappear"
+    for event in ("SessionStart", "Stop", "PreToolUse"):
+        assert any(_HERDR in c for c in _commands(hooks, event)), event
+
+
+@pytest.mark.skipif(not shutil.which("pwsh"), reason="PowerShell 7 is unavailable")
+def test_claude_settings_hooks_merge_twins_agree(tmp_path):
+    """The Windows splice applies the same per-entry rule as the POSIX one."""
+    script, rendered = _render_claude_splice(tmp_path)
+    fragment = re.search(r'FRAGMENT = r"""(.*?)"""', rendered, re.S).group(1)
+    frag_path = tmp_path / "fragment.json"
+    frag_path.write_text(fragment, encoding="utf-8")
+    live_text = json.dumps(_herdr_live(), indent=2)
+    live_path = tmp_path / "settings.json"
+    live_path.write_text(live_text, encoding="utf-8")
+
+    posix = json.loads(_run_claude_splice(script, live_text))
+    helper = ROOT / "bootstrap/_merge_claude_settings.ps1"
+    command = f"& '{helper}' -FragmentPath '{frag_path}' -LivePath '{live_path}' *> $null; exit 0"
+    result = subprocess.run(
+        [shutil.which("pwsh"), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command],
+        text=True,
+        encoding="utf-8",
+        capture_output=True,
+        check=False,
+        timeout=300,
+        start_new_session=True,
+    )
+    assert result.returncode == 0, result.stderr
+    windows = json.loads(live_path.read_text(encoding="utf-8"))
+    assert windows["hooks"] == posix["hooks"]
+    assert windows["model"] == "claude-opus-5"
+
+
 def test_repo_infrastructure_is_not_deployed_to_home():
     """tests/** used to be missing here, so chezmoi wrote the suite into ~/tests/."""
     ignore = (ROOT / ".chezmoiignore").read_text(encoding="utf-8")

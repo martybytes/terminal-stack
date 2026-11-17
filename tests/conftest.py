@@ -11,6 +11,29 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from tstack import headroom_token
 
+# What git exports to a hook to say which repository it is running in. The
+# pre-commit hook runs this suite, and every test that builds a throwaway repo
+# with `git -C <tmp>` inherits them. In a main clone GIT_INDEX_FILE is the
+# relative `.git/index`, which happens to resolve inside each temp repo; in a
+# linked worktree it is an absolute path to the worktree's index, so those
+# tests checked out against the wrong index and the hook failed tests that
+# pass anywhere else.
+_GIT_REPO_ENV = (
+    "GIT_DIR",
+    "GIT_INDEX_FILE",
+    "GIT_WORK_TREE",
+    "GIT_PREFIX",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_COMMON_DIR",
+)
+
+
+@pytest.fixture(autouse=True)
+def _no_inherited_git_repo(monkeypatch):
+    for name in _GIT_REPO_ENV:
+        monkeypatch.delenv(name, raising=False)
+
 
 @pytest.fixture(autouse=True)
 def _no_terminal_prompts(monkeypatch):

@@ -1262,4 +1262,5 @@ def test_the_documented_services_flags_are_all_accepted():
     for flag in sorted(documented):
         if flag in ("--no-color",):  # the alias, listed as --no-colour
             continue
-        services.parse([flag] if flag != "--tail" else [flag, "10"])
+        takes_value = {"--tail": "10", "--distro": "Ubuntu"}
+        services.parse([flag, takes_value[flag]] if flag in takes_value else [flag])
