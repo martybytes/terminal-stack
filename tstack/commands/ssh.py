@@ -11,7 +11,7 @@ import sys
 from typing import TYPE_CHECKING
 
 from .. import platform as plat
-from .. import ssh, ssh_acl
+from .. import ssh, ssh_acl, ssh_doctor
 
 if TYPE_CHECKING:
     from ..wizard.flow import Asker
@@ -24,11 +24,14 @@ Usage:
   tstack ssh setup --dry-run   show the plan; change nothing
   tstack ssh setup --yes       take the saved answers and defaults, ask nothing
   tstack ssh keys              list the keys that may log in
+  tstack ssh doctor            the key problems: modes, CRLF, agent, passphrases
+  tstack ssh doctor --fix      repair them, asking first (--yes: the safe ones only)
 
 Defaults: `ssh -p 22 you@this-pc` opens PowerShell, `ssh -p 2222 you@this-pc`
 opens Ubuntu (WSL). Both ports are yours to change. Applying needs admin for
 the Windows half: one UAC prompt, and declining it prints the exact command.
 Passwords are switched off only after a key login has been proven to work.
+Ubuntu can share the Windows ssh-agent (sshAgentBridge): unlock a key once.
 docs: doc windows/ssh-server
 """
 
@@ -49,7 +52,47 @@ def status() -> int:
         return 0
     for state, what, detail in ssh.windows_status(s).lines:
         say(f"    {MARK.get(state, '    ')}  {what:<18} {detail}")
+    say("    Key problems (modes, agent, passphrases): tstack ssh doctor")
     return 0
+
+
+def doctor(argv: list[str]) -> int:
+    """Report every finding; with --fix, offer each repair. 0 when nothing is left to warn about."""
+    import os
+
+    from .. import confirm
+
+    fix = "--fix" in argv
+    yes = "--yes" in argv or "-y" in argv or bool(os.environ.get("TS_ASSUME_YES"))
+    findings = ssh_doctor.collect()
+    say("==> tstack ssh doctor")
+    side = ""
+    for f in findings:
+        if f.side != side:
+            side = f.side
+            say(f"  {side}")
+        say(f"    {MARK.get(f.state, '    ')}  {f.what:<18} {f.detail}")
+    fixable = [f for f in findings if f.fix is not None]
+    if not fix:
+        if fixable:
+            say(f"==> {len(fixable)} can be repaired: tstack ssh doctor --fix")
+        return 1 if any(f.state == "warn" for f in findings) else 0
+    left = 0
+    for f in fixable:
+        if f.interactive and yes:
+            say(f"==> skipped under --yes (it asks on the terminal): {f.fix_says}")
+            left += 1
+            continue
+        if not confirm.confirm(f"{f.side}: {f.fix_says}?", assume_yes=yes and not f.interactive):
+            left += 1
+            continue
+        ok = f.fix()  # type: ignore[misc]
+        say(f"    {'done' if ok else 'FAILED'}: {f.fix_says}")
+        left += 0 if ok else 1
+    unfixable = sum(1 for f in findings if f.state == "warn" and f.fix is None)
+    say("==> " + ("all repaired." if not left and not unfixable else
+                  f"{left + unfixable} left; run `tstack ssh doctor` again to see them."))  # fmt: skip
+    return 1 if left or unfixable else 0
 
 
 def keys() -> int:
@@ -258,6 +301,8 @@ def apply(values: dict[str, str], chosen: list[ssh.Key], ask: Asker, *, dry: boo
     if ssh.wants_wsl(values):
         say(f"    WSL ({distro}): openssh-server on port {values['sshWslPort']}, mirrored networking, "
             "a logon task that keeps WSL up")  # fmt: skip
+        say("    WSL agent: " + ("the Windows ssh-agent, relayed (npiperelay + socat)"
+                                 if values.get("sshAgentBridge") == "on" else "its own"))  # fmt: skip
     for r in plan.firewall:
         say(f"    firewall: {r['Name']}  port {r['Port']}  {r['Profile']}  from {r['Remote']}")
     say(f"    keys to authorize: {len(chosen)}")
@@ -334,6 +379,15 @@ def apply(values: dict[str, str], chosen: list[ssh.Key], ask: Asker, *, dry: boo
                 ssh.wsl_shutdown()
                 say("==> WSL restarted with mirrored networking.")
         ssh.start_keepalive()
+        # The Windows agent, shared: a key unlocked once on Windows works here too.
+        if values.get("sshAgentBridge") == "on":
+            ok, why = ssh.wsl_install_bridge(distro)
+            say(
+                "==> WSL agent bridge: "
+                + ("running (Ubuntu uses the Windows ssh-agent)" if ok else f"not set up: {why}")
+            )
+        elif ssh.wsl_remove_bridge(distro):
+            say("==> WSL agent bridge: off (Ubuntu keeps its own agent)")
         # 3. Prove a key login THAT LANDS IN UBUNTU, then passwords off.
         if values.get("sshPasswordAuth") == "off" and not force_off and not failed:
             if ssh.verify_login(values["sshWslPort"], ssh.wsl_user(distro), "wsl"):
@@ -371,6 +425,8 @@ def main(argv: list[str]) -> int:
         return keys()
     if verb == "setup":
         return setup(args[1:])
+    if verb == "doctor":
+        return doctor(args[1:])
     say(f"tstack ssh: unknown command '{verb}'")
     say(HELP.rstrip())
     return 2
