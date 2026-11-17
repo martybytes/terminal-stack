@@ -47,6 +47,7 @@ Windows (the admin part, one UAC prompt; `bootstrap/ssh-server.ps1`):
 - **OpenSSH Server**: installed if missing. `sshd` and `ssh-agent` are set to Automatic.
 - **`C:\ProgramData\ssh\sshd_config`**:
   - A marked block goes at the **top** of the file. sshd keeps the first value it reads, so the block wins without your own lines being edited.
+  - **Except `Port`**: every `Port` line is another listener, so your own `Port` lines are commented out, tagged `# terminal-stack disabled:`.
   - The file is backed up first (`.bak.YYYYMMDD`).
   - It is checked with `sshd -t`, and rolled back if that fails.
 - **Keys**: written to the file sshd actually reads for you. That is `administrators_authorized_keys` (ACL: SYSTEM and Administrators only) when the stock `Match Group administrators` block is active, otherwise `~\.ssh\authorized_keys`.
@@ -92,6 +93,7 @@ A computer that used another port before (the old 2222 for Windows, for example)
 ## Troubleshooting
 
 - **`Permission denied (publickey)` on port 22, as an admin**: check which keys file is in force (`tstack ssh` shows it). The admin file is ignored unless its ACL is SYSTEM and Administrators only. Setup fixes that ACL.
+- **WSL: `ssh.socket` fails with "Address already in use"**: under mirrored networking WSL shares the Windows port space. Something on Windows holds the WSL port, often an older Windows sshd still listening on it. Setup checks this first and names the process.
 - **Port 2222 refuses from another computer but works locally**: WSL is not mirrored yet. Run `wsl --shutdown` and reconnect.
 - **Port 2222 is dead after a while**: the keep-alive task is not running. Run `schtasks /Run /TN "terminal-stack WSL sshd keep-alive"`.
 - **The UAC prompt was declined**: setup prints the exact command to run from an elevated PowerShell.

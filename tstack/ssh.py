@@ -65,6 +65,14 @@ WSL_DROPIN = "/etc/ssh/sshd_config.d/10-terminal-stack.conf"
 # filtered by Hyper-V firewall rules carrying it, not by ordinary host rules.
 WSL_VM_CREATOR = "{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}"
 KEEPALIVE_TASK = "terminal-stack WSL sshd keep-alive"
+
+# What each side answers to its proof command. A login that succeeds on the
+# wrong server is not a proof: on 11/16/2026 the WSL "proof" reached Windows sshd,
+# still on 2222, and switched WSL passwords off on the strength of it.
+PROOF = {
+    "windows": ("cmd /c echo %OS%", "Windows_NT"),  # cmd or pwsh as the login shell
+    "wsl": ("uname -s", "Linux"),
+}
 BLOCK_START = "# ---- terminal-stack-start ---- (tstack ssh setup; edits here are replaced)"
 BLOCK_END = "# ---- terminal-stack-end ----"
 
@@ -307,10 +315,17 @@ def sshd_config_path() -> Path:
     return Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData")) / "ssh" / "sshd_config"
 
 
+PORT_DISABLED = "# terminal-stack disabled: "
+
+
 def windows_block(s: dict[str, str], password_auth: str) -> str:
     """The managed block, placed FIRST in sshd_config: sshd keeps the first value
-    it reads for a keyword, so these win over any later line, without editing
-    the user's own lines."""
+    it reads for most keywords, so these win over any later line.
+
+    Port is the exception: every Port line adds a listener. So splice_block also
+    comments out the user's own Port lines, tagged so they can be told apart; on
+    11/16/2026 sshd answered on BOTH 22 and the old 2222, and the WSL sshd could
+    not bind 2222 under mirrored networking."""
     lines = [
         BLOCK_START,
         f"Port {s['sshWindowsPort']}",
@@ -329,8 +344,16 @@ def splice_block(config: str, block: str) -> str:
     )
     end = next((i for i, ln in enumerate(lines) if ln.startswith(BLOCK_END)), None)
     if start is not None and end is not None and end >= start:
-        return "".join(lines[:start]) + block + "".join(lines[end + 1 :])
-    return block + config
+        rest = lines[:start] + lines[end + 1 :]
+        head = start
+    else:
+        rest, head = lines, 0
+    out = []
+    for line in rest:
+        if line.strip().lower().startswith("port ") and not line.lstrip().startswith("#"):
+            line = PORT_DISABLED + line.lstrip()
+        out.append(line)
+    return "".join(out[:head]) + block + "".join(out[head:])
 
 
 def admin_keys_file_active(config: str) -> bool:
@@ -446,6 +469,7 @@ class Plan:
     password_off_without_verify: bool = False
     verify_user: str = ""
     verify_args: list[str] = field(default_factory=list)
+    verify_expect: str = PROOF["windows"][1]
     ssh_exe: str = ""
     windows: bool = True
     keepalive_distro: str = ""
@@ -490,7 +514,7 @@ def plan_windows(
     )
 
 
-def verify_args(port: str, user: str) -> list[str]:
+def verify_args(port: str, user: str, side: str = "windows") -> list[str]:
     """A non-interactive key login to localhost. `-F none` ignores ~/.ssh/config,
     whose `IdentitiesOnly yes` would otherwise hide every agent key."""
     null = "NUL" if plat.kind() == plat.WINDOWS else "/dev/null"
@@ -504,7 +528,7 @@ def verify_args(port: str, user: str) -> list[str]:
         "-p", port,
         "-l", user,
         "127.0.0.1",
-        "exit",
+        PROOF[side][0],
     ]  # fmt: skip
 
 
@@ -538,6 +562,10 @@ def run_elevated(plan: Plan) -> tuple[dict | None, Path]:
     plan_file = workdir / "plan.json"
     plan_file.write_text(plan.to_json(), encoding="utf-8")
     result_file = plan_file.with_suffix(".result.json")
+    # Created HERE, by the user: a file the elevated process creates belongs to
+    # Administrators, and the private temp dir's ACL then locks the caller out
+    # (EPERM), which read as "the elevated script left no result" when it had run.
+    result_file.write_text("", encoding="utf-8")
     pwsh = plat.find_pwsh()
     if not pwsh:
         return None, plan_file
@@ -556,6 +584,12 @@ def run_elevated(plan: Plan) -> tuple[dict | None, Path]:
             return None, plan_file
     try:
         return json.loads(result_file.read_text(encoding="utf-8-sig")), plan_file
+    except PermissionError:
+        detail = f"the elevated script ran, but its result is unreadable: {result_file}"
+        return {
+            "ok": False,
+            "steps": [{"name": "result", "ok": False, "detail": detail}],
+        }, plan_file
     except (OSError, ValueError):
         return {"ok": False, "steps": [{"name": "result", "ok": False,
                                         "detail": "the elevated script left no result"}]}, plan_file  # fmt: skip
@@ -814,6 +848,21 @@ def windows_status(s: dict[str, str]) -> Status:
     return st
 
 
+def windows_listener(port: str) -> str:
+    """The process listening on a Windows TCP port, or "". Under mirrored
+    networking WSL shares this port space, so a Windows listener blocks WSL."""
+    pwsh = plat.find_pwsh() if plat.kind() == plat.WINDOWS else None
+    if not pwsh or not port.isdigit():
+        return ""
+    got = proc.capture(
+        [pwsh, "-NoProfile", "-Command",
+         f"$c = Get-NetTCPConnection -State Listen -LocalPort {port} -ErrorAction SilentlyContinue |"
+         " Select-Object -First 1; if ($c) { (Get-Process -Id $c.OwningProcess).ProcessName }"],
+        timeout=20,
+    )  # fmt: skip
+    return got.stdout.strip() if got is not None and got.returncode == 0 else ""
+
+
 def wsl_shutdown() -> None:
     proc.capture(["wsl.exe", "--shutdown"], timeout=120)
 
@@ -823,10 +872,10 @@ def start_keepalive() -> None:
     proc.capture(["schtasks.exe", "/Run", "/TN", KEEPALIVE_TASK], timeout=30)
 
 
-def verify_login(port: str, user: str) -> bool:
-    """A key login to 127.0.0.1:<port> as <user>, non-interactive."""
+def verify_login(port: str, user: str, side: str = "windows") -> bool:
+    """A key login to 127.0.0.1:<port> as <user> that lands on `side`."""
     client = ssh_client()
     if not client or not user:
         return False
-    got = proc.capture([client, *verify_args(port, user)], timeout=30)
-    return got is not None and got.returncode == 0
+    got = proc.capture([client, *verify_args(port, user, side)], timeout=30)
+    return got is not None and got.returncode == 0 and PROOF[side][1] in (got.stdout or "")
