@@ -322,6 +322,12 @@ def test_fnm_ignores_package_json_engines_in_both_shells():
     # (no .Trim() on a null) plus a suppressed ErrorActionPreference keep it quiet.
     assert "$ErrorActionPreference = 'SilentlyContinue'" in ps
     assert "} finally { $ErrorActionPreference = $tsFnmEap }" in ps
+    # ...but a process that cannot START throws a terminating error that the
+    # preference does not touch ("Program 'fnm.exe' failed to run" at every ssh
+    # login, 11/17/2026). Only a catch keeps that quiet.
+    fnm = ps[ps.index("$tsFnmEap = $ErrorActionPreference") :]
+    fnm = fnm[: fnm.index("$ErrorActionPreference = $tsFnmEap")]
+    assert "} catch {" in fnm, "fnm's launch failure escapes the try"
 
 
 def test_headroom_auth_probe_retries_and_names_the_failure(monkeypatch):
