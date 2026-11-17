@@ -1552,6 +1552,25 @@ and the live file's key order survive byte for byte; and it **refuses rather tha
 a live file that will not parse is echoed straight back, because an unrecoverable hand-edit
 is worse than a skipped apply.
 
+**`hooks` is owned per entry, not per key (11/16/2026).** "The top-level keys the template
+renders" was the right rule for `statusLine` and `theme` and the wrong one for `hooks`, because
+`hooks` is not ours alone. `herdr integration install claude` writes its own `SessionStart`,
+`PreToolUse`, `Stop` and similar entries there, each calling
+`~/.claude/hooks/herdr-agent-state.sh`, and those hooks are all herdr's agents panel has to go
+on. Replacing the `hooks` value wholesale deleted them on every `tstack update`, so the panel
+emptied after each update with nothing in the diff to say why. `~/.cursor/hooks.json` had
+already been through this (§ "Why `~/.cursor/hooks.json` needs per-entry ownership").
+
+Both twins now rebuild each event array as *our rendered groups, then every live group with our
+hooks taken out*. An inner hook is ours if its command names one of the markers
+(`wez-tab-status`, `cc-speak`, `cc-tts`, `terminal-stack-tts`, the full set of commands this
+stack has ever written), or if it is identical to one we render now. The rule is one level
+deeper than Cursor's because Claude nests `{matcher, hooks: [...]}`: a group another tool
+appended into keeps that tool's hook, and is dropped only if we emptied it. An event that ends
+up empty disappears, so turning TTS off still removes our hooks. **A marker must never be
+`.claude/hooks/` on its own**: herdr's script lives in that directory too. For a file that
+holds no foreign hooks, the output is byte-identical to the old key-level splice.
+
 Two smaller traps were closed at the same time. `tests/**` was missing from `.chezmoiignore`,
 so chezmoi had been deploying the pytest suite into `~/tests/` — the same trap the installer
 entry points fell into, and the reason those are listed there. And a `.chezmoiremove` entry
