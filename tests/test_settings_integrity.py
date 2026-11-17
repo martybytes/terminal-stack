@@ -51,6 +51,7 @@ def _home(monkeypatch, tmp_path):
         "TS_LEADER",
         "TS_ATUIN",
         "TS_HERDR",
+        "TS_SSH_SERVER",
         "TS_MEMORY_BACKEND",
         "TS_HEADROOM",
         "TS_AGENTMEMORY",

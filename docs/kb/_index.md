@@ -28,7 +28,7 @@ edits the highlighted topic. The reader is `less`: `/pattern` searches, `q` quit
 - `common/codex.md` / `common/claude-code.md` — AI coding-agent shortcuts and footer configuration (`doc codex`, `doc claude-code`); `common/tools/{grok,gemini}.md` cover the other two agents, and `common/tools/node-python.md` the runtimes they need
 - `linux/` — apt, VeraCrypt, ssh permissions, systemd, docker (engine install, rootless without the docker group, NVIDIA toolkit), Omarchy (`doc omarchy`: pacman, the bash-first login shell, the XDG tmux path)
 - `macos/` — Homebrew, macOS WezTerm toggles, Docker Desktop
-- `windows/` — pwsh, winget, the TTS tray daemon, Docker Desktop
+- `windows/` — pwsh, winget, the TTS tray daemon, Docker Desktop, the SSH server (`tstack ssh`)
 - `wezterm/` — WezTerm keybindings + dev workflow (all OSes)
 - `_style/` — glamour style JSONs; dark/light follows your baked theme, `$DOC_STYLE` overrides
 

@@ -16,6 +16,7 @@ import re
 import shutil
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
+from typing import Any
 
 from .. import apps as catalog
 from .. import platform as plat
@@ -52,6 +53,13 @@ class Answers:
     wez_restore: str = "off"
     atuin: str = "off"
     herdr: str = "off"
+    ssh_server: str = "off"
+    ssh_targets: str = "both"
+    ssh_windows_port: str = "22"
+    ssh_wsl_port: str = "2222"
+    ssh_password_auth: str = "off"
+    ssh_scope: str = "private"
+    ssh_agent_bridge: str = "on"
     apps: list[str] = field(default_factory=list)
     cc_tts: str = "off"
     cc_tts_message: str = "template"
@@ -377,6 +385,7 @@ def collect(console: Console, ask_terminals: bool = False, ask: Asker | None = N
             wez_restore=_saved_on_off("weztermRestore"),
             atuin=_saved_on_off("atuinEnabled"),
             herdr=_saved_on_off("herdrConfig"),
+            **ssh_fields(ssh_saved()),
             apps=store.get("apps", "").split(),
             cc_tts="on" if store.normalise(store.get("ccTtsEnabled", "false")) == "true" else "off",
             cc_tts_message=_saved("ccTtsMessageMode", "template"),
@@ -453,6 +462,9 @@ def collect(console: Console, ask_terminals: bool = False, ask: Asker | None = N
 
     # ----------------------------------------------------------------- herdr
     herdr = _herdr(ask, selected)
+
+    # ------------------------------------------------------------------- ssh
+    ssh = ssh_questions(ask, selected, bare)
 
     # ------------------------------------------------------------------- tts
     if profile != PROFILE_FULL:
@@ -548,6 +560,7 @@ def collect(console: Console, ask_terminals: bool = False, ask: Asker | None = N
         wez_restore=wez_restore,
         atuin=atuin,
         herdr=herdr,
+        **ssh_fields(ssh),
         apps=selected,
         cc_tts=cc_tts,
         cc_tts_message=cc_tts_message,
@@ -781,6 +794,178 @@ def _gui_toggle(
     if bare:
         return _saved_on_off(key)
     return ask.choose(title, options, _saved_on_off(key), intro)
+
+
+def ssh_settings_defaults() -> dict[str, str]:
+    from .. import ssh as ssh_mod
+
+    return dict(ssh_mod.DEFAULTS)
+
+
+SSH_DEFAULTS = ssh_settings_defaults()
+
+
+# Setting key -> Answers field. The answers travel as scalars like every other
+# answer (emit.py's SHELL_NAMES / JSON_NAMES), not as one nested object.
+SSH_FIELDS = {
+    "sshServer": "ssh_server",
+    "sshTargets": "ssh_targets",
+    "sshWindowsPort": "ssh_windows_port",
+    "sshWslPort": "ssh_wsl_port",
+    "sshPasswordAuth": "ssh_password_auth",
+    "sshScope": "ssh_scope",
+    "sshAgentBridge": "ssh_agent_bridge",
+}
+
+
+def ssh_fields(values: dict[str, str]) -> dict[str, Any]:
+    return {f: values.get(k, SSH_DEFAULTS[k]) for k, f in SSH_FIELDS.items()}
+
+
+def ssh_answers(answers: Answers) -> dict[str, str]:
+    return {k: getattr(answers, f) for k, f in SSH_FIELDS.items()}
+
+
+def ssh_saved() -> dict[str, str]:
+    """This machine's saved SSH choices, defaults filled in."""
+    return {k: _saved(k, d) for k, d in SSH_DEFAULTS.items()}
+
+
+def _port(ask: Asker, title: str, saved: str, default: str, taken: str = "") -> str:
+    """A port: Enter keeps the saved one; `other` asks for a number and re-asks
+    until it is one, in range, and not the other side's."""
+    options = [(saved, saved, "keep" if saved != default else "default")]
+    if saved != default:
+        options.append((default, default, "default"))
+    options.append(("other", "other", "type a port number"))
+    picked = ask.choose(title, options, saved)
+    while picked == "other" or (taken and picked == taken):
+        if taken and picked == taken:
+            ask.console.say(f"  {taken} is already the other side's port.")
+        raw = ask.text("  Port number (1-65535): ").strip()
+        ok = raw.isdigit() and 1 <= int(raw) <= 65535 and raw != taken
+        if ok:
+            return raw
+        ask.console.say("  Not a usable port number.")
+        if not ask.console.interactive:
+            return default
+        picked = "other"
+    return picked
+
+
+def ssh_questions(ask: Asker, selected: list[str], bare: bool) -> dict[str, str]:
+    """The SSH server questions. Windows only; reused by `tstack ssh setup`.
+
+    Asked on every Windows install, not only when herdr is ticked: reaching this
+    PC from another computer is useful on its own. herdr only changes the
+    recommendation, since a remote herdr session is reached over ssh. Which KEYS
+    may log in is not a setting and is not asked here: `tstack ssh setup` asks it
+    while applying, so a key list never travels through the answers file.
+    """
+    saved = ssh_saved()
+    if _env("TS_SSH_SERVER"):
+        out = dict(saved, sshServer=_on_off(_env("TS_SSH_SERVER")))
+        for key, env in (
+            ("sshTargets", "TS_SSH_TARGETS"),
+            ("sshWindowsPort", "TS_SSH_WINDOWS_PORT"),
+            ("sshWslPort", "TS_SSH_WSL_PORT"),
+            ("sshPasswordAuth", "TS_SSH_PASSWORD_AUTH"),
+            ("sshScope", "TS_SSH_SCOPE"),
+            ("sshAgentBridge", "TS_SSH_AGENT_BRIDGE"),
+        ):
+            if _env(env):
+                out[key] = _env(env)
+        return out
+    if plat.kind() != plat.WINDOWS or bare:
+        return saved
+    herdr = "herdr" in selected or "herdr-app" in selected or shutil.which("herdr") is not None
+    best = "on" if herdr or saved["sshServer"] == "on" else "off"
+    why = (
+        "you have herdr, and a remote herdr session is reached over ssh"
+        if herdr
+        else "only if you want to reach this PC from another computer"
+    )
+    server = ask.choose(
+        "Make this PC reachable over SSH?",
+        [
+            ("off", "off", "no SSH server changes"),
+            ("on", "on", "PowerShell on one port, Ubuntu (WSL) on another"),
+        ],
+        best,
+        f"  RECOMMENDATION: {best}: {why}.\n"
+        "  `ssh -p 22 you@this-pc` opens PowerShell and `ssh -p 2222 you@this-pc`\n"
+        "  opens Ubuntu; both ports are yours to change. Key login only by default.\n"
+        "  Costs: an open port per side, and one UAC prompt when it is applied.\n"
+        "  Reconfigure any time with `tstack ssh setup`.",
+    )
+    out = dict(saved, sshServer=server)
+    if server != "on":
+        return out
+    out["sshTargets"] = ask.choose(
+        "Which side should answer?",
+        [
+            ("both", "both", "PowerShell and Ubuntu, on separate ports"),
+            ("windows", "Windows only", "PowerShell"),
+            ("wsl", "WSL only", "Ubuntu"),
+        ],
+        saved["sshTargets"],
+    )
+    if out["sshTargets"] in ("both", "windows"):
+        out["sshWindowsPort"] = _port(
+            ask, "Port for PowerShell (Windows sshd):", saved["sshWindowsPort"], "22"
+        )
+    if out["sshTargets"] in ("both", "wsl"):
+        out["sshWslPort"] = _port(
+            ask,
+            "Port for Ubuntu (WSL sshd):",
+            saved["sshWslPort"],
+            "2222",
+            taken=out["sshWindowsPort"] if out["sshTargets"] == "both" else "",
+        )
+    from .. import ssh as ssh_mod
+
+    tail = ssh_mod.tailscale_ip()
+    scope_default = saved["sshScope"]
+    if tail and saved["sshServer"] != "on":
+        scope_default = "lan-tailnet"
+    out["sshScope"] = ask.choose(
+        "Who may connect?",
+        [
+            ("private", "private networks", "networks Windows marks Private or Domain"),
+            ("tailnet", "Tailscale only", "only addresses on your tailnet"),
+            ("lan-tailnet", "private + Tailscale", "both of the above"),
+            ("any", "any network", "includes public Wi-Fi; keys only strongly advised"),
+        ],
+        scope_default,
+        (
+            f"  Tailscale is running here ({tail}): with `tailnet` your other devices\n"
+            "  reach this PC from anywhere, and nothing else can see the port."
+            if tail
+            else "  No Tailscale found here: `tailnet` would admit nothing until it is."
+        ),
+    )
+    out["sshPasswordAuth"] = ask.choose(
+        "Allow password login?",
+        [
+            ("off", "keys only", "switched off only after a key login is verified"),
+            ("on", "passwords too", "a fallback, and what attackers guess at"),
+        ],
+        saved["sshPasswordAuth"],
+        "  RECOMMENDATION: off. Passwords are only switched off once a key has\n"
+        "  logged in successfully, so this answer cannot lock you out.",
+    )
+    if out["sshTargets"] in ("both", "wsl"):
+        out["sshAgentBridge"] = ask.choose(
+            "Let Ubuntu use the Windows ssh-agent?",
+            [
+                ("on", "on", "unlock a key once on Windows, use it in both"),
+                ("off", "off", "Ubuntu keeps its own agent"),
+            ],
+            saved["sshAgentBridge"],
+            "  RECOMMENDATION: on. One passphrase prompt per boot instead of one per\n"
+            "  connection from Ubuntu, and the same keys on both sides.",
+        )
+    return out
 
 
 def _herdr(ask: Asker, selected: list[str]) -> str:
@@ -1206,6 +1391,19 @@ def review(console: Console, answers: Answers) -> None:
     console.say(f"    Session restore  {answers.wez_restore}")
     console.say(f"    atuin (Ctrl+R)   {answers.atuin}")
     console.say(f"    herdr config     {answers.herdr}")
+    ssh = ssh_answers(answers)
+    if ssh.get("sshServer") == "on":
+        ports = []
+        if ssh.get("sshTargets") in ("both", "windows"):
+            ports.append("PowerShell :" + ssh.get("sshWindowsPort", ""))
+        if ssh.get("sshTargets") in ("both", "wsl"):
+            ports.append("Ubuntu :" + ssh.get("sshWslPort", ""))
+        console.say(f"    SSH server       on ({', '.join(ports)})")
+        console.say(
+            f"    SSH access       {ssh.get('sshScope')}, passwords {ssh.get('sshPasswordAuth')}"
+        )
+    elif plat.kind() == plat.WINDOWS:
+        console.say("    SSH server       off")
     console.say(f"    tmux prefix      {answers.tmux}")
     console.say(f"    Apps             {' '.join(answers.apps) or '<none>'}")
     console.say(f"    Agent voice      {answers.cc_tts}")

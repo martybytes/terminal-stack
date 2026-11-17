@@ -443,6 +443,8 @@ function Get-TsConfig {
         memoryBackend = 'agentmemory'
         starshipPreset = 'terminal-stack'; atuinEnabled = 'off'
         herdrConfig = 'off'; herdrShell = 'auto'
+        sshServer = 'off'; sshTargets = 'both'; sshWindowsPort = '22'; sshWslPort = '2222'
+        sshPasswordAuth = 'off'; sshScope = 'private'; sshAgentBridge = 'on'
         promptTransient = 'on'; promptTransientStyle = 'bare'; promptNewline = 'off'
     }
 }
@@ -521,6 +523,14 @@ function Save-TsConfig {
         [string]$StarshipPreset = 'terminal-stack',
         [ValidateSet('on','off')][string]$AtuinEnabled = 'off',
         [ValidateSet('on','off')][string]$HerdrConfig = 'off',
+        # SSH server choices (tstack/ssh.py applies them). Carried forward below.
+        [ValidateSet('on','off')][string]$SshServer = 'off',
+        [ValidateSet('both','windows','wsl')][string]$SshTargets = 'both',
+        [ValidatePattern('^[0-9]{1,5}$')][string]$SshWindowsPort = '22',
+        [ValidatePattern('^[0-9]{1,5}$')][string]$SshWslPort = '2222',
+        [ValidateSet('on','off')][string]$SshPasswordAuth = 'off',
+        [ValidateSet('private','tailnet','lan-tailnet','any')][string]$SshScope = 'private',
+        [ValidateSet('on','off')][string]$SshAgentBridge = 'on',
         # The prompt's behaviour. Written by `tstack config prompt transient|newline`
         # (Python, straight into this file) and only ever carried forward here --
         # without these three, any Windows-side save stripped them from config.json.
@@ -569,6 +579,13 @@ function Save-TsConfig {
         @{ Param = 'StarshipPreset'; Name = 'starshipPreset'; Default = 'terminal-stack' },
         @{ Param = 'AtuinEnabled'; Name = 'atuinEnabled'; Default = 'off' },
         @{ Param = 'HerdrConfig'; Name = 'herdrConfig'; Default = 'off' },
+        @{ Param = 'SshServer'; Name = 'sshServer'; Default = 'off' },
+        @{ Param = 'SshTargets'; Name = 'sshTargets'; Default = 'both' },
+        @{ Param = 'SshWindowsPort'; Name = 'sshWindowsPort'; Default = '22' },
+        @{ Param = 'SshWslPort'; Name = 'sshWslPort'; Default = '2222' },
+        @{ Param = 'SshPasswordAuth'; Name = 'sshPasswordAuth'; Default = 'off' },
+        @{ Param = 'SshScope'; Name = 'sshScope'; Default = 'private' },
+        @{ Param = 'SshAgentBridge'; Name = 'sshAgentBridge'; Default = 'on' },
         @{ Param = 'PromptTransient'; Name = 'promptTransient'; Default = 'on' },
         @{ Param = 'PromptTransientStyle'; Name = 'promptTransientStyle'; Default = 'bare' },
         @{ Param = 'PromptNewline'; Name = 'promptNewline'; Default = 'off' }
@@ -599,6 +616,13 @@ function Save-TsConfig {
         starshipPreset     = $StarshipPreset
         atuinEnabled       = $AtuinEnabled
         herdrConfig        = $HerdrConfig
+        sshServer          = $SshServer
+        sshTargets         = $SshTargets
+        sshWindowsPort     = $SshWindowsPort
+        sshWslPort         = $SshWslPort
+        sshPasswordAuth    = $SshPasswordAuth
+        sshScope           = $SshScope
+        sshAgentBridge     = $SshAgentBridge
         promptTransient    = $PromptTransient
         promptTransientStyle = $PromptTransientStyle
         promptNewline      = $PromptNewline

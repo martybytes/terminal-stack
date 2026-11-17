@@ -523,6 +523,11 @@ class SettingsApp(App[None]):
         return "\n".join(bits)
 
     def show_detail(self, message: str = "") -> None:
+        # A RowHighlighted message can be delivered after the screen's widgets are
+        # gone (the app shutting down) or before the Settings pane has mounted:
+        # windows-latest hit both, as NoMatches on '#table'. Nothing to show then.
+        if not self.query("#table") or not self.query("#detail"):
+            return
         self.detail_text = self.detail_for(self.current(), message)
         self.query_one("#detail", Static).update(self.detail_text)
 
