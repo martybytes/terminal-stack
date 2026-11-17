@@ -38,7 +38,10 @@ SYSADMIN = "sysadmin"
 # "is it in winget" -- conflating the two is why a Windows box missing
 # grok/gemini/pi/cursor-agent was never once told so.
 ALL, POSIX, LINUX, WINDOWS = "all", "posix", "linux", "windows"
-PLATFORMS = (ALL, POSIX, LINUX, WINDOWS)
+# GUI apps: anywhere with a desktop, never WSL -- a GUI app belongs on the
+# Windows side, and a WSL install writes nothing under /mnt/c.
+DESKTOP = "desktop"
+PLATFORMS = (ALL, POSIX, LINUX, WINDOWS, DESKTOP)
 
 # The distro veto. `platforms` answers "can this OS install it"; this answers
 # "should this DISTRO offer it", and there is exactly one case: Omarchy
@@ -82,6 +85,8 @@ class App:
             return machine == plat.WINDOWS
         if self.platforms == LINUX:
             return machine == plat.LINUX
+        if self.platforms == DESKTOP:
+            return machine in (plat.MACOS, plat.LINUX, plat.WINDOWS)
         # posix: everything with a POSIX package manager. WSL counts -- it has
         # apt, and a tool installed there is a tool you can use.
         return machine in (plat.MACOS, plat.LINUX, plat.WSL)

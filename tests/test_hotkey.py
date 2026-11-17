@@ -115,7 +115,7 @@ def test_a_bare_wizard_says_it_is_a_preview_and_how_to_apply(monkeypatch):
     console = Console.scripted([])
     monkeypatch.setattr(wizard.Console, "open", classmethod(lambda cls, tty="": console))
     monkeypatch.setattr(
-        wizard.flow, "collect", lambda c, ask_terminals=False: flow.Answers(asked=1)
+        wizard.flow, "collect", lambda c, ask_terminals=False, ask=None: flow.Answers(asked=1)
     )
     monkeypatch.setattr(wizard.flow, "review", lambda c, a: None)
     assert wizard.main([]) == 0
@@ -131,7 +131,7 @@ def test_an_emitting_wizard_stays_quiet_about_previews(monkeypatch, tmp_path):
     console = Console.scripted([])
     monkeypatch.setattr(wizard.Console, "open", classmethod(lambda cls, tty="": console))
     monkeypatch.setattr(
-        wizard.flow, "collect", lambda c, ask_terminals=False: flow.Answers(asked=1)
+        wizard.flow, "collect", lambda c, ask_terminals=False, ask=None: flow.Answers(asked=1)
     )
     monkeypatch.setattr(wizard.flow, "review", lambda c, a: None)
     assert wizard.main(["--emit", "sh", "--out", str(tmp_path / "a.sh")]) == 0

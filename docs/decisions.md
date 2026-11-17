@@ -3069,6 +3069,86 @@ and a new winget id is verified with `winget show --id <id> --exact` before it i
 written down. An id that always fails is worse than an honest "not available on
 this platform".
 
+## How the desktop agent apps arrive (Herdr app, Orca, T3 Code)
+
+Added 11/16/2026. Three GUI workspaces for coding agents, in a `desktop` group
+that is route-listed (`ts_app_is_desktop` / `Test-TsAppIsDesktop`) like herdr and
+docker, because no package manager has all three on any platform.
+
+- **A new `platforms` value, `desktop`, rather than a veto.** macOS, Windows and
+  native Linux; never WSL. A WSL install writes nothing under `/mnt/c`, so a GUI
+  app "installed from WSL" would have to be a Linux GUI app in WSLg, which is
+  not what anyone ticking Orca on a Windows box means. Headless is decided at
+  run time, so it is a filter in the wizard and a skip in the installer, not a
+  catalog column.
+- **macOS: casks, with Orca from Stably's tap.** The bare `orca` cask is Plotly's
+  unrelated image exporter; `stablyai/orca/orca` is the app. The Herdr app cask
+  is Apple Silicon only, and the installer says so on Intel instead of failing.
+- **Windows: winget for two, herdr.dev for one.** `StablyAI.Orca` and
+  `T3Tools.T3Code` were checked in winget-pkgs. The Herdr app has no manifest
+  (`Herdr.Herdr` is the TUI, `Herdr.HerdrCore` the runtime), so it takes
+  herdr.dev's `app/install.ps1`. GUI apps put nothing on PATH, so
+  `$TsAppFixedPaths` now takes a LIST of candidate exe paths: Electron installs
+  per-user under `%LOCALAPPDATA%\Programs\<product name>` and the product name
+  has already changed once (T3 Code ships as "T3 Code (Beta)" on macOS).
+- **Ubuntu: the release `.deb` through `apt-get install ./file.deb`.** apt
+  resolves the Electron runtime dependencies and the package owns its files,
+  so removal is `apt remove`. Not the AppImage there: Ubuntu has dropped
+  libfuse2 from the default install, and an AppImage that will not start is the
+  silently-missing tool again.
+- **Arch/Omarchy: vendor builds, no AUR helper.** All three are AUR-only
+  (`herdr-app`, `stably-orca-bin`, `t3code-bin`), and the stack's rule that it
+  prints `yay` commands but never runs them (`tests/test_distro.py`) stands: an
+  AUR build runs an arbitrary PKGBUILD as the user, and on Omarchy the user did
+  not ask the stack to do that. herdr.dev's own script for the Herdr app;
+  AppImages into `~/.local/share/terminal-stack/apps/` with a `.desktop` entry
+  for Orca and T3 Code. Re-running replaces the image, which is the update path.
+- **Presence is the bundle or the launcher, never `command -v`.** On most GNOME
+  desktops `/usr/bin/orca` is the Orca screen reader, so a PATH probe reports an
+  app that is not there. On macOS a `*.app` in `/Applications` or
+  `~/Applications` counts however it got there, and is left alone: the Zed rule
+  (`--adopt` once deleted a real app bundle).
+- **Found on the way:** the Arch installer never installed `herdr`. It skipped
+  only the `ai` route before calling `ts_arch_pkg`, so herdr (and docker) fell
+  through to "no Arch package mapping", and nothing on the Arch path called
+  `ts_install_herdrs`. The totality test hid it by filtering both ids out first.
+
+## Why the wizard's Back is a replay, not a state machine
+
+Added 11/16/2026. The install questionnaire became arrow-driven (select and
+checklist widgets in `tstack/wizard/prompts.py`, raw keys in `console.py`) with
+Back on every step and a review that can jump to any step.
+
+- **No new dependency.** Textual already runs the settings dashboard, but it is
+  not installed when the wizard runs (on a fresh machine Python is the only
+  thing guaranteed), and it degrades badly in the old Windows console. charm's
+  `huh`/`gum` would be a Go binary to download before the first question. The
+  widgets are ~250 lines of stdlib: `termios` cbreak per key on POSIX, `msvcrt`
+  on Windows with VT processing switched on for `CONOUT$`.
+- **Back re-runs `collect()` with the earlier answers replayed.** `collect` is
+  straight-line code whose later questions are gated on earlier answers.
+  Turning it into a step table would have meant re-expressing every gate, and
+  every comment explaining one. Instead each answer is recorded (`Asker.log`);
+  Back re-runs the flow with the answers before the target step replayed
+  silently, so the gates are re-evaluated on exactly what was answered and the
+  flow stops at the step being revisited, defaulting to the previous answer.
+  Output a replayed step prints (the prompt preview, a probe report) is HELD and
+  discarded so the screen shows only the question being asked.
+- **The review's "change one answer" autofills the rest.** After the edited
+  step, every question already answered takes its remembered answer silently;
+  only the edited one and anything it newly unlocks is asked.
+- **The numbered prompts stay, unchanged, as the fallback**: a scripted console,
+  `TERM=dumb`, an unopenable tty, or `TS_WIZ_PLAIN=1`. They gained `<` for Back.
+- **cbreak with TCSANOW, never the default TCSAFLUSH.** `tty.setcbreak` flushes
+  pending input by default, which discards keys typed ahead of the read: a fast
+  down-down-Enter lost presses. Found by the pty test that decodes real escape
+  sequences.
+- **`--answers FILE` maps onto the existing `TS_*` skips** rather than adding a
+  second skip mechanism, and is strict about keys and values. It is the
+  interface a richer front end (a local web page writing the same JSON) would
+  use; that page was deliberately left for later: it cannot work over ssh or
+  headless, so the terminal wizard has to be good regardless.
+
 ## Why the default leader is `Ctrl+\`, not `Ctrl+Space`
 
 `Ctrl+Space` was the default from the start and was contested everywhere the

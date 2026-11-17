@@ -6,6 +6,26 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Added
 
+- **Desktop agent apps: Herdr app, Orca and T3 Code (11/16/2026).** A new
+  `desktop` group in the app catalog, never pre-ticked, offered on macOS,
+  Windows and desktop Linux (not WSL, not headless). macOS installs the casks
+  (`herdr-app`, Stably's `stablyai/orca/orca` tap, `t3-code`); Windows uses
+  winget (`StablyAI.Orca`, `T3Tools.T3Code`) and herdr.dev's app installer;
+  Ubuntu gets the `.deb`s through apt; Arch/Omarchy gets AppImages with a
+  launcher entry, never an AUR helper. A copy you installed yourself is
+  detected and left alone. `doc desktop-agent-apps`.
+- **The install wizard is arrow-driven, with Back (11/16/2026).** Up/down to
+  move, space to tick, Enter to continue, left (or `b`) to go back a step, `q`
+  to quit, on every question. The app picker is now three tick-lists —
+  command-line tools, AI agent CLIs, desktop agent apps — instead of a menu of
+  menus, and the review can jump to any step, change that one answer and come
+  back. Starship presets render one at a time as you arrow through them.
+  No new dependency: it is the same stdlib-only Python. `TS_WIZ_PLAIN=1` keeps
+  the numbered prompts, which also gained Back (`<`).
+- **`tstack wizard --answers FILE` / `TS_WIZ_ANSWERS` (11/16/2026).** Answers the
+  questions a JSON file names (the shape `--emit json` writes) and asks the rest,
+  so a run can be recorded once and replayed on another machine. Strict: an
+  unknown key or impossible value is refused by name.
 - **`tstack services repair` fixes Docker Desktop's "waiting 1m0s for the
   backend socket" (11/16/2026).** After a Docker Desktop update the WSL VM keeps
   running, the new backend never republishes its socket into it, and docker
@@ -121,6 +141,11 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
   nvim's `Ctrl+\ Ctrl+N` and SIGQUIT stay reachable.
 
 ### Fixed
+
+- **herdr installs on Arch/Omarchy (11/16/2026).** The Arch app installer sent
+  `herdr` (and `docker`) to `ts_arch_pkg`, printed "no Arch package mapping" and
+  never called herdr.dev's installer, so ticking herdr on Omarchy installed
+  nothing.
 
 - **The install's workspace question only saves a real directory (11/14/2026).**
   It saved any answer verbatim, so text typed ahead while the install was still

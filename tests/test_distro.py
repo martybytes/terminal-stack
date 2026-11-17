@@ -240,7 +240,7 @@ def _linux_catalog_ids() -> list[str]:
     Which of these pacman is responsible for is decided in bash, by the route
     functions themselves -- see the test below.
     """
-    return [a.id for a in apps.catalog() if a.platforms in ("all", "posix", "linux")]
+    return [a.id for a in apps.catalog() if a.platforms in ("all", "posix", "linux", "desktop")]
 
 
 @pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
@@ -268,6 +268,7 @@ def test_every_installable_catalog_id_has_an_arch_package():
         '  ts_app_is_ai "$i" && continue\n'
         '  ts_app_is_herdr "$i" && continue\n'
         '  ts_app_is_docker "$i" && continue\n'
+        '  ts_app_is_desktop "$i" && continue\n'
         '  ts_arch_pkg "$i" >/dev/null 2>&1 || echo "$i"\n'
         "done\n"
     )
@@ -301,6 +302,7 @@ def test_every_installable_catalog_id_has_a_debian_route():
         '  ts_app_is_ai "$i" && continue\n'
         '  ts_app_is_herdr "$i" && continue\n'
         '  ts_app_is_docker "$i" && continue\n'
+        '  ts_app_is_desktop "$i" && continue\n'
         '  ts_debian_pkg "$i" >/dev/null 2>&1 || echo "$i"\n'
         "done\n"
     )

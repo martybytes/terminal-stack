@@ -173,6 +173,8 @@ foreach ($id in $selectedApps) {
     if (Test-TsAppIsAi $id) { continue }      # not winget packages; handled below
     if (Test-TsAppIsPy $id) { continue }      # PyPI, not winget; handled below
     if (Test-TsAppIsHerdr $id) { continue }   # herdr.dev's own installer; handled below
+    # herdr-app: herdr.dev's app installer, below. orca/t3code are winget ids.
+    if ((Test-TsAppIsDesktop $id) -and -not $script:TsWingetIds.ContainsKey($id)) { continue }
     if ($script:TsWingetIds.ContainsKey($id)) {
         Install-WingetPackage -Id $script:TsWingetIds[$id] -Because $id | Out-Null
     } else {
@@ -188,6 +190,7 @@ if (@($selectedApps | Where-Object { Test-TsAppIsPy $_ }).Count) {
 }
 foreach ($id in $selectedApps) { if (Test-TsAppIsAi $id) { Install-TsAiCli $id } }
 foreach ($id in $selectedApps) { if (Test-TsAppIsHerdr $id) { Install-TsHerdr } }
+foreach ($id in $selectedApps) { if (Test-TsAppIsDesktop $id) { Install-TsDesktopApp $id } }
 Update-TsSessionPath
 Show-TsInstalledApps $selectedApps
 
