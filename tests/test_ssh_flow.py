@@ -213,6 +213,8 @@ def applied(windows, monkeypatch):
     monkeypatch.setattr(ssh, "start_keepalive", lambda: calls.append(("keepalive",)))
     monkeypatch.setattr(ssh, "verify_login", lambda port, user, side="windows": True)
     monkeypatch.setattr(ssh, "windows_listener", lambda port: "")
+    monkeypatch.setattr(ssh, "wsl_install_bridge", lambda d: calls.append(("bridge",)) or (True, ""))
+    monkeypatch.setattr(ssh, "wsl_remove_bridge", lambda d: calls.append(("no-bridge",)) or True)
     monkeypatch.setattr(ssh, "plat", plat)
     return calls
 
@@ -224,7 +226,7 @@ def test_a_full_apply_runs_both_halves_in_order(applied, windows, monkeypatch):
     values = dict(ssh.DEFAULTS, sshServer="on")
     code = cmd.apply(values, ssh.parse_keys(K1), FakeAsk(), dry=False)  # type: ignore[arg-type]
     assert code == 0
-    assert applied == [("win-keys",), ("wsl-server", "on"), ("shutdown",), ("keepalive",), ("wsl-server", "off")]
+    assert applied == [("win-keys",), ("wsl-server", "on"), ("shutdown",), ("keepalive",), ("bridge",), ("wsl-server", "off")]
     assert plans[0].keepalive_distro == "Ubuntu" and plans[0].password_off_after_verify
     assert plans[0].verify_expect == "Windows_NT"
 
@@ -508,3 +510,18 @@ def test_the_result_file_exists_before_elevation(tmp_path, monkeypatch):
     result, _ = ssh.run_elevated(ssh.plan_windows(dict(ssh.DEFAULTS, sshServer="on"), []))
     assert seen == [True]
     assert result is not None and result["ok"] is False
+
+
+def test_the_bridge_setting_off_removes_it(applied, windows, monkeypatch, capsys):
+    monkeypatch.setattr(ssh, "run_elevated", lambda plan: ({"ok": True, "steps": []}, windows / "p"))
+    values = dict(ssh.DEFAULTS, sshServer="on", sshAgentBridge="off")
+    cmd.apply(values, [], FakeAsk(), dry=False)  # type: ignore[arg-type]
+    assert ("no-bridge",) in applied and ("bridge",) not in applied
+    assert "Ubuntu keeps its own agent" in capsys.readouterr().out
+
+
+def test_a_bridge_that_fails_is_said(applied, windows, monkeypatch, capsys):
+    monkeypatch.setattr(ssh, "run_elevated", lambda plan: ({"ok": True, "steps": []}, windows / "p"))
+    monkeypatch.setattr(ssh, "wsl_install_bridge", lambda d: (False, "no winget"))
+    cmd.apply(dict(ssh.DEFAULTS, sshServer="on"), [], FakeAsk(), dry=False)  # type: ignore[arg-type]
+    assert "not set up: no winget" in capsys.readouterr().out

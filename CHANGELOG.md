@@ -6,6 +6,17 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Added
 
+- **Ubuntu shares the Windows ssh-agent, and `tstack ssh doctor [--fix]` (11/17/2026, Windows + WSL).**
+  With `sshAgentBridge` on (the default), `tstack ssh setup` installs npiperelay and socat and
+  starts a systemd user unit, `wsl-ssh-agent-bridge`, that relays the Windows agent to
+  `$XDG_RUNTIME_DIR/wsl-ssh-agent.sock`. `~/.zshrc` prefers that socket over Ubuntu's own agent,
+  even in panes a herdr or tmux server handed the old one, while a forwarded `ssh -A` agent still
+  wins. The Windows agent keeps keys across reboots, so each passphrase is typed once. `tstack ssh
+  doctor` reports the key problems on both sides: the agent service, keys not loaded,
+  `AddKeysToAgent`, duplicate `Host` blocks, keys without a passphrase, and in Ubuntu private keys
+  others can read and CRLF in `~/.ssh/config`. `--fix` repairs them, asking first; `--fix --yes`
+  applies only the ones that ask nothing. `doc windows/ssh-server`.
+
 - **`tstack keys`: every keyboard shortcut on this PC in one CSV (11/17/2026, Windows).** It
   probes every global hotkey combination and reads the shortcuts of Windows itself, Start-menu
   `.lnk` files, PowerToys, WezTerm, Windows Terminal, VS Code/Cursor/Zed, herdr, Claude Code,

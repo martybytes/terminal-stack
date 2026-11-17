@@ -59,10 +59,20 @@ unset _bin_os
 # the three targets this stack ships to. Arch stays FIRST so the path shared
 # with the bash twin still wins wherever both exist: naming a different one
 # there would leave a machine running two agents.
+#
+# WSL's bridge to the WINDOWS agent (`tstack ssh setup`, wsl-ssh-agent.sock)
+# comes before both: its keys stay unlocked across reboots, which is the whole
+# point of it. It may also replace a live value, but only when that value is one
+# of the two LOCAL agent sockets above -- a long-lived server started before the
+# bridge hands its panes the local one. A forwarded or 1Password socket still wins.
+_ts_rt="${XDG_RUNTIME_DIR:-/run/user/$UID}"
+if [[ -S "$_ts_rt/wsl-ssh-agent.sock" ]] && [[ ! -S "${SSH_AUTH_SOCK:-}" || "$SSH_AUTH_SOCK" == "$_ts_rt/ssh-agent.socket" || "$SSH_AUTH_SOCK" == "$_ts_rt/openssh_agent" ]]; then
+  export SSH_AUTH_SOCK="$_ts_rt/wsl-ssh-agent.sock"
+fi
 for _ts_sock in "${XDG_RUNTIME_DIR:-/run/user/$UID}/ssh-agent.socket" "${XDG_RUNTIME_DIR:-/run/user/$UID}/openssh_agent"; do
   [[ ! -S "${SSH_AUTH_SOCK:-}" && -S "$_ts_sock" ]] && export SSH_AUTH_SOCK="$_ts_sock"
 done
-unset _ts_sock
+unset _ts_sock _ts_rt
 
 # Path to your Oh My Zsh installation.
 export ZSH="$HOME/.oh-my-zsh"

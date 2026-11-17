@@ -68,6 +68,11 @@ bash half in omarchy-dots uses, and the two must agree or a machine ends up
 talking to two agents. Because the fix is in the shell and not the server, **every new
 pane is already correct** — no server restart, nothing to detach.
 
+On WSL with agent sharing (`tstack ssh setup`, `doc windows/ssh-server`), a third
+socket comes first: `$XDG_RUNTIME_DIR/wsl-ssh-agent.sock`, the Windows agent
+relayed in. It may replace a live value, but only one of the two local agent
+sockets above, which is what a server started before the bridge hands its panes.
+
 An already-open pane keeps the environment it started with. Fix that one in
 place, or just open a new one:
 

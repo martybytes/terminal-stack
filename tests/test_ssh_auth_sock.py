@@ -181,3 +181,25 @@ def test_it_stays_in_step_with_the_bash_twin(tmp_path):
     """omarchy-dots owns the bash half. The socket PATH is the contract between
     them: if one ever names a different one, a machine gets two agents."""
     assert "${XDG_RUNTIME_DIR:-/run/user/$UID}/ssh-agent.socket" in _block()
+
+
+def test_the_windows_agent_bridge_wins_over_a_local_agent(tmp_path):
+    """WSL with `tstack ssh setup`'s bridge: the Windows agent keeps its keys
+    unlocked across reboots, a local Linux agent does not."""
+    with _runtime_holding("openssh_agent", "wsl-ssh-agent.sock") as rt:
+        assert _resolve(tmp_path, rt, None) == str(rt / "wsl-ssh-agent.sock")
+
+
+def test_the_bridge_replaces_an_inherited_local_agent(tmp_path):
+    """A herdr or tmux server started before the bridge hands its panes the
+    local socket, live. That one value may be replaced, and only that one."""
+    with _runtime_holding("openssh_agent", "ssh-agent.socket", "wsl-ssh-agent.sock") as rt:
+        for local in ("openssh_agent", "ssh-agent.socket"):
+            assert _resolve(tmp_path, rt, str(rt / local)) == str(rt / "wsl-ssh-agent.sock")
+
+
+def test_a_forwarded_agent_still_beats_the_bridge(tmp_path):
+    """`ssh -A` into WSL: the agent of the computer you came from wins."""
+    with _runtime_holding("wsl-ssh-agent.sock", "forwarded.sock") as rt:
+        forwarded = rt / "forwarded.sock"
+        assert _resolve(tmp_path, rt, str(forwarded)) == str(forwarded)

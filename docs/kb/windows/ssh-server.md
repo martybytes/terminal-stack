@@ -19,6 +19,8 @@ tstack ssh                 # status: what is set up, against what is saved
 tstack ssh setup           # ask, pick keys, apply (one UAC prompt)
 tstack ssh setup --dry-run # the plan, nothing changed
 tstack ssh keys            # the keys that may log in
+tstack ssh doctor          # key problems: modes, CRLF, agent, passphrases
+tstack ssh doctor --fix    # repair them, asking first
 ```
 
 ## What it asks
@@ -31,7 +33,7 @@ tstack ssh keys            # the keys that may log in
   - `lan-tailnet`: both of the above.
   - `any`: every network, including public Wi-Fi.
 - **Passwords**: keys only (recommended) or passwords too. Passwords are switched off only **after a key login has been proven** on that port. If none of the keys you authorized is on this PC to test with, you are asked whether to switch them off anyway.
-- **Agent sharing**: lets Ubuntu use the Windows ssh-agent, so a key unlocked once works in both.
+- **Agent sharing**: lets Ubuntu use the Windows ssh-agent, so a key unlocked once works in both. See [The shared agent](#the-shared-agent).
 - **Keys**: tick any combination of these sources, and each one is then walked through:
   - **this PC's keys**: the `.pub` files in `~/.ssh`. A key with no passphrase is flagged.
   - **GitHub**: the keys published at `https://github.com/<user>.keys`.
@@ -69,6 +71,43 @@ WSL:
   - It takes effect after `wsl --shutdown`, which you are asked about because it closes every WSL shell.
 - **A Hyper-V firewall rule** (`terminal-stack-sshd-wsl-*`) for the WSL port. Mirrored-mode traffic into WSL is filtered there, not by the ordinary host rules.
 - **A logon task, `terminal-stack WSL sshd keep-alive`**: WSL stops a distro once nothing is attached, taking sshd with it. The task runs a hidden `wsl.exe --exec sleep infinity`.
+
+## The shared agent
+
+With agent sharing on (`sshAgentBridge`, the default), Ubuntu uses the **Windows** ssh-agent. The Windows agent keeps the keys you add across reboots, where a Linux agent forgets them at logout. So you type each passphrase once, ever, and the key works on both sides.
+
+- **npiperelay** is installed on Windows (`winget install --id albertony.npiperelay`) and linked into WSL as `~/.local/bin/npiperelay.exe`.
+- **socat** is installed in Ubuntu.
+- **A systemd user unit, `wsl-ssh-agent-bridge.service`**, has socat listen on `$XDG_RUNTIME_DIR/wsl-ssh-agent.sock` and hand each connection to npiperelay. npiperelay talks to the agent's named pipe.
+- **`~/.zshrc`** points `SSH_AUTH_SOCK` at that socket. It wins over Ubuntu's own agent, even when a herdr or tmux server handed the pane the old one. A forwarded `ssh -A` agent still wins over both.
+- Ubuntu's own `ssh-agent` is left running, untouched.
+
+Turning agent sharing off and re-running `tstack ssh setup` removes the unit and the link.
+
+```sh
+ssh-add -l                                          # in Ubuntu: the Windows agent's keys
+systemctl --user status wsl-ssh-agent-bridge        # the relay
+```
+
+A shell opened before the bridge existed keeps its old value. Open a new one.
+
+## Key doctor
+
+`tstack ssh doctor` checks the things that make ssh refuse a key or ask for its passphrase again and again. From Windows it checks both Windows and Ubuntu; in WSL or on Linux it checks that machine.
+
+| Check | `--fix` |
+|---|---|
+| Windows `ssh-agent` service not Running and Automatic | none: `tstack ssh setup` sets it (admin) |
+| Windows `~\.ssh` readable by other users | makes it private (`icacls`, no admin) |
+| A key named by `IdentityFile` is not in the Windows agent | `ssh-add` it: one passphrase, kept across reboots |
+| `AddKeysToAgent` not set in `~/.ssh/config` | none: add `AddKeysToAgent yes` under `Host *` |
+| The same `Host` pattern in two blocks (only the first block's values apply) | none: the stack never edits `~/.ssh/config` |
+| A private key with no passphrase | `ssh-keygen -p` on it |
+| Ubuntu: a private key other users can read, or a `~/.ssh`, `config` or `authorized_keys` others can write | `chmod 600` the keys, `go-w` the rest |
+| Ubuntu: Windows line endings in `~/.ssh/config` | strips them, backup taken |
+| Ubuntu: the shared agent missing or not answering | sets it up |
+
+`--fix` asks before each repair. `--fix --yes` applies only the ones that ask nothing on the terminal: modes, line endings, permissions and the bridge. The exit code is 0 when nothing is left to warn about.
 
 ## The other computer
 
@@ -110,4 +149,6 @@ A computer that used another port before (the old 2222 for Windows, for example)
 - **Port 2222 refuses from another computer but works locally**: WSL is not mirrored yet. Run `wsl --shutdown` and reconnect.
 - **Port 2222 is dead after a while**: the keep-alive task is not running. Run `schtasks /Run /TN "terminal-stack WSL sshd keep-alive"`.
 - **The UAC prompt was declined**: setup prints the exact command to run from an elevated PowerShell.
+- **Ubuntu still asks for a passphrase**: run `tstack ssh doctor`. A key ssh refuses for its mode, a key not loaded in the Windows agent, and a shell opened before the bridge existed all look the same from the prompt.
+- **`ssh-add -l` in Ubuntu says "Error connecting to agent"**: the Windows `ssh-agent` service is stopped, or the bridge unit is (`systemctl --user restart wsl-ssh-agent-bridge`).
 - **Doing it over ssh**: setup warns you. The port can move under you, so the first run belongs on the PC's own console.
