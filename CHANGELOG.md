@@ -4,6 +4,16 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+### Added
+
+- **`tstack keys`: every keyboard shortcut on this PC in one CSV (11/17/2026, Windows).** It
+  probes every global hotkey combination and reads the shortcuts of Windows itself, Start-menu
+  `.lnk` files, PowerToys, WezTerm, Windows Terminal, VS Code/Cursor/Zed, herdr, Claude Code,
+  PSReadLine, AutoHotkey, and tmux/zsh in WSL. It flags every app shortcut that another
+  program's global hotkey swallows. `-Identify` names that program: there is no Windows API
+  for it, so a small hook DLL (`bootstrap/hkspy`) watches who receives each key, and swallows
+  the press. `tstack doctor`'s taken-leader advice now points at it. `doc windows/keymap`.
+
 ### Fixed
 
 - **Claude sessions started with `cc*` now show in herdr's agents list (11/17/2026).** The

@@ -25,12 +25,14 @@ commands any more, and no aliases for them.
 | `tstack smb` | SMB shares over rclone (POSIX only) - see `doc smb-shares` |
 | `tstack agents` | agent CLI wiring - see `doc agentmemory`, `doc headroom` |
 | `tstack agentmemory` | the agentmemory hook harness; `--check` reports reverted edits |
+| `tstack keys` | every keyboard shortcut on this PC in one CSV, conflicts flagged; `-Identify` names the program holding each global hotkey (Windows only) - see `doc windows/keymap` |
 | `tstack doc` | this knowledge base (the bare `doc` command is the same thing) |
 | `tstack --help` | every subcommand, with platform gaps marked |
 | `tstack --version` | clone path, branch, commit, and whether it is dirty |
 
 A subcommand reported as "not available on <platform>" is deliberate, not a
-broken install: `smb` has no PowerShell implementation.
+broken install: `smb` has no PowerShell implementation, and `keys` reads Windows
+hotkeys, so it has no POSIX one.
 
 ## `tstack workspace` — the one setting that is not in the store
 

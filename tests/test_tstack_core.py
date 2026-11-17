@@ -371,7 +371,11 @@ def test_render_help_marks_platform_gaps(monkeypatch):
     as_platform(monkeypatch, plat.WINDOWS)
     assert "not available on windows" in cli.render_help()
     as_platform(monkeypatch, plat.LINUX)
-    assert "not available on" not in cli.render_help()
+    # `keys` reads Windows hotkeys; it is the one Windows-only row.
+    gaps = {
+        line.split()[0] for line in cli.render_help().splitlines() if "not available on" in line
+    }
+    assert gaps == {"keys"}, gaps
 
 
 def test_main_returns_usage_for_unknown_and_ok_for_help():

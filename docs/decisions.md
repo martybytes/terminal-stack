@@ -4461,7 +4461,10 @@ owner, system-wide, before any window. No WezTerm setting can get it back.
 The only test Windows offers is to try registering the chord ourselves: it fails
 with `ERROR_HOTKEY_ALREADY_REGISTERED` (1409) when it is held, and is released at
 once when it succeeds. **There is no API that names the holder**, which is why
-the advice lists likely programs rather than naming one. "Cannot tell" (not
+the advice lists likely programs rather than naming one.
+(Superseded 2026-11-17: `tstack keys -Identify` does name it, by pressing the chord under a
+`WH_GETMESSAGE` hook that records which process receives the `WM_HOTKEY`. The probe stays the
+doctor's test because it presses nothing; naming needs the key pressed. `doc windows/keymap`.) "Cannot tell" (not
 Windows, or a chord with no key code) returns None and prints nothing, never
 "ok".
 
