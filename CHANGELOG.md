@@ -14,7 +14,9 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
   spoken whole instead of cut mid-word at `maxChars`, and other text ends on a
   whole word. `tstack update` rebuilds the TTS exe when daemon source changed
   since its build; it was only installed when missing, which left one machine
-  speaking the idle reminder a month after the fix. `doc common/tts`.
+  speaking the idle reminder a month after the fix. `doc common/tts`. (The first
+  release of the rebuild failed with "cannot be found that accepts argument
+  '$null'" and kept the old build: an empty argument list splatted as `$null`.)
 
 ### Added
 
