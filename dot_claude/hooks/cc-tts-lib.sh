@@ -51,6 +51,49 @@ cc_tts_sdk_silenced() {
     [ "$(cc_tts_json .sources.claude.speakSdk false)" != true ]
 }
 
+# A finished background task or agent opens a turn of its own, and its Stop looked like an
+# answer to you. Only the transcript knows: the user entry that opened the turn carries
+# origin.kind "task-notification". Twin of turn_started_by_background in ttsd/hooks.py,
+# checked before the Windows handoff because from WSL the exe cannot read a /home path.
+# cc_tts_background_silenced <source> <hook-json>. Fails open: no python3, no transcript,
+# anything unreadable means speak.
+cc_tts_background_silenced() {
+    [ "${1:-claude}" = claude ] || return 1
+    [ "$(cc_tts_json .sources.claude.speakBackground false)" != true ] || return 1
+    command -v python3 >/dev/null 2>&1 || return 1
+    printf '%s' "${2:-}" | python3 -c '
+import json, sys
+try:
+    path = json.load(sys.stdin).get("transcript_path") or ""
+    with open(path, "rb") as handle:
+        handle.seek(0, 2)
+        handle.seek(max(0, handle.tell() - 524288))
+        tail = handle.read()
+except Exception:
+    sys.exit(1)
+for line in reversed(tail.splitlines()):
+    try:
+        entry = json.loads(line)
+    except ValueError:
+        continue
+    if not isinstance(entry, dict) or entry.get("type") != "user" or entry.get("isMeta"):
+        continue
+    content = (entry.get("message") or {}).get("content")
+    if isinstance(content, list) and any(
+            isinstance(p, dict) and p.get("type") == "tool_result" for p in content):
+        continue
+    origin = entry.get("origin")
+    if isinstance(origin, dict) and origin.get("kind"):
+        sys.exit(0 if origin.get("kind") == "task-notification" else 1)
+    if isinstance(content, list):
+        content = next((p.get("text") for p in content
+                        if isinstance(p, dict) and p.get("type") == "text"), "")
+    sys.exit(0 if isinstance(content, str)
+             and content.lstrip().startswith("<task-notification>") else 1)
+sys.exit(1)
+' 2>/dev/null
+}
+
 # The absolute mute, as the tray icon / hotkey / ccmute write it. The sentinel lives in
 # the Windows daemon's state dir, because on a combined host that is the process that does
 # the talking; a native Linux host, which has no ttsd, keeps its own next to the config.
@@ -367,6 +410,7 @@ cc_tts_build_speech() {
     # cc_tts_build_speech <source> <state> <project> [override_text]
     local source="$1" state="$2" project="$3" override_text="${4:-}"
     local text tpl max_chars prefix prefix_enabled include_project message_mode hook_json
+    local whole=0
 
     cc_tts_init_config
     max_chars="$(cc_tts_json .maxChars 120)"
@@ -405,6 +449,8 @@ cc_tts_build_speech() {
         local final_text self_line
         final_text="$(cc_tts_assistant_text "${CC_TTS_HOOK_JSON}" direct)"
         if [ -n "$final_text" ]; then
+            # A marker is spoken whole, as _line_for_one does; maxChars clipped it mid-word.
+            [ -n "$(cc_tts_speak_marker "$final_text")" ] && whole=1
             self_line="$(cc_tts_self_summary "$final_text")"
             if [ -n "$self_line" ]; then
                 text="${project:+$project} finished. $self_line"
@@ -436,7 +482,15 @@ cc_tts_build_speech() {
         esac
     fi
 
-    [ "${#text}" -gt "$max_chars" ] && text="${text:0:max_chars}"
+    # Twin of _clamp: end on a whole word, never inside one.
+    if [ "$whole" -eq 0 ] && [ "${#text}" -gt "$max_chars" ]; then
+        local cut="${text:0:max_chars-1}"
+        if [ "${text:max_chars-1:1}" != " " ] && [ "${cut% *}" != "$cut" ]; then
+            cut="${cut% *}"
+        fi
+        cut="${cut%"${cut##*[!,;:[:space:]-]}"}"
+        text="$cut…"
+    fi
     printf '%s' "$text"
 }
 

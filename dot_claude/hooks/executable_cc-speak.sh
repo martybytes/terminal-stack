@@ -16,6 +16,8 @@ notify="$(dirname "$0")/cc-tts-notify.sh"
 source="${CC_TTS_SOURCE:-claude}"
 export CC_TTS_SOURCE="$source"
 cc_tts_sdk_silenced "$source" && exit 0
+# Errors from a background-triggered turn still speak; only its "done" goes quiet.
+[ "$state" = waiting ] && cc_tts_background_silenced "$source" "$input" && exit 0
 event=stop
 [ "$state" = error ] && event=stop_failure
 if cc_tts_windows_hook "$source" "$event" "$state" "$input" >/dev/null 2>&1; then

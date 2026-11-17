@@ -215,3 +215,93 @@ def test_sdk_gate_applies_to_claude_only(monkeypatch):
     assert is_sdk_session("claude")
     assert not is_sdk_session("cursor")
     assert not is_sdk_session("codex")
+
+
+# ── turns a background task started ─────────────────────────────────────────
+
+def _transcript(tmp_path, *entries):
+    path = tmp_path / "session.jsonl"
+    path.write_text("".join(json.dumps(e) + "\n" for e in entries), encoding="utf-8")
+    return str(path)
+
+
+HUMAN = {"type": "user", "origin": {"kind": "human"}, "promptSource": "typed",
+         "message": {"role": "user", "content": "fix 70"}}
+TASK = {"type": "user", "origin": {"kind": "task-notification"}, "promptSource": "system",
+        "message": {"role": "user", "content": "<task-notification>\n<task-id>b1</task-id>"}}
+LEGACY_TASK = {"type": "user", "message": {
+    "role": "user", "content": [{"type": "text", "text": "<task-notification> done"}]}}
+TOOL_RESULT = {"type": "user", "message": {"role": "user", "content": [
+    {"type": "tool_result", "tool_use_id": "t1", "content": "ok"}]}}
+META = {"type": "user", "isMeta": True, "message": {"content": "<system-reminder>x"}}
+ASSISTANT = {"type": "assistant", "message": {"content": [{"type": "text", "text": "Done."}]}}
+
+
+def test_background_turn_is_detected_from_the_transcript(tmp_path):
+    from ttsd.hooks import turn_started_by_background as bg
+
+    assert bg(_transcript(tmp_path, HUMAN, ASSISTANT, TASK, ASSISTANT))
+    assert not bg(_transcript(tmp_path, TASK, ASSISTANT, HUMAN, ASSISTANT))
+    # Tool results and meta reminders sit between the prompt and the Stop; skip them.
+    assert bg(_transcript(tmp_path, TASK, ASSISTANT, TOOL_RESULT, META, ASSISTANT))
+    assert not bg(_transcript(tmp_path, HUMAN, TOOL_RESULT, META, ASSISTANT))
+    # Older Claude Code builds have no origin field, only the tag in the content.
+    assert bg(_transcript(tmp_path, LEGACY_TASK, ASSISTANT))
+
+
+def test_background_detection_fails_open(tmp_path):
+    from ttsd.hooks import turn_started_by_background as bg
+
+    assert not bg("")
+    assert not bg(str(tmp_path / "missing.jsonl"))
+    junk = tmp_path / "junk.jsonl"
+    junk.write_text("not json\n{\n", encoding="utf-8")
+    assert not bg(str(junk))
+
+
+def _submit_turn(monkeypatch, transcript, event="stop", state="waiting",
+                 speak_background=None):
+    import ttsd.hooks as hooks
+
+    settings = {"enabled": True, "daemon.enabled": True,
+                "events": ["waiting", "error", "question", "permission"]}
+    if speak_background is not None:
+        settings["sources.claude.speakBackground"] = speak_background
+
+    class _Cfg:
+        def get(self, dotted, default=None):
+            return settings.get(dotted, default)
+
+    posted = []
+    monkeypatch.setattr(hooks, "Config", _Cfg)
+    monkeypatch.setattr(hooks.mute, "is_muted", lambda: False)
+    monkeypatch.setattr(hooks, "_post", lambda cfg, payload: posted.append(payload) or True)
+    monkeypatch.setattr(hooks, "_spawn_direct", lambda *a, **k: False)
+    monkeypatch.delenv("CC_TTS_REPORT_DISABLED", raising=False)
+    monkeypatch.delenv("CLAUDE_CODE_ENTRYPOINT", raising=False)
+    rc = hooks.submit_hook("claude", event, state,
+                           raw({"session_id": "s1", "transcript_path": transcript}))
+    return rc, posted
+
+
+def test_background_turn_stop_is_silent_by_default(monkeypatch, tmp_path):
+    rc, posted = _submit_turn(monkeypatch, _transcript(tmp_path, HUMAN, TASK, ASSISTANT))
+    assert rc == 0
+    assert posted == []
+
+
+def test_background_turn_speaks_when_opted_in(monkeypatch, tmp_path):
+    _, posted = _submit_turn(monkeypatch, _transcript(tmp_path, TASK, ASSISTANT),
+                             speak_background=True)
+    assert len(posted) == 1
+
+
+def test_background_turn_error_still_speaks(monkeypatch, tmp_path):
+    _, posted = _submit_turn(monkeypatch, _transcript(tmp_path, TASK, ASSISTANT),
+                             event="stop_failure", state="error")
+    assert len(posted) == 1
+
+
+def test_user_turn_still_speaks(monkeypatch, tmp_path):
+    _, posted = _submit_turn(monkeypatch, _transcript(tmp_path, TASK, HUMAN, ASSISTANT))
+    assert len(posted) == 1

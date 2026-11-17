@@ -243,6 +243,63 @@ def is_sdk_session(source: str) -> bool:
     return source.lower() == "claude" and entrypoint.startswith("sdk")
 
 
+_TRANSCRIPT_TAIL_BYTES = 512 * 1024
+
+
+def turn_started_by_background(transcript_path: str) -> bool:
+    """True when the turn now ending was opened by a background task, not by the user.
+
+    A finished background task or agent starts a new turn of its own, and its Stop hook
+    is indistinguishable from one that answers a prompt: same event, same payload. Those
+    turns were 43% of everything spoken. Only the transcript knows: the user entry that
+    opened the turn carries origin.kind "task-notification" (older builds: content that
+    starts with <task-notification>). Reads the tail only; any doubt means False, so a
+    turn is never silenced on a guess.
+    """
+    if not transcript_path:
+        return False
+    try:
+        with open(transcript_path, "rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            size = handle.tell()
+            handle.seek(max(0, size - _TRANSCRIPT_TAIL_BYTES))
+            tail = handle.read()
+    except OSError:
+        return False
+    for line in reversed(tail.splitlines()):
+        try:
+            entry = json.loads(line)
+        except (UnicodeDecodeError, ValueError):
+            continue
+        if not isinstance(entry, dict) or entry.get("type") != "user" or entry.get("isMeta"):
+            continue
+        content = (entry.get("message") or {}).get("content")
+        if isinstance(content, list) and any(
+                isinstance(part, dict) and part.get("type") == "tool_result"
+                for part in content):
+            continue
+        origin = entry.get("origin")
+        if isinstance(origin, dict) and origin.get("kind"):
+            return origin.get("kind") == "task-notification"
+        if isinstance(content, list):
+            content = next((part.get("text") for part in content
+                            if isinstance(part, dict) and part.get("type") == "text"), "")
+        return isinstance(content, str) and content.lstrip().startswith("<task-notification>")
+    return False
+
+
+def background_silenced(source: str, event: str, payload: dict, cfg: Config) -> bool:
+    """A Claude Stop closing a background-triggered turn, with speakBackground off.
+
+    Only the "done" Stop: a StopFailure or a question from the same turn still speaks.
+    """
+    if source.lower() != "claude" or event.lower() != "stop":
+        return False
+    if cfg.get("sources.claude.speakBackground", False):
+        return False
+    return turn_started_by_background(str(payload.get("transcript_path") or ""))
+
+
 def submit_hook(source: str, event: str, state: str, raw: bytes) -> int:
     payload = build_payload(source, event, state, raw)
     if payload is None:
@@ -258,6 +315,8 @@ def submit_hook(source: str, event: str, state: str, raw: bytes) -> int:
         return declined
     if is_sdk_session(source) and not cfg.get("sources.claude.speakSdk", False):
         return declined
+    if background_silenced(source, event, payload, cfg):
+        return 0
     # The mute is checked here, before the daemon POST and before any worker is spawned,
     # because this is the one place every hook on every host passes through. It is
     # deliberately absolute: no priority escape, since the whole point is silencing the

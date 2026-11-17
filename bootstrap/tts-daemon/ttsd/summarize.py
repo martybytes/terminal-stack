@@ -87,8 +87,16 @@ class Summarizer:
 
         mode = str(self.cfg.get("summarize.mode", "template"))
         summary = ""
+        # A <!-- speak: --> sentence is spoken whole. maxChars cut it mid-word: the
+        # "Claude. <project> finished." lead-in alone takes about a third of the default
+        # 120, so a 15-word marker was clipped more often than not. The marker regex
+        # already caps it at 200 characters, and the instructions at 15 words.
+        whole = False
         if mode == "self":
-            summary = self._self_summary(ev.text)
+            summary = self._extract_marker(ev.text)
+            whole = bool(summary)
+            if not whole:
+                summary = self._self_summary(ev.text)
         elif mode == "haiku":
             summary = self._llm_haiku(ev.text)
             if summary == "" and self.cfg.get("summarize.emptyMeansSilent", False):
@@ -102,7 +110,8 @@ class Summarizer:
             body = f"{spoken} finished. {summary}"
         else:
             body = self._template_line(ev, spoken)
-        return _clamp(_assemble(prefix, body), self._max_chars())
+        line = _assemble(prefix, body)
+        return " ".join(line.split()) if whole else _clamp(line, self._max_chars())
 
     # ── template mode (the floor everything lands on) ─────────────────────
 
@@ -258,8 +267,14 @@ def _assemble(prefix: str, body: str) -> str:
 
 
 def _clamp(text: str, limit: int) -> str:
+    """Fit text in limit characters, ending on a whole word, never inside one."""
     text = " ".join(text.split())
-    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+    if len(text) <= limit:
+        return text
+    cut = text[: limit - 1]
+    if text[limit - 1] != " " and " " in cut:
+        cut = cut.rsplit(" ", 1)[0]
+    return cut.rstrip(" ,;:-") + "…"
 
 
 def _speakable(text: str) -> str:

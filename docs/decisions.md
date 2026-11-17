@@ -649,6 +649,43 @@ reach back that far. The reminder is dropped, not downgraded: the `summarize.py`
 "Still waiting in …" line is now unreachable from Claude. That is accepted, since
 saying it would still announce one turn twice.
 
+## Why a turn a background task started is silent, and how it is told apart
+
+A finished background task or agent opens a new turn in the session that launched
+it, and that turn ends with an ordinary Stop. On 11/16/2026 the history showed 43% of
+spoken Stops came from such turns: one prompt produced "waiting on the pre-push
+suite", "fixed and pushed", and "PR 70 is ready", each followed by the idle reminder.
+**The Stop payload has no field that says who opened the turn**, so the hook reads
+the transcript: the last user entry that is not a tool result or an `isMeta`
+reminder carries `origin.kind` `"task-notification"` (older builds: content that
+starts with `<task-notification>`). Only the tail is read (512 KB, a few ms on an
+11 MB transcript), and any doubt (no path, unreadable file, bad JSON) means speak.
+
+Only the "done" Stop is silenced: a StopFailure and questions from the same turn
+still speak. `sources.claude.speakBackground` turns it back on; like `speakSdk` it is
+a key read with a code default, not a chezmoi `[data]` key. The bash twin checks
+**before** the Windows handoff, because from WSL the exe would get a `/home` path it
+cannot open and would fail open.
+
+## Why a `<!-- speak: -->` line is never cut to `maxChars`
+
+`maxChars` (default 120) clipped every line mid-word, and the
+"Claude. <project> finished." lead-in took about 33 of those characters, so 37% of
+spoken lines ended in "…" partway through a word. The marker is already bounded
+(the regex takes at most 200 characters, the instruction asks for 15 words), so it
+is spoken whole. Text without one, a template or a fallback sentence, still fits
+`maxChars`, but now ends on a whole word.
+
+## Why `tstack update` rebuilds a stale TTS exe
+
+The sync installed `terminal-stack-tts.exe` only when it was **missing**. A machine
+that already had one never got a daemon fix: on 11/16/2026 one was still running the
+10/16 build, speaking the `idle_prompt` reminder that 10/25 had silenced. The exe
+records the clone HEAD it was built from (`terminal-stack-tts.exe version`), so the
+sync rebuilds when `git diff --quiet <build> HEAD -- bootstrap/tts-daemon` says the
+source changed, or the build commit is unknown to this clone. A failed rebuild keeps
+the working exe and only warns; an unreadable version is left alone.
+
 ## Why ducking snapshots pre-duck volumes to disk before touching anything
 
 Windows persists per-app mixer volume indefinitely. A daemon that dies between ramp-down and restore leaves the music at 30% until the user finds the Volume Mixer — so the duck engine writes `state\duck-snapshot.json` *before* the first volume change, restores any stale snapshot at next startup, runs a 15 s watchdog while holding, and exposes `POST /v1/duck/release` plus a `--restore-volumes` oneshot that `tstack doctor --repair` invokes. Pause mode uses the Windows media-session API (`TryPauseAsync` only on sessions that were Playing, resume exactly those) and never simulates the media key, which is a blind toggle other apps can hijack.

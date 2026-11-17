@@ -69,6 +69,30 @@ if ($ccTtsEnabled) {
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $ttsExe)) {
             throw 'sync-windows: failed to install terminal-stack-tts.exe'
         }
+    } elseif (Get-Command git -ErrorAction SilentlyContinue) {
+        # The exe is a build of the clone at one commit and was only ever installed when
+        # MISSING, so a fix to the daemon never reached a machine that already had one:
+        # one ran a 10/16 build for a month, speaking the idle reminder that 10/25 had
+        # silenced. Rebuild when daemon source changed since the build. Never fatal: a
+        # failed rebuild keeps the working exe, and an unreadable version is left alone.
+        $built = try { (& $ttsExe version 2>$null | Select-Object -First 1) } catch { '' }
+        $built = "$built".Trim()
+        if ($built -match '^[0-9a-f]{40}$') {
+            & git -C $SourceDir diff --quiet $built HEAD -- bootstrap/tts-daemon 2>$null
+            $stale = ($LASTEXITCODE -ne 0)   # 1 = changed; 128 = build commit unknown here
+            if ($stale) {
+                Write-Host "sync-windows: TTS daemon source changed since build $($built.Substring(0, 7)); rebuilding"
+                $installer = Join-Path $SourceDir 'bootstrap\install-tts-daemon.ps1'
+                $daemonEnabled = [bool]($tsCfg.ccTts.daemon -and $tsCfg.ccTts.daemon.enabled)
+                $installArgs = if ($daemonEnabled) { @() } else { @('-NoStart', '-NoAutostart') }
+                try {
+                    & $installer @installArgs
+                } catch {
+                    Write-Warning "sync-windows: TTS rebuild failed, keeping the old build: $_"
+                }
+            }
+        }
+        $global:LASTEXITCODE = 0
     }
 }
 $ccTtsStopHook = if ($ccTtsEnabled) {
