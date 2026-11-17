@@ -103,8 +103,28 @@ def _s(**kw: str) -> dict[str, str]:
     return dict(ssh.DEFAULTS, sshServer="on", **kw)
 
 
+def test_other_port_lines_are_disabled_because_port_is_additive():
+    """sshd answered on 22 AND the old 2222: every Port line adds a listener."""
+    out = ssh.splice_block("#Port 22\nPort 2222\nAddressFamily any\n", ssh.windows_block(_s(), "on"))
+    assert "# terminal-stack disabled: Port 2222" in out and "#Port 22" in out
+    assert [ln for ln in out.splitlines() if ln.startswith("Port ")] == ["Port 22"]
+    assert ssh.splice_block(out, ssh.windows_block(_s(), "on")) == out
+
+
+def test_the_script_disables_other_port_lines_too():
+    script = (ROOT / "bootstrap" / "ssh-server.ps1").read_text(encoding="utf-8")
+    assert "# terminal-stack disabled: " in script and "Port\\s+\\S" in script
+
+
+def test_the_proof_checks_which_side_answered():
+    assert ssh.verify_args("22", "me")[-1] == ssh.PROOF["windows"][0]
+    assert ssh.verify_args("2222", "me", "wsl")[-1] == "uname -s"
+    script = (ROOT / "bootstrap" / "ssh-server.ps1").read_text(encoding="utf-8")
+    assert "$p.verify_expect" in script
+
+
 def test_the_block_goes_first_and_replaces_itself():
-    config = "Port 2222\n#PasswordAuthentication yes\n"
+    config = "#Port 22\n#PasswordAuthentication yes\n"
     once = ssh.splice_block(config, ssh.windows_block(_s(), "on"))
     assert once.startswith(ssh.BLOCK_START) and once.endswith(config)
     assert "Port 22\n" in once and "PasswordAuthentication yes" in once

@@ -58,10 +58,14 @@ function Set-TsBlock([string]$Block) {
     if ($start -ge 0 -and $end -ge $start) {
         $before = if ($start -gt 0) { $lines[0..($start - 1)] } else { @() }
         $after = if ($end + 1 -lt $lines.Count) { $lines[($end + 1)..($lines.Count - 1)] } else { @() }
-        $new = @($before) + $blockLines + @($after)
     } else {
-        $new = $blockLines + $lines
+        $before = @(); $after = $lines
     }
+    # Port is ADDITIVE: every Port line is another listener, so the block cannot
+    # win by coming first. The user's own Port lines are commented out, tagged.
+    # Twin of splice_block in tstack/ssh.py.
+    $fix = { param($l) if ($l -match '^\s*Port\s+\S') { '# terminal-stack disabled: ' + $l.TrimStart() } else { $l } }
+    $new = @(@($before) | ForEach-Object { & $fix $_ }) + $blockLines + @(@($after) | ForEach-Object { & $fix $_ })
     # sshd on Windows reads CRLF or LF; keep the file's own convention (CRLF as shipped).
     Set-Content -LiteralPath $config -Value (($new -join "`r`n").TrimEnd("`r`n") + "`r`n") -NoNewline -Encoding ascii
 }
@@ -185,8 +189,10 @@ try {
     Restart-Service sshd
     $verified = $false
     if ($p.ssh_exe -and (Test-Path -LiteralPath $p.ssh_exe)) {
-        & $p.ssh_exe @($p.verify_args) 2>$null | Out-Null
-        $verified = ($LASTEXITCODE -eq 0)
+        # It must land on WINDOWS: a login that reaches some other sshd on the
+        # port proves nothing about this one.
+        $answer = & $p.ssh_exe @($p.verify_args) 2>$null
+        $verified = ($LASTEXITCODE -eq 0) -and ("$answer" -match [regex]::Escape($p.verify_expect))
     }
     Add-TsStep "key login on port $($p.settings.sshWindowsPort)" $verified $(if ($verified) { 'verified' } else { 'no agent or local key could log in' })
     if ($p.password_off_after_verify) {

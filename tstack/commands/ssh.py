@@ -195,13 +195,12 @@ def setup(argv: list[str]) -> int:
 def apply(values: dict[str, str], chosen: list[ssh.Key], ask: Asker, *, dry: bool) -> int:
     """Both halves, in an order that cannot strand you:
 
-    1. ~/.ssh/authorized_keys on Windows, and the WSL sshd + its keys, passwords
-       still on where they are to go off (no admin needed for either)
-    2. .wslconfig -> mirrored (the user's file; every other line kept)
-    3. ONE elevated run: Windows sshd, firewall, Hyper-V rule, keep-alive task;
-       it proves a Windows key login before switching Windows passwords off
-    4. `wsl --shutdown` (with consent: it closes WSL shells), then the keep-alive
-    5. prove a WSL key login, then switch WSL passwords off
+    1. the user's authorized_keys, then ONE elevated run: Windows sshd (moved
+       off any old port), firewall, Hyper-V rule, keep-alive task; it proves a
+       Windows key login before switching Windows passwords off
+    2. WSL: refuse a port Windows still holds, then the server and its keys,
+       passwords still on; .wslconfig -> mirrored, `wsl --shutdown` with consent
+    3. prove a key login that lands in Ubuntu, then switch WSL passwords off
     """
     import os
 
@@ -274,30 +273,13 @@ def apply(values: dict[str, str], chosen: list[ssh.Key], ask: Asker, *, dry: boo
         return 0
 
     failed = False
-    # 1 ------------------------------------------------------------------
+    # 1. Windows first. Under mirrored networking WSL shares the Windows port
+    #    space, so the WSL sshd cannot bind its port until Windows sshd has let go
+    #    of it -- on 11/16/2026 Windows still held 2222 and ssh.socket failed with
+    #    "Address already in use" because WSL was configured first.
     if ssh.wants_windows(values):
         added = ssh.write_user_authorized(chosen)
         say(f"==> Windows ~/.ssh/authorized_keys: {len(added)} added")
-    if ssh.wants_wsl(values):
-        say(f"==> WSL: installing / configuring openssh-server in {distro} ...")
-        ok, why = ssh.wsl_apply_server(distro, values, wsl_first_pw)
-        if not ok:
-            say(f"    failed: {why}")
-            failed = True
-        added_wsl, why = ssh.wsl_authorize(distro, chosen)
-        say(
-            f"    WSL ~/.ssh/authorized_keys: {len(added_wsl)} added" + (f" ({why})" if why else "")
-        )
-        # 2 --------------------------------------------------------------
-        changed = ssh.set_mirrored()
-        say(
-            "==> .wslconfig: networkingMode=mirrored "
-            + ("set (backup taken)" if changed else "already set")
-        )
-    else:
-        changed = False
-
-    # 3 ------------------------------------------------------------------
     say("==> Applying the admin part (one UAC prompt) ...")
     result, plan_file = ssh.run_elevated(plan)
     if result is None:
@@ -305,21 +287,42 @@ def apply(values: dict[str, str], chosen: list[ssh.Key], ask: Asker, *, dry: boo
         say("    From an ELEVATED PowerShell:")
         say(f"    {ssh.manual_command(plan_file)}")
         return 1
+    for step in result.get("steps", []):
+        mark = "ok  " if step.get("ok") else "FAIL"
+        detail = f": {step.get('detail')}" if step.get("detail") else ""
+        say(f"    {mark}  {step.get('name')}{detail}")
     if not result.get("ok"):
         failed = True
-        say("==> The admin part failed:")
-        for step in result.get("steps", []):
-            if not step.get("ok"):
-                say(f"    {step.get('name')}: {step.get('detail')}")
 
-    # 4 ------------------------------------------------------------------
+    # 2. WSL: the server, its keys, mirrored networking.
     if ssh.wants_wsl(values):
+        holder = ssh.windows_listener(values["sshWslPort"])
+        if holder and holder != "wslrelay":
+            say(f"==> WSL: port {values['sshWslPort']} is held on Windows by {holder}.")
+            say("    Under mirrored networking WSL cannot use it. Free it, or pick another")
+            say("    port with `tstack ssh setup`.")
+            failed = True
+        else:
+            say(f"==> WSL: installing / configuring openssh-server in {distro} ...")
+            ok, why = ssh.wsl_apply_server(distro, values, wsl_first_pw)
+            if not ok:
+                say(f"    failed: {why}")
+                failed = True
+        added_wsl, why = ssh.wsl_authorize(distro, chosen)
+        say(
+            f"    WSL ~/.ssh/authorized_keys: {len(added_wsl)} added" + (f" ({why})" if why else "")
+        )
+        changed = ssh.set_mirrored()
+        say(
+            "==> .wslconfig: networkingMode=mirrored "
+            + ("set (backup taken)" if changed else "already set")
+        )
         if changed:
             restart = ask.choose(
                 "Mirrored networking takes effect after `wsl --shutdown`, which closes every WSL shell.",
                 [
                     ("now", "shut WSL down now", ""),
-                    ("later", "later", "port 2222 works locally until then"),
+                    ("later", "later", "the WSL port works locally until then"),
                 ],
                 "now",
             )
@@ -327,13 +330,13 @@ def apply(values: dict[str, str], chosen: list[ssh.Key], ask: Asker, *, dry: boo
                 ssh.wsl_shutdown()
                 say("==> WSL restarted with mirrored networking.")
         ssh.start_keepalive()
-        # 5 --------------------------------------------------------------
-        if values.get("sshPasswordAuth") == "off" and not force_off:
-            if ssh.verify_login(values["sshWslPort"], ssh.wsl_user(distro)):
+        # 3. Prove a key login THAT LANDS IN UBUNTU, then passwords off.
+        if values.get("sshPasswordAuth") == "off" and not force_off and not failed:
+            if ssh.verify_login(values["sshWslPort"], ssh.wsl_user(distro), "wsl"):
                 ok, why = ssh.wsl_apply_server(distro, values, "off")
                 say("==> WSL passwords off (a key login was verified)" if ok else f"==> WSL: {why}")
             else:
-                say("==> WSL passwords left ON: no key login could be verified from this PC.")
+                say("==> WSL passwords left ON: no key login to Ubuntu could be verified.")
                 say("    Test from the other computer, then re-run `tstack ssh setup`.")
         elif force_off:
             ssh.wsl_apply_server(distro, values, "off")

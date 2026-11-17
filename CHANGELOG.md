@@ -4,6 +4,14 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+### Fixed
+
+- **`tstack ssh setup` failed on its first real run (11/16/2026).** Four bugs:
+  - Windows sshd answered on both 22 and the old 2222. Every `Port` line adds a listener, so the managed block's "first value wins" did not cover it. The other `Port` lines are now commented out, tagged.
+  - The WSL sshd was configured before Windows let go of 2222, and under mirrored networking it could not bind ("Address already in use"). The admin part now runs first, and a WSL port still held on Windows is refused, naming the process.
+  - The WSL "proof" logged in to Windows sshd, which still held 2222, and switched WSL passwords off on that basis. Each proof now checks which side answered (`Windows_NT` or `Linux`).
+  - "The elevated script left no result" when it had run: the result file it created belonged to Administrators and could not be read. The caller now creates the file before elevating.
+
 ### Added
 
 - **`tstack ssh`: reach this PC over SSH, PowerShell on 22 and Ubuntu on 2222

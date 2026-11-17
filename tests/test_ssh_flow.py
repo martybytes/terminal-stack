@@ -211,7 +211,8 @@ def applied(windows, monkeypatch):
     monkeypatch.setattr(ssh, "set_mirrored", lambda: True)
     monkeypatch.setattr(ssh, "wsl_shutdown", lambda: calls.append(("shutdown",)))
     monkeypatch.setattr(ssh, "start_keepalive", lambda: calls.append(("keepalive",)))
-    monkeypatch.setattr(ssh, "verify_login", lambda port, user: True)
+    monkeypatch.setattr(ssh, "verify_login", lambda port, user, side="windows": True)
+    monkeypatch.setattr(ssh, "windows_listener", lambda port: "")
     monkeypatch.setattr(ssh, "plat", plat)
     return calls
 
@@ -225,6 +226,25 @@ def test_a_full_apply_runs_both_halves_in_order(applied, windows, monkeypatch):
     assert code == 0
     assert applied == [("win-keys",), ("wsl-server", "on"), ("shutdown",), ("keepalive",), ("wsl-server", "off")]
     assert plans[0].keepalive_distro == "Ubuntu" and plans[0].password_off_after_verify
+    assert plans[0].verify_expect == "Windows_NT"
+
+
+def test_the_admin_part_runs_before_wsl_binds_its_port(applied, windows, monkeypatch):
+    """Under mirrored networking the WSL sshd cannot bind a port Windows sshd
+    still holds; Windows must move off it first."""
+    order = []
+    monkeypatch.setattr(ssh, "run_elevated", lambda plan: order.append("admin") or ({"ok": True}, windows / "p"))
+    monkeypatch.setattr(ssh, "wsl_apply_server", lambda d, s, pw: order.append("wsl") or (True, ""))
+    cmd.apply(dict(ssh.DEFAULTS, sshServer="on"), [], FakeAsk(), dry=False)  # type: ignore[arg-type]
+    assert order[:2] == ["admin", "wsl"]
+
+
+def test_a_wsl_port_windows_still_holds_is_refused(applied, monkeypatch, capsys, windows):
+    monkeypatch.setattr(ssh, "run_elevated", lambda plan: ({"ok": True, "steps": []}, windows / "p"))
+    monkeypatch.setattr(ssh, "windows_listener", lambda port: "sshd")
+    code = cmd.apply(dict(ssh.DEFAULTS, sshServer="on"), [], FakeAsk(), dry=False)  # type: ignore[arg-type]
+    assert code == 1 and "held on Windows by sshd" in capsys.readouterr().out
+    assert not any(c[0] == "wsl-server" for c in applied)
 
 
 def test_a_declined_uac_prompt_prints_the_command(applied, monkeypatch, capsys, windows):
@@ -237,10 +257,18 @@ def test_a_declined_uac_prompt_prints_the_command(applied, monkeypatch, capsys, 
 def test_a_failed_admin_step_is_reported(applied, monkeypatch, capsys, windows):
     bad = {"ok": False, "steps": [{"name": "firewall", "ok": False, "detail": "denied"}]}
     monkeypatch.setattr(ssh, "run_elevated", lambda plan: (bad, windows / "p.json"))
-    monkeypatch.setattr(ssh, "verify_login", lambda p, u: False)
+    monkeypatch.setattr(ssh, "verify_login", lambda p, u, side="windows": False)
     code = cmd.apply(dict(ssh.DEFAULTS, sshServer="on"), [], FakeAsk({"Mirrored": "later"}), dry=False)  # type: ignore[arg-type]
     out = capsys.readouterr().out
-    assert code == 1 and "firewall: denied" in out and "WSL passwords left ON" in out
+    assert code == 1 and "FAIL  firewall: denied" in out
+
+
+def test_a_login_that_cannot_be_proven_leaves_wsl_passwords_on(applied, monkeypatch, capsys, windows):
+    monkeypatch.setattr(ssh, "run_elevated", lambda plan: ({"ok": True, "steps": []}, windows / "p"))
+    monkeypatch.setattr(ssh, "verify_login", lambda p, u, side="windows": False)
+    assert cmd.apply(dict(ssh.DEFAULTS, sshServer="on"), [], FakeAsk(), dry=False) == 0  # type: ignore[arg-type]
+    assert "WSL passwords left ON" in capsys.readouterr().out
+    assert ("wsl-server", "off") not in applied
 
 
 def test_an_unprovable_key_asks_before_passwords_go_off(applied, monkeypatch, windows):
@@ -377,7 +405,14 @@ def test_tailscale_and_verify_and_keygen_probes(monkeypatch, tmp_path):
     monkeypatch.setattr(plat, "kind", lambda: plat.LINUX)
     monkeypatch.setattr(ssh.proc, "capture", lambda *a, **k: _done(out="100.64.1.2\n"))
     assert ssh.tailscale_ip() == "100.64.1.2"
+    # A login that succeeds but lands on the wrong side is not a proof: the WSL
+    # proof once reached Windows sshd and switched WSL passwords off.
+    assert ssh.verify_login("22", "me") is False
+    monkeypatch.setattr(ssh.proc, "capture", lambda *a, **k: _done(out="Windows_NT\r\n"))
     assert ssh.verify_login("22", "me") is True
+    assert ssh.verify_login("2222", "me", "wsl") is False
+    monkeypatch.setattr(ssh.proc, "capture", lambda *a, **k: _done(out="Linux\n"))
+    assert ssh.verify_login("2222", "me", "wsl") is True
     assert ssh.verify_login("22", "") is False
     key = tmp_path / "id"
     key.write_text("x", encoding="utf-8")
@@ -455,3 +490,21 @@ def test_save_writes_only_what_changed(monkeypatch):
     ssh.save(dict(ssh.DEFAULTS))
     assert "sshWindowsPort" not in written and "sshServer" in written
     assert ssh.settings()["sshWindowsPort"] == "22"
+
+
+def test_the_result_file_exists_before_elevation(tmp_path, monkeypatch):
+    """Created by the user: one the elevated process creates is unreadable here (EPERM)."""
+    monkeypatch.setattr(plat, "find_pwsh", lambda: "pwsh")
+    monkeypatch.setattr(ssh, "is_admin", lambda: False)
+    monkeypatch.setattr(ssh.tempfile, "mkdtemp", lambda prefix: str(tmp_path))
+    seen = []
+
+    def run(argv, check=False):
+        seen.append((tmp_path / "plan.result.json").exists())
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(ssh.subprocess, "run", run)
+    monkeypatch.setattr(ssh, "sshd_config_path", lambda: tmp_path / "none")
+    result, _ = ssh.run_elevated(ssh.plan_windows(dict(ssh.DEFAULTS, sshServer="on"), []))
+    assert seen == [True]
+    assert result is not None and result["ok"] is False
