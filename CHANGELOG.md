@@ -4,6 +4,19 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+### Added
+
+- **`tstack ssh`: reach this PC over SSH, PowerShell on 22 and Ubuntu on 2222
+  (11/16/2026).** Asked by the Windows install wizard (recommended with herdr)
+  and re-runnable with `tstack ssh setup`. It installs and configures Windows
+  OpenSSH with pwsh as the login shell, and a real sshd inside WSL on mirrored
+  networking, with a Hyper-V firewall rule and a logon keep-alive task. Ports,
+  targets, who may connect (private networks, Tailscale, both, or any) and
+  password login are all choices, and so are the keys: this PC's own, GitHub's
+  published keys, a pasted key, or a newly generated pair, in any combination.
+  The admin part is one UAC prompt. Passwords go off only after a key login has
+  been proven on that port. `doc windows/ssh-server`.
+
 ### Fixed
 
 - **Windows install summary: desktop apps report correctly and are never launched

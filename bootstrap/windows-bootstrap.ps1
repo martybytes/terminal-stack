@@ -153,6 +153,14 @@ Set-TsMemoryBackend $wizard.MemoryBackend
 # -- and AtuinEnabled is [ValidateSet('on','off')], which an empty string fails.
 if ($wizard.Tmux)  { $saveArgs.TmuxPrefix   = $wizard.Tmux }
 if ($wizard.Atuin) { $saveArgs.AtuinEnabled = $wizard.Atuin }
+# SSH server choices. Each only when the wizard produced it, for the reason above:
+# an empty string fails the ValidateSet and would reset a saved value.
+foreach ($pair in @(@('SshServer','SshServer'), @('SshTargets','SshTargets'),
+        @('SshWindowsPort','SshWindowsPort'), @('SshWslPort','SshWslPort'),
+        @('SshPasswordAuth','SshPasswordAuth'), @('SshScope','SshScope'),
+        @('SshAgentBridge','SshAgentBridge'))) {
+    if ($wizard.($pair[0])) { $saveArgs[$pair[1]] = $wizard.($pair[0]) }
+}
 
 # Required packages (always installed; not part of the picker). Terminal
 # emulators are NOT here — they are a wizard choice, see Read-TsTerminals.
@@ -233,6 +241,12 @@ if (-not $WhatIfPreference) {
         if ($wizard.Headroom -eq 'on') { & $agentsPython $agentsEntry agents headroom on $wizard.HeadroomCursor | Out-Host }
         if ($wizard.Caveman -eq 'on') { & $agentsPython $agentsEntry agents caveman on | Out-Host }
         if ($wizard.Agentmemory -eq 'on') { & $agentsPython $agentsEntry agents agentmemory on | Out-Host }
+        # SSH server: keys are picked here, interactively, and the Windows half is
+        # applied with one UAC prompt. Not piped: it asks questions. Never fatal.
+        if ($wizard.SshServer -eq 'on') {
+            & $agentsPython $agentsEntry ssh setup --from-wizard
+            if ($LASTEXITCODE -ne 0) { Write-Warning 'SSH setup did not finish; re-run: tstack ssh setup' }
+        }
     } else {
         Write-Warning 'python3 not found; skipped the coding-agent wiring. Re-run: tstack config agents <tool> repair'
     }

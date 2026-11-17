@@ -154,6 +154,15 @@ herdrConfig = {{ index . "herdrConfig" | default "off" | quote }}
        everywhere else -- which on Omarchy is deliberately not the login shell,
        since that box is bash-first and the fleet never runs chsh. */}}
 herdrShell = {{ index . "herdrShell" | default "auto" | quote }}
+{{- /* SSH server (Windows; tstack ssh setup). Saved choices only: the
+       sshd configs themselves are written by tstack/ssh.py, never rendered. */}}
+sshServer = {{ index . "sshServer" | default "off" | quote }}
+sshTargets = {{ index . "sshTargets" | default "both" | quote }}
+sshWindowsPort = {{ index . "sshWindowsPort" | default "22" | quote }}
+sshWslPort = {{ index . "sshWslPort" | default "2222" | quote }}
+sshPasswordAuth = {{ index . "sshPasswordAuth" | default "off" | quote }}
+sshScope = {{ index . "sshScope" | default "private" | quote }}
+sshAgentBridge = {{ index . "sshAgentBridge" | default "on" | quote }}
 {{- /* Per-computer agent integrations. These are deliberately user-global but
        machine-local: a laptop without the Docker services stays off. */}}
 headroomEnabled = {{ index . "headroomEnabled" | default "off" | quote }}

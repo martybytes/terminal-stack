@@ -37,6 +37,7 @@ PINNED = {
     "TS_ATUIN": "on",
     "TS_APPS": "eza,bat",
     "TS_HERDR": "off",
+    "TS_SSH_SERVER": "off",
     "TS_CC_TTS": "off",
     "TS_MEMORY_BACKEND": "none",
     "TS_HEADROOM": "off",

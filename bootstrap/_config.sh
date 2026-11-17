@@ -1491,6 +1491,7 @@ TS_MIRROR_DATA_KEYS="
     weztermMux weztermRestore atuinEnabled starshipPreset headroomEnabled headroomCursorMode
     cavemanEnabled agentmemoryEnabled playwrightEnabled memoryBackend herdrConfig herdrShell
     promptTransient promptTransientStyle promptNewline
+    sshServer sshTargets sshWindowsPort sshWslPort sshPasswordAuth sshScope sshAgentBridge
 "
 
 ts_data_prefetch() {
@@ -1512,6 +1513,22 @@ ts_data_prefetch() {
     done <<EOF
 $out
 EOF
+}
+
+# SSH server choices, saved on the Windows side by the wizard / tstack ssh. Read for
+# the config.json mirror only, so a WSL-side save never strips them.
+# Windows is authoritative for these: the wizard and `tstack ssh` save them there,
+# and a WSL [data] normally lacks them. So the order is [data], then the value
+# config.json already holds (TS_SSH_MIRROR_SRC, set by the mirror writer), then the
+# default -- reading [data] alone reset a Windows "on" to "off" on every WSL save.
+ts_ssh_get() {
+    local v; v="$(ts_data_get "$1" 2>/dev/null || true)"
+    if [ -z "$v" ] && [ -f "${TS_SSH_MIRROR_SRC:-}" ] && command -v python3 >/dev/null 2>&1; then
+        v="$(python3 -c 'import json,sys
+try: print(json.load(open(sys.argv[1], encoding="utf-8-sig")).get(sys.argv[2], ""))
+except Exception: pass' "$TS_SSH_MIRROR_SRC" "$1" 2>/dev/null || true)"
+    fi
+    printf '%s' "${v:-$2}"
 }
 
 ts_data_get() {
@@ -2032,6 +2049,7 @@ ts_mirror_windows_config() {
         return 0
     fi
     local dst="/mnt/c/Users/$winuser/AppData/Local/terminal-stack"
+    local TS_SSH_MIRROR_SRC="$dst/config.json"
     mkdir -p "$dst" 2>/dev/null || return 0
     local lk="" lm="" tm="" rt="" tr="" appscsv="" jsonapps=""
     # These six are derived expressions rather than plain [data] keys, so they cannot go
@@ -2075,6 +2093,13 @@ EOF
   "weztermRestore": "$(ts_wez_restore_get)",
   "atuinEnabled": "$(ts_atuin_get)",
   "herdrConfig": "$(ts_herdr_get)",
+  "sshServer": "$(ts_ssh_get sshServer off)",
+  "sshTargets": "$(ts_ssh_get sshTargets both)",
+  "sshWindowsPort": "$(ts_ssh_get sshWindowsPort 22)",
+  "sshWslPort": "$(ts_ssh_get sshWslPort 2222)",
+  "sshPasswordAuth": "$(ts_ssh_get sshPasswordAuth off)",
+  "sshScope": "$(ts_ssh_get sshScope private)",
+  "sshAgentBridge": "$(ts_ssh_get sshAgentBridge on)",
   "starshipPreset": "$(ts_starship_get)",
   "promptTransient": "$(ts_prompt_setting_get promptTransient)",
   "promptTransientStyle": "$(ts_prompt_setting_get promptTransientStyle)",

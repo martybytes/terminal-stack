@@ -35,6 +35,9 @@ SHELL = "shell"  # needs a new shell before it takes effect
 STANDALONE = "standalone"  # has its own writer; not part of a bulk save
 
 
+PORT_KEYS = frozenset({"sshWindowsPort", "sshWslPort"})
+
+
 @dataclass(frozen=True)
 class Setting:
     key: str
@@ -68,6 +71,8 @@ class Setting:
             return f"{self.key} must be one of: {', '.join(self.options)}"
         if self.kind == "text" and not value.strip():
             return f"{self.key} cannot be empty"
+        if self.key in PORT_KEYS and not (value.isdigit() and 1 <= int(value) <= 65535):
+            return f"{self.key} must be a port number from 1 to 65535"
         if self.kind == "text" and ('"' in value or "\\" in value):
             # store.set and ts_data_set write `key = "<value>"` with no
             # escaping, so either character corrupts chezmoi.toml and every
@@ -224,6 +229,75 @@ SETTINGS: tuple[Setting, ...] = (
             "auto = the shell this stack configures here (pwsh on Windows, zsh elsewhere), "
             "not the login shell; login = herdr's own default"
         ),
+        flags=frozenset({STANDALONE}),
+    ),
+    # SSH server (Windows only, asked by the wizard; `tstack ssh setup` reconfigures).
+    # Saved here, applied by tstack/ssh.py; docs/kb/windows/ssh-server.md.
+    Setting(
+        "sshServer",
+        "SSH server",
+        "choice",
+        "ssh",
+        "off",
+        options=("on", "off"),
+        note="reach this PC over SSH: PowerShell on one port, Ubuntu (WSL) on another",
+        flags=frozenset({STANDALONE}),
+    ),
+    Setting(
+        "sshTargets",
+        "SSH targets",
+        "choice",
+        "ssh",
+        "both",
+        options=("both", "windows", "wsl"),
+        flags=frozenset({STANDALONE}),
+    ),
+    Setting(
+        "sshWindowsPort",
+        "SSH port, Windows (PowerShell)",
+        "text",
+        "ssh",
+        "22",
+        flags=frozenset({STANDALONE}),
+    ),
+    Setting(
+        "sshWslPort",
+        "SSH port, WSL (Ubuntu)",
+        "text",
+        "ssh",
+        "2222",
+        flags=frozenset({STANDALONE}),
+    ),
+    Setting(
+        "sshPasswordAuth",
+        "SSH password login",
+        "choice",
+        "ssh",
+        "off",
+        options=("on", "off"),
+        note="off takes effect only after a key login has been verified",
+        flags=frozenset({STANDALONE}),
+    ),
+    Setting(
+        "sshScope",
+        "SSH reachable from",
+        "choice",
+        "ssh",
+        "private",
+        options=("private", "tailnet", "lan-tailnet", "any"),
+        note=(
+            "private = Private/Domain networks; tailnet = Tailscale addresses only; "
+            "lan-tailnet = both; any = every network including public Wi-Fi"
+        ),
+        flags=frozenset({STANDALONE}),
+    ),
+    Setting(
+        "sshAgentBridge",
+        "WSL uses the Windows ssh-agent",
+        "choice",
+        "ssh",
+        "on",
+        options=("on", "off"),
         flags=frozenset({STANDALONE}),
     ),
     Setting(
