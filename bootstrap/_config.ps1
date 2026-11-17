@@ -41,6 +41,11 @@ $script:TsWingetIds = @{
     uv         = 'astral-sh.uv'
     ruff       = 'astral-sh.ruff'
     yazi       = 'sxyazi.yazi'
+    # Desktop agent apps. Verified in winget-pkgs; herdr-app has NO winget id
+    # (Herdr.Herdr is the TUI, Herdr.HerdrCore the runtime), so it routes
+    # through Install-TsDesktopApp instead.
+    orca       = 'StablyAI.Orca'
+    t3code     = 'T3Tools.T3Code'
     # Deliberately absent: ncdu, bandwhich, tree and atuin. The first three have
     # no reliable winget id (or, for bandwhich, no Windows build). atuin has no
     # winget manifest at all, and `atuin init` has no PowerShell target — its
@@ -89,7 +94,8 @@ function Read-TsAppsCatalog {
         if ($parts.Count -lt 5) { Write-Warning "apps.conf: malformed row: $trimmed"; continue }
         # Windows here, always: this file is only ever loaded on the Windows side.
         $plat = $parts[3]
-        if ($plat -ne 'all' -and $plat -ne 'windows') { continue }
+        # `desktop` (GUI apps) includes Windows; it only excludes WSL.
+        if ($plat -ne 'all' -and $plat -ne 'windows' -and $plat -ne 'desktop') { continue }
         $rows += [pscustomobject]@{
             Id = $parts[0]; Group = $parts[1]; Classes = $parts[2]
             Platforms = $plat; Description = $parts[4]
@@ -120,7 +126,8 @@ $script:TsAppGroupDesc = @{
     shell = 'shell essentials'; search = 'search and find'; disk = 'disk usage'
     system = 'system monitors'; network = 'network'; git = 'git tooling'
     editors = 'editors and readers'; runtimes = 'language runtimes'
-    python = 'Python tooling'; ai = 'AI coding agents'; models = 'local model sizing'
+    python = 'Python tooling'; ai = 'AI coding agents'; desktop = 'desktop agent apps'
+    models = 'local model sizing'
 }
 $script:TsAppGroups = [ordered]@{}
 foreach ($g in @($script:TsAppCatalog | ForEach-Object { $_.Group } | Select-Object -Unique)) {
@@ -159,6 +166,13 @@ function Test-TsAppIsPy([string]$id) { return ($script:TsPyTools -contains $id) 
 $script:TsHerdrTools = @('herdr')
 function Test-TsAppIsHerdr([string]$id) { return ($script:TsHerdrTools -contains $id) }
 
+# Desktop agent apps, route-listed like herdr. Twin of ts_app_is_desktop in
+# _config.sh. orca and t3code are plain winget ids ($TsWingetIds) and go through
+# the normal winget pass; herdr-app has no winget manifest (Herdr.Herdr is the
+# TUI, Herdr.HerdrCore the runtime) and comes from herdr.dev's app installer.
+$script:TsDesktopApps = @('herdr-app', 'orca', 't3code')
+function Test-TsAppIsDesktop([string]$id) { return ($script:TsDesktopApps -contains $id) }
+
 # Can this platform actually install <id>? Twin of ts_app_installable in
 # bootstrap/_config.sh. This used to be a bare $TsWingetIds.ContainsKey, which
 # quietly meant "is it in winget" rather than "can we install it": the agent
@@ -169,6 +183,7 @@ function Test-TsAppInstallable([string]$id) {
     if (Test-TsAppIsAi $id) { return $true }
     if (Test-TsAppIsPy $id) { return $true }
     if (Test-TsAppIsHerdr $id) { return $true }
+    if (Test-TsAppIsDesktop $id) { return $true }
     return $false
 }
 
@@ -210,14 +225,34 @@ function Get-TsAppCommand([string]$id) {
 # land in Program Files. Checked as a fallback so Get-TsAppsPending doesn't nag
 # forever about something that's actually installed. Keep in sync with the exe
 # path the `pm` launcher (in $PROFILE) resolves.
+#
+# A value may be a LIST of candidates: the Electron apps install per-user under
+# %LOCALAPPDATA%\Programs, per-machine under Program Files, and the folder name
+# is the product name, which has changed between releases before.
 $script:TsAppFixedPaths = @{
     prettymark = "$env:ProgramFiles\PrettyMark\PrettyMark.exe"
+    'herdr-app' = "$env:LOCALAPPDATA\Programs\herdr-app\herdr-app.exe"
+    orca       = @("$env:LOCALAPPDATA\Programs\Orca\Orca.exe",
+                   "$env:LOCALAPPDATA\Programs\orca-ide\Orca.exe",
+                   "$env:ProgramFiles\Orca\Orca.exe")
+    t3code     = @("$env:LOCALAPPDATA\Programs\T3 Code\T3 Code.exe",
+                   "$env:LOCALAPPDATA\Programs\T3 Code (Beta)\T3 Code (Beta).exe",
+                   "$env:LOCALAPPDATA\Programs\t3code\T3 Code.exe",
+                   "$env:ProgramFiles\T3 Code\T3 Code.exe")
+}
+
+# The first fixed path for <id> that exists, or $null.
+function Get-TsAppFixedPath([string]$id) {
+    if (-not $script:TsAppFixedPaths.ContainsKey($id)) { return $null }
+    foreach ($p in @($script:TsAppFixedPaths[$id])) {
+        if (Test-Path -LiteralPath $p) { return $p }
+    }
+    return $null
 }
 
 function Test-TsAppInstalled([string]$id) {
     if (Get-TsAppCommand $id) { return $true }
-    if ($script:TsAppFixedPaths.ContainsKey($id)) { return (Test-Path $script:TsAppFixedPaths[$id]) }
-    return $false
+    return [bool](Get-TsAppFixedPath $id)
 }
 
 # Apps this machine is expected to have but doesn't. Two sources, deliberately:
@@ -1411,6 +1446,8 @@ function Install-TsApps([string[]]$Apps) {
             if (Test-TsAppIsAi $id) { continue }      # handled by Install-TsAiCli below
             if (Test-TsAppIsPy $id) { continue }      # handled by Install-TsPyTool below
             if (Test-TsAppIsHerdr $id) { continue }   # handled by Install-TsHerdr below
+            # herdr-app: herdr.dev's app installer, below. orca/t3code fall through to winget.
+            if ((Test-TsAppIsDesktop $id) -and -not $script:TsWingetIds.ContainsKey($id)) { continue }
             if ($script:TsWingetIds.ContainsKey($id)) {
                 $wid = $script:TsWingetIds[$id]
                 Write-Host "==> winget install $wid"
@@ -1432,6 +1469,7 @@ function Install-TsApps([string[]]$Apps) {
     }
     foreach ($id in $Apps) { if (Test-TsAppIsAi $id) { Install-TsAiCli $id } }
     foreach ($id in $Apps) { if (Test-TsAppIsHerdr $id) { Install-TsHerdr } }
+    foreach ($id in $Apps) { if (Test-TsAppIsDesktop $id) { Install-TsDesktopApp $id } }
     Update-TsSessionPath
 }
 
@@ -1545,6 +1583,26 @@ function Install-TsAiCli([string]$id) {
 # not winget (see $TsHerdrTools above for why). Idempotent, never fatal, and only
 # ever runs for an id actually ticked: herdr is `classes none` in apps.conf, so
 # no default set pre-selects it. Twin of ts_install_herdr in bootstrap/_config.sh.
+# The desktop apps winget cannot install. Only herdr-app today: orca and t3code
+# are winget ids and were handled by the winget pass, so this returns for them.
+# Twin of ts_install_desktop_app in _config.sh. A copy already present is left
+# alone, never reinstalled over.
+function Install-TsDesktopApp([string]$id) {
+    if ($script:TsWingetIds.ContainsKey($id)) { return }
+    if (Test-TsAppInstalled $id) { Write-Host "==> ${id}: already installed; leaving it alone."; return }
+    switch ($id) {
+        'herdr-app' {
+            # Same reasoning as Install-TsHerdr: Windows PowerShell, `iex` on a
+            # string is unaffected by execution policy.
+            Write-Host "==> herdr-app: installing via herdr.dev's app installer"
+            try { & powershell -NoProfile -Command "irm https://releases.herdr.dev/app/install.ps1 | iex" }
+            catch { Write-Warning 'herdr-app install failed; see https://herdr.dev/download/' }
+            Update-TsSessionPath
+        }
+        default { Write-Host "==> ${id}: no Windows install route; skipped" }
+    }
+}
+
 function Install-TsHerdr {
     $existing = Get-Command herdr -CommandType Application -ErrorAction SilentlyContinue
     if ($existing) { Write-Host "==> herdr: already installed ($($existing.Source))"; return }
@@ -1596,8 +1654,8 @@ function Show-TsInstalledApps([string[]]$Apps) {
             $ver = Get-TsAppVersionLine $cmd.Source
             if (-not $ver) { $ver = $cmd.Source }
             Write-Host ("    {0,-14} {1}" -f $id, $ver.Substring(0, [Math]::Min(40, $ver.Length)))
-        } elseif ($script:TsAppFixedPaths.ContainsKey($id) -and (Test-Path $script:TsAppFixedPaths[$id])) {
-            Write-Host ("    {0,-14} {1}" -f $id, $script:TsAppFixedPaths[$id])
+        } elseif ($fixed = Get-TsAppFixedPath $id) {
+            Write-Host ("    {0,-14} {1}" -f $id, $fixed)
         } elseif (-not (Test-TsAppInstallable $id)) {
             # Twin of the bash summary: a tool this platform cannot install is not missing.
             Write-Host ("    {0,-14} {1}" -f $id, 'not available on this platform')

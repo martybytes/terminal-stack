@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 import re
 import shutil
+from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 
 from .. import apps as catalog
@@ -21,12 +22,17 @@ from .. import platform as plat
 from .. import schema, store
 from . import probes
 from .console import Console
-from .prompts import Option, choice, multi, text
+from .prompts import BACK, QUIT, Option, checklist, choice, multi, select, text
 
 # Questions, in the order they are asked.
 PROFILE_PROMPT, PROFILE_SHELL, PROFILE_FULL = "prompt", "shell", "full"
 
 TERMINAL_GROUP = ("wezterm-nightly", "wezterm-stable")
+
+# Catalog groups that get a step of their own in arrow-key mode, rather than a
+# section of the command-line tools list: they are the ones people come to the
+# installer to choose.
+AI_GROUP, DESKTOP_GROUP = "ai", "desktop"
 
 
 @dataclass(frozen=True)
@@ -71,43 +77,175 @@ def _on_off(value: str, *, default: str = "off") -> str:
     return default
 
 
+class GoBack(Exception):
+    """The user asked for the previous step. Caught by `run`."""
+
+
+class QuitWizard(Exception):
+    """The user quit mid-questionnaire. Caught by `run`; exit 3."""
+
+
+@dataclass(frozen=True)
+class Step:
+    """One answered question, as `run` replays it after a Back."""
+
+    title: str
+    value: str | list[str]
+    free_text: bool = False
+
+
+OptionSpec = tuple[str, str, str] | Option
+
+
+def _options(options: Sequence[OptionSpec]) -> list[Option]:
+    return [o if isinstance(o, Option) else Option(*o) for o in options]
+
+
 @dataclass
 class Asker:
-    """Wraps the primitives so every question tallies `asked` the same way."""
+    """Wraps the primitives so every question tallies `asked` the same way --
+    and records each answer, which is what makes Back work.
+
+    BACK IS A REPLAY, not a rewind. `collect` is straight-line code whose later
+    questions are gated on earlier answers (the profile reshapes everything after
+    it). Rather than restructure that into a state machine, `run` re-runs it with
+    the answers before the target step in `replay`: those return instantly and
+    silently, so the gates are re-evaluated on exactly the answers given, and the
+    flow stops at the step being revisited. `memory` makes every earlier answer
+    the default when a step comes round again.
+
+    `autofill` is the review screen's "change one answer": after the edited step,
+    any question already answered takes its remembered answer silently, so only
+    the edited one -- and any question it newly unlocks -- is asked.
+    """
 
     console: Console
     count: int = 0
+    replay: list[Step] = field(default_factory=list)
+    memory: dict[str, str | list[str]] = field(default_factory=dict)
+    autofill: bool = False
+    banner: str = "terminal-stack setup"
+    log: list[Step] = field(default_factory=list)
+    _pos: int = 0
+    _live: bool = False
+
+    @property
+    def header(self) -> str:
+        return f"{self.banner}  -  step {sum(1 for s in self.log if not s.free_text) + 1}"
+
+    def _remembered(self, title: str) -> Step | None:
+        if self._pos < len(self.replay):
+            step = self.replay[self._pos]
+            if step.title == title:
+                self._pos += 1
+                return step
+            # The flow went somewhere the old answers do not cover. Stop
+            # replaying and ask from here.
+            self._pos = len(self.replay)
+        if self.autofill and self._live and title in self.memory:
+            return Step(title, self.memory[title])
+        return None
+
+    def _record(self, step: Step) -> None:
+        self.log.append(step)
+        self.memory[step.title] = step.value
+        if not step.free_text:
+            self.count += 1
+
+    def _intro(self, intro: str) -> tuple[str, ...]:
+        """Whatever the flow printed since the last question, then the intro.
+        In arrow-key mode that becomes part of the screen; otherwise it is
+        printed above the prompt exactly as before."""
+        pending = self.console.take_pending()
+        lines = tuple(intro.splitlines()) if intro else ()
+        if self.console.tui:
+            return tuple(pending) + lines
+        with self.console.released():
+            for line in pending:
+                self.console.say(line)
+        return lines
+
+    def _settle(self, value: str | list[str], asked: bool, title: str) -> None:
+        if value == BACK or value == [BACK]:
+            raise GoBack
+        if value == QUIT or value == [QUIT]:
+            raise QuitWizard
+        if asked:
+            self._record(Step(title, value))
+            self._live = True
 
     def choose(
-        self, title: str, options: list[tuple[str, str, str]], default: str, intro: str = ""
+        self, title: str, options: Sequence[OptionSpec], default: str, intro: str = ""
     ) -> str:
-        value, asked = choice(
-            self.console,
-            title,
-            [Option(*o) for o in options],
-            default,
-            tuple(intro.splitlines()) if intro else (),
-        )
-        self.count += 1 if asked else 0
+        step = self._remembered(title)
+        if step is not None and isinstance(step.value, str):
+            self.console.take_pending()
+            self._record(step)
+            return step.value
+        remembered = self.memory.get(title)
+        if isinstance(remembered, str):
+            default = remembered
+        lines = self._intro(intro)
+        with self.console.released():
+            if self.console.tui:
+                value, asked = select(
+                    self.console, title, _options(options), default, lines, self.header
+                )
+            else:
+                value, asked = choice(self.console, title, _options(options), default, lines)
+        self._settle(value, asked, title)
         return value
 
     def tick(
         self,
         title: str,
-        options: list[tuple[str, str, str]],
+        options: Sequence[OptionSpec],
         preticked: list[str],
         intro: str = "",
         exclusive: tuple[str, ...] = (),
+        presets: dict[str, tuple[str, list[str]]] | None = None,
     ) -> list[str]:
-        value, asked = multi(
-            self.console,
-            title,
-            [Option(*o) for o in options],
-            preticked,
-            tuple(intro.splitlines()) if intro else (),
-            exclusive,
-        )
-        self.count += 1 if asked else 0
+        step = self._remembered(title)
+        if step is not None and isinstance(step.value, list):
+            self.console.take_pending()
+            self._record(step)
+            return list(step.value)
+        remembered = self.memory.get(title)
+        if isinstance(remembered, list):
+            preticked = remembered
+        lines = self._intro(intro)
+        with self.console.released():
+            if self.console.tui:
+                value, asked = checklist(
+                    self.console,
+                    title,
+                    _options(options),
+                    preticked,
+                    lines,
+                    exclusive,
+                    self.header,
+                    presets,
+                )
+            else:
+                value, asked = multi(
+                    self.console, title, _options(options), preticked, lines, exclusive
+                )
+        self._settle(value, asked, title)
+        return value
+
+    def text(self, prompt: str) -> str:
+        """Free text (a custom chord, a y/N). Recorded so a replay repeats it,
+        but never tallied: it is part of the question before it."""
+        step = self._remembered(prompt)
+        if step is not None and isinstance(step.value, str):
+            self.console.take_pending()
+            self._record(Step(prompt, step.value, free_text=True))
+            return step.value
+        self._intro("")
+        with self.console.released():
+            value = text(self.console, prompt)
+        if self.console.interactive:
+            self._record(Step(prompt, value, free_text=True))
         return value
 
 
@@ -128,9 +266,13 @@ def headless() -> bool:
     return bool(_env("SSH_CONNECTION") or _env("SSH_TTY"))
 
 
-def collect(console: Console, ask_terminals: bool = False) -> Answers:
-    """Every answer, in order. Nothing is written."""
-    ask = Asker(console)
+def collect(console: Console, ask_terminals: bool = False, ask: Asker | None = None) -> Answers:
+    """Every answer, in order. Nothing is written.
+
+    `ask` is passed by `run`, which owns Back/Quit; called bare (the tests, an
+    old caller) it behaves exactly as it always did.
+    """
+    ask = ask if ask is not None else Asker(console)
     bare = headless()
 
     # ---------------------------------------------------------------- profile
@@ -307,7 +449,7 @@ def collect(console: Console, ask_terminals: bool = False) -> Answers:
     )
 
     # ------------------------------------------------------------------ apps
-    selected = _apps(ask, app_class)
+    selected = _apps(ask, app_class, bare)
 
     # ----------------------------------------------------------------- herdr
     herdr = _herdr(ask, selected)
@@ -420,7 +562,7 @@ def collect(console: Console, ask_terminals: bool = False) -> Answers:
     )
 
 
-def collect_apps(console: Console) -> Answers:
+def collect_apps(console: Console, ask: Asker | None = None) -> Answers:
     """Just the tool picker, for `tstack config apps`.
 
     A whole `collect()` would ask about the leader key and the memory backend to
@@ -429,9 +571,9 @@ def collect_apps(console: Console) -> Answers:
     a re-run: `tstack config apps` on a server should not start by asking whether
     it is a server.
     """
-    ask = Asker(console)
+    ask = ask if ask is not None else Asker(console)
     app_class = catalog.saved_class(store.get("apps", "").split())
-    selected = _apps(ask, app_class)
+    selected = _apps(ask, app_class, headless())
     return Answers(app_class=app_class, apps=selected, asked=ask.count)
 
 
@@ -499,13 +641,13 @@ def _leader(ask: Asker, console: Console) -> str:
             intro=_LEADER_INTRO,
         )
         if leader == "custom":
-            leader = _chord(console, text(console, _CHORD_PROMPT))
+            leader = _chord(console, ask.text(_CHORD_PROMPT))
         if not hotkey.held_elsewhere(leader) or not console.interactive:
             return leader
         console.say()
         for line in hotkey.advice(leader):
             console.say(f"  {line}")
-        reply = (text(console, f"  Keep {hotkey.label(leader)} anyway? [y/N]: ") or "").lower()
+        reply = (ask.text(f"  Keep {hotkey.label(leader)} anyway? [y/N]: ") or "").lower()
         if reply in ("y", "yes"):
             return leader
 
@@ -595,6 +737,23 @@ def _starship(ask: Asker, console: Console) -> str:
     offered = choices.options(choices.STARSHIP)
     if len(offered) <= 1:
         return current
+    if console.tui:
+        # One preview at a time, for the highlighted row, instead of every
+        # preset scrolled past before the question.
+        return ask.choose(
+            "Which prompt?",
+            [
+                Option(
+                    o.value,
+                    o.value,
+                    o.note,
+                    preview=choices.preview(choices.STARSHIP, o.value) or "",
+                )
+                for o in offered
+            ],
+            current,
+            "  Arrow through them: each one is rendered below as you go.",
+        )
     console.say()
     console.say("  Every prompt, rendered here so you can see them:")
     for option in offered:
@@ -696,10 +855,18 @@ def _terminals(ask: Asker) -> list[str]:
     )
 
 
-def _apps(ask: Asker, app_class: str) -> list[str]:
-    """The CLI tool picker: a whole-set answer, then optionally per-tool."""
+def _apps(ask: Asker, app_class: str, bare: bool = False) -> list[str]:
+    """The CLI tool picker: a whole-set answer, then optionally per-tool.
+
+    A headless machine is never offered the desktop apps: there is nothing to
+    run a GUI on, and the installer would only skip them.
+    """
     here = plat.kind()
-    available = [a for a in catalog.catalog() if a.installable(here)]
+    available = [
+        a
+        for a in catalog.catalog()
+        if a.installable(here) and not (bare and a.group == DESKTOP_GROUP)
+    ]
     if not available:
         # A clone with no apps.conf, or one this platform can install nothing
         # from. Answering "recommended" with silence is the silently-dropped-tool
@@ -726,6 +893,8 @@ def _apps(ask: Asker, app_class: str) -> list[str]:
         return [a.id for a in available if a.id in wanted]
 
     saved = store.get("apps", "").split()
+    if ask.console.tui:
+        return _apps_tui(ask, available, pretick, saved, app_class)
     options = (
         [
             (
@@ -760,6 +929,77 @@ def _apps(ask: Asker, app_class: str) -> list[str]:
     if answer == "customize":
         return _pick_items(ask, available, pretick)
     return pretick
+
+
+def _apps_tui(
+    ask: Asker,
+    available: list[catalog.App],
+    pretick: list[str],
+    saved: list[str],
+    app_class: str,
+) -> list[str]:
+    """Arrow-key mode: three tick-lists instead of a menu of menus.
+
+    Every tool is visible and individually tickable on one screen, grouped; the
+    agent CLIs and the desktop apps get a step each, because they are what
+    people come to an installer to choose. Pre-ticked with this machine's saved
+    selection, or the recommended set on a fresh one.
+    """
+    base = set(saved) if saved else set(pretick)
+    tools = [a for a in available if a.group not in (AI_GROUP, DESKTOP_GROUP)]
+    agents = [a for a in available if a.group == AI_GROUP]
+    desktop = [a for a in available if a.group == DESKTOP_GROUP]
+
+    def rows(members: list[catalog.App], grouped: bool) -> list[OptionSpec]:
+        return [
+            Option(a.id, a.id, a.description, group=catalog_group_desc(a.group) if grouped else "")
+            for a in members
+        ]
+
+    def presets(members: list[catalog.App]) -> dict[str, tuple[str, list[str]]]:
+        ids = {a.id for a in members}
+        out = {"r": ("recommended", [i for i in pretick if i in ids])}
+        if saved:
+            out["k"] = ("keep saved", [i for i in saved if i in ids])
+        return out
+
+    chosen: set[str] = set()
+    if tools:
+        chosen |= set(
+            ask.tick(
+                "Command-line tools",
+                rows(tools, grouped=True),
+                [a.id for a in tools if a.id in base],
+                "  The font, Starship, chezmoi and zsh are always installed; this is the rest.\n"
+                f"  r resets to the recommended set for a {app_class} machine"
+                + ("; k restores what this machine has saved." if saved else "."),
+                presets=presets(tools),
+            )
+        )
+    if agents:
+        chosen |= set(
+            ask.tick(
+                "AI coding agents (command-line)",
+                rows(agents, grouped=False),
+                [a.id for a in agents if a.id in base],
+                "  Each comes from its vendor's own installer, never a package manager.\n"
+                "  codex, gemini and pi need Node: keep fnm ticked on the previous screen.",
+                presets=presets(agents),
+            )
+        )
+    if desktop:
+        chosen |= set(
+            ask.tick(
+                "Desktop agent apps",
+                rows(desktop, grouped=False),
+                [a.id for a in desktop if a.id in saved],
+                "  GUI workspaces for running coding agents side by side. None is ticked\n"
+                "  by default. A copy you installed yourself is detected and left alone.\n"
+                "  macOS: Homebrew casks.  Windows: winget, or herdr.dev's installer.\n"
+                "  Linux: herdr.dev's installer, and a .deb (Ubuntu) or AppImage (Arch).",
+            )
+        )
+    return [a.id for a in available if a.id in chosen]
 
 
 def _pick_groups(ask: Asker, available: list[catalog.App], pretick: list[str]) -> list[str]:
@@ -800,6 +1040,7 @@ def catalog_group_desc(group: str) -> str:
         "runtimes": "language runtimes",
         "python": "Python tooling",
         "ai": "AI coding agents",
+        "desktop": "desktop agent apps",
         "models": "local model sizing",
     }.get(group, group)
 
@@ -1015,3 +1256,131 @@ def confirm(
             f"  '{reply}' is not one of the choices - Enter to "
             f"{'finish' if preview else 'proceed'}, 'e' to edit, 'q' to quit."
         )
+
+
+def _summary(value: str | list[str]) -> str:
+    if isinstance(value, list):
+        return " ".join(value) if value else "<none>"
+    return value or "<empty>"
+
+
+def _last_question(log: list[Step]) -> int:
+    """Index of the last real question in `log` (free text belongs to the
+    question before it), or 0 when there is none."""
+    for index in range(len(log) - 1, -1, -1):
+        if not log[index].free_text:
+            return index
+    return 0
+
+
+def _review_tui(
+    console: Console, answers: Answers, log: list[Step], preview: bool, header: str
+) -> str | int:
+    """The review as a menu. Returns "proceed", "quit", "back", or the index in
+    `log` of the step to change."""
+    console.hold(True)
+    review(console, answers)
+    console.hold(False)
+    summary = tuple(console.take_pending())
+    proceed = (
+        ("proceed", "Done", "this is a preview - nothing is saved")
+        if preview
+        else ("proceed", "Proceed", "save these answers and install")
+    )
+    while True:
+        picked, _ = select(
+            console,
+            "Review",
+            [
+                Option(*proceed),
+                Option("change", "Change an answer", "jump to any step, then come back here"),
+                Option("quit", "Quit", "nothing is installed or changed"),
+            ],
+            "proceed",
+            summary,
+            header,
+        )
+        if picked in ("proceed", BACK):
+            return "proceed" if picked == "proceed" else "back"
+        if picked in ("quit", QUIT):
+            return "quit"
+        steps = [i for i, step in enumerate(log) if not step.free_text]
+        if not steps:
+            continue
+        target, _ = select(
+            console,
+            "Change which answer?",
+            [
+                Option(str(i), log[i].title.strip().rstrip(":"), _summary(log[i].value)[:60])
+                for i in steps
+            ],
+            str(steps[0]),
+            ("  The step you pick is asked again; everything else keeps its answer.",),
+            header,
+        )
+        if target in (BACK, QUIT):
+            continue
+        return int(target)
+
+
+def run(
+    console: Console,
+    *,
+    ask_terminals: bool = False,
+    assume_yes: bool = False,
+    preview: bool = False,
+    review_screen: bool = True,
+    only_apps: bool = False,
+) -> Answers | None:
+    """The questionnaire with Back, Quit and the review. None means quit.
+
+    Drives `collect` (or `collect_apps`) through an Asker that records every
+    answer; a Back re-runs it replaying the answers before the target step. In
+    plain-prompt mode the review is `confirm`, unchanged; in arrow-key mode it
+    is a menu that can jump to any step.
+    """
+    replay: list[Step] = []
+    memory: dict[str, str | list[str]] = {}
+    autofill = False
+    banner = "terminal-stack setup" + ("  (preview - nothing is saved)" if preview else "")
+    while True:
+        ask = Asker(console, replay=replay, memory=memory, autofill=autofill, banner=banner)
+        console.hold(True)
+        try:
+            if only_apps:
+                answers = collect_apps(console, ask=ask)
+            else:
+                answers = collect(console, ask_terminals=ask_terminals, ask=ask)
+        except GoBack:
+            console.hold(False)
+            console.take_pending()
+            replay, memory, autofill = ask.log[: _last_question(ask.log)], ask.memory, False
+            continue
+        except QuitWizard:
+            console.hold(False)
+            console.take_pending()
+            console.say("==> quit - nothing was installed or changed.")
+            return None
+        console.hold(False)
+        console.flush()
+        if not review_screen or only_apps:
+            return answers
+        if not console.tui:
+            return confirm(console, answers, assume_yes, preview=preview)
+        if assume_yes or answers.asked == 0:
+            review(console, answers)
+            return answers
+        verdict = _review_tui(console, answers, ask.log, preview, ask.header)
+        if verdict == "proceed":
+            # The final frame is gone with the menu; leave the answers on screen.
+            review(console, answers)
+            return answers
+        if verdict == "quit":
+            console.say("==> quit - nothing was installed or changed.")
+            return None
+        memory = ask.memory
+        if verdict == "back":
+            replay, autofill = ask.log[: _last_question(ask.log)], False
+        else:
+            assert isinstance(verdict, int)
+            replay, autofill = ask.log[:verdict], True

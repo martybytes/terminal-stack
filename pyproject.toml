@@ -44,6 +44,9 @@ testpaths = ["tests"]
 # other (tests.shell_support, tests.test_agent_tools), which only resolves when
 # the repo root is on sys.path.
 addopts = "-q --strict-markers --strict-config"
+# A test that blocks (on a terminal, a pty, a pipe) prints every thread's stack
+# after this long instead of sitting silent until CI cancels the job.
+faulthandler_timeout = 300
 markers = [
     "slow: takes more than a few seconds",
     "pwsh: needs PowerShell 7+",

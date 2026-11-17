@@ -90,10 +90,12 @@ common_install_selected_apps() {
     echo "$INFO Installing selected apps: $apps"
     local apt_pkgs="" id pkg
     for id in $apps; do
-        # The AI CLIs, herdr and docker are install ROUTES, handled below.
+        # The AI CLIs, herdr, docker and the desktop apps are install ROUTES,
+        # handled below.
         ts_app_is_ai "$id" && continue
         ts_app_is_herdr "$id" && continue
         ts_app_is_docker "$id" && continue
+        ts_app_is_desktop "$id" && continue
         case "$id" in
             nvtop) command -v nvidia-smi >/dev/null 2>&1 || continue ;;
         esac
@@ -278,6 +280,8 @@ common_install_selected_apps() {
     # the path `herdr update` and `herdr channel set` use. Shared with the macOS
     # pass, so there is one herdr install route on POSIX.
     ts_install_herdrs "$apps"
+    # Herdr app / Orca / T3 Code: one shared route in _config.sh (.deb here).
+    ts_install_desktops "$apps"
 }
 
 # glow — Charm's terminal markdown renderer (`glow file.md`; `glow .` for the TUI browser).

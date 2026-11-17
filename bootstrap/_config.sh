@@ -101,6 +101,7 @@ ts_apps_load() {
         $4=="all" { print; next }
         $4=="posix" && (p=="macos" || p=="linux" || p=="wsl") { print; next }
         $4=="linux" && p=="linux" { print; next }
+        $4=="desktop" && (p=="macos" || p=="linux") { print; next }
     ')"
     # Distro veto, on top of the platform column.
     #
@@ -154,6 +155,7 @@ ts_app_group_desc() {
         runtimes) echo "language runtimes" ;;
         python)  echo "Python tooling" ;;
         ai)      echo "AI coding agents" ;;
+        desktop) echo "desktop agent apps" ;;
         models)  echo "local model sizing" ;;
         *)       echo "" ;;
     esac
@@ -301,7 +303,13 @@ ts_apps_pending() {
     for id in $saved $expected; do
         case " $seen " in *" $id "*) continue ;; esac
         seen="$seen $id"
-        command -v "$(ts_app_bin "$id")" >/dev/null 2>&1 && continue
+        if ts_app_is_desktop "$id"; then
+            # GUI apps put nothing reliable on PATH (and /usr/bin/orca is a
+            # screen reader), so presence is the bundle / launcher entry.
+            ts_desktop_app_present "$id" && continue
+        else
+            command -v "$(ts_app_bin "$id")" >/dev/null 2>&1 && continue
+        fi
         ts_app_installable "$id" || continue
         out="$out $id"
     done
@@ -548,6 +556,8 @@ ts_brew_install_apps() {
             # herdr IS mapped — by its own installer, below. Same reason zed has
             # an empty arm: without one the catch-all blames the wrong thing.
             herdr)      ;;
+            # Casks, installed by ts_install_desktops below (tap for orca).
+            herdr-app|orca|t3code) ;;
             *)          ts_app_is_ai "$id" || echo "==> $id: no macOS package mapping; skipped" ;;
         esac
     done
@@ -582,6 +592,7 @@ ts_brew_install_apps() {
     ts_install_ai_clis "$apps"  || ts_note_failure "agent CLIs" "retry: tstack config apps claude,codex,…"
     ts_install_herdrs "$apps"   || ts_note_failure "herdr" "retry: tstack config apps herdr"
     ts_install_dockers "$apps"  || ts_note_failure "docker" "retry: brew install --cask docker"
+    ts_install_desktops "$apps" || ts_note_failure "desktop apps" "retry: tstack config apps herdr-app,orca,t3code"
     return 0
 }
 
@@ -829,6 +840,228 @@ ts_install_dockers() {
     return 0
 }
 
+# ── Desktop agent apps (herdr-app, orca, t3code) ────────────────────────────────
+# GUI workspaces for coding agents. Route-listed like herdr and docker: the group
+# (`desktop`) says what they ARE, this list says how they arrive, and no single
+# package manager has all three anywhere.
+#
+#   macOS   Homebrew casks: herdr-app, stablyai/orca/orca (a TAP -- the bare
+#           `orca` cask is Plotly's unrelated tool), t3-code.
+#   Debian  herdr.dev's own app installer; Orca and T3 Code from the .deb on
+#           their latest GitHub release (apt resolves the deps and the package
+#           owns the files, so an uninstall is `apt remove`).
+#   Arch    herdr.dev's installer; Orca and T3 Code as AppImages plus a .desktop
+#           entry. All three are AUR-only on Arch and the stack never runs an
+#           AUR helper (tests/test_distro.py), so the vendor builds it is.
+#   WSL     never: a GUI app belongs on the Windows side, and a WSL install
+#           writes nothing under /mnt/c. The `desktop` platform column already
+#           keeps them out of the WSL catalog; the guard below is belt and braces.
+#
+# A copy installed by hand is NEVER replaced -- the Zed rule (ts_brew_install_apps):
+# `--adopt` on an existing bundle deleted a real app. Present means leave it.
+ts_app_is_desktop() {
+    case "$1" in herdr-app|orca|t3code) return 0 ;; *) return 1 ;; esac
+}
+
+# Bundle / launcher globs per id. `?` stands in for the space in "T3 Code": the
+# pattern is expanded unquoted, so a literal space would split it in two.
+# Orca's .desktop glob is deliberately NOT a PATH probe: /usr/bin/orca on most
+# GNOME desktops is the Orca SCREEN READER, and `command -v orca` would report
+# an app that is not there.
+_ts_desktop_mac_bundle() {
+    case "$1" in
+        herdr-app) echo "Herdr.app" ;;
+        orca)      echo "Orca.app" ;;
+        t3code)    echo "T3?Code*.app" ;;
+    esac
+}
+_ts_desktop_linux_entry() {
+    case "$1" in
+        herdr-app) echo "herdr-app.desktop" ;;
+        orca)      echo "*[Oo]rca-ide*.desktop orca.desktop" ;;
+        t3code)    echo "*[Tt]3*[Cc]ode*.desktop t3code.desktop" ;;
+    esac
+}
+
+# Is <id> already on this machine, however it got there? Never `command -v` for
+# orca/t3code (see above); herdr-app's launcher name is unambiguous.
+ts_desktop_app_present() {
+    local id="$1" d pat f
+    if [ "$id" = herdr-app ] && command -v herdr-app >/dev/null 2>&1; then return 0; fi
+    case "$(uname -s 2>/dev/null)" in
+        Darwin)
+            pat="$(_ts_desktop_mac_bundle "$id")"
+            [ -n "$pat" ] || return 1
+            for d in "${TS_APPLICATIONS_DIR:-/Applications}" "$HOME/Applications"; do
+                # shellcheck disable=SC2086
+                for f in "$d"/$pat; do [ -d "$f" ] && return 0; done
+            done ;;
+        *)
+            for pat in $(_ts_desktop_linux_entry "$id"); do
+                for d in "${XDG_DATA_HOME:-$HOME/.local/share}/applications" /usr/share/applications; do
+                    # shellcheck disable=SC2086
+                    for f in "$d"/$pat; do [ -e "$f" ] && return 0; done
+                done
+            done ;;
+    esac
+    return 1
+}
+
+# The download URL of the first asset in <repo>'s latest release matching <regex>.
+_ts_github_latest_asset() {
+    curl -fsSL "https://api.github.com/repos/$1/releases/latest" 2>/dev/null \
+        | grep -oE '"browser_download_url":[[:space:]]*"[^"]+"' \
+        | cut -d'"' -f4 \
+        | grep -E "$2" \
+        | head -n1
+}
+
+# uname -m spelled the two ways these release assets use: `deb` (amd64/arm64)
+# and `gnu` (x86_64/arm64). Both projects spell ARM `arm64`.
+_ts_desktop_arch() {
+    case "$(uname -m 2>/dev/null)" in
+        aarch64|arm64) echo arm64 ;;
+        *) if [ "$1" = deb ]; then echo amd64; else echo x86_64; fi ;;
+    esac
+}
+
+# Release-asset regex per id and package kind (deb | appimage).
+_ts_desktop_asset_re() {
+    local id="$1" kind="$2"
+    case "$id:$kind" in
+        orca:deb)      echo "orca-ide_.*_$(_ts_desktop_arch deb)\\.deb\$" ;;
+        orca:appimage) if [ "$(_ts_desktop_arch deb)" = arm64 ]
+                       then echo 'orca-linux-arm64\.AppImage$'
+                       else echo 'orca-linux\.AppImage$'; fi ;;
+        t3code:deb)      echo "T3-Code-.*-$(_ts_desktop_arch deb)\\.deb\$" ;;
+        t3code:appimage) echo "T3-Code-.*-$(_ts_desktop_arch gnu)\\.AppImage\$" ;;
+    esac
+}
+
+_ts_desktop_repo() {
+    case "$1" in orca) echo stablyai/orca ;; t3code) echo pingdotgg/t3code ;; esac
+}
+_ts_desktop_name() {
+    case "$1" in herdr-app) echo "Herdr" ;; orca) echo "Orca" ;; t3code) echo "T3 Code" ;; esac
+}
+
+# AppImage + launcher entry, user-space, no root. A re-run replaces the image in
+# place, which is the update path.
+_ts_desktop_install_appimage() {
+    local id="$1" url dir img apps
+    url="$(_ts_github_latest_asset "$(_ts_desktop_repo "$id")" "$(_ts_desktop_asset_re "$id" appimage)")"
+    if [ -z "$url" ]; then
+        ts_note_failure "$id" "no AppImage in the latest $(_ts_desktop_repo "$id") release for $(uname -m)"
+        return 0
+    fi
+    dir="${XDG_DATA_HOME:-$HOME/.local/share}/terminal-stack/apps"
+    apps="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
+    img="$dir/$id.AppImage"
+    mkdir -p "$dir" "$apps"
+    echo "==> $id: downloading $(basename "$url")"
+    if ! curl -fL --silent --show-error -o "$img.part" "$url"; then
+        rm -f "$img.part"
+        ts_note_failure "$id" "download failed: $url"
+        return 0
+    fi
+    mv -f "$img.part" "$img"
+    chmod 0755 "$img"
+    cat > "$apps/$id.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=$(_ts_desktop_name "$id")
+Comment=Installed by terminal-stack (tstack config apps)
+Exec="$img" %U
+Terminal=false
+Categories=Development;
+EOF
+    command -v update-desktop-database >/dev/null 2>&1 \
+        && update-desktop-database "$apps" >/dev/null 2>&1 || true
+    echo "==> $id: installed to $img (launcher: $(_ts_desktop_name "$id"))"
+    # AppImages are FUSE 2 executables; without libfuse2 they refuse to start.
+    if ! ldconfig -p 2>/dev/null | grep -q 'libfuse\.so\.2'; then
+        echo "    note: AppImages need FUSE 2 (Arch: fuse2). Without it, run: $img --appimage-extract-and-run"
+    fi
+}
+
+_ts_desktop_install_deb() {
+    local id="$1" url tmp
+    url="$(_ts_github_latest_asset "$(_ts_desktop_repo "$id")" "$(_ts_desktop_asset_re "$id" deb)")"
+    if [ -z "$url" ]; then
+        ts_note_failure "$id" "no .deb in the latest $(_ts_desktop_repo "$id") release for $(uname -m)"
+        return 0
+    fi
+    tmp="$(mktemp -d)"
+    echo "==> $id: downloading $(basename "$url")"
+    if curl -fL --silent --show-error -o "$tmp/$(basename "$url")" "$url" \
+        && sudo apt-get install -y "$tmp/$(basename "$url")"; then
+        echo "==> $id: installed"
+    else
+        ts_note_failure "$id" "retry: sudo apt-get install ./$(basename "$url")"
+    fi
+    rm -rf "$tmp"
+}
+
+ts_install_desktop_app() {
+    local id="$1" cask
+    if ts_desktop_app_present "$id"; then
+        echo "==> $id: already installed; leaving it alone."
+        return 0
+    fi
+    if command -v _ts_in_container >/dev/null 2>&1 && _ts_in_container; then
+        echo "==> $id: skipped inside a container"; return 0
+    fi
+    if command -v _ts_is_wsl >/dev/null 2>&1 && _ts_is_wsl; then
+        echo "==> $id is a desktop app: install it on the Windows side (tstack config apps there)."
+        return 0
+    fi
+    if command -v ts_is_headless >/dev/null 2>&1 && ts_is_headless; then
+        echo "==> $id: skipped on a headless machine (it is a desktop app)"; return 0
+    fi
+    case "$(uname -s 2>/dev/null)" in
+        Darwin)
+            case "$id" in
+                herdr-app)
+                    if [ "$(uname -m)" != arm64 ]; then
+                        echo "==> herdr-app: Herdr ships no Intel macOS build; skipped."
+                        return 0
+                    fi
+                    cask=herdr-app ;;
+                orca)   cask=stablyai/orca/orca ;;
+                t3code) cask=t3-code ;;
+            esac
+            command -v brew >/dev/null 2>&1 || { ts_note_failure "$id" "Homebrew not found"; return 0; }
+            echo "==> $id: installing the $cask cask"
+            brew install --cask "$cask" || ts_note_failure "$id" "retry: brew install --cask $cask"
+            return 0 ;;
+    esac
+    # Linux.
+    if [ "$id" = herdr-app ]; then
+        echo "==> herdr-app: installing via herdr.dev's app installer"
+        curl -fsSL https://releases.herdr.dev/app/install.sh | sh \
+            || ts_note_failure "herdr-app" "see https://herdr.dev/download/"
+        return 0
+    fi
+    # pacman first: Arch is the AppImage route by design, and asking for apt-get
+    # alone sends an Arch box that happens to carry it down the .deb path.
+    if command -v pacman >/dev/null 2>&1; then
+        _ts_desktop_install_appimage "$id"
+    elif command -v apt-get >/dev/null 2>&1; then
+        _ts_desktop_install_deb "$id"
+    else
+        _ts_desktop_install_appimage "$id"
+    fi
+    return 0
+}
+
+ts_install_desktops() {
+    local id
+    for id in $1; do
+        ts_app_is_desktop "$id" && ts_install_desktop_app "$id"
+    done
+    return 0
+}
+
 # Print what each selected app resolved to, so a curl-pipe installer that failed
 # quietly is visible rather than assumed.
 ts_report_installed_apps() {
@@ -839,6 +1072,16 @@ ts_report_installed_apps() {
     echo "==> Installed tools:"
     for id in $1; do
         bin="$(ts_app_bin "$id")"
+        if ts_app_is_desktop "$id"; then
+            if ts_desktop_app_present "$id"; then
+                printf '    %-14s %s\n' "$id" "installed (desktop app)"
+            elif ! ts_app_installable "$id"; then
+                printf '    %-14s %s\n' "$id" "not available on this platform"
+            else
+                printf '    %-14s %s\n' "$id" "NOT FOUND (desktop app)"
+            fi
+            continue
+        fi
         if path="$(command -v "$bin" 2>/dev/null)"; then
             # Capture FIRST, then process. This used to be one four-stage
             # pipeline assigned directly, which under `set -euo pipefail` meant
