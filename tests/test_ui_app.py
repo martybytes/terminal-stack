@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -55,7 +56,7 @@ def drive(coro_factory):
     return asyncio.run(coro_factory())
 
 
-async def settle(pilot, predicate, what, tries=50):
+async def settle(pilot, predicate, what, timeout=20.0):
     """Pause until `predicate()` holds, rather than assuming one pause is enough.
 
     Setting `Input.value` POSTS a Changed message; a single `pilot.pause()` runs
@@ -66,10 +67,13 @@ async def settle(pilot, predicate, what, tries=50):
     a real flake, not a product bug: refresh_table clears and refills in one
     synchronous call, so the table is never partially populated.
     """
-    for _ in range(tries):
+    # Bounded by wall time, not a pause count: a count that is ample on a laptop
+    # ran out on a loaded windows-latest runner, twice on 11/16/2026.
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
         if predicate():
             return
-        await pilot.pause()
+        await pilot.pause(0.05)
     raise AssertionError(f"timed out waiting for {what}")
 
 
@@ -78,6 +82,9 @@ def test_the_dashboard_mounts_with_every_setting_and_filters_live():
     async def script():
         app = SettingsApp()
         async with app.run_test() as pilot:
+            # The table lives in a TabPane, mounted after run_test() hands over;
+            # windows-latest once got here first ("No nodes match '#table'").
+            await settle(pilot, lambda: bool(app.query("#table")), "the settings table")
             table = app.query_one("#table", DataTable)
             total = table.row_count
             # Not `== len(schema.SETTINGS)`: the dashboard also carries rows that
