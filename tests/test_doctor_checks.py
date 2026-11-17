@@ -511,6 +511,9 @@ def _stub_everything(monkeypatch, tmp_path, *, healthy: bool) -> None:
     # that has neither. Say which machine this is pretending to be rather than
     # inheriting whatever the developer running the suite happens to have.
     monkeypatch.setattr(doctor.herdr, "binary", lambda: None)
+    # Docker Desktop's integration is asked of wsl.exe and tasklist.exe, which the
+    # `which` stub above would otherwise send to the real machine.
+    monkeypatch.setattr(doctor.docker_desktop, "integration_status", lambda: ("n/a", []))
 
 
 def test_collect_runs_every_check_without_touching_the_machine(monkeypatch, tmp_path):

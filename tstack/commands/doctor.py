@@ -34,7 +34,19 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .. import checks, confirm, engine, headroom_token, herdr, hotkey, paths, proc, stacks, store
+from .. import (
+    checks,
+    confirm,
+    docker_desktop,
+    engine,
+    headroom_token,
+    herdr,
+    hotkey,
+    paths,
+    proc,
+    stacks,
+    store,
+)
 from .. import platform as plat
 from ..checks import Report
 from . import agents
@@ -1008,6 +1020,26 @@ def check_wsl_docker_shim(report: Report, src: Path | None) -> None:
     )
 
 
+def check_docker_integration(report: Report) -> None:
+    """Docker Desktop's WSL integration lost its backend socket (a stale WSL VM).
+
+    The one Docker fault every other probe misses: on Windows `docker` works and
+    containers run, while inside WSL docker is gone and Docker Desktop shows a
+    dialog whose Restart button fails the same way every time. Only asked of a
+    distro that is already running, so doctor never boots one; a machine without
+    Docker Desktop, or with every integrated distro stopped, reports nothing.
+    """
+    status, distros = docker_desktop.integration_status()
+    if status == docker_desktop.STALE:
+        report.fail(
+            "docker-integration",
+            f"{docker_desktop.STALE_ADVICE} ({', '.join(distros)})",
+            docker_desktop.STALE_FIX,
+        )
+    elif status == docker_desktop.HEALTHY:
+        report.ok("docker-integration", f"Docker Desktop reaches {', '.join(distros)}")
+
+
 def check_clone_branch(report: Report, src: Path | None) -> None:
     """A runtime clone must track the release branch, and must track something.
 
@@ -1167,6 +1199,7 @@ def collect() -> Report:
     check_git_hooks(report, src)
     check_git_ssh_command(report)
     check_wsl_docker_shim(report, src)
+    check_docker_integration(report)
     return report
 
 

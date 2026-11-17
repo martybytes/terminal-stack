@@ -4368,3 +4368,47 @@ than reimplementing starship's handler. Tested on PSReadLine 2.4.5.
 `tstack config prompt` on Windows now re-runs the sync after a change, because
 the Python half only saves `config.json`; a preset or newline change used to
 wait for the next `tstack update`.
+
+## Why `tstack services repair` recycles the WSL VM, and only from Windows
+
+After a Docker Desktop update the integration for every WSL distro dies with
+"waiting 1m0s for the backend socket". The shared tmpfs at
+`/mnt/wsl/docker-desktop/shared-sockets/` belongs to the WSL utility VM, not to
+Docker Desktop: the update restarts the backend, the VM keeps running, and the
+new backend comes up against the old VM's empty directory and never republishes
+`backend.sock`. Diagnosed 11/03/2026 on Docker Desktop 4.97 (VM uptime 39 h, the
+shared `host-services/` directory empty and dated before the update, the 19
+engine-side sockets healthy) and again on 4.99 on 11/16/2026, when it surfaced in
+the middle of the install wizard. Docker's own Restart button, and
+`docker desktop restart`, only re-run the one-minute poll; the button was tried
+after a clean recycle and still failed. Only `stop` -> `wsl --shutdown` -> `start`
+has ever fixed it, so that is the whole repair, and the KB's earlier
+`docker desktop restart` advice was removed rather than kept as a first thing
+to try.
+
+**Windows only.** `wsl --shutdown` from inside WSL kills the process running it
+partway through, after Docker is already stopped. Refusing from WSL is cheaper
+than a half-repair.
+
+**Detection never boots a distro and never calls a stopped one stale.** Docker
+publishes the socket only while an integrated distro runs, so an empty shared
+directory is normal while they are all stopped; reporting that would be a false
+failure on every machine whose WSL is idle. Doctor and the installer ask only a
+distro that is already running, and give a just-started backend 75 seconds,
+because the proxy's own wait is one minute.
+
+**The installer's offer defaults to no.** The repair closes every WSL terminal.
+The engine probe cannot see this fault at all (`docker` on Windows works), so
+the offer runs after the engine answers, whether or not the installer started it.
+
+**The disk-ownership check rides along** because it is the other fault that
+appears in the same moment: the elevated installer can recreate the Docker WSL
+disk owned by Administrators on a relocated (junctioned) store, and `wslservice`
+then cannot rewrite its DACL as you (MountDisk/HCS/E_ACCESSDENIED). The repair
+prints the `icacls` lines and waits; it never elevates, because silently taking
+ownership of files is not something a dotfiles tool should do.
+
+**Never reset or unregister.** Both destroy every image and volume and neither
+touches the cause; the failure message says so in as many words, because they
+are the two things a search result will suggest next.
+
