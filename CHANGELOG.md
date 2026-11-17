@@ -6,6 +6,14 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **Windows install summary: desktop apps report correctly and are never launched
+  (11/16/2026).** The summary ran `herdr-app --version` and `-V` against a GUI app,
+  which can open its window; desktop apps now report `installed (desktop app)`
+  without being run, as the bash twin already did. T3 Code read as NOT FOUND
+  because winget installs `T3 Code (Beta).exe` under a `t3code` folder, a pair
+  the presence table lacked, so `tstack update` would have nagged for it
+  forever. The TTS build prints one line instead of ~230 lines of PyInstaller
+  output; the full log still prints if the build fails.
 - **Voice notifications: no more background-task chatter, cut-off lines, or
   stale builds (11/16/2026).** A finished background task or agent opens a turn
   of its own, and its Stop was spoken like an answer to you: 43% of everything

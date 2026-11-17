@@ -238,6 +238,7 @@ $script:TsAppFixedPaths = @{
     t3code     = @("$env:LOCALAPPDATA\Programs\T3 Code\T3 Code.exe",
                    "$env:LOCALAPPDATA\Programs\T3 Code (Beta)\T3 Code (Beta).exe",
                    "$env:LOCALAPPDATA\Programs\t3code\T3 Code.exe",
+                   "$env:LOCALAPPDATA\Programs\t3code\T3 Code (Beta).exe",
                    "$env:ProgramFiles\T3 Code\T3 Code.exe")
 }
 
@@ -1649,6 +1650,16 @@ function Show-TsInstalledApps([string[]]$Apps) {
     Write-Host ''
     Write-Host '==> Installed tools:'
     foreach ($id in $Apps) {
+        # Twin of the bash summary's desktop branch. Never probe a GUI app with
+        # --version / -V: herdr-app is on the PATH, printed nothing for either, and
+        # an unknown flag can open its window.
+        if ($script:TsDesktopApps -contains $id) {
+            $state = if (Test-TsAppInstalled $id) { 'installed (desktop app)' }
+                     elseif (-not (Test-TsAppInstallable $id)) { 'not available on this platform' }
+                     else { 'NOT FOUND (desktop app)' }
+            Write-Host ("    {0,-14} {1}" -f $id, $state)
+            continue
+        }
         $cmd = Get-TsAppCommand $id
         if ($cmd) {
             $ver = Get-TsAppVersionLine $cmd.Source

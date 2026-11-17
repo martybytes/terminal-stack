@@ -36,9 +36,19 @@ try {
         'pyinstaller==6.22.2' -r (Join-Path $PSScriptRoot 'requirements.txt')
     if ($LASTEXITCODE -ne 0) { throw 'TTS build dependency installation failed.' }
     New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
-    & $venvPython -m PyInstaller (Join-Path $PSScriptRoot 'terminal-stack-tts.spec') `
-        --noconfirm --clean --distpath $OutputDirectory --workpath $work
-    if ($LASTEXITCODE -ne 0) { throw 'PyInstaller TTS build failed.' }
+    # Captured, not streamed: a good build is ~230 lines of INFO that buried the rest of
+    # an install. The whole log is printed when the build fails, so nothing is lost.
+    # Captured with Continue, because PyInstaller logs to stderr and Stop would abort
+    # on its first INFO line.
+    $buildLog = & {
+        $ErrorActionPreference = 'Continue'
+        & $venvPython -m PyInstaller (Join-Path $PSScriptRoot 'terminal-stack-tts.spec') `
+            --noconfirm --clean --distpath $OutputDirectory --workpath $work 2>&1
+    }
+    if ($LASTEXITCODE -ne 0) {
+        $buildLog | ForEach-Object { Write-Host "$_" }
+        throw 'PyInstaller TTS build failed.'
+    }
     $result = Join-Path $OutputDirectory 'terminal-stack-tts.exe'
     if (-not (Test-Path -LiteralPath $result -PathType Leaf)) {
         throw "PyInstaller did not produce $result"
