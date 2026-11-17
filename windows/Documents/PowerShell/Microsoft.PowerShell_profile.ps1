@@ -318,7 +318,8 @@ function dbx { db @args }
 #   tmux     tmux OWNS the outer title while attached: it swallows our OSC 2 and
 #            substitutes set-titles-string, so we skip.
 #   else     plain OSC 2, which only STAYS because the cc* wrappers set
-#            CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 so Claude writes no title of
+#            CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 (here only, see
+#            Invoke-TsClaudeTitled) so Claude writes no title of
 #            its own. Without that pair this is pointless.
 function Set-TsTabTitle([string]$title) {
     if ($env:WEZTERM_PANE) {
@@ -487,15 +488,32 @@ function claude {
     }
 }
 
+# Run claude for a cc* wrapper. CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 is set ONLY
+# where the wrapper's title is a plain OSC 2 that Claude would overwrite. Claude
+# reads that variable as "no terminal chrome" and also stops sending OSC 7501,
+# its agent-status report, so setting it inside herdr made every cc* session
+# invisible in herdr's agent list. WezTerm (sticky set-tab-title), tmux (owns the
+# title) and herdr (HC_TERMINAL_ID / HERDR_ENV: names tabs itself and needs
+# 7501) never need it. Twin: _ts_claude_titled in dot_zshrc.
+function Test-TsClaudeTitleQuiet {
+    -not ($env:WEZTERM_PANE -or $env:TMUX -or $env:HC_TERMINAL_ID -or $env:HERDR_ENV)
+}
+function Invoke-TsClaudeTitled {
+    if (-not (Test-TsClaudeTitleQuiet)) { claude @args; return }
+    $saved = $env:CLAUDE_CODE_DISABLE_TERMINAL_TITLE
+    $env:CLAUDE_CODE_DISABLE_TERMINAL_TITLE = '1'
+    try { claude @args } finally { $env:CLAUDE_CODE_DISABLE_TERMINAL_TITLE = $saved }
+}
+
 # Bare project leaf as the tab title — no 'cc' prefix: the WezTerm tab bar's
 # Claude icon and state dots already say Claude, and the prefix wasted tab width.
-function cc    { Set-TsTabTitle "$(Split-Path -Leaf $PWD)"; $p=$env:CLAUDE_CODE_DISABLE_TERMINAL_TITLE; $env:CLAUDE_CODE_DISABLE_TERMINAL_TITLE='1'; try { claude @args } finally { $env:CLAUDE_CODE_DISABLE_TERMINAL_TITLE=$p; Set-TsTabTitle "" } }
-function ccc   { Set-TsTabTitle "$(Split-Path -Leaf $PWD)"; $p=$env:CLAUDE_CODE_DISABLE_TERMINAL_TITLE; $env:CLAUDE_CODE_DISABLE_TERMINAL_TITLE='1'; try { claude --continue @args } finally { $env:CLAUDE_CODE_DISABLE_TERMINAL_TITLE=$p; Set-TsTabTitle "" } }
-function ccd   { Set-TsTabTitle "$(Split-Path -Leaf $PWD)"; $p=$env:CLAUDE_CODE_DISABLE_TERMINAL_TITLE; $env:CLAUDE_CODE_DISABLE_TERMINAL_TITLE='1'; try { claude --dangerously-skip-permissions @args } finally { $env:CLAUDE_CODE_DISABLE_TERMINAL_TITLE=$p; Set-TsTabTitle "" } }
-function ccdc  { Set-TsTabTitle "$(Split-Path -Leaf $PWD)"; $p=$env:CLAUDE_CODE_DISABLE_TERMINAL_TITLE; $env:CLAUDE_CODE_DISABLE_TERMINAL_TITLE='1'; try { claude --dangerously-skip-permissions --continue @args } finally { $env:CLAUDE_CODE_DISABLE_TERMINAL_TITLE=$p; Set-TsTabTitle "" } }
-function ccr   { Set-TsTabTitle "$(Split-Path -Leaf $PWD)"; $p=$env:CLAUDE_CODE_DISABLE_TERMINAL_TITLE; $env:CLAUDE_CODE_DISABLE_TERMINAL_TITLE='1'; try { claude --resume @args } finally { $env:CLAUDE_CODE_DISABLE_TERMINAL_TITLE=$p; Set-TsTabTitle "" } }
-function ccdr  { Set-TsTabTitle "$(Split-Path -Leaf $PWD)"; $p=$env:CLAUDE_CODE_DISABLE_TERMINAL_TITLE; $env:CLAUDE_CODE_DISABLE_TERMINAL_TITLE='1'; try { claude --dangerously-skip-permissions --resume @args } finally { $env:CLAUDE_CODE_DISABLE_TERMINAL_TITLE=$p; Set-TsTabTitle "" } }
-function cca   { Set-TsTabTitle "agents"; $p=$env:CLAUDE_CODE_DISABLE_TERMINAL_TITLE; $env:CLAUDE_CODE_DISABLE_TERMINAL_TITLE='1'; try { claude agents } finally { $env:CLAUDE_CODE_DISABLE_TERMINAL_TITLE=$p; Set-TsTabTitle "" } }
+function cc    { Set-TsTabTitle "$(Split-Path -Leaf $PWD)"; try { Invoke-TsClaudeTitled @args } finally { Set-TsTabTitle "" } }
+function ccc   { Set-TsTabTitle "$(Split-Path -Leaf $PWD)"; try { Invoke-TsClaudeTitled --continue @args } finally { Set-TsTabTitle "" } }
+function ccd   { Set-TsTabTitle "$(Split-Path -Leaf $PWD)"; try { Invoke-TsClaudeTitled --dangerously-skip-permissions @args } finally { Set-TsTabTitle "" } }
+function ccdc  { Set-TsTabTitle "$(Split-Path -Leaf $PWD)"; try { Invoke-TsClaudeTitled --dangerously-skip-permissions --continue @args } finally { Set-TsTabTitle "" } }
+function ccr   { Set-TsTabTitle "$(Split-Path -Leaf $PWD)"; try { Invoke-TsClaudeTitled --resume @args } finally { Set-TsTabTitle "" } }
+function ccdr  { Set-TsTabTitle "$(Split-Path -Leaf $PWD)"; try { Invoke-TsClaudeTitled --dangerously-skip-permissions --resume @args } finally { Set-TsTabTitle "" } }
+function cca   { Set-TsTabTitle "agents"; try { Invoke-TsClaudeTitled agents } finally { Set-TsTabTitle "" } }
 
 # Interactive Codex sessions get a three-row WezTerm dashboard. Utility commands
 # remain stock, and codex-stock is an explicit no-enhancements escape hatch.

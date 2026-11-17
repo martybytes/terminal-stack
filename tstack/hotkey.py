@@ -10,7 +10,9 @@ a tray app has claimed it.
 
 The test is the one Windows offers: try to register the chord ourselves. It
 fails with ERROR_HOTKEY_ALREADY_REGISTERED (1409) when someone holds it, and is
-released at once when it succeeds. Windows has no API that names the holder.
+released at once when it succeeds. Windows has no API that names the holder;
+`tstack keys -Identify` (bootstrap/ts-keymap.ps1) names it by pressing the
+chord under a WH_GETMESSAGE hook that records who receives the WM_HOTKEY.
 
 Deliberately free of package-relative imports so the PowerShell side can run
 it as a plain script (`python hotkey.py ctrl-backslash`) -- one implementation
@@ -143,8 +145,8 @@ def advice(chord: str) -> list[str]:
         "     shortcut. Usual suspects: PowerToys, launchers (Wox, Flow Launcher,",
         "     Raycast), dictation tools (Wispr Flow), ChatGPT / Grok / other AI",
         "     desktop apps, screenshot tools (Snagit, ShareX), Stream Deck.",
-        "     Quitting them one at a time from the tray and re-running",
-        "     `tstack doctor` tells you which it is.",
+        f"     `tstack keys -Chord {chord} -Identify` names the program for you;",
+        "     quitting suspects one at a time and re-running `tstack doctor` also works.",
         "  2. Pick a different leader:  tstack config leader ctrl-a",
         "     (any chord works; `tstack doctor` re-checks it for you).",
         "",
@@ -155,9 +157,9 @@ def advice(chord: str) -> list[str]:
 def one_line_fix() -> str:
     """The same advice, for a one-line report such as `tstack doctor`."""
     return (
-        "fix: turn that shortcut off in the program that owns it (PowerToys, Wox, Wispr Flow, "
-        "an AI desktop app, Snagit, Stream Deck - quit them one at a time and re-run "
-        "`tstack doctor`), or pick another leader: tstack config leader ctrl-a"
+        "fix: turn that shortcut off in the program that owns it "
+        "(`tstack keys -Chord <leader> -Identify` names it), "
+        "or pick another leader: tstack config leader ctrl-a"
     )
 
 

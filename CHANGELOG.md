@@ -4,7 +4,23 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+### Added
+
+- **`tstack keys`: every keyboard shortcut on this PC in one CSV (11/17/2026, Windows).** It
+  probes every global hotkey combination and reads the shortcuts of Windows itself, Start-menu
+  `.lnk` files, PowerToys, WezTerm, Windows Terminal, VS Code/Cursor/Zed, herdr, Claude Code,
+  PSReadLine, AutoHotkey, and tmux/zsh in WSL. It flags every app shortcut that another
+  program's global hotkey swallows. `-Identify` names that program: there is no Windows API
+  for it, so a small hook DLL (`bootstrap/hkspy`) watches who receives each key, and swallows
+  the press. `tstack doctor`'s taken-leader advice now points at it. `doc windows/keymap`.
+
 ### Fixed
+
+- **Claude sessions started with `cc*` now show in herdr's agents list (11/17/2026).** The
+  wrappers set `CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1` to keep their tab title, and Claude Code
+  also reads that variable as "don't report agent status" (OSC 7501), which is the only way
+  herdr knows a terminal is an agent. The variable is now set only where the wrapper's title is
+  a plain OSC 2 (Ghostty, Terminal.app and similar), never in WezTerm, tmux or herdr.
 
 - **Windows ssh ignored every key in `~\.ssh` once Codex was installed (11/16/2026).**
   Codex's sandbox adds `CodexSandboxUsers:(RX)` to the profile root, `~\.ssh` inherits

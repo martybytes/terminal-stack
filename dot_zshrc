@@ -292,7 +292,8 @@ alias gl='git log --oneline --graph --decorate -10'
 #            title, but it is keybind-only: no CLI drives a running instance and
 #            no escape sequence reaches it (ConEmu OSC 9;3 sets the surface
 #            title, tested). OSC 2 is all we get — and it only STAYS because the
-#            cc* wrappers set CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 so Claude
+#            cc* wrappers set CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 (here only, see
+#            _ts_claude_titled) so Claude
 #            never writes a title of its own. Without that pair this is pointless.
 #
 # Clearing is handled by _set_title on the next prompt, so an empty title here
@@ -455,15 +456,30 @@ claude() {
     ENABLE_TOOL_SEARCH="${ENABLE_TOOL_SEARCH:-true}" HEADROOM_PROJECT="${PWD:t}" \
     "$_TS_CLAUDE_BIN" "$@"
 }
+# Run claude for a cc* wrapper. CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 is set ONLY
+# where the wrapper's title is a plain OSC 2 that Claude would overwrite. Claude
+# reads that variable as "no terminal chrome" and also stops sending OSC 7501,
+# its agent-status report, so setting it inside herdr made every cc* session
+# invisible in herdr's agent list. WezTerm (sticky set-tab-title), tmux (owns the
+# title) and herdr (HC_TERMINAL_ID / HERDR_ENV: names tabs itself and needs
+# 7501) never need it. Twin: Invoke-TsClaudeTitled in $PROFILE.
+_ts_claude_title_quiet() { [[ -z $WEZTERM_PANE && -z $TMUX && -z $HC_TERMINAL_ID && -z $HERDR_ENV ]] }
+_ts_claude_titled() {
+  if _ts_claude_title_quiet; then
+    CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 claude "$@"
+  else
+    claude "$@"
+  fi
+}
 # { } always { }: the title clears even when Ctrl+C aborts the function body
 # (matches the pwsh wrappers' try/finally); exit status of the body is preserved.
-cc()    { _ts_tab_title "${PWD:t}"; { CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 claude "$@" }                                           always { _ts_tab_title "" } }
-ccc()   { _ts_tab_title "${PWD:t}"; { CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 claude --continue "$@" }                                always { _ts_tab_title "" } }
-ccd()   { _ts_tab_title "${PWD:t}"; { CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 claude --dangerously-skip-permissions "$@" }            always { _ts_tab_title "" } }
-ccdc()  { _ts_tab_title "${PWD:t}"; { CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 claude --dangerously-skip-permissions --continue "$@" } always { _ts_tab_title "" } }
-ccr()   { _ts_tab_title "${PWD:t}"; { CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 claude --resume "$@" }                                  always { _ts_tab_title "" } }
-ccdr()  { _ts_tab_title "${PWD:t}"; { CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 claude --dangerously-skip-permissions --resume "$@" }   always { _ts_tab_title "" } }
-cca()   { _ts_tab_title "agents";   { CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 claude agents }                                         always { _ts_tab_title "" } }
+cc()    { _ts_tab_title "${PWD:t}"; { _ts_claude_titled "$@" }                                           always { _ts_tab_title "" } }
+ccc()   { _ts_tab_title "${PWD:t}"; { _ts_claude_titled --continue "$@" }                                always { _ts_tab_title "" } }
+ccd()   { _ts_tab_title "${PWD:t}"; { _ts_claude_titled --dangerously-skip-permissions "$@" }            always { _ts_tab_title "" } }
+ccdc()  { _ts_tab_title "${PWD:t}"; { _ts_claude_titled --dangerously-skip-permissions --continue "$@" } always { _ts_tab_title "" } }
+ccr()   { _ts_tab_title "${PWD:t}"; { _ts_claude_titled --resume "$@" }                                  always { _ts_tab_title "" } }
+ccdr()  { _ts_tab_title "${PWD:t}"; { _ts_claude_titled --dangerously-skip-permissions --resume "$@" }   always { _ts_tab_title "" } }
+cca()   { _ts_tab_title "agents";   { _ts_claude_titled agents }                                         always { _ts_tab_title "" } }
 
 # Interactive Codex sessions get a three-row WezTerm dashboard. Utility commands
 # remain stock, and codex-stock is an explicit no-enhancements escape hatch.

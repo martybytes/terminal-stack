@@ -226,7 +226,8 @@ Ordered so that each step is verifiable before the next one starts.
       has a `--label` on its pane commands and exports `HERDR_PANE_ID`, so the
       branch is detectable and implementable.
 - [ ] Confirm the `cc*` wrappers still behave. They set
-      `CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1`, and both halves of the OSC 2 story
+      `CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1` (outside WezTerm, tmux and herdr only:
+      inside herdr it also silenced Claude's OSC 7501 agent status), and both halves of the OSC 2 story
       are load-bearing.
 - [x] Do not turn `dot_zshrc` into a `.tmpl`. If the herdr shell fragment needs
       templating, make it a rendered fragment under `dot_config/terminal-stack/`

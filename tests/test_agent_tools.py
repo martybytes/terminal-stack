@@ -2384,9 +2384,7 @@ def test_cc_wrappers_stop_claude_overwriting_the_tab_title():
     )
     for name in ("cc()", "ccc()", "ccd()", "ccdc()", "ccr()", "ccdr()", "cca()"):
         line = next(l for l in rc.splitlines() if l.startswith(name))
-        assert "CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1" in line, (
-            f"{name} would have its tab title overwritten by Claude"
-        )
+        assert "_ts_claude_titled" in line, f"{name} would have its tab title overwritten by Claude"
         assert "_ts_tab_title" in line
     for name in (
         "function cc ",
@@ -2398,13 +2396,41 @@ def test_cc_wrappers_stop_claude_overwriting_the_tab_title():
         "function cca ",
     ):
         line = next(l for l in ps.splitlines() if l.startswith(name))
-        assert "CLAUDE_CODE_DISABLE_TERMINAL_TITLE" in line, (
+        assert "Invoke-TsClaudeTitled" in line, (
             f"{name.strip()} (pwsh) would have its tab title overwritten"
         )
         assert "Set-TsTabTitle" in line
     # The old WezTerm-only names must be fully retired on both sides.
     assert "_wez_tab_title" not in rc
     assert "Set-WezTabTitle" not in ps
+    # The helpers set the variable, and only where the title is a plain OSC 2.
+    assert "CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 claude" in rc
+    assert "$env:CLAUDE_CODE_DISABLE_TERMINAL_TITLE = '1'" in ps
+
+
+def test_cc_wrappers_leave_claude_agent_status_on_where_the_title_is_not_osc2():
+    """CLAUDE_CODE_DISABLE_TERMINAL_TITLE also stops Claude sending OSC 7501, its
+    agent-status report, and herdr lists a terminal as an agent only from that.
+    Setting it inside herdr hid every cc* session from herdr's agent list. WezTerm
+    (sticky tab title), tmux (owns the title) and herdr (HC_TERMINAL_ID, HERDR_ENV)
+    never need it, so the guard must name all four variables, on both sides."""
+    rc = (ROOT / "dot_zshrc").read_text(encoding="utf-8")
+    ps = (ROOT / "windows/Documents/PowerShell/Microsoft.PowerShell_profile.ps1").read_text(
+        encoding="utf-8"
+    )
+    zguard = next(l for l in rc.splitlines() if l.startswith("_ts_claude_title_quiet()"))
+    start = ps.index("function Test-TsClaudeTitleQuiet")
+    pguard = ps[start : ps.index("}", start)]
+    for var in ("WEZTERM_PANE", "TMUX", "HC_TERMINAL_ID", "HERDR_ENV"):
+        assert f"-z ${var}" in zguard, f"zsh guard misses {var}"
+        assert f"$env:{var}" in pguard, f"pwsh guard misses {var}"
+
+    # Nothing else may set the variable unconditionally for claude.
+    def code(text: str) -> list[str]:
+        return [l for l in text.splitlines() if not l.lstrip().startswith("#")]
+
+    assert sum("CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1" in l for l in code(rc)) == 1
+    assert sum("CLAUDE_CODE_DISABLE_TERMINAL_TITLE = '1'" in l for l in code(ps)) == 1
 
 
 def test_tab_title_helper_skips_tmux_and_falls_back_to_osc2():

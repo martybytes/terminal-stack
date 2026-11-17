@@ -1,0 +1,16 @@
+[package]
+name = "hkspy"
+version = "0.1.0"
+edition = "2021"
+description = "WH_GETMESSAGE hook that names the process receiving a Windows global hotkey (used by ts-keymap.ps1)"
+publish = false
+
+[lib]
+name = "hkspy"
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[profile.release]
+panic = "abort"
+opt-level = "s"
+strip = true
