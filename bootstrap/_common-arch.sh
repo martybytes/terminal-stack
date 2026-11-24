@@ -151,7 +151,7 @@ common_install_selected_apps() {
     # common_arch_tag in _common-posix.sh (CPU architecture, not the distro).
     case " $apps " in *" llmfit "*)
         command -v llmfit >/dev/null 2>&1 \
-            || common_install_github_binary "AlexsJones/llmfit" "llmfit" "llmfit-.*-$(common_arch_tag rust)-unknown-linux-gnu\\.tar\\.gz$" \
+            || common_install_github_binary "AlexsJones/llmfit" "llmfit" "llmfit-.*-$(common_arch_tag rust)-unknown-linux-(musl|gnu)\\.tar\\.gz$" \
             || echo "$WARN llmfit unavailable (GitHub fallback failed)" ;;
     esac
 

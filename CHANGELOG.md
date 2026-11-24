@@ -16,6 +16,14 @@ All notable changes captured here. Format loosely follows [Keep a Changelog](htt
 
 ### Fixed
 
+- **atuin failed on Ubuntu 22.04 with "GLIBC_2.39 not found" (11/24/2026, Linux).** The
+  GitHub-release fallback fetched upstream's `-unknown-linux-gnu` build, which links the
+  glibc of whatever runner built it — newer than 22.04's 2.35. Every fallback that has one
+  (atuin, yazi/ya, uv/uvx, ruff, llmfit, eza, delta, dust, bottom, bandwhich) now fetches the
+  static `-musl` build, and `common_install_github_binary` prefers musl whenever a pattern
+  matches both. eza and delta have no aarch64 musl build, so ARM still gets gnu there. A
+  machine that already has a broken binary keeps it (the installer skips anything on
+  `PATH`): `doc common/tools/atuin` has the one-line fix.
 - **Claude sessions started with `cc*` now show in herdr's agents list (11/17/2026).** The
   wrappers set `CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1` to keep their tab title, and Claude Code
   also reads that variable as "don't report agent status" (OSC 7501), which is the only way

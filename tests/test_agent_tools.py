@@ -2017,6 +2017,50 @@ def test_common_arch_tag_rust_uses_aarch64_not_arm64():
     assert tag("x86_64", "deb") == "amd64"
 
 
+@pytest.mark.skipif(not BASH, reason="compatible bash is unavailable")
+@pytest.mark.parametrize(
+    ("assets", "expected"),
+    [
+        # gnu listed first, as the GitHub API does for atuin: musl must still win.
+        (
+            ["atuin-x86_64-unknown-linux-gnu.tar.gz", "atuin-x86_64-unknown-linux-musl.tar.gz"],
+            "musl",
+        ),
+        # No musl build for this arch (eza/delta on aarch64): fall back to gnu.
+        (["eza_aarch64-unknown-linux-gnu.tar.gz"], "gnu"),
+    ],
+)
+def test_github_binary_prefers_musl_assets(tmp_path, assets, expected):
+    """A `-gnu` release asset links the glibc of the runner that built it, so
+    atuin 18.x died on Ubuntu 22.04 with "GLIBC_2.39 not found". The static musl
+    build must win whenever the pattern allows both."""
+    lib = ROOT / "bootstrap/_common-posix.sh"
+    fn = re.search(
+        r"^common_install_github_binary\(\) \{.*?^\}", lib.read_text(encoding="utf-8"), re.S | re.M
+    )
+    assert fn, "common_install_github_binary not found"
+    listing = "\n".join(f'"browser_download_url": "https://example.invalid/{a}"' for a in assets)
+    # curl stub: the API call prints the listing; the download records its URL and fails.
+    script = (
+        f"{fn.group(0)}\n"
+        'curl() {\n  case " $* " in\n    *" -o "*) echo "DL ${!#}"; return 1 ;;\n'
+        f"    *) cat <<'JSON'\n{listing}\nJSON\n    ;;\n  esac\n}}\n"
+        "INFO=; WARN=\n"
+        'common_install_github_binary owner/repo nosuchbin-xyz "unknown-linux-(musl|gnu)\\.tar\\.gz$"\n'
+    )
+    out = subprocess.run(
+        [BASH, "-c", script],
+        capture_output=True,
+        text=True,
+        timeout=300,
+        start_new_session=True,
+        env={**os.environ, "HOME": bash_path(tmp_path)},
+    ).stdout
+    downloaded = [line for line in out.splitlines() if line.startswith("DL ")]
+    assert len(downloaded) == 1, out
+    assert f"-unknown-linux-{expected}.tar.gz" in downloaded[0]
+
+
 def test_atuin_is_gated_by_a_setting_not_a_presence_check():
     """atuin *replaces* Ctrl+R and its binary is often installed but dormant, so
     a `command -v atuin` guard in dot_zshrc would hijack the binding without the

@@ -62,4 +62,24 @@ Everything stays on this machine.
 | `atuin history list` | dump what is stored |
 | `tstack config atuin on` / `off` | enable/disable the `Ctrl+R` integration |
 
+## "GLIBC_2.39 not found"
+
+```
+atuin: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.39' not found (required by atuin)
+```
+
+The binary is upstream's `-unknown-linux-gnu` build, which needs the glibc of
+the distro it was built on — newer than Ubuntu 22.04's 2.35. On Linux the
+GitHub-release fallback now fetches the static `-unknown-linux-musl` build,
+which runs on any glibc. A machine installed before that fix keeps the broken
+binary, because the installer skips anything already on `PATH`. Remove it and
+reinstall:
+
+```sh
+rm ~/.local/bin/atuin && tstack config apps
+```
+
+The same applies to any other tool from the GitHub fallback (yazi, uv, ruff,
+eza, delta, dust, bottom, bandwhich, llmfit) that fails with this error.
+
 See also `doc common/search-history`, `doc common/tools/fzf`.

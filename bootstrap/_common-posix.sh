@@ -356,6 +356,13 @@ common_arch_tag() {
 # Fetch the latest release tarball from a GitHub repo for the current arch and
 # extract the named binary into ~/.local/bin. Skips if the binary is already on PATH.
 # Usage: common_install_github_binary <repo> <binary-name> <asset-grep-pattern>
+#
+# When the pattern matches several assets, a musl one wins. The `-gnu` builds
+# link the glibc of whatever runner built them, so a release built on a newer
+# distro dies on an older one before main() — atuin 18.x on Ubuntu 22.04
+# (glibc 2.35): "version `GLIBC_2.39' not found". musl builds are static and
+# run anywhere. Patterns say `(musl|gnu)` so an arch with no musl build (eza and
+# delta on aarch64) still gets the gnu one.
 common_install_github_binary() {
     local repo="$1" bin_name="$2" asset_pattern="$3"
     if command -v "$bin_name" >/dev/null 2>&1; then
@@ -370,6 +377,7 @@ common_install_github_binary() {
         | grep -oE '"browser_download_url":[[:space:]]*"[^"]+"' \
         | cut -d'"' -f4 \
         | grep -E "$asset_pattern" \
+        | awk '/musl/ { print; next } { rest[++n] = $0 } END { for (i = 1; i <= n; i++) print rest[i] }' \
         | head -n1)
     if [ -z "$asset_url" ]; then
         echo "$WARN Could not find asset matching '$asset_pattern' in latest $repo release."
