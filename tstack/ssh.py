@@ -776,6 +776,147 @@ def set_mirrored() -> bool:
     return True
 
 
+# ----------------------------------------------------------- agent bridge
+#
+# Ubuntu uses the WINDOWS ssh-agent, so a key unlocked once is unlocked on both
+# sides, and stays unlocked: the Windows agent keeps its keys across reboots,
+# where every Linux agent forgets them at logout. That is the fix for being
+# asked for a passphrase again and again.
+#
+# The relay is the well-trodden one: socat listens on a unix socket in WSL and
+# hands each connection to npiperelay.exe, which talks to the agent's named
+# pipe. A systemd USER service runs it; dot_zshrc prefers its socket over a
+# local Linux agent, and a forwarded `ssh -A` socket still wins over both.
+# Nothing here stops, restarts or disables Ubuntu's own ssh-agent.
+
+BRIDGE_UNIT = "wsl-ssh-agent-bridge.service"
+BRIDGE_SOCK = "wsl-ssh-agent.sock"  # under $XDG_RUNTIME_DIR, the name dot_zshrc probes
+NPIPERELAY_ID = "albertony.npiperelay"  # `winget show --id albertony.npiperelay --exact`
+AGENT_PIPE = "//./pipe/openssh-ssh-agent"
+
+
+def npiperelay_path() -> Path | None:
+    """npiperelay.exe as winget installed it, or anywhere on PATH."""
+    base = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData/Local")))
+    for d in sorted((base / "Microsoft/WinGet/Packages").glob("albertony.npiperelay_*")):
+        exe = d / "npiperelay.exe"
+        if exe.is_file():
+            return exe
+    found = shutil.which("npiperelay.exe") or shutil.which("npiperelay")
+    if found:
+        # winget's Links entry is a symlink; WSL wants the file it points at.
+        with_target = Path(found).resolve()
+        return with_target if with_target.is_file() else Path(found)
+    return None
+
+
+def install_npiperelay() -> Path | None:
+    exe = npiperelay_path()
+    if exe is not None:
+        return exe
+    winget = shutil.which("winget")
+    if not winget:
+        return None
+    proc.capture(
+        [winget, "install", "--id", NPIPERELAY_ID, "--exact", "--silent",
+         "--accept-package-agreements", "--accept-source-agreements",
+         "--disable-interactivity"],
+        timeout=600,
+    )  # fmt: skip
+    return npiperelay_path()
+
+
+def bridge_unit() -> str:
+    """The user unit. npiperelay is reached through a symlink in ~/.local/bin,
+    so a Windows path with a space in it never meets socat's word splitting."""
+    return (
+        "# Managed by terminal-stack (tstack ssh setup / tstack ssh doctor --fix).\n"
+        "# Relays the Windows ssh-agent into WSL. Replaced on every apply.\n"
+        "[Unit]\n"
+        "Description=Windows ssh-agent relayed into WSL (terminal-stack)\n"
+        "\n"
+        "[Service]\n"
+        f"ExecStartPre=-/bin/rm -f %t/{BRIDGE_SOCK}\n"
+        f'ExecStart=/usr/bin/socat "UNIX-LISTEN:%t/{BRIDGE_SOCK},fork,umask=077" '
+        f'"EXEC:%h/.local/bin/npiperelay.exe -ei -s {AGENT_PIPE},nofork"\n'
+        "Restart=on-failure\n"
+        "RestartSec=2\n"
+        "\n"
+        "[Install]\n"
+        "WantedBy=default.target\n"
+    )
+
+
+# $1 = npiperelay.exe's Windows path. Unit text on stdin. As the WSL user.
+BRIDGE_SCRIPT = r"""set -e
+unit="$HOME/.config/systemd/user/__UNIT__"
+mkdir -p "$HOME/.local/bin" "$HOME/.config/systemd/user"
+ln -sfn "$(wslpath -u "$1")" "$HOME/.local/bin/npiperelay.exe"
+cat > "$unit.new"
+if cmp -s "$unit.new" "$unit"; then changed=0; else changed=1; fi
+mv -f "$unit.new" "$unit"
+systemctl --user daemon-reload
+systemctl --user enable __UNIT__ >/dev/null 2>&1
+if [ "$changed" = 1 ]; then systemctl --user restart __UNIT__; else systemctl --user start __UNIT__; fi
+""".replace("__UNIT__", BRIDGE_UNIT)
+
+BRIDGE_REMOVE_SCRIPT = r"""unit="$HOME/.config/systemd/user/__UNIT__"
+[ -f "$unit" ] || exit 0
+systemctl --user disable --now __UNIT__ >/dev/null 2>&1 || true
+rm -f "$unit" "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/__SOCK__"
+[ -L "$HOME/.local/bin/npiperelay.exe" ] && rm -f "$HOME/.local/bin/npiperelay.exe"
+systemctl --user daemon-reload || true
+echo removed
+""".replace("__UNIT__", BRIDGE_UNIT).replace("__SOCK__", BRIDGE_SOCK)
+
+# 0: the bridge answers and holds keys. 1: it answers, the Windows agent is
+# empty. 2: no answer (not set up, not running, or the Windows agent is down).
+# 3: not set up at all.
+BRIDGE_PROBE_SCRIPT = r"""sock="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/__SOCK__"
+[ -f "$HOME/.config/systemd/user/__UNIT__" ] || { echo 3; exit 0; }
+[ -S "$sock" ] || { echo 2; exit 0; }
+SSH_AUTH_SOCK="$sock" timeout 10 ssh-add -l >/dev/null 2>&1
+echo $?
+""".replace("__UNIT__", BRIDGE_UNIT).replace("__SOCK__", BRIDGE_SOCK)
+
+
+def wsl_bridge_state(distro: str) -> int:
+    """BRIDGE_PROBE_SCRIPT's answer; 2 when WSL cannot be asked."""
+    got = wsl(["sh", "-c", BRIDGE_PROBE_SCRIPT], distro=distro, timeout=60)
+    if got is None or got.returncode != 0:
+        return 2
+    last = (got.stdout or "").strip().splitlines()[-1:] or ["2"]
+    return int(last[0]) if last[0].isdigit() else 2
+
+
+def wsl_install_bridge(distro: str) -> tuple[bool, str]:
+    """npiperelay on Windows, socat in WSL, then the user unit, started."""
+    exe = install_npiperelay()
+    if exe is None:
+        return False, f"npiperelay is not installed (winget install --id {NPIPERELAY_ID})"
+    got = wsl(
+        ["sh", "-c",
+         "command -v socat >/dev/null 2>&1 || { export DEBIAN_FRONTEND=noninteractive; "
+         "apt-get update -qq && apt-get install -y -qq socat >/dev/null; }"],
+        distro=distro, root=True, timeout=600,
+    )  # fmt: skip
+    if got is None or got.returncode != 0:
+        why = "" if got is None else (got.stderr or got.stdout).strip()[-300:]
+        return False, f"could not install socat in {distro}: {why or 'wsl.exe could not run'}"
+    got = wsl(["sh", "-c", BRIDGE_SCRIPT, "sh", str(exe)], distro=distro, stdin=bridge_unit(),
+              timeout=120)  # fmt: skip
+    if got is None or got.returncode != 0:
+        why = "" if got is None else (got.stderr or got.stdout).strip()[-300:]
+        return False, f"the bridge unit did not start: {why or 'wsl.exe could not run'}"
+    return True, ""
+
+
+def wsl_remove_bridge(distro: str) -> bool:
+    """True when there was a bridge and it is gone now."""
+    got = wsl(["sh", "-c", BRIDGE_REMOVE_SCRIPT], distro=distro, timeout=60)
+    return got is not None and got.returncode == 0 and "removed" in got.stdout
+
+
 # ------------------------------------------------------------------ status
 
 

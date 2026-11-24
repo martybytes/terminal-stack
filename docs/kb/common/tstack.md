@@ -19,7 +19,7 @@ commands any more, and no aliases for them.
 | `tstack wezterm` | WezTerm channel and updates |
 | `tstack ghostty` | the managed Ghostty config; `status`, `diff`, `on`, `off` |
 | `tstack herdr` | the managed herdr config; `status`, `on`, `off`, `update` |
-| `tstack ssh` | Windows: reach this PC over SSH, PowerShell on one port and Ubuntu on another; `status`, `setup`, `keys` - see `doc windows/ssh-server` |
+| `tstack ssh` | Windows: reach this PC over SSH, PowerShell on one port and Ubuntu on another; `status`, `setup`, `keys`, `doctor [--fix]` - see `doc windows/ssh-server` |
 | `tstack omarchy` | the Omarchy desktop integration (theme template + event hooks); `status`, `sync`, `on`, `off`. Omarchy only |
 | `tstack wizard` | ask the install questions and print the answers — it saves nothing |
 | `tstack smb` | SMB shares over rclone (POSIX only) - see `doc smb-shares` |
