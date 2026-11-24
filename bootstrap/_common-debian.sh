@@ -124,12 +124,12 @@ common_install_selected_apps() {
     # eza/delta: prefer apt, else upstream release. Only warn if BOTH fail.
     case " $apps " in *" eza "*)
         command -v eza >/dev/null 2>&1 \
-            || common_install_github_binary "eza-community/eza" "eza" "eza_$(common_arch_tag gnu)-unknown-linux-gnu\\.tar\\.gz$" \
+            || common_install_github_binary "eza-community/eza" "eza" "eza_$(common_arch_tag gnu)-unknown-linux-(musl|gnu)\\.tar\\.gz$" \
             || echo "$WARN eza unavailable (not in apt and GitHub fallback failed)" ;;
     esac
     case " $apps " in *" delta "*)
         command -v delta >/dev/null 2>&1 \
-            || common_install_github_binary "dandavison/delta" "delta" "delta-.*-$(common_arch_tag gnu)-unknown-linux-gnu\\.tar\\.gz$" \
+            || common_install_github_binary "dandavison/delta" "delta" "delta-.*-$(common_arch_tag gnu)-unknown-linux-(musl|gnu)\\.tar\\.gz$" \
             || echo "$WARN delta unavailable (not in apt and GitHub fallback failed)" ;;
     esac
     # gh / ghq / lazygit — the workspace-organizer toolchain. ghq and lazygit are
@@ -173,7 +173,7 @@ common_install_selected_apps() {
     # (Raspberry Pi, Ampere VMs) as much as on x86_64.
     case " $apps " in *" dust "*)
         command -v dust >/dev/null 2>&1 \
-            || common_install_github_binary "bootandy/dust" "dust" "dust-.*-$(common_arch_tag gnu)-unknown-linux-gnu\\.tar\\.gz$" \
+            || common_install_github_binary "bootandy/dust" "dust" "dust-.*-$(common_arch_tag gnu)-unknown-linux-(musl|gnu)\\.tar\\.gz$" \
             || echo "$WARN dust unavailable (GitHub fallback failed)" ;;
     esac
     case " $apps " in *" gdu "*)
@@ -183,12 +183,12 @@ common_install_selected_apps() {
     esac
     case " $apps " in *" bottom "*)
         command -v btm >/dev/null 2>&1 \
-            || common_install_github_binary "ClementTsang/bottom" "btm" "bottom_$(common_arch_tag gnu)-unknown-linux-gnu\\.tar\\.gz$" \
+            || common_install_github_binary "ClementTsang/bottom" "btm" "bottom_$(common_arch_tag gnu)-unknown-linux-(musl|gnu)\\.tar\\.gz$" \
             || echo "$WARN bottom unavailable (GitHub fallback failed)" ;;
     esac
     case " $apps " in *" bandwhich "*)
         command -v bandwhich >/dev/null 2>&1 \
-            || common_install_github_binary "imsnif/bandwhich" "bandwhich" "bandwhich-.*-$(common_arch_tag gnu)-unknown-linux-(gnu|musl)\\.tar\\.gz$" \
+            || common_install_github_binary "imsnif/bandwhich" "bandwhich" "bandwhich-.*-$(common_arch_tag gnu)-unknown-linux-(musl|gnu)\\.tar\\.gz$" \
             || echo "$WARN bandwhich unavailable (GitHub fallback failed)"
         # It reads raw sockets, so it needs CAP_NET_RAW or sudo to actually run.
         command -v bandwhich >/dev/null 2>&1 \
@@ -196,7 +196,7 @@ common_install_selected_apps() {
     esac
     case " $apps " in *" gping "*)
         command -v gping >/dev/null 2>&1 \
-            || common_install_github_binary "orf/gping" "gping" "gping-$(common_arch_tag gnu)-unknown-linux-(gnu|musl)\\.tar\\.gz$" \
+            || common_install_github_binary "orf/gping" "gping" "gping-$(common_arch_tag gnu)-unknown-linux-(musl|gnu)\\.tar\\.gz$" \
             || echo "$WARN gping unavailable (GitHub fallback failed)" ;;
     esac
     # atuin and yazi are cargo-dist projects: their ARM asset says `aarch64`,
@@ -204,17 +204,17 @@ common_install_selected_apps() {
     # Ubuntu archive, so there is no apt arm above to fall back from.
     case " $apps " in *" atuin "*)
         command -v atuin >/dev/null 2>&1 \
-            || common_install_github_binary "atuinsh/atuin" "atuin" "atuin-$(common_arch_tag rust)-unknown-linux-gnu\\.tar\\.gz$" \
+            || common_install_github_binary "atuinsh/atuin" "atuin" "atuin-$(common_arch_tag rust)-unknown-linux-(musl|gnu)\\.tar\\.gz$" \
             || echo "$WARN atuin unavailable (GitHub fallback failed)" ;;
     esac
     # yazi ships a .zip, and two binaries: `yazi` (the TUI) and `ya` (its CLI,
     # needed by plugin management). Fetch both; the second is best-effort.
     case " $apps " in *" yazi "*)
         command -v yazi >/dev/null 2>&1 \
-            || common_install_github_binary "sxyazi/yazi" "yazi" "yazi-$(common_arch_tag rust)-unknown-linux-gnu\\.zip$" \
+            || common_install_github_binary "sxyazi/yazi" "yazi" "yazi-$(common_arch_tag rust)-unknown-linux-(musl|gnu)\\.zip$" \
             || echo "$WARN yazi unavailable (GitHub fallback failed)"
         command -v ya >/dev/null 2>&1 \
-            || common_install_github_binary "sxyazi/yazi" "ya" "yazi-$(common_arch_tag rust)-unknown-linux-gnu\\.zip$" \
+            || common_install_github_binary "sxyazi/yazi" "ya" "yazi-$(common_arch_tag rust)-unknown-linux-(musl|gnu)\\.zip$" \
             || true ;;
     esac
     case " $apps " in *" btop "*)
@@ -231,7 +231,7 @@ common_install_selected_apps() {
     # "rust" arch style is the one the release names use (x86_64/aarch64).
     case " $apps " in *" llmfit "*)
         command -v llmfit >/dev/null 2>&1 \
-            || common_install_github_binary "AlexsJones/llmfit" "llmfit" "llmfit-.*-$(common_arch_tag rust)-unknown-linux-gnu\\.tar\\.gz$" \
+            || common_install_github_binary "AlexsJones/llmfit" "llmfit" "llmfit-.*-$(common_arch_tag rust)-unknown-linux-(musl|gnu)\\.tar\\.gz$" \
             || echo "$WARN llmfit unavailable (GitHub fallback failed)" ;;
     esac
     # Runtimes and the Python group. None of these is in apt under a usable
@@ -243,15 +243,15 @@ common_install_selected_apps() {
     case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) PATH="$HOME/.local/bin:$PATH" ;; esac
     case " $apps " in *" uv "*)
         command -v uv >/dev/null 2>&1 \
-            || common_install_github_binary "astral-sh/uv" "uv" "uv-$(common_arch_tag rust)-unknown-linux-gnu\\.tar\\.gz$" \
+            || common_install_github_binary "astral-sh/uv" "uv" "uv-$(common_arch_tag rust)-unknown-linux-(musl|gnu)\\.tar\\.gz$" \
             || echo "$WARN uv unavailable (GitHub fallback failed)"
         command -v uvx >/dev/null 2>&1 \
-            || common_install_github_binary "astral-sh/uv" "uvx" "uv-$(common_arch_tag rust)-unknown-linux-gnu\\.tar\\.gz$" \
+            || common_install_github_binary "astral-sh/uv" "uvx" "uv-$(common_arch_tag rust)-unknown-linux-(musl|gnu)\\.tar\\.gz$" \
             || true ;;
     esac
     case " $apps " in *" ruff "*)
         command -v ruff >/dev/null 2>&1 \
-            || common_install_github_binary "astral-sh/ruff" "ruff" "ruff-$(common_arch_tag rust)-unknown-linux-gnu\\.tar\\.gz$" \
+            || common_install_github_binary "astral-sh/ruff" "ruff" "ruff-$(common_arch_tag rust)-unknown-linux-(musl|gnu)\\.tar\\.gz$" \
             || echo "$WARN ruff unavailable (GitHub fallback failed)" ;;
     esac
     # fnm names its x86_64 asset `fnm-linux.zip` and its ARM one `fnm-arm64.zip`.
@@ -374,9 +374,9 @@ common_install_neovim() {
 # Install eza and git-delta from upstream releases if apt didn't provide them.
 common_install_optional_binaries() {
     # eza: tar.gz with a single 'eza' binary at the root.
-    common_install_github_binary "eza-community/eza" "eza" "eza_$(common_arch_tag gnu)-unknown-linux-gnu\\.tar\\.gz$" || true
+    common_install_github_binary "eza-community/eza" "eza" "eza_$(common_arch_tag gnu)-unknown-linux-(musl|gnu)\\.tar\\.gz$" || true
     # git-delta: ships as 'delta'. Asset name pattern: delta-<version>-x86_64-unknown-linux-gnu.tar.gz.
-    common_install_github_binary "dandavison/delta" "delta" "delta-.*-$(common_arch_tag gnu)-unknown-linux-gnu\\.tar\\.gz$" || true
+    common_install_github_binary "dandavison/delta" "delta" "delta-.*-$(common_arch_tag gnu)-unknown-linux-(musl|gnu)\\.tar\\.gz$" || true
 }
 
 common_bat_symlink() {
